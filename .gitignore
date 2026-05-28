@@ -1,0 +1,58 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+out
+.next
+.turbo
+build
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+!contracts/broadcast/*/31337/
+!contracts/broadcast/**/*dry-run/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Coverage
+coverage/
+lcov.info
+
+# Turbo
+.turbo
+
+# Docker volumes
+postgres-data/
+redis-data/
+
+# Supabase
+supabase/.branches
+supabase/.temp

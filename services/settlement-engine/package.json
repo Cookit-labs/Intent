@@ -1,0 +1,17 @@
+{
+  "name": "@intent/settlement-engine",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": { "dev": "tsx watch src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@intent/types": "workspace:*",
+    "viem": "^2.17.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@intent/tsconfig": "workspace:*",
+    "@types/node": "^20.14.9",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.2"
+  }
+}

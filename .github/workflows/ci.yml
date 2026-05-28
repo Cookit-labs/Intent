@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  typescript:
+    name: TypeScript (typecheck + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+
+  backend:
+    name: Go (build + test + vet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - working-directory: backend
+        run: go build ./...
+      - working-directory: backend
+        run: go vet ./...
+      - working-directory: backend
+        run: go test ./...
+
+  contracts:
+    name: Contracts (forge build + test)
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'contracts/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - working-directory: contracts
+        run: forge build
+      - working-directory: contracts
+        run: forge test --fuzz-runs 1000 -vvv

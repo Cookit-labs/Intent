@@ -1,0 +1,8 @@
+{
+  "extends": "@intent/tsconfig/tsconfig.nextjs.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

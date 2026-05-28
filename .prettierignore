@@ -1,0 +1,11 @@
+node_modules
+.next
+dist
+out
+.turbo
+contracts/out
+contracts/cache
+contracts/broadcast
+backend/bin
+*.generated.*
+pnpm-lock.yaml

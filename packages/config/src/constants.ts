@@ -1,0 +1,20 @@
+export const PROTOCOL_CONSTANTS = {
+  COMPETITION_WINDOW_MS: 30_000,
+  MAX_SLIPPAGE_BPS: 100,
+  PROTOCOL_FEE_BPS: 10,
+  MIN_AGENT_STAKE_USDC: '100',
+  REPUTATION_INITIAL_SCORE: 1000,
+  REPUTATION_DECAY_RATE_PER_DAY: 0.005,
+  MAX_PROPOSALS_PER_COMPETITION: 20,
+  USDC_DECIMALS: 6,
+} as const
+
+export const WEBSOCKET_CHANNELS = {
+  INTENT_CREATED: 'intent:created',
+  COMPETITION_STARTED: 'competition:started',
+  COMPETITION_PROPOSAL: 'competition:proposal',
+  COMPETITION_WINNER: 'competition:winner',
+  EXECUTION_STATUS: 'execution:status',
+  LEADERBOARD_UPDATED: 'leaderboard:updated',
+  AGENT_REPUTATION: 'agent:reputation',
+} as const

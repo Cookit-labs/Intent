@@ -1,0 +1,1 @@
+{ "extends": "@intent/tsconfig/tsconfig.node.json", "compilerOptions": { "outDir": "dist", "rootDir": "src" }, "include": ["src"] }

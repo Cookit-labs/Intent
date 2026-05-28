@@ -1,0 +1,18 @@
+{
+  "name": "@intent/agent-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": { "dev": "tsx watch src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@intent/ai-agents": "workspace:*",
+    "@intent/types": "workspace:*",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@intent/tsconfig": "workspace:*",
+    "@types/node": "^20.14.9",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.2"
+  }
+}

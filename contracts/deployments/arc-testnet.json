@@ -1,0 +1,13 @@
+{
+  "network": "arc-testnet",
+  "chainId": 0,
+  "contracts": {
+    "IntentEscrow": "",
+    "ReputationRegistry": "",
+    "AgentRegistry": "",
+    "SettlementManager": "",
+    "ExecutionValidator": "",
+    "MockUSDC": ""
+  },
+  "deployedAt": ""
+}
