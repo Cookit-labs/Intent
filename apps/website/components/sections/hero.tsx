@@ -42,14 +42,14 @@ export function Hero() {
         </a>
       </div>
 
-      <div className="relative mx-auto mt-20 hidden max-w-4xl overflow-hidden md:block 2xl:max-w-5xl">
-        <div className="from-background pointer-events-none absolute inset-y-0 left-0 z-10 w-24 bg-gradient-to-r to-transparent" />
-        <div className="from-background pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent" />
+      <div className="relative mx-auto mt-16 max-w-4xl overflow-hidden md:mt-20 2xl:max-w-5xl">
+        <div className="from-background pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r to-transparent sm:w-24" />
+        <div className="from-background pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l to-transparent sm:w-24" />
         <div className="animate-marquee flex w-max">
           {[...THUMBNAILS, ...THUMBNAILS, ...THUMBNAILS].map((src, i) => (
             <div
               key={i}
-              className="relative mr-4 aspect-[2/3] w-48 shrink-0 overflow-hidden rounded-lg"
+              className="relative mr-4 aspect-[2/3] w-40 shrink-0 overflow-hidden rounded-lg sm:w-48"
             >
               <Image src={src} alt="" fill sizes="192px" className="object-cover" />
             </div>
