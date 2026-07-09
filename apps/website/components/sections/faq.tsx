@@ -79,7 +79,7 @@ export function Faq() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.7, delay: 0.2, ease: EASE }}
-        className="mx-auto mt-14 max-w-2xl md:mt-16"
+        className="mx-auto mt-14 max-w-4xl md:mt-16"
       >
         <Accordion.Root type="single" collapsible className="flex flex-col">
           {FAQS.map((faq, i) => (
