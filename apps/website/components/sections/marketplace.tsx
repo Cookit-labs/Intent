@@ -3,9 +3,9 @@
 // TODO: implement Marketplace section
 export function Marketplace() {
   return (
-    <section id="marketplace" className="relative py-24 px-6">
-      <div className="mx-auto max-w-7xl">
-        <p className="text-zinc-500 font-mono text-sm">// Marketplace — TODO: implement</p>
+    <section id="marketplace" className="relative px-6 py-24">
+      <div className="mx-auto max-w-[1600px]">
+        <p className="font-mono text-sm text-zinc-500">{'// Marketplace — TODO: implement'}</p>
       </div>
     </section>
   )
