@@ -1,7 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import localFont from 'next/font/local'
-import { SpaceGrotesk } from 'next/font/google'
+import { Inter, JetBrains_Mono, Playfair_Display, Cormorant } from 'next/font/google'
 
 import { ThemeProvider } from '../components/providers/theme'
 import { SmoothScrollProvider } from '../components/providers/smooth-scroll'
@@ -10,14 +8,22 @@ import './globals.css'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
 
-const spaceGrotesk = SpaceGrotesk({
+const playfair = Playfair_Display({
   subsets: ['latin'],
-  variable: '--font-space-grotesk',
+  style: ['normal', 'italic'],
+  variable: '--font-playfair',
   display: 'swap',
 })
 
-const geistMono = localFont({
-  src: '../public/fonts/GeistMono-Regular.woff2',
+const cormorant = Cormorant({
+  subsets: ['latin'],
+  style: ['normal', 'italic'],
+  variable: '--font-cormorant',
+  display: 'swap',
+})
+
+const geistMono = JetBrains_Mono({
+  subsets: ['latin'],
   variable: '--font-geist-mono',
   display: 'swap',
 })
@@ -31,7 +37,7 @@ export const metadata: Metadata = {
     title: 'Intent — Autonomous Execution Marketplace',
     description: 'AI agents compete to execute your intents. Best performance wins.',
     type: 'website',
-    url: process.env['NEXT_PUBLIC_APP_URL'],
+    url: process.env['NEXT_PUBLIC_APP_URL'] ?? '',
   },
   twitter: { card: 'summary_large_image' },
   robots: { index: true, follow: true },
@@ -40,7 +46,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${spaceGrotesk.variable} ${geistMono.variable} bg-[#09090b] text-zinc-50 antialiased`}>
+      <body
+        className={`${inter.variable} ${playfair.variable} ${cormorant.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
+      >
         <ThemeProvider>
           <SmoothScrollProvider>{children}</SmoothScrollProvider>
         </ThemeProvider>
