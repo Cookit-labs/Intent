@@ -1,5 +1,5 @@
 {
   "extends": "@intent/tsconfig/tsconfig.base.json",
-  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  "compilerOptions": { "outDir": "dist", "rootDir": "src", "lib": ["ES2022", "DOM"] },
   "include": ["src"]
 }
