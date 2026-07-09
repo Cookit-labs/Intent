@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
-    "@intent/ai-agents": "workspace:*",
     "@intent/config": "workspace:*",
     "@intent/sdk": "workspace:*",
     "@intent/types": "workspace:*",
