@@ -35,9 +35,10 @@ export function Hero() {
 
         <a
           href="#"
-          className="bg-foreground text-background mt-8 inline-block rounded-full px-6 py-3 text-sm font-medium transition-opacity hover:opacity-90"
+          className="bg-foreground text-background mt-8 inline-flex items-center gap-1.5 rounded-full px-6 py-3 text-sm font-medium transition-opacity hover:opacity-90"
         >
           Book a Demo
+          <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
         </a>
       </div>
 
