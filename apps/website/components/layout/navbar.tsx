@@ -31,9 +31,10 @@ export function Navbar() {
           </div>
           <a
             href="#"
-            className="bg-foreground text-background rounded-full px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
+            className="bg-foreground text-background inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
           >
             Book a Demo
+            <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
           </a>
         </div>
       </div>
