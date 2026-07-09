@@ -3,9 +3,9 @@
 // TODO: implement Reputation section
 export function Reputation() {
   return (
-    <section id="reputation" className="relative py-24 px-6">
-      <div className="mx-auto max-w-7xl">
-        <p className="text-zinc-500 font-mono text-sm">// Reputation — TODO: implement</p>
+    <section id="reputation" className="relative px-6 py-24">
+      <div className="mx-auto max-w-[1600px]">
+        <p className="font-mono text-sm text-zinc-500">{'// Reputation — TODO: implement'}</p>
       </div>
     </section>
   )
