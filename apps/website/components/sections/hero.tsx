@@ -10,7 +10,7 @@ const THUMBNAILS = [
 
 export function Hero() {
   return (
-    <section id="hero" className="relative overflow-hidden px-6 py-32">
+    <section id="hero" className="relative overflow-hidden px-6 py-24 md:py-28 2xl:py-32">
       {/* <div className="pointer-events-none absolute left-1/4 top-1 hidden h-[200px] w-[200px] rotate-[20deg] -translate-x-1/2 overflow-hidden lg:block">
         <Image src="/images/Arc.png" alt="" fill sizes="160px" className="object-contain p-4" />
       </div>
@@ -19,7 +19,7 @@ export function Hero() {
       </div> */}
 
       <div className="mx-auto max-w-3xl text-center">
-        <h1 className="font-display mt-4 text-5xl leading-tight md:text-6xl">
+        <h1 className="font-display mt-4 text-4xl leading-tight md:text-5xl 2xl:text-6xl">
           State your intentions
           <br />
           Watch agents compete for the best execution.
@@ -42,7 +42,7 @@ export function Hero() {
         </a>
       </div>
 
-      <div className="relative mx-auto mt-20 hidden max-w-5xl overflow-hidden md:block">
+      <div className="relative mx-auto mt-20 hidden max-w-4xl overflow-hidden md:block 2xl:max-w-5xl">
         <div className="from-background pointer-events-none absolute inset-y-0 left-0 z-10 w-24 bg-gradient-to-r to-transparent" />
         <div className="from-background pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent" />
         <div className="animate-marquee flex w-max">

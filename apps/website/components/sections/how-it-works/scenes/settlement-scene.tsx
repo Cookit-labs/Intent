@@ -48,7 +48,7 @@ export function SettlementScene() {
 
   return (
     <div
-      className="relative h-[220px] w-full overflow-hidden rounded-2xl md:h-[260px]"
+      className="relative h-[200px] w-full overflow-hidden rounded-2xl md:h-[220px] 2xl:h-[260px]"
       style={{ background: '#e8e8ec' }}
     >
       <AmbientBlob color="rgba(29,155,240,0.30)" size={200} top="8%" left="12%" duration={13} />

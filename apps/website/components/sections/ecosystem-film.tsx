@@ -324,7 +324,7 @@ export function EcosystemFilm() {
           boxShadow: '0 1px 0 0 rgba(255,255,255,0.6) inset, 0 28px 70px -28px rgba(17,17,26,0.2)',
         }}
       >
-        <div className="relative z-10 flex flex-col p-5 md:p-8">
+        <div className="relative z-10 flex flex-col p-5 md:p-6 2xl:p-8">
           {/* Window chrome */}
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
@@ -349,7 +349,7 @@ export function EcosystemFilm() {
           {/* Chat transcript */}
           <div
             ref={scrollRef}
-            className="mt-6 h-[440px] overflow-y-auto pr-1 [scrollbar-width:none] md:h-[540px] [&::-webkit-scrollbar]:hidden"
+            className="mt-6 h-[420px] overflow-y-auto pr-1 [scrollbar-width:none] md:h-[460px] 2xl:h-[540px] [&::-webkit-scrollbar]:hidden"
           >
             <div className="flex flex-col gap-3.5">
               {msgs.map((m) => (

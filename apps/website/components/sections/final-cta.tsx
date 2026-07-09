@@ -13,14 +13,14 @@ const HEADLINE = 'Your first intent is one click away.'
 
 export function FinalCta() {
   return (
-    <section id="final-cta" className="relative px-6 py-24 md:py-32">
+    <section id="final-cta" className="relative px-6 py-24 md:py-28 2xl:py-32">
       <div className="mx-auto max-w-3xl text-center">
         <motion.h2
           initial={{ opacity: 0, y: 24 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.7, ease: EASE }}
-          className="font-display text-4xl leading-tight tracking-tight md:text-5xl"
+          className="font-display text-4xl leading-tight tracking-tight 2xl:text-5xl"
         >
           {HEADLINE}
         </motion.h2>

@@ -102,7 +102,7 @@ export function IntentComposerScene() {
 
   return (
     <div
-      className="relative h-[340px] w-full overflow-hidden rounded-2xl md:h-[380px]"
+      className="relative h-[300px] w-full overflow-hidden rounded-2xl md:h-[320px] 2xl:h-[380px]"
       style={{ background: '#e8e8ec' }}
     >
       <AmbientBlob color="rgba(99,102,241,0.32)" size={220} top="12%" left="4%" duration={11} />

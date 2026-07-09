@@ -24,7 +24,7 @@ export function Ecosystem() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.7, delay: 0.12, ease: EASE }}
-          className="font-display mt-4 text-4xl leading-tight tracking-tight md:text-5xl"
+          className="font-display mt-4 text-4xl leading-tight tracking-tight 2xl:text-5xl"
         >
           Every winning execution becomes activity on <em className="font-serif italic">Arc</em>.
         </motion.h2>
@@ -47,7 +47,7 @@ export function Ecosystem() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.7, delay: 0.3, ease: EASE }}
-        className="mx-auto mt-16 max-w-5xl md:mt-20"
+        className="mx-auto mt-16 max-w-4xl md:mt-20 2xl:max-w-5xl"
       >
         <EcosystemFilm />
       </motion.div>

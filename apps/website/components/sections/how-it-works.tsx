@@ -11,7 +11,7 @@ const EASE = [0.25, 0.46, 0.45, 0.94] as const
 
 export function HowItWorks() {
   return (
-    <section id="how-it-works" className="relative overflow-hidden px-6 py-24 md:py-32">
+    <section id="how-it-works" className="relative overflow-hidden px-6 py-24 md:py-28 2xl:py-32">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute inset-x-0 bottom-14 top-14 bg-[#D8D8D8] md:bottom-20 md:top-20" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -45,7 +45,7 @@ export function HowItWorks() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.7, delay: 0.12, ease: EASE }}
-          className="font-display mt-4 text-4xl leading-tight tracking-tight md:text-5xl"
+          className="font-display mt-4 text-4xl leading-tight tracking-tight 2xl:text-5xl"
         >
           One intent in.
           <br />A single best <em className="font-serif italic">execution</em> out.
@@ -63,7 +63,7 @@ export function HowItWorks() {
         </motion.p>
       </div>
 
-      <div className="mx-auto mt-16 grid max-w-7xl grid-cols-1 gap-6 md:mt-20 lg:grid-cols-12 lg:gap-7">
+      <div className="mx-auto mt-16 grid max-w-6xl grid-cols-1 gap-6 md:mt-20 lg:grid-cols-12 lg:gap-7 2xl:max-w-7xl">
         <FeatureCard
           title="Express the outcome"
           description="Skip the order form. State what you want and USDC locks into escrow instantly."

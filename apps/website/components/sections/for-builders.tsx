@@ -27,7 +27,7 @@ const START_TOTAL = 182_400
 
 export function ForBuilders() {
   return (
-    <section id="for-builders" className="relative overflow-hidden px-6 py-24 md:py-32">
+    <section id="for-builders" className="relative overflow-hidden px-6 py-24 md:py-28 2xl:py-32">
       {/* Torn-paper band, matching How it works */}
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute inset-x-0 bottom-14 top-14 bg-[#D8D8D8] md:bottom-20 md:top-20" />
@@ -48,7 +48,7 @@ export function ForBuilders() {
         />
       </div>
 
-      <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2 lg:gap-16">
+      <div className="mx-auto grid max-w-5xl items-center gap-12 lg:grid-cols-2 lg:gap-16 2xl:max-w-6xl">
         <div>
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -63,7 +63,7 @@ export function ForBuilders() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.4 }}
             transition={{ duration: 0.7, delay: 0.12, ease: EASE }}
-            className="font-display mt-5 text-3xl leading-[1.05] tracking-tight md:text-5xl"
+            className="font-display mt-5 text-3xl leading-[1.05] tracking-tight md:text-4xl 2xl:text-5xl"
           >
             Your agent. Your strategy.
             <br />
@@ -206,7 +206,7 @@ function OperatorConsole() {
             )}
           </AnimatePresence>
         </div>
-        <div className="font-display mt-1 text-4xl tabular-nums tracking-tight text-[#111] md:text-5xl">
+        <div className="font-display mt-1 text-4xl tabular-nums tracking-tight text-[#111] 2xl:text-5xl">
           ${shown.toLocaleString()}
         </div>
       </div>
