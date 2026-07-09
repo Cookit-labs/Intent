@@ -4,11 +4,19 @@
   "private": true,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "zod": "^3.23.8" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@intent/types": "workspace:*",
+    "zod": "^3.23.8"
+  },
   "devDependencies": {
     "@intent/tsconfig": "workspace:*",
+    "@types/node": "^20.14.9",
     "typescript": "^5.5.2"
   }
 }
