@@ -4,6 +4,7 @@ import { Ecosystem } from '../components/sections/ecosystem'
 import { ForBuilders } from '../components/sections/for-builders'
 import { FinalCta } from '../components/sections/final-cta'
 import { Faq } from '../components/sections/faq'
+import { Newsletter } from '../components/sections/newsletter'
 import { Navbar } from '../components/layout/navbar'
 import { Footer } from '../components/layout/footer'
 
@@ -17,6 +18,7 @@ export default function Home() {
         <Ecosystem />
         <ForBuilders />
         <Faq />
+        <Newsletter />
         {/* <FinalCta /> */}
       </main>
       <Footer />
