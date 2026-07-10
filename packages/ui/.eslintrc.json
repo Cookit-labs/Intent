@@ -1,0 +1,10 @@
+{
+  "root": true,
+  "extends": ["@intent/eslint-config/base"],
+  "parserOptions": {
+    "project": "./tsconfig.json"
+  },
+  "rules": {
+    "import/export": "off"
+  }
+}
