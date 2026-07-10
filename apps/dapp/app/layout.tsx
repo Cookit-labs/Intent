@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import { Inter, Space_Grotesk } from 'next/font/google'
-import localFont from 'next/font/local'
+import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google'
 
 import { RootProviders } from '../providers/root'
 
@@ -12,8 +11,8 @@ const spaceGrotesk = Space_Grotesk({
   variable: '--font-space-grotesk',
   display: 'swap',
 })
-const geistMono = localFont({
-  src: '../public/fonts/GeistMono-Regular.woff2',
+const geistMono = JetBrains_Mono({
+  subsets: ['latin'],
   variable: '--font-geist-mono',
   display: 'swap',
 })
