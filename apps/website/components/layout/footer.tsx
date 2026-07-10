@@ -22,7 +22,6 @@ export function Footer() {
       whileInView={{ opacity: 1 }}
       viewport={{ once: true, amount: 0.3 }}
       transition={{ duration: 0.6 }}
-      className="border-t border-black/10"
     >
       <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
