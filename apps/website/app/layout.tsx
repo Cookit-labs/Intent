@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono, Playfair_Display, Cormorant } from 'next/font/google'
 
+import { CookieConsent } from '../components/layout/cookie-consent'
+import { NewsletterPopup } from '../components/layout/newsletter-popup'
 import { ThemeProvider } from '../components/providers/theme'
 import { SmoothScrollProvider } from '../components/providers/smooth-scroll'
 
@@ -51,6 +53,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       >
         <ThemeProvider>
           <SmoothScrollProvider>{children}</SmoothScrollProvider>
+          <CookieConsent />
+          <NewsletterPopup />
         </ThemeProvider>
       </body>
     </html>
