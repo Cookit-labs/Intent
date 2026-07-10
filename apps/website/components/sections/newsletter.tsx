@@ -178,9 +178,11 @@ export function Newsletter() {
           )}
         </motion.div>
 
-        {/* {status !== 'success' && (
-          <p className="text-background/40 mt-4 font-sans text-xs">No spam. Unsubscribe anytime.</p>
-        )} */}
+        {status !== 'success' && (
+          <p className="text-background/40 mt-4 font-sans text-sm">
+            Subscribe to Intent newsletter and unsubscribe anytime.
+          </p>
+        )}
       </div>
     </section>
   )

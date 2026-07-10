@@ -33,7 +33,7 @@ const BURST = [
 function IntentOrb({ cx, cy }: { cx: number; cy: number }) {
   return (
     <>
-      <circle cx={cx} cy={cy} r="9" className="text-accent" fill="currentColor" />
+      <circle cx={cx} cy={cy} r="9" className="text-indigo-500" fill="currentColor" />
       <path
         d={`M${cx} ${cy - 6} C ${cx + 1} ${cy - 1} ${cx + 1.5} ${cy - 0.5} ${cx + 6} ${cy} C ${cx + 1.5} ${cy + 0.5} ${cx + 1} ${cy + 1} ${cx} ${cy + 6} C ${cx - 1} ${cy + 1} ${cx - 1.5} ${cy + 0.5} ${cx - 6} ${cy} C ${cx - 1.5} ${cy - 0.5} ${cx - 1} ${cy - 1} ${cx} ${cy - 6} Z`}
         className="text-background"
@@ -65,7 +65,7 @@ function IntentArtwork({ animate }: { animate: boolean }) {
       {/* decorative twinkles */}
       <motion.path
         d="M204 42 L207.3 51.5 L217.3 51.7 L209.3 57.7 L212.2 67.3 L204 61.6 L195.8 67.3 L198.7 57.7 L190.7 51.7 L200.7 51.5 Z"
-        className="text-accent"
+        className="text-indigo-500"
         fill="currentColor"
         initial={animate ? { opacity: 0, scale: 0.5 } : false}
         animate={animate ? { opacity: [0, 1, 0.55, 1], scale: 1 } : { opacity: 1, scale: 1 }}
@@ -79,7 +79,7 @@ function IntentArtwork({ animate }: { animate: boolean }) {
       />
       <motion.path
         d="M30 138 C 31.5 148 32 148.5 42 150 C 32 151.5 31.5 152 30 162 C 28.5 152 28 151.5 18 150 C 28 148.5 28.5 148 30 138 Z"
-        className="text-accent"
+        className="text-indigo-500"
         fill="currentColor"
         initial={animate ? { opacity: 0, scale: 0.5 } : false}
         animate={animate ? { opacity: [0, 0.6, 1, 0.6], scale: 1 } : { opacity: 1, scale: 1 }}
@@ -114,24 +114,24 @@ function IntentArtwork({ animate }: { animate: boolean }) {
         {/* body */}
         <path
           d="M28 176 C 22 148 30 118 46 104 C 52 98 66 97 74 106 C 82 116 82 138 80 150 C 90 158 92 170 84 176 Z"
-          className="text-accent"
+          className="text-indigo-500"
           fill="currentColor"
         />
         {/* extended, offering arm */}
         <path
           d="M76 112 C 92 116 102 120 110 128"
-          className="text-accent"
+          className="text-indigo-500"
           stroke="currentColor"
           strokeWidth="12"
           strokeLinecap="round"
           fill="none"
         />
-        <circle cx="112" cy="130" r="6" className="text-accent" fill="currentColor" />
+        <circle cx="112" cy="130" r="6" className="text-indigo-500" fill="currentColor" />
         {/* head */}
-        <circle cx="54" cy="64" r="17" className="text-accent" fill="currentColor" />
+        <circle cx="54" cy="64" r="17" className="text-indigo-500" fill="currentColor" />
         {/* hair */}
         <g
-          className="text-accent"
+          className="text-indigo-500"
           stroke="currentColor"
           strokeWidth="4"
           strokeLinecap="round"
@@ -166,31 +166,31 @@ function IntentArtwork({ animate }: { animate: boolean }) {
         {/* body */}
         <path
           d="M138 300 C 132 274 142 250 162 240 C 172 236 186 237 194 246 C 204 256 206 280 200 300 Z"
-          className="text-accent"
+          className="text-indigo-500"
           fill="currentColor"
         />
         {/* reaching arm + catching hand */}
         <path
           d="M158 240 C 152 224 150 210 150 198"
-          className="text-accent"
+          className="text-indigo-500"
           stroke="currentColor"
           strokeWidth="12"
           strokeLinecap="round"
           fill="none"
         />
-        <circle cx="150" cy="196" r="6" className="text-accent" fill="currentColor" />
+        <circle cx="150" cy="196" r="6" className="text-indigo-500" fill="currentColor" />
         {/* head */}
-        <circle cx="170" cy="214" r="21" className="text-accent" fill="currentColor" />
+        <circle cx="170" cy="214" r="21" className="text-indigo-500" fill="currentColor" />
         {/* antenna */}
         <path
           d="M170 194 v-11"
-          className="text-accent"
+          className="text-indigo-500"
           stroke="currentColor"
           strokeWidth="4"
           strokeLinecap="round"
           fill="none"
         />
-        <circle cx="170" cy="180" r="4" className="text-accent" fill="currentColor" />
+        <circle cx="170" cy="180" r="4" className="text-indigo-500" fill="currentColor" />
         {/* visor + eyes (negative) */}
         <rect
           x="154"
@@ -201,8 +201,8 @@ function IntentArtwork({ animate }: { animate: boolean }) {
           className="text-foreground"
           fill="currentColor"
         />
-        <circle cx="163" cy="213.5" r="2.6" className="text-accent" fill="currentColor" />
-        <circle cx="177" cy="213.5" r="2.6" className="text-accent" fill="currentColor" />
+        <circle cx="163" cy="213.5" r="2.6" className="text-indigo-500" fill="currentColor" />
+        <circle cx="177" cy="213.5" r="2.6" className="text-indigo-500" fill="currentColor" />
         {/* executed check on chest (negative) */}
         <circle
           cx="172"
@@ -214,7 +214,7 @@ function IntentArtwork({ animate }: { animate: boolean }) {
         />
         <path
           d="M167 270 l3.5 3.5 l6 -7"
-          className="text-accent"
+          className="text-indigo-500"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"

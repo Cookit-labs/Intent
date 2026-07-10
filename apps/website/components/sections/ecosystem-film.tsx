@@ -93,21 +93,10 @@ const SETTLE_STEPS = [
   'Reputation updated',
 ]
 
-// Token lands exactly on each node. Five stops from Intent (0) to Arc (1):
-// Escrow → Compete → Execute → Settle → Arc.
-const PROGRESS: Record<Phase, number> = {
-  boot: 0,
-  type: 0,
-  send: 0,
-  lock: 0.2,
-  addmenu: 0.2,
-  compete: 0.4,
-  recommend: 0.4,
-  choose: 0.4,
-  launch: 0.6,
-  settle: 0.8,
-  done: 1,
-}
+// Rail advances on its own steady cadence (below), independent of the chat
+// pacing, so the token spends an equal interval between every node.
+const RAIL_START_MS = 1500
+const RAIL_GAP_MS = 3300
 
 const RAIL_NODES = [
   { label: '', at: 0, live: (p: number) => p >= 0 },
@@ -128,6 +117,7 @@ export function EcosystemFilm() {
   const reduced = useReducedMotion()
   const [cycle, setCycle] = useState(0)
   const [phase, setPhase] = useState<Phase>('boot')
+  const [railProgress, setRailProgress] = useState(0)
   const [inputText, setInputText] = useState('')
   const [inputSent, setInputSent] = useState(false)
   const [composerPointer, setComposerPointer] = useState<ComposerPointer>('hidden')
@@ -144,6 +134,7 @@ export function EcosystemFilm() {
   useEffect(() => {
     if (reduced) {
       setPhase('done')
+      setRailProgress(1)
       setInputSent(true)
       setChosen(true)
       setMsgs([
@@ -178,6 +169,7 @@ export function EcosystemFilm() {
     const push = (m: MsgInput) => setMsgs((prev) => [...prev, { ...m, id: nextId() } as Msg])
 
     setPhase('boot')
+    setRailProgress(0)
     setInputText('')
     setInputSent(false)
     setComposerPointer('hidden')
@@ -188,6 +180,11 @@ export function EcosystemFilm() {
     setDoneStep(-1)
     setSettledValue(0)
     setSecondsLeft(30)
+
+    // Rail token — even cadence, one node every RAIL_GAP_MS, independent of chat
+    for (let n = 1; n <= 5; n++) {
+      at(RAIL_START_MS + n * RAIL_GAP_MS, () => setRailProgress(n * 0.2))
+    }
 
     // Act I — user types the intent and sends it
     at(500, () => {
@@ -298,10 +295,34 @@ export function EcosystemFilm() {
   // itself, never scrollIntoView (which would drag the whole page).
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: reduced ? 'auto' : 'smooth' })
+    // Assign scrollTop directly (container-only). A programmatic smooth scrollTo
+    // is picked up by Lenis and drags the whole page when the loop restarts.
+    if (el) el.scrollTop = el.scrollHeight
   }, [msgs, typing, inputText, doneStep, reduced])
 
-  const progress = PROGRESS[phase]
+  const progress = railProgress
+
+  // Rail nodes fill only when the travelling token actually reaches them — lag
+  // the fill trigger by the token's fixed travel duration so a diamond never
+  // lights up before the ring passes over it. On loop restart (progress drops)
+  // the token snaps back and nodes clear instantly instead of sweeping backwards.
+  const prevProgress = useRef(0)
+  const goingBack = progress < prevProgress.current
+  const railTransition = {
+    duration: reduced || goingBack ? 0 : 0.7,
+    ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
+  }
+
+  const [reached, setReached] = useState(0)
+  useEffect(() => {
+    const backward = progress < prevProgress.current
+    const t = setTimeout(() => setReached(progress), reduced || backward ? 0 : 700)
+    return () => clearTimeout(t)
+  }, [progress, reduced])
+  useEffect(() => {
+    prevProgress.current = progress
+  }, [progress])
+
   const competing = phase === 'compete' || phase === 'recommend' || phase === 'choose'
   const recommending = ['recommend', 'choose', 'launch', 'settle', 'done'].includes(phase)
   const armed = inputText.length > 0
@@ -351,49 +372,58 @@ export function EcosystemFilm() {
             ref={scrollRef}
             className="mt-6 h-[420px] overflow-y-auto pr-1 [scrollbar-width:none] md:h-[460px] 2xl:h-[540px] [&::-webkit-scrollbar]:hidden"
           >
-            <div className="flex flex-col gap-3.5">
-              {msgs.map((m) => (
-                <MessageRow
-                  key={m.id}
-                  msg={m}
-                  recommending={recommending}
-                  chosen={chosen}
-                  doneStep={doneStep}
-                  settledValue={settledValue}
-                />
-              ))}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={cycle}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.4, ease: 'easeInOut' }}
+                className="flex flex-col gap-3.5"
+              >
+                {msgs.map((m) => (
+                  <MessageRow
+                    key={m.id}
+                    msg={m}
+                    recommending={recommending}
+                    chosen={chosen}
+                    doneStep={doneStep}
+                    settledValue={settledValue}
+                  />
+                ))}
 
-              <AnimatePresence>
-                {typing.length > 0 && (
-                  <motion.div
-                    key="typing-cluster"
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="flex flex-col gap-2"
-                  >
-                    <span className="text-muted-foreground/60 ml-11 font-sans text-[11px]">
-                      {typing.length} agents strategizing…
-                    </span>
-                    <div className="flex flex-wrap gap-2">
-                      {AGENTS.filter((a) => typing.includes(a.key)).map((a) => (
-                        <motion.div
-                          key={a.key}
-                          layout
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          className="border-border bg-card/80 flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3"
-                        >
-                          <Avatar agent={a} size={22} />
-                          <TypingDots />
-                        </motion.div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                <AnimatePresence>
+                  {typing.length > 0 && (
+                    <motion.div
+                      key="typing-cluster"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex flex-col gap-2"
+                    >
+                      <span className="text-muted-foreground/60 ml-11 font-sans text-[11px]">
+                        {typing.length} agents strategizing…
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {AGENTS.filter((a) => typing.includes(a.key)).map((a) => (
+                          <motion.div
+                            key={a.key}
+                            layout
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="border-border bg-card/80 flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3"
+                          >
+                            <Avatar agent={a} size={22} />
+                            <TypingDots />
+                          </motion.div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            </AnimatePresence>
           </div>
 
           {/* Composer input */}
@@ -535,11 +565,11 @@ export function EcosystemFilm() {
               className="absolute left-0 top-1/2 h-[3px] origin-left -translate-y-1/2"
               style={{ background: BRAND }}
               animate={{ scaleX: progress }}
-              transition={{ duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={railTransition}
             />
 
             {RAIL_NODES.map((node) => {
-              const live = node.live(progress)
+              const live = node.live(reached)
               return (
                 <div
                   key={node.at}
@@ -570,7 +600,7 @@ export function EcosystemFilm() {
               className="absolute top-1/2 z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[4px] sm:h-5 sm:w-5 md:h-6 md:w-6 md:rounded-[5px]"
               style={{ background: BRAND, boxShadow: '0 0 0 5px rgba(99,102,241,0.18)' }}
               animate={{ left: `${progress * 100}%` }}
-              transition={{ duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={railTransition}
             />
           </div>
 
