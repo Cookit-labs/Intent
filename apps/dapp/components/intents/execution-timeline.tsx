@@ -1,5 +1,15 @@
 'use client'
-// TODO: implement ExecutionTimeline component
-export function ExecutionTimeline() {
-  return <div className="text-zinc-500 font-mono text-xs p-4">// ExecutionTimeline — TODO</div>
+import { Skeleton } from '@intent/ui'
+
+export function ExecutionTimeline(): JSX.Element {
+  return (
+    <div className="flex flex-col gap-3">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <Skeleton className="h-6 w-6 rounded-full" />
+          <Skeleton className="h-4 flex-1" />
+        </div>
+      ))}
+    </div>
+  )
 }

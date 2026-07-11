@@ -1,5 +1,12 @@
 'use client'
-// TODO: implement BidStream component
-export function BidStream() {
-  return <div className="text-zinc-500 font-mono text-xs p-4">// BidStream — TODO</div>
+import { Skeleton } from '@intent/ui'
+
+export function BidStream(): JSX.Element {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Skeleton key={i} className="h-9 w-full" />
+      ))}
+    </div>
+  )
 }

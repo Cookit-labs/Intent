@@ -1,5 +1,10 @@
 'use client'
-// TODO: implement ReputationChart component
-export function ReputationChart() {
-  return <div className="text-zinc-500 font-mono text-xs p-4">// ReputationChart — TODO</div>
+import { Card, Skeleton } from '@intent/ui'
+
+export function ReputationChart(): JSX.Element {
+  return (
+    <Card className="p-5">
+      <Skeleton className="h-48 w-full" />
+    </Card>
+  )
 }
