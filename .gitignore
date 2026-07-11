@@ -56,3 +56,5 @@ redis-data/
 # Supabase
 supabase/.branches
 supabase/.temp
+# Market research (never push)
+docs/Intent Market Research.pdf
