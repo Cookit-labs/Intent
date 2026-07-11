@@ -5,6 +5,7 @@ export interface ParsedIntent {
   input: CreateIntentInput
   escrowUsd: number
   referencePriceUsd: number
+  targetPriceUsd: number
 }
 
 const TOKEN_ALIASES: Record<string, string> = {
@@ -53,6 +54,15 @@ function firstNumber(text: string): number | null {
   return match ? Number(match[0]) : null
 }
 
+// A price target if the text names one (e.g. "below $3,200", "at 3200").
+function targetPrice(text: string): number | null {
+  const dollar = text.match(/\$\s?([\d,]+(\.\d+)?)/)
+  if (dollar) return Number(dollar[1]!.replace(/,/g, ''))
+  const worded = text.match(/(?:below|above|at|under|over)\s+\$?\s?([\d,]+(\.\d+)?)/i)
+  if (worded) return Number(worded[1]!.replace(/,/g, ''))
+  return null
+}
+
 /**
  * Best-effort interpretation of a free-text outcome into a structured intent.
  * This is the mock stand-in for the backend's intent parser; it never fails,
@@ -76,6 +86,7 @@ export function parseIntent(raw: string): ParsedIntent {
     outcome,
     escrowUsd,
     referencePriceUsd,
+    targetPriceUsd: targetPrice(outcome) ?? referencePriceUsd,
     input: {
       type,
       tokenIn,

@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, Plus } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 
 const EXAMPLES = [
@@ -14,18 +14,21 @@ export function ComposerInput({
   onSubmit,
   disabled = false,
   showExamples = false,
+  initialText,
+  onReset,
 }: {
   onSubmit: (text: string) => void
   disabled?: boolean
   showExamples?: boolean
+  initialText?: string
+  onReset?: () => void
 }): JSX.Element {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText ?? '')
 
   function submit(): void {
     const trimmed = text.trim()
     if (!trimmed || disabled) return
     onSubmit(trimmed)
-    setText('')
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -55,10 +58,20 @@ export function ComposerInput({
 
       <div
         className={cn(
-          'border-border focus-within:border-foreground/40 flex items-end gap-2 rounded-xl border p-2 transition-colors',
+          'border-border focus-within:border-foreground/40 flex items-end gap-2 rounded-full border py-2 pl-2 pr-2 transition-colors',
           disabled && 'opacity-60'
         )}
       >
+        {onReset ? (
+          <button
+            type="button"
+            onClick={onReset}
+            aria-label="New intent"
+            className="border-border text-muted-foreground hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        ) : null}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -66,7 +79,7 @@ export function ComposerInput({
           disabled={disabled}
           rows={1}
           placeholder="Describe the outcome you want…"
-          className="placeholder:text-muted-foreground max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none"
+          className="placeholder:text-muted-foreground max-h-40 min-h-[2.25rem] flex-1 resize-none self-center bg-transparent px-2 py-1.5 text-sm outline-none"
           aria-label="Describe your intent"
         />
         <button
@@ -74,7 +87,7 @@ export function ComposerInput({
           onClick={submit}
           disabled={disabled || !text.trim()}
           aria-label="Submit intent"
-          className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           <ArrowUp className="h-4 w-4" />
         </button>

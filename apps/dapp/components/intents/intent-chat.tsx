@@ -1,34 +1,41 @@
 'use client'
 
-import { Badge, Card } from '@intent/ui'
-import { motion } from 'framer-motion'
-import { Radio, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { useCreateIntent } from '../../hooks/use-intent'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
-import { intentTypeLabel } from '../../lib/intent-format'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
-import { ComposerInput } from './composer-input'
 import { CompetitionPanel } from './competition-panel'
+import { ComposerInput } from './composer-input'
 
 export function IntentChat(): JSX.Element {
   const router = useRouter()
   const createIntent = useCreateIntent()
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
+  const [executingKey, setExecutingKey] = useState<string | null>(null)
   const competition = useMockCompetition(parsed)
 
   function handleSubmit(text: string): void {
     setMessage(text)
     setParsed(parseIntent(text))
+    setExecutingKey(null)
   }
 
-  function handleAccept(): void {
-    if (!parsed) return
+  function handleReset(): void {
+    setMessage(null)
+    setParsed(null)
+    setExecutingKey(null)
+  }
+
+  function handleExecute(key: string): void {
+    if (!parsed || executingKey) return
+    setExecutingKey(key)
     createIntent.mutate(parsed.input, {
       onSuccess: (created) => router.push(`/intents/${created.id}`),
+      onError: () => setExecutingKey(null),
     })
   }
 
@@ -41,7 +48,7 @@ export function IntentChat(): JSX.Element {
           </span>
           <p className="text-muted-foreground max-w-md text-sm">
             Skip the order form. Say what you want to happen — autonomous agents compete to find the
-            best execution, and you pick the winner.
+            best execution, and you pick who executes.
           </p>
         </div>
         <ComposerInput onSubmit={handleSubmit} showExamples />
@@ -50,59 +57,18 @@ export function IntentChat(): JSX.Element {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* User intent bubble */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-end"
-      >
-        <div className="border-border max-w-[80%] rounded-2xl rounded-br-sm border px-4 py-2.5 text-sm">
-          {message}
-        </div>
-      </motion.div>
+    <div className="flex flex-col gap-6">
+      <CompetitionPanel state={competition} onExecute={handleExecute} executingKey={executingKey} />
 
-      {/* Assistant: intent understood */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.15 }}
-      >
-        <Card className="flex flex-col gap-3 p-4">
-          <span className="text-muted-foreground text-[11px] tracking-wide">Intent understood</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{intentTypeLabel(parsed.input.type)}</Badge>
-            <Badge variant="outline">{parsed.escrowUsd.toLocaleString()} USDC escrowed</Badge>
-            <Badge variant="outline">Target {parsed.input.tokenOut}</Badge>
-          </div>
-          <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-            <Radio className="text-muted-foreground h-3 w-3" />
-            Broadcasting to the agent network
-            <motion.span
-              className="bg-foreground h-1.5 w-1.5 rounded-full"
-              animate={{ opacity: [1, 0.3, 1] }}
-              transition={{ duration: 1, repeat: Infinity }}
-            />
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Live competition */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <CompetitionPanel
-          parsed={parsed}
-          state={competition}
-          onAccept={handleAccept}
-          accepting={createIntent.isPending}
-        />
-      </motion.div>
+      <ComposerInput
+        key={message}
+        initialText={message}
+        onSubmit={handleSubmit}
+        onReset={handleReset}
+      />
 
       {createIntent.isError ? (
-        <p className="text-destructive text-sm">
+        <p className="text-foreground text-sm">
           {(createIntent.error as Error).message || 'Something went wrong. No funds moved.'}
         </p>
       ) : null}

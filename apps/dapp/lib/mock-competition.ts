@@ -6,19 +6,19 @@ export interface CompetingAgent {
   key: string
   name: string
   strategyType: AgentStrategyType
+  tag: string
   reasoning: string
   slippagePct: number
+  priceRatio: number
+  gradient: string
   revealAt: number
 }
 
 export interface AgentProposalView {
   key: string
   name: string
-  strategyType: AgentStrategyType
-  projectedOut: string
-  tokenOut: string
-  slippagePct: number
   avgPriceUsd: number
+  slippagePct: number
   score: number
 }
 
@@ -28,66 +28,73 @@ export const RACE_DURATION = 6800
 export const DECIDE_AT = RACE_DURATION + 600
 export const WINDOW_SECONDS = 30
 
+// priceRatio is each agent's avg fill relative to a $3,200 anchor, so the
+// numbers land exactly on the reference mock when the intent targets $3,200
+// and scale proportionally for any other target price.
 export const AGENTS: CompetingAgent[] = [
   {
     key: 'twap',
     name: 'TWAP',
     strategyType: 'twap',
-    reasoning: 'Time-slicing order flow',
+    tag: 'Time-sliced',
+    reasoning:
+      'Slicing the order into even tranches to blend the fill and hold market impact flat.',
     slippagePct: 0.18,
+    priceRatio: 3201.4 / 3200,
+    gradient: 'linear-gradient(135deg, #7c8a9e, #cbb79a)',
     revealAt: REVEAL_DELAYS[0],
-  },
-  {
-    key: 'arbitrage',
-    name: 'Arbitrage',
-    strategyType: 'arbitrage',
-    reasoning: 'Scanning venues for spread',
-    slippagePct: 0.11,
-    revealAt: REVEAL_DELAYS[1],
   },
   {
     key: 'momentum',
     name: 'Momentum',
     strategyType: 'momentum',
-    reasoning: 'Timing entry on breakout',
+    tag: 'Breakout timing',
+    reasoning:
+      'Holding for the retest of the $3,180 level, then filling the whole clip in one clean shot.',
     slippagePct: 0.24,
+    priceRatio: 3203.1 / 3200,
+    gradient: 'linear-gradient(135deg, #8a9a5b, #d8c9a0)',
+    revealAt: REVEAL_DELAYS[1],
+  },
+  {
+    key: 'arbitrage',
+    name: 'Arbitrage',
+    strategyType: 'arbitrage',
+    tag: 'Cross-venue',
+    reasoning:
+      'Routing across Curve and Uniswap to capture a 4bp spread the single-venue agents are leaving on the table.',
+    slippagePct: 0.11,
+    priceRatio: 3198.9 / 3200,
+    gradient: 'linear-gradient(135deg, #9e6f7c, #6b7b9e)',
     revealAt: REVEAL_DELAYS[2],
   },
   {
     key: 'shadow',
     name: 'Shadow',
     strategyType: 'shadow',
-    reasoning: 'Simulating 40 execution paths',
+    tag: 'Path search',
+    reasoning:
+      'Simulated 40 execution paths — the best is a hidden-order split across two pools. Tightest fill, lowest slip.',
     slippagePct: 0.09,
+    priceRatio: 3197.6 / 3200,
+    gradient: 'linear-gradient(135deg, #2b2b2f, #4a4a52)',
     revealAt: REVEAL_DELAYS[3],
   },
 ]
 
-function fmt(n: number, max = 4): string {
-  return n.toLocaleString('en-US', { maximumFractionDigits: max })
-}
-
 /** Build each agent's concrete proposal for a parsed intent. */
 export function buildProposals(parsed: ParsedIntent): Record<string, AgentProposalView> {
-  const { escrowUsd, referencePriceUsd, input } = parsed
-  const entries = AGENTS.map((a): [string, AgentProposalView] => {
-    const avgPriceUsd = referencePriceUsd * (1 + a.slippagePct / 100)
-    const projected = (escrowUsd / avgPriceUsd) * (1 - a.slippagePct / 100)
-    const score = Number((100 - a.slippagePct * 20).toFixed(1))
-    return [
-      a.key,
-      {
-        key: a.key,
-        name: a.name,
-        strategyType: a.strategyType,
-        projectedOut: fmt(projected),
-        tokenOut: input.tokenOut,
-        slippagePct: a.slippagePct,
-        avgPriceUsd,
-        score,
-      },
-    ]
-  })
+  const base = parsed.targetPriceUsd || parsed.referencePriceUsd || 3200
+  const entries = AGENTS.map((a): [string, AgentProposalView] => [
+    a.key,
+    {
+      key: a.key,
+      name: a.name,
+      avgPriceUsd: base * a.priceRatio,
+      slippagePct: a.slippagePct,
+      score: Number((100 - a.slippagePct * 20).toFixed(1)),
+    },
+  ])
   return Object.fromEntries(entries)
 }
 
