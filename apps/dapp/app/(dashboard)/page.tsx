@@ -15,7 +15,7 @@ export default function DashboardPage(): JSX.Element {
       </p>
 
       <div className="mt-6 flex gap-3">
-        <Button asChild size="lg">
+        <Button asChild size="lg" className="bg-foreground text-background hover:bg-foreground/90">
           <Link href="/intents/new">
             <Sparkles className="h-4 w-4" /> Submit an intent
           </Link>

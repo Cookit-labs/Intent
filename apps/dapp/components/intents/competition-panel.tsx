@@ -166,7 +166,12 @@ export function CompetitionPanel({
               <span>{parsed.escrowUsd.toLocaleString()} USDC escrowed · settles on Arc</span>
               <span>{winnerProposal.name} agent</span>
             </div>
-            <Button onClick={onAccept} disabled={accepting} size="lg">
+            <Button
+              onClick={onAccept}
+              disabled={accepting}
+              size="lg"
+              className="bg-foreground text-background hover:bg-foreground/90"
+            >
               {accepting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" /> Submitting…
