@@ -54,12 +54,20 @@ function firstNumber(text: string): number | null {
   return match ? Number(match[0]) : null
 }
 
-// A price target if the text names one (e.g. "below $3,200", "at 3200").
+function scaleAmount(raw: string, suffix: string | undefined): number {
+  let n = Number(raw.replace(/,/g, ''))
+  const s = suffix?.toLowerCase()
+  if (s === 'k') n *= 1_000
+  if (s === 'm') n *= 1_000_000
+  return n
+}
+
+// A price target if the text names one (e.g. "below $3,200", "at $30k").
 function targetPrice(text: string): number | null {
-  const dollar = text.match(/\$\s?([\d,]+(\.\d+)?)/)
-  if (dollar) return Number(dollar[1]!.replace(/,/g, ''))
-  const worded = text.match(/(?:below|above|at|under|over)\s+\$?\s?([\d,]+(\.\d+)?)/i)
-  if (worded) return Number(worded[1]!.replace(/,/g, ''))
+  const dollar = text.match(/\$\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
+  if (dollar) return scaleAmount(dollar[1]!, dollar[2])
+  const worded = text.match(/(?:below|above|at|under|over)\s+\$?\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
+  if (worded) return scaleAmount(worded[1]!, worded[2])
   return null
 }
 

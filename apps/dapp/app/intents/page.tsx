@@ -17,7 +17,7 @@ export default function IntentsPage(): JSX.Element {
   const [tab, setTab] = useState<Tab>('compose')
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
+    <div className="mx-auto max-w-4xl px-6 py-10">
       <div className="mb-6">
         <h1 className="font-display text-3xl font-semibold tracking-tight">Intents</h1>
         <p className="text-muted-foreground mt-1 text-sm">

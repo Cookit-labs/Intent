@@ -86,21 +86,26 @@ export function IntentChat(): JSX.Element {
             </p>
           </div>
         ) : (
-          <CompetitionPanel
-            state={competition}
-            onExecute={handleExecute}
-            executingKey={executingKey}
-          />
+          <div className="flex flex-col gap-4">
+            <div className="flex justify-end">
+              <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+                {message}
+              </div>
+            </div>
+            <CompetitionPanel
+              state={competition}
+              onExecute={handleExecute}
+              executingKey={executingKey}
+            />
+          </div>
         )}
       </div>
 
       {/* Composer */}
       <div className="border-border shrink-0 border-t p-3">
         <ComposerInput
-          key={message ?? 'idle'}
           onSubmit={handleSubmit}
           showExamples={!parsed}
-          {...(message ? { initialText: message } : {})}
           {...(parsed ? { onReset: handleReset } : {})}
         />
         {createIntent.isError ? (

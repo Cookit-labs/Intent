@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { ArrowUp, Plus } from 'lucide-react'
+import { ArrowUp, Bot, FileText, Paperclip, Plus, Sparkles, type LucideIcon } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 
 const EXAMPLES = [
@@ -10,25 +10,46 @@ const EXAMPLES = [
   'Rebalance to 60 / 40 ETH · USDC',
 ]
 
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-foreground hover:bg-muted flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors"
+    >
+      <Icon className="text-muted-foreground h-4 w-4" />
+      {label}
+    </button>
+  )
+}
+
 export function ComposerInput({
   onSubmit,
   disabled = false,
   showExamples = false,
-  initialText,
   onReset,
 }: {
   onSubmit: (text: string) => void
   disabled?: boolean
   showExamples?: boolean
-  initialText?: string
   onReset?: () => void
 }): JSX.Element {
-  const [text, setText] = useState(initialText ?? '')
+  const [text, setText] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
 
   function submit(): void {
     const trimmed = text.trim()
     if (!trimmed || disabled) return
     onSubmit(trimmed)
+    setText('')
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -62,16 +83,38 @@ export function ComposerInput({
           disabled && 'opacity-60'
         )}
       >
-        {onReset ? (
+        <div className="relative">
           <button
             type="button"
-            onClick={onReset}
-            aria-label="New intent"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="Add to intent"
+            aria-expanded={menuOpen}
             className="border-border text-muted-foreground hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors"
           >
             <Plus className="h-4 w-4" />
           </button>
-        ) : null}
+          {menuOpen ? (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <div className="border-border bg-card absolute bottom-full left-0 z-20 mb-2 w-48 overflow-hidden rounded-xl border shadow-lg">
+                {onReset ? (
+                  <MenuItem
+                    icon={Sparkles}
+                    label="New intent"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onReset()
+                    }}
+                  />
+                ) : null}
+                <MenuItem icon={Bot} label="Add agent" onClick={() => setMenuOpen(false)} />
+                <MenuItem icon={FileText} label="Attach PDF" onClick={() => setMenuOpen(false)} />
+                <MenuItem icon={Paperclip} label="Attach file" onClick={() => setMenuOpen(false)} />
+              </div>
+            </>
+          ) : null}
+        </div>
+
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -86,7 +129,7 @@ export function ComposerInput({
           type="button"
           onClick={submit}
           disabled={disabled || !text.trim()}
-          aria-label="Submit intent"
+          aria-label="Send intent"
           className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           <ArrowUp className="h-4 w-4" />
