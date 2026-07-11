@@ -36,7 +36,7 @@ export function Sidebar(): JSX.Element {
     <aside className="border-border bg-surface-elevated flex h-full w-60 shrink-0 flex-col border-r">
       <div className="flex h-16 items-center gap-2 px-6">
         <span className="font-display text-lg font-semibold tracking-tight">Intent</span>
-        <span className="bg-brand/10 text-brand rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide">
+        <span className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[10px] tracking-wide">
           Terminal
         </span>
       </div>
@@ -51,8 +51,8 @@ export function Sidebar(): JSX.Element {
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 active
-                  ? 'bg-brand/10 text-brand'
-                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                  ? 'text-foreground font-semibold'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />

@@ -45,7 +45,7 @@ export function ComposerInput({
               type="button"
               disabled={disabled}
               onClick={() => onSubmit(ex)}
-              className="border-border bg-card text-muted-foreground hover:border-brand/40 hover:text-foreground rounded-full border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
+              className="border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground rounded-full border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
             >
               {ex}
             </button>
@@ -55,7 +55,7 @@ export function ComposerInput({
 
       <div
         className={cn(
-          'border-border bg-card focus-within:border-brand/50 flex items-end gap-2 rounded-xl border p-2 shadow-sm transition-colors',
+          'border-border focus-within:border-foreground/40 flex items-end gap-2 rounded-xl border p-2 transition-colors',
           disabled && 'opacity-60'
         )}
       >
@@ -74,7 +74,7 @@ export function ComposerInput({
           onClick={submit}
           disabled={disabled || !text.trim()}
           aria-label="Submit intent"
-          className="bg-brand text-brand-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           <ArrowUp className="h-4 w-4" />
         </button>

@@ -10,19 +10,19 @@ const categoryLabel: Record<VenueCategory, string> = {
   orderbook: 'Order book',
 }
 
-const categoryVariant: Record<VenueCategory, 'secondary' | 'accent' | 'outline'> = {
-  swap: 'secondary',
-  aggregator: 'accent',
+const categoryVariant: Record<VenueCategory, 'outline'> = {
+  swap: 'outline',
+  aggregator: 'outline',
   orderbook: 'outline',
 }
 
 export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
   return (
     <a href={venue.url} target="_blank" rel="noopener noreferrer" className="block">
-      <Card className="hover:border-brand/40 hover:bg-muted/30 flex h-full flex-col gap-4 p-5 transition-colors">
+      <Card className="hover:border-foreground/40 flex h-full flex-col gap-4 p-5 transition-colors">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="bg-brand/10 font-display text-brand flex h-10 w-10 items-center justify-center rounded-md text-lg font-semibold">
+            <span className="border-border text-foreground flex h-10 w-10 items-center justify-center rounded-md border text-lg font-semibold">
               {venue.name.charAt(0)}
             </span>
             <div>
@@ -41,7 +41,7 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
           {venue.chains.map((chain) => (
             <span
               key={chain}
-              className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[11px]"
+              className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[11px]"
             >
               {chain}
             </span>

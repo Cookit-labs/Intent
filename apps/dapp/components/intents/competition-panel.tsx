@@ -44,7 +44,7 @@ function CountdownRing({ seconds }: { seconds: number }): JSX.Element {
             cy="18"
             r="15"
             fill="none"
-            stroke="hsl(var(--brand))"
+            stroke="hsl(var(--foreground))"
             strokeWidth="2.5"
             strokeLinecap="round"
             initial={{ pathLength: 1 }}
@@ -77,13 +77,13 @@ export function CompetitionPanel({
     <Card className="flex flex-col gap-4 p-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Radio className="text-brand h-4 w-4" />
+          <Radio className="text-muted-foreground h-4 w-4" />
           <span className="text-sm font-medium">
             {decided ? 'Best execution selected' : 'Agents competing'}
           </span>
         </div>
         {decided ? (
-          <Badge variant="success">Winner</Badge>
+          <Badge variant="outline">Winner</Badge>
         ) : (
           <CountdownRing seconds={Math.min(secondsLeft, WINDOW_SECONDS)} />
         )}
@@ -102,14 +102,14 @@ export function CompetitionPanel({
               animate={{ opacity: dimmed ? 0.45 : 1 }}
               transition={{ duration: 0.4 }}
               className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 ${
-                isWinner ? 'border-brand/40 bg-brand/5' : 'border-border'
+                isWinner ? 'border-foreground/50' : 'border-border'
               }`}
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-sm font-semibold">
                   {agent.name}
                   {isWinner ? (
-                    <span className="bg-brand text-brand-foreground flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium">
+                    <span className="bg-foreground text-background flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium">
                       <Check className="h-2.5 w-2.5" strokeWidth={3} />
                       Recommended
                     </span>
@@ -153,7 +153,7 @@ export function CompetitionPanel({
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="border-border bg-muted/40 flex flex-col gap-3 rounded-lg border p-4"
+            className="border-border flex flex-col gap-3 rounded-lg border p-4"
           >
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Recommended execution</span>

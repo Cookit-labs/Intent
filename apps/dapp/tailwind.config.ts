@@ -53,9 +53,9 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-inter)'],
-        display: ['var(--font-playfair)'],
-        serif: ['var(--font-cormorant)'],
-        mono: ['var(--font-geist-mono)'],
+        display: ['var(--font-inter)'],
+        serif: ['var(--font-inter)'],
+        mono: ['var(--font-inter)'],
       },
     },
   },

@@ -36,7 +36,7 @@ export function IntentChat(): JSX.Element {
     return (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <span className="bg-brand/10 text-brand flex h-11 w-11 items-center justify-center rounded-full">
+          <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
             <Sparkles className="h-5 w-5" />
           </span>
           <p className="text-muted-foreground max-w-md text-sm">
@@ -57,7 +57,7 @@ export function IntentChat(): JSX.Element {
         animate={{ opacity: 1, y: 0 }}
         className="flex justify-end"
       >
-        <div className="bg-brand text-brand-foreground max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+        <div className="border-border max-w-[80%] rounded-2xl rounded-br-sm border px-4 py-2.5 text-sm">
           {message}
         </div>
       </motion.div>
@@ -69,19 +69,17 @@ export function IntentChat(): JSX.Element {
         transition={{ delay: 0.15 }}
       >
         <Card className="flex flex-col gap-3 p-4">
-          <span className="text-brand font-mono text-[11px] uppercase tracking-widest">
-            Intent understood
-          </span>
+          <span className="text-muted-foreground text-[11px] tracking-wide">Intent understood</span>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{intentTypeLabel(parsed.input.type)}</Badge>
+            <Badge variant="outline">{intentTypeLabel(parsed.input.type)}</Badge>
             <Badge variant="outline">{parsed.escrowUsd.toLocaleString()} USDC escrowed</Badge>
             <Badge variant="outline">Target {parsed.input.tokenOut}</Badge>
           </div>
           <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
-            <Radio className="text-brand h-3 w-3" />
+            <Radio className="text-muted-foreground h-3 w-3" />
             Broadcasting to the agent network
             <motion.span
-              className="bg-brand h-1.5 w-1.5 rounded-full"
+              className="bg-foreground h-1.5 w-1.5 rounded-full"
               animate={{ opacity: [1, 0.3, 1] }}
               transition={{ duration: 1, repeat: Infinity }}
             />
