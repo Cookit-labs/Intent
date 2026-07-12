@@ -26,7 +26,7 @@ const geistMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: { default: 'Intent Terminal', template: '%s | Intent' },
+  title: { default: 'Intent', template: '%s · Intent' },
   description: 'Submit intents. Watch agents compete. Settle on-chain.',
 }
 

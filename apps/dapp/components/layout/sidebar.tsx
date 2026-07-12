@@ -1,32 +1,19 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import {
-  BarChart3,
-  Boxes,
-  Gavel,
-  History,
-  LayoutDashboard,
-  Settings,
-  Sparkles,
-  Trophy,
-  Vault,
-  Wallet,
-} from 'lucide-react'
+import { BarChart3, Boxes, History, Settings, Sparkles, Vault, Wallet } from 'lucide-react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const nav = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/intents', label: 'Intents', icon: Sparkles },
-  { href: '/competitions', label: 'Competitions', icon: Gavel },
   { href: '/agents', label: 'Agents', icon: Wallet },
   { href: '/apps', label: 'Apps', icon: Boxes },
-  { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
-  { href: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { href: '/history', label: 'History', icon: History },
-  { href: '/vault', label: 'Vault', icon: Vault },
-  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/analytics', label: 'Analytics', icon: BarChart3, soon: true },
+  { href: '/history', label: 'History', icon: History, soon: true },
+  { href: '/vault', label: 'Vault', icon: Vault, soon: true },
+  { href: '/settings', label: 'Settings', icon: Settings, soon: true },
 ] as const
 
 export function Sidebar(): JSX.Element {
@@ -34,16 +21,15 @@ export function Sidebar(): JSX.Element {
 
   return (
     <aside className="border-border bg-surface-elevated flex h-full w-60 shrink-0 flex-col border-r">
-      <div className="flex h-16 items-center gap-2 px-6">
+      <div className="flex h-16 items-center px-6">
         <span className="font-display text-lg font-semibold tracking-tight">Intent</span>
-        <span className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[10px] tracking-wide">
-          Terminal
-        </span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
-        {nav.map(({ href, label, icon: Icon }) => {
-          const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
+        {nav.map((item) => {
+          const { href, label, icon: Icon } = item
+          const soon = 'soon' in item && item.soon
+          const active = pathname.startsWith(href)
           return (
             <Link
               key={href}
@@ -57,17 +43,24 @@ export function Sidebar(): JSX.Element {
             >
               <Icon className="h-4 w-4 shrink-0" />
               {label}
+              {soon ? (
+                <span
+                  className={cn(
+                    'ml-auto rounded border px-1.5 py-0.5 text-[10px] font-normal',
+                    active ? 'border-brand-foreground/40' : 'border-border'
+                  )}
+                >
+                  Soon
+                </span>
+              ) : null}
             </Link>
           )
         })}
       </nav>
 
-      <div className="border-border border-t px-6 py-4">
-        <p className="text-muted-foreground font-mono text-[11px] leading-relaxed">
-          Settling in USDC on Arc.
-          <br />
-          Non-custodial by design.
-        </p>
+      <div className="border-border flex items-center gap-2 border-t px-6 py-4">
+        <Image src="/images/Arc.png" alt="Arc" width={18} height={18} className="rounded" />
+        <p className="text-muted-foreground text-[11px]">Powered by Arc network</p>
       </div>
     </aside>
   )

@@ -8,7 +8,7 @@ export default function AnalyticsPage(): JSX.Element {
   return (
     <div className="flex flex-col gap-6 p-6">
       <PageHeader
-        eyebrow="Intent Terminal"
+        // eyebrow="Intent Terminal"
         title="Analytics"
         description="Volume, slippage, and competition trends. Coming soon."
         badge={<Badge variant="outline">Preview · Coming soon</Badge>}

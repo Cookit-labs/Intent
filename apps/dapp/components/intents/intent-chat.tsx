@@ -1,13 +1,11 @@
 'use client'
 
-import { cn } from '@intent/ui'
 import { Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { useCreateIntent } from '../../hooks/use-intent'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
-import { WINDOW_SECONDS } from '../../lib/mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
 import { ComposerInput } from './composer-input'
@@ -29,9 +27,6 @@ export function IntentChat(): JSX.Element {
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
   const competition = useMockCompetition(parsed)
-
-  const live = competition.phase === 'competing'
-  const timer = String(Math.min(competition.secondsLeft, WINDOW_SECONDS)).padStart(2, '0')
 
   function handleSubmit(text: string): void {
     setMessage(text)
@@ -57,19 +52,10 @@ export function IntentChat(): JSX.Element {
   return (
     <div className="border-border bg-card flex h-[70vh] max-h-[720px] min-h-[520px] flex-col overflow-hidden rounded-2xl border">
       {/* Window chrome */}
-      <div className="border-border flex shrink-0 items-center justify-between border-b px-4 py-3">
+      <div className="border-border relative flex shrink-0 items-center border-b px-4 py-3">
         <TrafficLights />
-        <span className="text-muted-foreground text-xs">Live settlement</span>
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs tabular-nums">
-          <span
-            className={cn(
-              'h-1.5 w-1.5 rounded-full',
-              live
-                ? 'bg-foreground animate-pulse motion-reduce:animate-none'
-                : 'bg-muted-foreground'
-            )}
-          />
-          00:{competition.phase === 'decided' ? '00' : timer}
+        <span className="text-muted-foreground absolute left-1/2 -translate-x-1/2 text-xs">
+          Live settlement
         </span>
       </div>
 

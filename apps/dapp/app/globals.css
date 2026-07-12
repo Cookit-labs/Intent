@@ -39,3 +39,8 @@
     @apply bg-brand/20 text-brand;
   }
 }
+
+/* RainbowKit connect button: normal weight to match the flat, no-bold rule. */
+[data-rk] button {
+  font-weight: 400 !important;
+}

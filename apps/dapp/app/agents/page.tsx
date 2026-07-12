@@ -1,21 +1,49 @@
-import { Badge, PageHeader } from '@intent/ui'
+'use client'
 
-import { AgentCard } from '../../components/agents/agent-card'
+import { cn } from '@intent/ui'
+import { useState } from 'react'
+
+import { AgentDirectory } from '../../components/agents/agent-directory'
+import { AgentLeaderboard } from '../../components/agents/agent-leaderboard'
+
+type Tab = 'directory' | 'leaderboard'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'directory', label: 'Directory' },
+  { id: 'leaderboard', label: 'Leaderboard' },
+]
 
 export default function AgentsPage(): JSX.Element {
+  const [tab, setTab] = useState<Tab>('directory')
+
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <PageHeader
-        eyebrow="Intent Terminal"
-        title="Agents"
-        description="Solver agents that compete to fill intents. Building in Slice 2."
-        badge={<Badge variant="outline">Preview · Slice 2</Badge>}
-      />
-      <div className="grid gap-4 sm:grid-cols-2">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <AgentCard key={i} />
+    <div className="mx-auto max-w-4xl px-6 py-10">
+      <div className="mb-6">
+        <h1 className="font-display text-3xl font-semibold tracking-tight">Agents</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Solver agents that compete to fill your intents. Browse, rank, and connect your own.
+        </p>
+      </div>
+
+      <div className="border-border mb-8 flex items-center gap-6 border-b">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={cn(
+              '-mb-px border-b-2 px-1 pb-3 text-sm transition-colors',
+              tab === t.id
+                ? 'border-foreground text-foreground font-semibold'
+                : 'text-muted-foreground hover:text-foreground border-transparent'
+            )}
+          >
+            {t.label}
+          </button>
         ))}
       </div>
+
+      {tab === 'directory' ? <AgentDirectory /> : <AgentLeaderboard />}
     </div>
   )
 }
