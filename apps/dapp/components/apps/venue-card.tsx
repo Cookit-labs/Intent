@@ -3,6 +3,7 @@
 import type { Venue, VenueCategory } from '@intent/types'
 import { Badge, Card } from '@intent/ui'
 import { ArrowUpRight } from 'lucide-react'
+import Image from 'next/image'
 
 const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
@@ -10,10 +11,11 @@ const categoryLabel: Record<VenueCategory, string> = {
   orderbook: 'Order book',
 }
 
-const categoryVariant: Record<VenueCategory, 'outline'> = {
-  swap: 'outline',
-  aggregator: 'outline',
-  orderbook: 'outline',
+function chainSlug(chain: string): string {
+  return chain
+    .toLowerCase()
+    .replace(/\s*chain$/, '')
+    .trim()
 }
 
 export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
@@ -22,12 +24,16 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
       <Card className="hover:border-foreground/40 flex h-full flex-col gap-4 p-5 transition-colors">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="border-border text-foreground flex h-10 w-10 items-center justify-center rounded-md border text-lg font-semibold">
-              {venue.name.charAt(0)}
-            </span>
+            <Image
+              src={`/images/venues/${venue.id}.webp`}
+              alt={`${venue.name} logo`}
+              width={40}
+              height={40}
+              className="border-border h-10 w-10 shrink-0 rounded-md border bg-white object-contain p-1"
+            />
             <div>
               <p className="font-display text-base font-semibold leading-tight">{venue.name}</p>
-              <Badge variant={categoryVariant[venue.category]} className="mt-1">
+              <Badge variant="outline" className="mt-1">
                 {categoryLabel[venue.category]}
               </Badge>
             </div>
@@ -41,8 +47,15 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
           {venue.chains.map((chain) => (
             <span
               key={chain}
-              className="border-border text-muted-foreground rounded border px-1.5 py-0.5 text-[11px]"
+              className="border-border text-muted-foreground flex items-center gap-1 rounded border py-0.5 pl-1 pr-1.5 text-[11px]"
             >
+              <Image
+                src={`/images/chains/${chainSlug(chain)}.webp`}
+                alt=""
+                width={14}
+                height={14}
+                className="h-3.5 w-3.5 rounded-full"
+              />
               {chain}
             </span>
           ))}
