@@ -29,7 +29,7 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
               alt={`${venue.name} logo`}
               width={40}
               height={40}
-              className="border-border h-10 w-10 shrink-0 rounded-md border bg-white object-contain p-1"
+              className="h-10 w-10 shrink-0 rounded-md object-contain"
             />
             <div>
               <p className="font-display text-base font-semibold leading-tight">{venue.name}</p>
@@ -43,21 +43,17 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
 
         <p className="text-muted-foreground text-sm">{venue.bestFor}</p>
 
-        <div className="mt-auto flex flex-wrap gap-1.5">
+        <div className="mt-auto flex items-center -space-x-1.5">
           {venue.chains.map((chain) => (
-            <span
+            <Image
               key={chain}
-              className="border-border text-muted-foreground flex items-center gap-1 rounded border py-0.5 pl-1 pr-1.5 text-[11px]"
-            >
-              <Image
-                src={`/images/chains/${chainSlug(chain)}.webp`}
-                alt=""
-                width={14}
-                height={14}
-                className="h-3.5 w-3.5 rounded-full"
-              />
-              {chain}
-            </span>
+              src={`/images/chains/${chainSlug(chain)}.webp`}
+              alt={chain}
+              title={chain}
+              width={20}
+              height={20}
+              className="ring-background h-5 w-5 rounded-full ring-2"
+            />
           ))}
         </div>
       </Card>
