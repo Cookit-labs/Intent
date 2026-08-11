@@ -21,6 +21,10 @@ export const clientEnvSchema = z.object({
   NEXT_PUBLIC_API_URL: z.string().url(),
   NEXT_PUBLIC_WS_URL: z.string(),
   NEXT_PUBLIC_DAPP_URL: z.string().url().optional(),
+  // Optional: injected wallets work without it, WalletConnect does not.
+  NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: z.string().optional(),
+  // Optional: falls back to the public Arc endpoint.
+  NEXT_PUBLIC_ARC_RPC_URL: z.string().url().optional(),
 })
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>
