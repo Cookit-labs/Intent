@@ -59,6 +59,11 @@ supabase/.temp
 # Market research (never push)
 docs/Intent Market Research.pdf
 
+# Internal planning docs (local only)
+docs/PRODUCT.md
+docs/PERMISSIONS.md
+docs/CONVERSATION.md
+
 # Build artifacts
 *.tsbuildinfo
 
