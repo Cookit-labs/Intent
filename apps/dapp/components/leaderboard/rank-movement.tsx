@@ -1,5 +1,6 @@
 'use client'
-// TODO: implement RankMovement component
-export function RankMovement() {
-  return <div className="text-zinc-500 font-mono text-xs p-4">// RankMovement — TODO</div>
+import { Skeleton } from '@intent/ui'
+
+export function RankMovement(): JSX.Element {
+  return <Skeleton className="h-4 w-10" />
 }

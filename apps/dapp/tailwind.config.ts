@@ -12,18 +12,50 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        brand: { DEFAULT: '#6366f1', dim: '#4f46e5' },
-        accent: '#06b6d4',
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        brand: {
+          DEFAULT: 'hsl(var(--brand))',
+          dim: 'hsl(var(--brand) / 0.85)',
+          foreground: 'hsl(var(--brand-foreground))',
+        },
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        success: 'hsl(var(--success))',
+        warning: 'hsl(var(--warning))',
         surface: {
-          base: '#09090b',
-          elevated: '#18181b',
-          card: '#1c1c1f',
+          base: 'hsl(var(--surface-base))',
+          elevated: 'hsl(var(--surface-elevated))',
+          card: 'hsl(var(--surface-card))',
         },
       },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
       fontFamily: {
-        sans: ['var(--font-inter)'],
-        display: ['var(--font-space-grotesk)'],
-        mono: ['var(--font-geist-mono)'],
+        sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-inter)', 'ui-monospace', 'monospace'],
       },
     },
   },
