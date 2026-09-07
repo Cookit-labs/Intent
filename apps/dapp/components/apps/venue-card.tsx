@@ -4,6 +4,9 @@ import type { Venue, VenueCategory } from '@intent/types'
 import { Badge, Card } from '@intent/ui'
 import { ArrowUpRight } from 'lucide-react'
 import Image from 'next/image'
+import { useState } from 'react'
+
+import { StellarMark } from '../layout/chain-marks'
 
 const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
@@ -18,19 +21,41 @@ function chainSlug(chain: string): string {
     .trim()
 }
 
+/**
+ * Venue logo, falling back to a lettermark. Only the original EVM venues ship
+ * bitmaps in /images/venues; rather than commit a logo file per Stellar venue,
+ * a missing image degrades to the venue's initial instead of a broken frame.
+ */
+function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
+  const [failed, setFailed] = useState(false)
+
+  if (failed) {
+    return (
+      <span className="bg-muted text-muted-foreground flex h-10 w-10 shrink-0 items-center justify-center rounded-md font-display text-base font-semibold">
+        {venue.name.charAt(0)}
+      </span>
+    )
+  }
+
+  return (
+    <Image
+      src={`/images/venues/${venue.id}.webp`}
+      alt={`${venue.name} logo`}
+      width={40}
+      height={40}
+      onError={() => setFailed(true)}
+      className="h-10 w-10 shrink-0 rounded-md object-contain"
+    />
+  )
+}
+
 export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
   return (
     <a href={venue.url} target="_blank" rel="noopener noreferrer" className="block">
       <Card className="hover:border-foreground/40 flex h-full flex-col gap-4 p-5 transition-colors">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Image
-              src={`/images/venues/${venue.id}.webp`}
-              alt={`${venue.name} logo`}
-              width={40}
-              height={40}
-              className="h-10 w-10 shrink-0 rounded-md object-contain"
-            />
+            <VenueLogo venue={venue} />
             <div>
               <p className="font-display text-base font-semibold leading-tight">{venue.name}</p>
               <Badge variant="outline" className="mt-1">
@@ -44,17 +69,27 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
         <p className="text-muted-foreground text-sm">{venue.bestFor}</p>
 
         <div className="mt-auto flex items-center -space-x-1.5">
-          {venue.chains.map((chain) => (
-            <Image
-              key={chain}
-              src={`/images/chains/${chainSlug(chain)}.webp`}
-              alt={chain}
-              title={chain}
-              width={20}
-              height={20}
-              className="ring-background h-5 w-5 rounded-full ring-2"
-            />
-          ))}
+          {venue.chains.map((chain) =>
+            // Stellar has no bitmap in /images/chains, and shipping one for a
+            // 20px badge is not worth it — the inline mark scales better and
+            // matches the switcher exactly.
+            chainSlug(chain) === 'stellar' ? (
+              <StellarMark
+                key={chain}
+                className="ring-background h-5 w-5 rounded-full ring-2"
+              />
+            ) : (
+              <Image
+                key={chain}
+                src={`/images/chains/${chainSlug(chain)}.webp`}
+                alt={chain}
+                title={chain}
+                width={20}
+                height={20}
+                className="ring-background h-5 w-5 rounded-full ring-2"
+              />
+            )
+          )}
         </div>
       </Card>
     </a>

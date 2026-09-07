@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono, Playfair_Display, Cormorant } from 'next/font/google'
 
-import { AppShell } from '../components/layout/app-shell'
 import { RootProviders } from '../providers/root'
 
 import './globals.css'
@@ -36,9 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${inter.variable} ${playfair.variable} ${cormorant.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
       >
-        <RootProviders>
-          <AppShell>{children}</AppShell>
-        </RootProviders>
+        <RootProviders>{children}</RootProviders>
       </body>
     </html>
   )

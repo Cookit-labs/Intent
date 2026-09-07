@@ -4,19 +4,24 @@ import { EmptyState, Input } from '@intent/ui'
 import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
+import { useChain } from '../../providers/chain-provider'
 import { venues } from '../../lib/venues'
 import { VenueCard } from './venue-card'
 
 export function VenueGrid(): JSX.Element {
   const [query, setQuery] = useState('')
+  const { descriptor } = useChain()
 
   const filtered = useMemo(() => {
+    // Only venues that exist on the active chain's family: a Stellar user has
+    // no way to trade on Uniswap, so listing it would be noise.
+    const onChain = venues.filter((v) => v.family === descriptor.family)
     const q = query.trim().toLowerCase()
-    if (!q) return venues
-    return venues.filter((v) =>
+    if (!q) return onChain
+    return onChain.filter((v) =>
       [v.name, v.category, v.bestFor].some((field) => field.toLowerCase().includes(q))
     )
-  }, [query])
+  }, [query, descriptor.family])
 
   return (
     <div className="flex flex-col gap-5">
