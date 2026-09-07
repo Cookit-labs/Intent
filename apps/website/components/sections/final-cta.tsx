@@ -1,7 +1,8 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { ArrowUpRight } from 'lucide-react'
+
+import { LaunchDapp } from '../layout/launch-dapp'
 
 const EASE = [0.25, 0.46, 0.45, 0.94] as const
 
@@ -31,13 +32,7 @@ export function FinalCta() {
           viewport={{ once: true, amount: 0.4 }}
           transition={{ duration: 0.6, delay: 0.15, ease: EASE }}
         >
-          <a
-            href="#"
-            className="bg-foreground text-background mt-10 inline-flex items-center gap-1.5 rounded-full px-6 py-3 font-sans text-sm font-medium transition-opacity hover:opacity-90"
-          >
-            Book a Demo
-            <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-          </a>
+          <LaunchDapp size="lg" className="mt-10 inline-block text-left" />
         </motion.div>
       </div>
     </section>

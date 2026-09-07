@@ -1,8 +1,10 @@
 'use client'
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, Menu, X } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
+
+import { LaunchDapp } from './launch-dapp'
 
 const NAV_LINKS = [
   { label: 'Docs', href: '#' },
@@ -30,13 +32,7 @@ export function Navbar() {
               </a>
             ))}
           </div>
-          <a
-            href="#"
-            className="bg-foreground text-background hidden items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 sm:inline-flex"
-          >
-            Book a Demo
-            <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-          </a>
+          <LaunchDapp size="sm" className="hidden sm:block" />
 
           {/* Mobile menu toggle */}
           <button
@@ -77,14 +73,7 @@ export function Navbar() {
                   {link.label}
                 </a>
               ))}
-              <a
-                href="#"
-                onClick={() => setOpen(false)}
-                className="bg-foreground text-background mt-2 inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-sm font-medium transition-opacity hover:opacity-90"
-              >
-                Book a Demo
-                <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-              </a>
+              <LaunchDapp variant="inline" className="mt-3" onNavigate={() => setOpen(false)} />
             </div>
           </motion.div>
         )}
