@@ -18,7 +18,12 @@ const TOKEN_ALIASES: Record<string, string> = {
   usdt: 'USDT',
 }
 
-const PRICE_USD: Record<string, number> = {
+/**
+ * Reference spot prices. Exported because the agent layer must inject these
+ * into prompts rather than let a model recall its own — two copies would drift
+ * and the projected fills would stop matching the parsed intent.
+ */
+export const REFERENCE_PRICES_USD: Record<string, number> = {
   USDC: 1,
   USDT: 1,
   WETH: 3500,
@@ -81,7 +86,7 @@ export function parseIntent(raw: string): ParsedIntent {
   const type = detectType(outcome)
   const tokenOut = detectToken(outcome, 'WETH')
   const tokenIn = tokenOut === 'USDC' ? 'USDT' : 'USDC'
-  const referencePriceUsd = PRICE_USD[tokenOut] ?? 3500
+  const referencePriceUsd = REFERENCE_PRICES_USD[tokenOut] ?? 3500
 
   const num = firstNumber(outcome) ?? 1
   // If the number reads like a token quantity (small), value it; otherwise treat as USD.

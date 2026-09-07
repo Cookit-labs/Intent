@@ -71,11 +71,14 @@ export function CompetitionPanel({
                   ) : null}
                 </div>
 
-                <p className="text-foreground mt-2 text-sm">{agent.reasoning}</p>
+                <p className="text-foreground mt-2 text-sm">
+                  {proposal?.reasoning ?? agent.reasoning}
+                </p>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="bg-muted text-foreground rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">
-                    {money(proposal?.avgPriceUsd ?? 0)} avg · {agent.slippagePct.toFixed(2)}% slip
+                    {money(proposal?.avgPriceUsd ?? 0)} avg ·{' '}
+                    {(proposal?.slippagePct ?? agent.slippagePct).toFixed(2)}% slip
                   </span>
                   <button
                     type="button"
@@ -97,6 +100,12 @@ export function CompetitionPanel({
           )
         })}
       </AnimatePresence>
+
+      {decided && Object.values(proposals).some((p) => p.degraded) ? (
+        <p className="text-muted-foreground mt-1 text-center text-[11px]">
+          Simulated proposals — live agents unavailable.
+        </p>
+      ) : null}
 
       {decided && winner ? (
         <motion.div

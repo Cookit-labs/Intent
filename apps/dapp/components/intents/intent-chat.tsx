@@ -4,6 +4,8 @@ import { Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { useChain } from '../../providers/chain-provider'
+import { useCompetition } from '../../hooks/use-competition'
 import { useCreateIntent } from '../../hooks/use-intent'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
@@ -26,7 +28,14 @@ export function IntentChat(): JSX.Element {
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
-  const competition = useMockCompetition(parsed)
+  const { slug } = useChain()
+
+  // Agents run through the route only when explicitly enabled. The offline race
+  // stays the default so a checkout with no configuration behaves as before.
+  const useAgents = process.env['NEXT_PUBLIC_USE_AI'] === 'true'
+  const live = useCompetition(useAgents ? parsed : null, slug)
+  const offline = useMockCompetition(useAgents ? null : parsed)
+  const competition = useAgents ? live : offline
 
   function handleSubmit(text: string): void {
     setMessage(text)
