@@ -241,6 +241,44 @@ rate-limited to 1/minute and 5/hour per address.
 
 ---
 
+## AI Agents
+
+The four competing agents (TWAP, Momentum, Arbitrage, Shadow) reason with
+DeepSeek. Off by default — with no configuration the app runs a simulated race
+and behaves exactly as before.
+
+```bash
+# apps/dapp/.env.local
+AGENT_BRAIN=deepseek
+DEEPSEEK_API_KEY=sk-...
+NEXT_PUBLIC_USE_AI=true
+```
+
+**The key is server-side only.** Agents run in a route handler
+(`app/api/agents/compete`) that streams each proposal over SSE as it lands.
+Nothing under `lib/agents/brains/` may be imported from a component.
+
+**Failure degrades, it does not break.** A missing key, a rate limit, a timeout
+or a malformed response makes that one agent fall back to a simulated proposal;
+the race still renders four cards and picks a winner. The panel says
+"Simulated proposals" whenever any card came from the fallback, so mock
+reasoning is never passed off as live agent output.
+
+**Scoring is deterministic TypeScript**, not a model call — a model grading its
+own competition would not be reproducible between identical runs.
+
+**Swapping provider** means adding one file under `lib/agents/brains/` and a
+line in `registry.ts`. Nothing else knows which model answered.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENT_BRAIN` | `mock` | `deepseek` to use the model |
+| `DEEPSEEK_API_KEY` | — | Unset falls back to simulated agents |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning |
+| `NEXT_PUBLIC_USE_AI` | `false` | Routes the UI through the agent endpoint |
+
+---
+
 <div align="center">
 
 Part of the **[Cookit Labs](https://github.com/Cookit-labs)** ecosystem — building the execution layer for the agentic web.
