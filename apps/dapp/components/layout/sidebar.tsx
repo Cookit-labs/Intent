@@ -6,6 +6,9 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import { StellarMark } from './chain-marks'
+import { useChain } from '../../providers/chain-provider'
+
 const nav = [
   { href: '/intents', label: 'Intents', icon: Sparkles },
   { href: '/agents', label: 'Agents', icon: Wallet },
@@ -18,6 +21,7 @@ const nav = [
 
 export function Sidebar(): JSX.Element {
   const pathname = usePathname()
+  const { slug, descriptor } = useChain()
 
   return (
     <aside className="border-border bg-surface-elevated flex h-full w-60 shrink-0 flex-col border-r">
@@ -27,8 +31,9 @@ export function Sidebar(): JSX.Element {
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
         {nav.map((item) => {
-          const { href, label, icon: Icon } = item
+          const { href: path, label, icon: Icon } = item
           const soon = 'soon' in item && item.soon
+          const href = `/${slug}${path}`
           const active = pathname.startsWith(href)
           return (
             <Link
@@ -59,8 +64,12 @@ export function Sidebar(): JSX.Element {
       </nav>
 
       <div className="border-border flex items-center gap-2 border-t px-6 py-4">
-        <Image src="/images/Arc.png" alt="Arc" width={18} height={18} className="rounded" />
-        <p className="text-muted-foreground text-[11px]">Powered by Arc network</p>
+        {slug === 'arc' ? (
+          <Image src="/images/Arc.png" alt="" width={18} height={18} className="rounded" />
+        ) : (
+          <StellarMark className="h-[18px] w-[18px]" />
+        )}
+        <p className="text-muted-foreground text-[11px]">Powered by {descriptor.name} network</p>
       </div>
     </aside>
   )

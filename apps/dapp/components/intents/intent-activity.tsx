@@ -5,6 +5,8 @@ import { Button, Card } from '@intent/ui'
 import { Plus } from 'lucide-react'
 import Link from 'next/link'
 
+import { useChain } from '../../providers/chain-provider'
+
 import { useIntents } from '../../hooks/use-intent'
 import { IntentCard } from './intent-card'
 
@@ -28,6 +30,7 @@ function Section({ title, intents }: { title: string; intents: Intent[] }): JSX.
 
 export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.Element {
   const { data: intents, isLoading, isError, error } = useIntents()
+  const { slug } = useChain()
 
   const active = intents?.filter((i) => ACTIVE.has(i.status)) ?? []
   const done = intents?.filter((i) => !ACTIVE.has(i.status)) ?? []
@@ -63,7 +66,7 @@ export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.E
           </Button>
         ) : (
           <Button asChild className="bg-foreground text-background hover:bg-foreground/90">
-            <Link href="/intents/new">
+            <Link href={`/${slug}/intents/new`}>
               <Plus className="h-4 w-4" /> Compose your first intent
             </Link>
           </Button>

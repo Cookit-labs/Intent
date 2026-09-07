@@ -3,6 +3,7 @@ import type { Venue } from '@intent/types'
 export const venues: Venue[] = [
   {
     id: 'cow-swap',
+    family: 'evm' as const,
     name: 'CoW Swap',
     category: 'aggregator',
     chains: ['Ethereum', 'Arbitrum', 'Base', 'Gnosis'],
@@ -11,6 +12,7 @@ export const venues: Venue[] = [
   },
   {
     id: '1inch',
+    family: 'evm' as const,
     name: '1inch',
     category: 'aggregator',
     chains: ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon', 'Base'],
@@ -19,6 +21,7 @@ export const venues: Venue[] = [
   },
   {
     id: 'uniswap',
+    family: 'evm' as const,
     name: 'Uniswap',
     category: 'swap',
     chains: ['Ethereum', 'Arbitrum', 'Optimism', 'Base', 'Polygon'],
@@ -27,6 +30,7 @@ export const venues: Venue[] = [
   },
   {
     id: 'curve',
+    family: 'evm' as const,
     name: 'Curve',
     category: 'swap',
     chains: ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon'],
@@ -35,6 +39,7 @@ export const venues: Venue[] = [
   },
   {
     id: '0x',
+    family: 'evm' as const,
     name: '0x',
     category: 'aggregator',
     chains: ['Ethereum', 'Arbitrum', 'Base', 'Polygon'],
@@ -43,6 +48,7 @@ export const venues: Venue[] = [
   },
   {
     id: 'kyberswap',
+    family: 'evm' as const,
     name: 'KyberSwap',
     category: 'aggregator',
     chains: ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon', 'Base'],
@@ -51,6 +57,7 @@ export const venues: Venue[] = [
   },
   {
     id: 'matcha',
+    family: 'evm' as const,
     name: 'Matcha',
     category: 'aggregator',
     chains: ['Ethereum', 'Arbitrum', 'Base', 'Polygon'],
@@ -59,6 +66,7 @@ export const venues: Venue[] = [
   },
   {
     id: 'dydx',
+    family: 'evm' as const,
     name: 'dYdX',
     category: 'orderbook',
     chains: ['dYdX Chain'],
@@ -67,10 +75,59 @@ export const venues: Venue[] = [
   },
   {
     id: 'injective',
+    family: 'evm' as const,
     name: 'Injective',
     category: 'orderbook',
     chains: ['Injective'],
     bestFor: 'On-chain order book',
     url: 'https://injective.com',
+  },
+  // Stellar-native venues. These trade Stellar assets through Soroban/SDEX and
+  // have no EVM deployment, which is exactly why the Apps screen filters by
+  // chain family rather than listing everything everywhere.
+  {
+    id: 'soroswap',
+    name: 'Soroswap',
+    family: 'stellar' as const,
+    category: 'swap',
+    chains: ['Stellar'],
+    bestFor: 'Soroban AMM swaps',
+    url: 'https://soroswap.finance',
+  },
+  {
+    id: 'aquarius',
+    name: 'Aquarius',
+    family: 'stellar' as const,
+    category: 'swap',
+    chains: ['Stellar'],
+    bestFor: 'Incentivised AMM pools',
+    url: 'https://aqua.network',
+  },
+  {
+    id: 'stellarx',
+    name: 'StellarX',
+    family: 'stellar' as const,
+    category: 'orderbook',
+    chains: ['Stellar'],
+    bestFor: 'Native SDEX orderbook',
+    url: 'https://www.stellarx.com',
+  },
+  {
+    id: 'phoenix',
+    name: 'Phoenix',
+    family: 'stellar' as const,
+    category: 'swap',
+    chains: ['Stellar'],
+    bestFor: 'Soroban-native DEX',
+    url: 'https://www.phoenix-hub.io',
+  },
+  {
+    id: 'lumenswap',
+    name: 'Lumenswap',
+    family: 'stellar' as const,
+    category: 'orderbook',
+    chains: ['Stellar'],
+    bestFor: 'Lightweight SDEX trading',
+    url: 'https://lumenswap.io',
   },
 ]
