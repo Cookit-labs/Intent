@@ -198,6 +198,49 @@ cp apps/dapp/.env.example apps/dapp/.env.local
 
 ---
 
+## Access Gate (built, currently DISABLED)
+
+> Not active. This was built from a prompt intended for a different project,
+> so **nothing in the dApp is gated** — all routes are open. The code is kept
+> in case it is wanted later; re-enable by restoring the matcher in
+> `apps/dapp/middleware.ts`.
+
+When enabled, only emails marked `accepted` receive a login code.
+
+```bash
+docker compose up -d          # Postgres :55432, Redis :56379 (non-default: other
+                              # local projects commonly hold 5432/6379)
+cp apps/dapp/.env.example apps/dapp/.env.local   # then fill AUTH_SECRET + ADMIN_TOKEN
+pnpm dev
+```
+
+Generate the two secrets:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # AUTH_SECRET
+node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"   # ADMIN_TOKEN
+```
+
+**Flow.** `/verify` asks for an email. Accepted -> a 6-digit code is emailed and a
+signed httpOnly cookie is set on success. Not accepted -> routed to `/waitlist`.
+Everything under `/[chain]/*` is blocked by middleware until that cookie exists.
+
+**In development no email is sent** — the code prints to the dev-server console.
+Set `RESEND_API_KEY` and `EMAIL_FROM` to send real mail.
+
+**Accepting someone:** open `/admin/waitlist`, enter `ADMIN_TOKEN`, click Accept.
+
+| Route | Purpose |
+|-------|---------|
+| `/verify` | Email + OTP sign-in |
+| `/waitlist` | Public signup |
+| `/admin/waitlist` | Accept / revoke testers |
+
+Codes are stored hashed with a 10-minute TTL, die after 5 wrong attempts, and are
+rate-limited to 1/minute and 5/hour per address.
+
+---
+
 <div align="center">
 
 Part of the **[Cookit Labs](https://github.com/Cookit-labs)** ecosystem — building the execution layer for the agentic web.

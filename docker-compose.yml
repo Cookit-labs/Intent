@@ -1,0 +1,40 @@
+# Local datastores for the dApp's access gate (waitlist + OTP).
+#
+# Host ports are deliberately NOT the defaults. Other projects on this machine
+# already bind 5432 and 6379, and pointing Intent at those would silently open
+# someone else's database rather than fail — which is far worse than a refused
+# connection. Containers still speak their standard ports internally.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: intent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: intent
+      POSTGRES_PASSWORD: intent_local_dev
+      POSTGRES_DB: intent
+    ports:
+      - '55432:5432'
+    volumes:
+      - intent-pgdata:/var/lib/postgresql/data
+      - ./packages/db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U intent -d intent']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: intent-redis
+    restart: unless-stopped
+    ports:
+      - '56379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  intent-pgdata:
