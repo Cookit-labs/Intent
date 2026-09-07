@@ -1,4 +1,6 @@
 export * from './addresses'
 export * from './chain'
+export * from './chains-registry'
+export * from './stellar'
 export * from './constants'
 export * from './env'

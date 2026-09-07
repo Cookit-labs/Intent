@@ -44,6 +44,16 @@ export const chains: Record<SupportedNetwork, ChainConfig> = {
     blockExplorerUrl: 'http://localhost:8545',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   },
+  // Stellar has no numeric chain id or EVM RPC; it is identified by network
+  // passphrase (see `stellar.ts`). These fields exist only to satisfy the
+  // EVM-shaped map — nothing on the Stellar path reads them.
+  'stellar-testnet': {
+    id: -1,
+    name: 'Stellar Testnet',
+    rpcUrl: 'https://horizon-testnet.stellar.org',
+    blockExplorerUrl: 'https://stellar.expert/explorer/testnet',
+    nativeCurrency: { name: 'Lumens', symbol: 'XLM', decimals: 7 },
+  },
 }
 
 /** Decimals for USDC read through the ERC-20 interface, as opposed to natively. */

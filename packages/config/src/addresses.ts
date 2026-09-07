@@ -25,4 +25,15 @@ export const CONTRACT_ADDRESSES: Record<SupportedNetwork, ContractAddresses> = {
     executionValidator: '0x0000000000000000000000000000000000000000',
     usdc: '0x0000000000000000000000000000000000000000',
   },
+  // Stellar contracts are Soroban contract ids (C...), not 0x addresses. This
+  // entry exists to satisfy the network map; the Stellar side reads its assets
+  // from `stellar.ts` instead, and gets real ids when Soroban contracts deploy.
+  'stellar-testnet': {
+    intentEscrow: '0x0000000000000000000000000000000000000000',
+    reputationRegistry: '0x0000000000000000000000000000000000000000',
+    agentRegistry: '0x0000000000000000000000000000000000000000',
+    settlementManager: '0x0000000000000000000000000000000000000000',
+    executionValidator: '0x0000000000000000000000000000000000000000',
+    usdc: '0x0000000000000000000000000000000000000000',
+  },
 }
