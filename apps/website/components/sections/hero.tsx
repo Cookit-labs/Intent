@@ -1,5 +1,6 @@
 import Image from 'next/image'
-import { ArrowUpRight } from 'lucide-react'
+
+import { LaunchDapp } from '../layout/launch-dapp'
 
 const THUMBNAILS = [
   '/images/Image1.webp',
@@ -33,13 +34,7 @@ export function Hero() {
 
         <div className="border-border mx-auto mt-8 w-24 border-t border-dashed" />
 
-        <a
-          href="#"
-          className="bg-foreground text-background mt-8 inline-flex items-center gap-1.5 rounded-full px-6 py-3 text-sm font-medium transition-opacity hover:opacity-90"
-        >
-          Book a Demo
-          <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
-        </a>
+        <LaunchDapp size="lg" className="mt-8 inline-block text-left" />
       </div>
 
       <div className="relative mx-auto mt-16 max-w-4xl overflow-hidden md:mt-20 2xl:max-w-5xl">
