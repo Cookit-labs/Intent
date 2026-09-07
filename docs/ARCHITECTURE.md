@@ -12,7 +12,7 @@ graph TD
     Backend -->|emit competition:started| Redis[(Redis Pub/Sub)]
     Redis -->|subscribe| CompetitionEngine[competition-engine]
     CompetitionEngine -->|run agents| AgentOrchestrator[agent-orchestrator]
-    AgentOrchestrator -->|Claude API| Claude[(Anthropic Claude)]
+    AgentOrchestrator -->|DeepSeek API| DeepSeek[(DeepSeek)]
     AgentOrchestrator -->|proposals| CompetitionEngine
     CompetitionEngine -->|score + select winner| Backend
     Backend -->|emit competition:winner| Redis
@@ -22,6 +22,18 @@ graph TD
     Backend -->|settle USDC| SettlementManager[SettlementManager.sol]
     Backend -->|update reputation| ReputationRegistry[ReputationRegistry.sol]
 ```
+
+> **Current implementation note.** The `agent-orchestrator` box above is the
+> target design. Today the agent layer runs in the dApp instead — a Next.js
+> route (`apps/dapp/app/api/agents/compete`) streaming over SSE rather than a
+> Go service publishing to Redis and out through the WebSocket hub. The Go
+> backend has no AI dependencies yet, and blocking real agents on standing up
+> that service was a much larger project than making the reasoning real.
+>
+> The seam is deliberate: agents sit behind an `AgentBrain` interface, and the
+> SSE frames mirror the `competition:*` event payloads in
+> `packages/types/src/websocket.ts`. Moving to the diagram above is then a
+> transport change inside `hooks/use-competition.ts`, not a rewrite.
 
 ---
 
@@ -50,13 +62,28 @@ leaderboard:updated
 agent:reputation:{agentId}
 ```
 
-### 5. Claude as Agent Intelligence
-**Why:** Claude's tool-use capability lets agents call real-world functions (price feeds, slippage estimation, chain state) within a reasoning loop. Each agent strategy is a system prompt + user prompt + tools. The scoring orchestrator also uses Claude to rank proposals objectively.
+### 5. DeepSeek as Agent Intelligence
+**Why:** Tool-use with strict schema validation lets each agent return a
+structured proposal rather than prose, so the UI renders validated numbers
+instead of parsing free text. Each agent strategy is a system prompt plus one
+tool definition. DeepSeek is chosen on cost — roughly an order of magnitude
+cheaper per token than frontier models at this workload's size — and sits
+behind an `AgentBrain` interface so the vendor can be swapped without touching
+the competition flow.
 
-**Agent model:** `claude-sonnet-4-6` (production quality, fast enough for 30s competition windows)
+**Scoring is not done by a model.** Proposals are ranked in plain TypeScript.
+A model grading its own competition is neither reproducible nor testable, and
+the ranking is arithmetic that does not need one.
+
+**Prices are injected, never recalled.** Market data is passed in the prompt
+with an explicit instruction not to use prices from memory; the models are
+weaker at factual recall than at bounded reasoning.
+
+**Agent model:** `deepseek-v4-flash` by default, `deepseek-v4-pro` configurable
+per strategy. Which one ships is decided by the eval harness, not by guesswork.
 
 **Agents:**
-| Agent | Strategy | Claude Role |
+| Agent | Strategy | Model Role |
 |-------|----------|-------------|
 | TWAP Agent | Time-weighted execution | Adapts interval timing to market conditions |
 | Momentum Agent | Trend-following | Reads price momentum, times entry |
@@ -205,12 +232,12 @@ Each agent has access to:
 ```
 intent arrives →
   AgentRunner.collectProposals(intent, competitionId) [parallel]
-    ├── TWAPAgent.propose()     → Claude call → AgentProposal
-    ├── MomentumAgent.propose() → Claude call → AgentProposal
-    ├── ShadowAgent.propose()   → Claude call → AgentProposal
-    └── ArbAgent.propose()      → Claude call → AgentProposal
+    ├── TWAPAgent.propose()     → DeepSeek call → AgentProposal
+    ├── MomentumAgent.propose() → DeepSeek call → AgentProposal
+    ├── ShadowAgent.propose()   → DeepSeek call → AgentProposal
+    └── ArbAgent.propose()      → DeepSeek call → AgentProposal
   ScoringOrchestrator.rankProposals(proposals, intent)
-    └── Claude scores all proposals → ranked ScoredProposal[]
+    └── deterministic scoring → ranked ScoredProposal[]
   winner = proposals[0]
   publish competition:winner event
 ```
@@ -274,7 +301,7 @@ See [.env.example](../.env.example) for the full list. Critical variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key for AI agents |
+| `DEEPSEEK_API_KEY` | No | DeepSeek key. Unset means agents fall back to the built-in mock. |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `REDIS_URL` | Yes | Redis connection string |
 | `JWT_SECRET` | Yes | Min 32 chars |
