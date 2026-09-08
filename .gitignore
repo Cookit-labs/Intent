@@ -69,3 +69,7 @@ docs/CONVERSATION.md
 
 # Superpowers scratch
 .superpowers/
+
+# Eval run output. Regenerable with `pnpm agents:eval`, and one file per run
+# would accumulate; the conclusions live in evals/RESULTS.md instead.
+apps/dapp/lib/agents/evals/results/
