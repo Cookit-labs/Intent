@@ -20,6 +20,14 @@ export interface AgentProposalView {
   avgPriceUsd: number
   slippagePct: number
   score: number
+  /**
+   * Present when a real agent produced this proposal. The panel falls back to
+   * the strategy's static text when it is absent, so the mock path renders
+   * exactly as before.
+   */
+  reasoning?: string
+  /** True when this came from the offline fallback rather than a live agent. */
+  degraded?: boolean
 }
 
 // Timing mirrors the website how-it-works agent-race scene.
