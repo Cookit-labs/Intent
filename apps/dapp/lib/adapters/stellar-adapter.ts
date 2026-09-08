@@ -4,7 +4,7 @@ import { accountExplorerUrl, stellarDescriptor, stellarTestnet } from '@intent/c
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ChainAdapter, ChainWallet } from '../chain-adapter'
+import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
 
@@ -209,9 +209,42 @@ function useStellarWallet(): ChainWallet {
   }
 }
 
+/**
+ * Hands a prepared transaction to whichever wallet the user connected with.
+ *
+ * The kit already routes this to Freighter, xBull, Lobstr, Rabet, Albedo or
+ * Hana, so nothing here is wallet-specific. A user declining is an ordinary
+ * outcome and is reported as `rejected` rather than thrown: cancelling a swap
+ * is not an error.
+ */
+async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
+  ensureKit()
+
+  try {
+    const { signedTxXdr } = await StellarWalletsKit.signTransaction(req.xdr, {
+      address: req.address,
+      networkPassphrase: stellarTestnet.networkPassphrase,
+    })
+
+    if (signedTxXdr === undefined || signedTxXdr === '') {
+      return { ok: false, reason: 'rejected' }
+    }
+    return { ok: true, signedXdr: signedTxXdr }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'could not sign'
+    // Wallets word a decline differently; treating it as an error would show a
+    // failure message for something the user chose to do.
+    if (/reject|denied|declin|cancel|close/i.test(message)) {
+      return { ok: false, reason: 'rejected' }
+    }
+    return { ok: false, reason: 'wallet_error', detail: message }
+  }
+}
+
 export const stellarAdapter: ChainAdapter = {
   descriptor: stellarDescriptor,
   useWallet: useStellarWallet,
   accountUrl: (address) => accountExplorerUrl('stellar', address),
   faucetUrl: 'https://friendbot.stellar.org',
+  signTransaction: signStellarTransaction,
 }
