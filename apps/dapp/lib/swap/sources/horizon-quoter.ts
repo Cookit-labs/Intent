@@ -90,7 +90,9 @@ export function createHorizonQuoter(options: HorizonQuoterOptions = {}): QuoteSo
           failure: {
             source: 'horizon',
             reason: aborted ? 'timeout' : 'upstream_error',
-            detail: e instanceof Error ? e.message : undefined,
+            // Spread rather than assign: exactOptionalPropertyTypes rejects an
+            // explicit undefined for an optional field.
+            ...(e instanceof Error ? { detail: e.message } : {}),
           },
         }
       }
@@ -147,8 +149,8 @@ export function createHorizonQuoter(options: HorizonQuoterOptions = {}): QuoteSo
 /** Stroops back to the decimal string Horizon's query parameters expect. */
 function decimalFromBase(base: string): string {
   const value = BigInt(base)
-  const whole = value / 10_000_000n
-  const fraction = (value % 10_000_000n).toString().padStart(7, '0')
+  const whole = value / BigInt(10_000_000)
+  const fraction = (value % BigInt(10_000_000)).toString().padStart(7, '0')
   return `${whole.toString()}.${fraction}`
 }
 

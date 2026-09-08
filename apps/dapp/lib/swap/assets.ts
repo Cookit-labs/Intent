@@ -41,7 +41,7 @@ export function isNative(asset: AssetRef): boolean {
  */
 export const STROOP_DECIMALS = 7
 
-const STROOPS_PER_UNIT = 10_000_000n
+const STROOPS_PER_UNIT = BigInt(10_000_000)
 
 /** "30" -> "300000000" (30 XLM in stroops). Rejects anything that would lose precision. */
 export function toBaseUnits(amount: string): string {
@@ -79,7 +79,7 @@ export function applySlippage(baseAmount: string, toleranceBps: number): string 
     throw new Error(`slippage tolerance ${toleranceBps} bps is out of range`)
   }
   const amount = BigInt(baseAmount)
-  return ((amount * BigInt(10_000 - toleranceBps)) / 10_000n).toString()
+  return ((amount * BigInt(10_000 - toleranceBps)) / BigInt(10_000)).toString()
 }
 
 export const XLM: ClassicAsset = { kind: 'classic', code: 'XLM' }
