@@ -28,7 +28,17 @@ const PRICING_USD_PER_MTOK: Record<string, { input: number; output: number }> = 
   'deepseek-v4-pro': { input: 0.66, output: 1.98 },
 }
 
-const MAX_OUTPUT_TOKENS = 400
+/**
+ * Covers the tool call plus the thinking tokens the model spends before it.
+ *
+ * These models reason before answering, and that reasoning is billed and
+ * counted here. Measured: a single strategy uses 400-900 completion tokens, and
+ * at a 400 ceiling the reply is cut off mid-thought — `finish_reason: length`,
+ * no tool call at all. That surfaces as a schema failure, which reads like the
+ * model misbehaving when the real cause is the budget. The headroom is
+ * deliberate; unused tokens are not billed.
+ */
+const MAX_OUTPUT_TOKENS = 4_000
 
 export interface DeepSeekBrainOptions {
   apiKey?: string
@@ -40,7 +50,10 @@ export interface DeepSeekBrainOptions {
 
 interface ChatCompletionResponse {
   choices?: {
+    /** 'length' means the reply was cut off before the tool call was finished. */
+    finish_reason?: string
     message?: {
+      content?: string
       tool_calls?: { function?: { name?: string; arguments?: string } }[]
     }
   }[]
@@ -171,7 +184,13 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
             model,
             messages: buildMessages(req),
             tools: [tool],
-            tool_choice: { type: 'function', function: { name: 'submit_proposal' } },
+            // 'auto', not a forced function. DeepSeek's models reason in
+            // thinking mode, which rejects a forced tool_choice outright:
+            // "Thinking mode does not support this tool_choice". The strategy
+            // prompts already instruct the model to answer by calling the tool,
+            // and a reply that arrives as prose anyway is caught below and
+            // falls back — so forcing buys nothing and costs every request.
+            tool_choice: 'auto',
             temperature: STRATEGIES[req.strategy].temperature,
             max_tokens: MAX_OUTPUT_TOKENS,
           }),
@@ -206,10 +225,18 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         }
       }
 
-      const call = body.choices?.[0]?.message?.tool_calls?.[0]?.function
+      const choice = body.choices?.[0]
+      const call = choice?.message?.tool_calls?.[0]?.function
       if (call?.arguments === undefined) {
-        // Prose instead of a tool call. Treated as a schema failure so the
-        // caller substitutes a fallback rather than showing an empty card.
+        // Two very different causes land here, and telling them apart matters:
+        // 'length' means the token budget cut the reply off mid-thought, while
+        // anything else means the model answered in prose. The first is a
+        // configuration problem and the second is a prompting one, so the
+        // reason is logged rather than collapsed into a bare schema failure.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[agents] ${req.strategy}: no tool call (finish_reason=${choice?.finish_reason ?? 'unknown'}, completion_tokens=${body.usage?.completion_tokens ?? 0})`
+        )
         return {
           ok: false,
           error: 'invalid_schema',
@@ -234,6 +261,8 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
       })
 
       if (!validated.ok) {
+        // eslint-disable-next-line no-console
+        console.warn(`[agents] ${req.strategy}: rejected — ${validated.reason}`)
         return {
           ok: false,
           error: 'invalid_schema',

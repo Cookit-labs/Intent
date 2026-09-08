@@ -84,7 +84,15 @@ export const proposalToolSchema = z.object({
   venues: z.array(z.string()),
   sliceCount: z.number().int().min(1).max(50),
   confidence: z.number().min(0).max(1),
-  horizonMinutes: z.number().int().min(0).max(60 * 24),
+  // Up to a week. The original 24h cap rejected otherwise-sound proposals:
+  // an accumulate intent is a multi-day plan by nature, so a longer horizon is
+  // the strategy working rather than a bad value. The bound still exists to
+  // catch a nonsense figure.
+  horizonMinutes: z
+    .number()
+    .int()
+    .min(0)
+    .max(60 * 24 * 7),
 })
 
 export type ProposalToolInput = z.infer<typeof proposalToolSchema>

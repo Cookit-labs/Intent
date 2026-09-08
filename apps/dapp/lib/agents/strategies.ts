@@ -38,7 +38,11 @@ Rules that apply to every agent:
 - You are proposing an execution plan, not giving financial advice.
 - Be concrete and quantitative. State the actual numbers you are working from.
 - Your reasoning is shown directly to the user in a chat bubble: at most two sentences, no preamble, no restating the question.
-- Return your answer by calling the submit_proposal tool. Do not reply with prose.`
+- Return your answer by calling the submit_proposal tool. Do not reply with prose.
+- Decide quickly and commit. Do not enumerate alternatives you are not going to
+  choose, and do not re-derive the same figure twice. These models reason before
+  answering and that reasoning is billed and capped: over-deliberating exhausts
+  the budget before the tool call is emitted, which produces no answer at all.`
 
 export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
   twap: {

@@ -27,8 +27,15 @@ export const dynamic = 'force-dynamic'
 /** Bounds prompt size and the cost of a single request. */
 const MAX_INTENT_CHARS = 500
 
-/** Per-agent ceiling. Four of these run concurrently, not in sequence. */
-const AGENT_TIMEOUT_MS = 12_000
+/**
+ * Per-agent ceiling. Four of these run concurrently, not in sequence.
+ *
+ * Generous because DeepSeek reasons in thinking mode before answering, which
+ * routinely takes 20-40s on a real request — measured, not guessed. A tighter
+ * bound simply aborted every agent and served the offline fallback, which
+ * looked like the model failing rather than the timeout being wrong.
+ */
+const AGENT_TIMEOUT_MS = 60_000
 
 const WINDOW_SECONDS = 30
 
