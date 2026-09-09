@@ -123,7 +123,10 @@ export function CompetitionPanel({
                     )}
                   >
                     {isExecuting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    Execute
+                    {/* Named for what it does. "Execute" implied the trade
+                        went through on this click, when it opens a confirm
+                        step where the wallet is actually asked to sign. */}
+                    {isExecuting ? 'Selected' : 'Review'}
                   </button>
                 </div>
               </div>

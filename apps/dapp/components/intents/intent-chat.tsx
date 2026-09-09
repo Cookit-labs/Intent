@@ -1,7 +1,7 @@
 'use client'
 
 import { Sparkles } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
@@ -70,6 +70,18 @@ export function IntentChat(): JSX.Element {
   const chosenRoute =
     executingKey !== null ? (live.routesByAgent[executingKey] ?? live.route) : undefined
   const swap = useSwapExecution(useAgents ? chosenRoute : undefined)
+
+  // Clicking Execute puts the swap into `review`, which renders the confirm
+  // card — but that card sits below four agent cards in a scrolling panel, so
+  // it appeared off-screen. The click looked like it had done nothing, and the
+  // wallet prompt (which is the *second* step, on that card) never came
+  // because the button was never seen.
+  const confirmRef = useRef<HTMLDivElement | null>(null)
+  const awaitingConfirm = swap.phase === 'review'
+  useEffect(() => {
+    if (!awaitingConfirm) return
+    confirmRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [awaitingConfirm])
 
   // The swap's hash belongs on the intent that asked for it. Without this the
   // hash was shown once in the confirmation card and then dropped, leaving
@@ -241,18 +253,20 @@ export function IntentChat(): JSX.Element {
 
             {/* Appears only once an agent has won with an executable route, so
                 the race is never interrupted by a confirmation prompt. */}
-            <SwapConfirm
-              phase={swap.phase}
-              quote={swap.quote}
-              sendDisplay={swap.sendDisplay}
-              receiveDisplay={swap.receiveDisplay}
-              hash={swap.hash}
-              explorerUrl={swap.explorerUrl}
-              error={swap.error}
-              usdPrices={swap.usdPrices}
-              onConfirm={swap.confirm}
-              onReset={swap.reset}
-            />
+            <div ref={confirmRef}>
+              <SwapConfirm
+                phase={swap.phase}
+                quote={swap.quote}
+                sendDisplay={swap.sendDisplay}
+                receiveDisplay={swap.receiveDisplay}
+                hash={swap.hash}
+                explorerUrl={swap.explorerUrl}
+                error={swap.error}
+                usdPrices={swap.usdPrices}
+                onConfirm={swap.confirm}
+                onReset={swap.reset}
+              />
+            </div>
           </div>
         )}
       </div>
