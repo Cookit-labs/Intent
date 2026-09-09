@@ -9,6 +9,7 @@ import { stellarTestnet } from '@intent/config'
 import { Fragment } from 'react'
 
 import { intentTypeLabel } from '../../lib/intent-format'
+import { useChainHref } from '../../providers/chain-provider'
 
 const PRICE_USD: Record<string, number> = {
   USDC: 1,
@@ -103,8 +104,9 @@ function ExecutionTrack({ view }: { view: StatusView }): JSX.Element {
 
 export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   const view = statusView(intent.status)
+  const chainHref = useChainHref()
   return (
-    <Link href={`/intents/${intent.id}`} className="block">
+    <Link href={chainHref(`/intents/${intent.id}`)} className="block">
       <Card className="hover:border-foreground/40 flex gap-4 p-5 transition-colors">
         <span
           className={cn(

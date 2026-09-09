@@ -59,7 +59,10 @@ export function IntentChat(): JSX.Element {
     if (!parsed || executingKey) return
     setExecutingKey(key)
     createIntent.mutate(parsed.input, {
-      onSuccess: (created) => router.push(`/intents/${created.id}`),
+      // Chain-prefixed: a bare /intents/:id hits the compatibility redirect in
+      // next.config.js and lands on the default chain, so executing an intent on
+      // Stellar would silently drop the user onto Arc.
+      onSuccess: (created) => router.push(`/${slug}/intents/${created.id}`),
       onError: () => setExecutingKey(null),
     })
   }
