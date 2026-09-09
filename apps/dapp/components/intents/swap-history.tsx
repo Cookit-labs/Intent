@@ -8,6 +8,7 @@ import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
 import { TokenIcon } from '../ui/token-icon'
+import { SwapCircleIcon } from './intent-type-icon'
 
 /**
  * Swaps this account has made, read from the ledger.
@@ -84,6 +85,10 @@ export function SwapHistory(): JSX.Element | null {
 
       {swaps.map((s) => (
         <Card key={s.txHash} className="flex items-center gap-4 p-4">
+          {/* Leading mark, so an on-chain swap row is scannable the same way an
+              intent row is — the type is readable before the numbers are. */}
+          <SwapCircleIcon className="h-7 w-7 shrink-0 text-black" />
+
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm tabular-nums">
               <span className="flex items-center gap-1.5 font-medium">

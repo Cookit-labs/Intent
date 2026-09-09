@@ -49,6 +49,25 @@ function SwapGlyph(): JSX.Element {
   )
 }
 
+/**
+ * An executed swap: two arrows exchanging inside a ring.
+ *
+ * Filled rather than stroked, matching the supplied artwork, and on its own
+ * 48-unit grid — so it is a separate component rather than another glyph in
+ * `IntentTypeIcon`, which is stroke-based on a 24 grid. Inlined rather than
+ * loaded from `/images/venues/swap.svg` so it inherits `currentColor`; an
+ * `<img>` cannot be recoloured.
+ */
+export function SwapCircleIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg viewBox="0 0 48 48" fill="currentColor" className={cn('h-5 w-5', className)} aria-hidden>
+      <path d="M36.4,28.6l-4.9-5a2.1,2.1,0,0,0-2.7-.2,1.9,1.9,0,0,0-.2,3L30.2,28H15a2,2,0,0,0,0,4H30.2l-1.6,1.6a1.9,1.9,0,0,0,.2,3,2.1,2.1,0,0,0,2.7-.2l4.9-5A1.9,1.9,0,0,0,36.4,28.6Z" />
+      <path d="M33,16H17.8l1.6-1.6a1.9,1.9,0,0,0-.2-3,2.1,2.1,0,0,0-2.7.2l-4.9,5a1.9,1.9,0,0,0,0,2.8l4.9,5a2.1,2.1,0,0,0,2.7.2,1.9,1.9,0,0,0,.2-3L17.8,20H33a2,2,0,0,0,0-4Z" />
+      <path d="M42,24A18,18,0,1,1,24,6,18.1,18.1,0,0,1,42,24m4,0A22,22,0,1,0,24,46,21.9,21.9,0,0,0,46,24Z" />
+    </svg>
+  )
+}
+
 export function IntentTypeIcon({
   type,
   className,

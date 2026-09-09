@@ -6,7 +6,6 @@ import { ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import { ExternalLink } from 'lucide-react'
 import { stellarTestnet } from '@intent/config'
-import { Fragment } from 'react'
 
 import { intentTypeLabel } from '../../lib/intent-format'
 import { useChainHref } from '../../providers/chain-provider'
@@ -25,22 +24,14 @@ const PRICE_USD: Record<string, number> = {
 
 const COMPETING_AGENTS = 4
 
-const STAGES: IntentStatus[] = ['pending', 'competition', 'executing', 'settled']
-
 interface StatusView {
-  stage: number
   live: boolean
   failed: boolean
 }
 
 function statusView(status: IntentStatus): StatusView {
-  if (status === 'failed' || status === 'cancelled') return { stage: 0, live: false, failed: true }
-  const stage = STAGES.indexOf(status)
-  return {
-    stage: stage === -1 ? 0 : stage,
-    live: status === 'competition' || status === 'executing',
-    failed: false,
-  }
+  if (status === 'failed' || status === 'cancelled') return { live: false, failed: true }
+  return { live: status === 'competition' || status === 'executing', failed: false }
 }
 
 function timeAgo(iso: string): string {
@@ -76,35 +67,6 @@ function usd(intent: Intent): string {
   return `~$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 }
 
-function ExecutionTrack({ view }: { view: StatusView }): JSX.Element {
-  return (
-    <div className="flex items-center gap-1.5" aria-hidden>
-      {STAGES.map((stage, i) => {
-        const done = !view.failed && i <= view.stage
-        const active = view.live && i === view.stage
-        return (
-          <Fragment key={stage}>
-            {i > 0 ? (
-              <span className={cn('h-px w-5', done ? 'bg-foreground' : 'bg-border')} />
-            ) : null}
-            <span className="relative flex h-2 w-2 items-center justify-center">
-              {active ? (
-                <span className="border-foreground/50 absolute inline-flex h-3 w-3 animate-ping rounded-full border motion-reduce:hidden" />
-              ) : null}
-              <span
-                className={cn(
-                  'h-2 w-2 rounded-full',
-                  done ? 'bg-foreground' : 'border-border border bg-transparent'
-                )}
-              />
-            </span>
-          </Fragment>
-        )
-      })}
-    </div>
-  )
-}
-
 export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   const view = statusView(intent.status)
   const chainHref = useChainHref()
@@ -118,7 +80,7 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
 
             Pure black on every row, cancelled included. Dimming it made the
             same icon look like two different marks depending on status, and
-            the row's state is already carried by its label and track.
+            the row's state is already carried by its label.
 
             Literal black rather than a token because that is what was asked
             for. Safe while the app is `forcedTheme="light"`; if dark mode is
@@ -153,10 +115,6 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
             <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
               {usd(intent)}
             </span>
-          </div>
-
-          <div className="mt-3">
-            <ExecutionTrack view={view} />
           </div>
 
           {/* Cancelling from the list saves a round trip to the detail page,
