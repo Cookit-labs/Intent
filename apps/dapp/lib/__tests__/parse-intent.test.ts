@@ -63,7 +63,10 @@ describe('order type', () => {
   it.each([
     ['Sell 100 XLM at $0.25 or better', 'limit_sell'],
     ['Swap 30 XLM to USDC', 'market_buy'],
-    ['Accumulate 2 ETH below $3,200', 'accumulate'],
+    // Names a price, so it is a limit buy described as accumulation rather
+    // than an open-ended one. See the price-decides-type cases below.
+    ['Accumulate 2 ETH below $3,200', 'limit_buy'],
+    ['Accumulate 2 ETH over the next month', 'accumulate'],
     ['Hedge 15,000 USDC exposure', 'hedge'],
   ])('reads %j as %s', (text, expected) => {
     expect(parseIntent(text, PRICES).input.type).toBe(expected)
@@ -126,5 +129,41 @@ describe('budget intents keep their stated size', () => {
     const p = parseIntent('Swap $30 worth of XLM to USDC', live)
     expect(p.escrowUsd).toBe(30)
     expect(Number(p.input.amountIn)).toBeCloseTo(30 / 0.1838, 2)
+  })
+})
+
+/**
+ * A stated price makes an intent a limit order, whatever else the text says.
+ *
+ * "Accumulate $200 of XLM below $0.19" matched the word "accumulate" first and
+ * was classified as an open-ended TWAP, dropping the one instruction that
+ * mattered — the price the user would not trade through.
+ */
+describe('a named price decides the intent type', () => {
+  const live = { XLM: 0.1838, USDC: 1, USDT: 1 }
+
+  it('reads accumulate with a price cap as a limit buy', () => {
+    const p = parseIntent('Accumulate $200 worth of XLM below a $0.19 price', live)
+    expect(p.input.type).toBe('limit_buy')
+    expect(p.targetPriceUsd).toBeCloseTo(0.19, 5)
+  })
+
+  it('keeps an open-ended accumulate as accumulate', () => {
+    // No price named, so there is nothing to hold out for.
+    expect(parseIntent('Accumulate $200 worth of XLM over the next week', live).input.type).toBe(
+      'accumulate'
+    )
+  })
+
+  it('still reads DCA without a price as accumulate', () => {
+    expect(parseIntent('DCA into XLM weekly', live).input.type).toBe('accumulate')
+  })
+
+  it('reads a sell with a price as a limit sell', () => {
+    expect(parseIntent('Sell 100 XLM at $0.25 or better', live).input.type).toBe('limit_sell')
+  })
+
+  it('leaves a plain swap as a market buy', () => {
+    expect(parseIntent('Swap $30 worth of XLM to USDC', live).input.type).toBe('market_buy')
   })
 })

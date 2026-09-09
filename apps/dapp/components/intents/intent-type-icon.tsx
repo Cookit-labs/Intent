@@ -30,12 +30,16 @@ function AccumulateGlyph(): JSX.Element {
           curve — the shape is implied by its arc, not bounded by it. */}
       <path d="M11.9 12.7C10.6 11 9.5 10.2 8.5 10" />
       <path d="M12.1 14.3c1.1-1.6 2.1-2.4 3.1-2.6" />
-      {/* Sparkles */}
-      <path d="M4.4 6.6v1.6M3.6 7.4h1.6M19.1 4v1.6M18.3 4.8h1.6M20 9v1.4M19.3 9.7h1.4" />
-      {/* Open palm */}
-      <path d="M1.7 16.4h2v4.8h-2z" />
-      <path d="M3.7 17.1h6.2a1.3 1.3 0 0 1 0 2.6H7.9" />
-      <path d="M9.9 17.1a2 2 0 0 1 2.9 0h6.9a1.4 1.4 0 0 1 .4 2.75l-8.2 2.2H3.7" />
+      {/* Sparkles. Two, not three, and set wider — crowding small crosses
+          against the coin was most of what made the mark look heavy. */}
+      <path d="M4 6.7v1.5M3.25 7.45h1.5M19.6 4.3v1.5M18.85 5.05h1.5" />
+      {/* Open palm, as a single sweep plus a cuff. The earlier version drew
+          the thumb and two finger lines as separate near-parallel strokes,
+          which at 32px merged into one dark band — the weight was never the
+          stroke width, it was how much ink sat in that corner. */}
+      <path d="M1.9 16.9h1.9v4.4H1.9z" />
+      <path d="M3.8 17.6h6a1.25 1.25 0 0 1 0 2.5H7.6" />
+      <path d="M12.4 17.6h6.8a1.35 1.35 0 0 1 .4 2.65l-8 2.15H3.8" />
     </>
   )
 }

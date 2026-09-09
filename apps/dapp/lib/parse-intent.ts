@@ -41,9 +41,17 @@ function detectType(text: string): IntentType {
   if (t.includes('hedge')) return 'hedge'
   if (t.includes('rebalance')) return 'rebalance'
   if (t.includes('route') || t.includes('liquidity')) return 'route_liquidity'
-  if (t.includes('accumulate') || t.includes('dca')) return 'accumulate'
+
   const limit =
     t.includes('limit') || t.includes('below') || t.includes('above') || t.includes('at $')
+
+  // A named price decides the type, even when the text also says "accumulate".
+  // "Accumulate $200 of XLM below $0.19" is a limit buy that happens to be
+  // described as accumulation — matching the word first classified it as an
+  // open-ended TWAP and dropped the one instruction that mattered, the price
+  // the user would not trade through.
+  if (!limit && (t.includes('accumulate') || t.includes('dca'))) return 'accumulate'
+
   if (t.includes('sell')) return limit ? 'limit_sell' : 'market_sell'
   return limit ? 'limit_buy' : 'market_buy'
 }
