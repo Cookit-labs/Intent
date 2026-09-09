@@ -10,6 +10,7 @@ import { Fragment } from 'react'
 
 import { intentTypeLabel } from '../../lib/intent-format'
 import { useChainHref } from '../../providers/chain-provider'
+import { useCancelIntent } from '../../hooks/use-intent'
 
 const PRICE_USD: Record<string, number> = {
   USDC: 1,
@@ -105,6 +106,8 @@ function ExecutionTrack({ view }: { view: StatusView }): JSX.Element {
 export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   const view = statusView(intent.status)
   const chainHref = useChainHref()
+  const cancelIntent = useCancelIntent()
+  const open = intent.status === 'pending' && intent.limitPriceUsd !== undefined
   return (
     <Link href={chainHref(`/intents/${intent.id}`)} className="block">
       <Card className="hover:border-foreground/40 flex gap-4 p-5 transition-colors">
@@ -146,6 +149,30 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
           <div className="mt-3">
             <ExecutionTrack view={view} />
           </div>
+
+          {/* Cancelling from the list saves a round trip to the detail page,
+              which matters for the one action a waiting order exists to allow.
+              stopPropagation because the whole card is a link. */}
+          {open ? (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-muted-foreground text-xs">
+                Waiting for $
+                {intent.limitPriceUsd?.toLocaleString('en-US', { maximumFractionDigits: 6 })}
+              </span>
+              <button
+                type="button"
+                disabled={cancelIntent.isPending}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  cancelIntent.mutate(intent.id)
+                }}
+                className="border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-50"
+              >
+                {cancelIntent.isPending ? 'Cancelling…' : 'Cancel'}
+              </button>
+            </div>
+          ) : null}
 
           {/* A settled trade should be checkable without re-running it. The
               explorer is the only source that is not this app's own word. */}

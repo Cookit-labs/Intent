@@ -66,7 +66,18 @@ export function IntentChat(): JSX.Element {
     // Every intent is recorded, whichever way it goes. Skipping the record for
     // signable routes kept the user in the chat but left the trade out of
     // history entirely, so an executed limit buy simply never appeared.
-    const input = { ...parsed.input, chain: slug }
+    // The limit price travels with the intent. Parsed but never stored, it was
+    // discarded at creation — so a limit order became indistinguishable from a
+    // market order the moment it was placed, and filled immediately.
+    const isLimit =
+      parsed.input.type === 'limit_buy' ||
+      parsed.input.type === 'limit_sell' ||
+      parsed.input.type === 'accumulate'
+    const input = {
+      ...parsed.input,
+      chain: slug,
+      ...(isLimit && parsed.targetPriceUsd > 0 ? { limitPriceUsd: parsed.targetPriceUsd } : {}),
+    }
 
     // A signable route stays here. The competition, the winner and the
     // signature all belong to one conversation, and sending the user to a

@@ -35,6 +35,14 @@ export interface Intent {
   amountIn: string
   minAmountOut: string
   deadline: string
+  /**
+   * The price the user will not trade through, in USD per unit of `tokenOut`.
+   *
+   * Present only on limit intents. Without it a limit order cannot be told
+   * from a market order once created, which is how "buy below $0.19" came to
+   * fill at $0.1972 seconds after being placed.
+   */
+  limitPriceUsd?: number
   status: IntentStatus
   escrowTxHash?: string
   settlementTxHash?: string
@@ -44,6 +52,7 @@ export interface Intent {
 
 export interface CreateIntentInput {
   chain?: ChainSlug
+  limitPriceUsd?: number
   type: IntentType
   tokenIn: string
   tokenOut: string
