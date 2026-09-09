@@ -119,3 +119,22 @@ export function useCancelIntent() {
     },
   })
 }
+
+/**
+ * Attach a settled transaction hash to an intent.
+ *
+ * Called once a swap confirms, so the intent that asked for the trade and the
+ * transaction that performed it point at each other.
+ */
+export function useSettleIntent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, txHash }: { id: string; txHash: string }) =>
+      client.intents.settle(id, txHash),
+    onSuccess: (settled) => {
+      queryClient.invalidateQueries({ queryKey: intentKeys.all })
+      queryClient.setQueryData(intentKeys.detail(settled.id), settled)
+    },
+  })
+}

@@ -51,3 +51,45 @@ describe('intent listing is chain-scoped', () => {
     expect((await client.intents.list()).length).toBeGreaterThanOrEqual(2)
   })
 })
+
+/**
+ * An intent must remember the transaction that settled it.
+ *
+ * The swap flow produced a real hash, showed it once in the confirmation card
+ * and dropped it — nothing wrote it back — so a settled intent could offer no
+ * explorer link to a trade that had genuinely happened.
+ */
+describe('settlement is recorded on the intent', () => {
+  const client = getIntentClient()
+
+  const input = {
+    chain: 'stellar' as const,
+    type: 'limit_buy' as const,
+    tokenIn: 'USDC',
+    tokenOut: 'XLM',
+    amountIn: '200',
+    minAmountOut: '1000',
+    deadline: new Date(Date.now() + 3_600_000).toISOString(),
+  }
+
+  it('stores the hash and marks the intent settled', async () => {
+    const created = await client.intents.create(input)
+    expect(created.settlementTxHash).toBeUndefined()
+
+    const hash = 'a'.repeat(64)
+    const settled = await client.intents.settle(created.id, hash)
+
+    expect(settled.settlementTxHash).toBe(hash)
+    // Confirmed by a transaction, so no longer subject to the time-based
+    // projection that governs an unsettled intent.
+    expect(settled.status).toBe('settled')
+  })
+
+  it('keeps the hash on subsequent reads', async () => {
+    const created = await client.intents.create(input)
+    const hash = 'b'.repeat(64)
+    await client.intents.settle(created.id, hash)
+
+    expect((await client.intents.get(created.id)).settlementTxHash).toBe(hash)
+  })
+})

@@ -16,6 +16,14 @@ export interface IntentApi {
    */
   cancel(id: string): Promise<Intent>
   /**
+   * Record the transaction that settled an intent.
+   *
+   * Without this the swap's hash was produced, shown once, and dropped — the
+   * intent and the transaction that fulfilled it were never connected, so
+   * history could not offer a link to a trade that had genuinely happened.
+   */
+  settle(id: string, txHash: string): Promise<Intent>
+  /**
    * Intents for one chain.
    *
    * Chain-scoped because an intent is a promise about a specific network: a
@@ -193,6 +201,18 @@ const mockClient: DappClient = {
       }
 
       found.status = 'cancelled'
+      found.updatedAt = now()
+      persist(store)
+      return { ...found }
+    },
+    async settle(intentId, txHash) {
+      const found = store.find((i) => i.id === intentId)
+      if (!found) throw new Error(`Intent ${intentId} not found`)
+
+      found.settlementTxHash = txHash
+      // The chain has confirmed it, so the time-based projection no longer
+      // applies — this is settled because a transaction says so.
+      found.status = 'settled'
       found.updatedAt = now()
       persist(store)
       return { ...found }

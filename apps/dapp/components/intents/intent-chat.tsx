@@ -1,11 +1,11 @@
 'use client'
 
 import { Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
-import { useCancelIntent, useCreateIntent } from '../../hooks/use-intent'
+import { useCancelIntent, useCreateIntent, useSettleIntent } from '../../hooks/use-intent'
 import { useWallet } from '../../hooks/use-wallet'
 import { checkAffordability } from '../../lib/affordability'
 import { fetchStellarBalances } from '../../lib/stellar-account'
@@ -31,6 +31,7 @@ function TrafficLights(): JSX.Element {
 export function IntentChat(): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
+  const settleIntent = useSettleIntent()
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
@@ -60,6 +61,18 @@ export function IntentChat(): JSX.Element {
   // Only the live path produces an executable route; the offline race has
   // nothing to sign.
   const swap = useSwapExecution(useAgents ? live.route : undefined)
+
+  // The swap's hash belongs on the intent that asked for it. Without this the
+  // hash was shown once in the confirmation card and then dropped, leaving
+  // history unable to link to a trade that really happened.
+  const settledHash = swap.phase === 'settled' ? swap.hash : undefined
+  useEffect(() => {
+    if (placedId === null || settledHash === undefined) return
+    settleIntent.mutate({ id: placedId, txHash: settledHash })
+    // Deliberately keyed on the pair alone: re-running on every render of the
+    // mutation object would record the same hash repeatedly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placedId, settledHash])
 
   function handleSubmit(text: string): void {
     setMessage(text)

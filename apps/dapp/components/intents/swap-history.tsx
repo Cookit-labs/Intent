@@ -1,12 +1,14 @@
 'use client'
 
-import { Card } from '@intent/ui'
+import { Card, cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, ExternalLink } from 'lucide-react'
+import { ArrowRight, ChevronDown, ExternalLink } from 'lucide-react'
+import { useState } from 'react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
+import type { SwapRecord } from '../../lib/swap/history'
 import { TokenIcon } from '../ui/token-icon'
 import { SwapCircleIcon } from './intent-type-icon'
 
@@ -84,42 +86,115 @@ export function SwapHistory(): JSX.Element | null {
       </div>
 
       {swaps.map((s) => (
-        <Card key={s.txHash} className="flex items-center gap-4 p-4">
-          {/* Leading mark, so an on-chain swap row is scannable the same way an
-              intent row is — the type is readable before the numbers are. */}
-          <SwapCircleIcon className="h-7 w-7 shrink-0 text-black" />
+        <SwapRow key={s.txHash} swap={s} />
+      ))}
+    </div>
+  )
+}
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-sm tabular-nums">
-              <span className="flex items-center gap-1.5 font-medium">
-                <TokenIcon symbol={s.sentAsset} size={18} />
-                {amount(s.sentAmount)} {s.sentAsset}
+/**
+ * One settled swap, expandable in place.
+ *
+ * Matches the intent rows above it: the summary is enough to scan, and the
+ * detail — route, timing, the explorer link — opens under the row rather than
+ * on a page of its own.
+ */
+function SwapRow({ swap }: { swap: SwapRecord }): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <Card className="overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="hover:bg-muted/40 flex w-full items-center gap-4 p-4 text-left transition-colors"
+      >
+        {/* Leading mark, so an on-chain swap row is scannable the same way an
+            intent row is — the type is readable before the numbers are. */}
+        <SwapCircleIcon className="h-7 w-7 shrink-0 text-black" />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            {/* Named, like the intent rows. Without a title these read as a
+                different kind of thing entirely from the list beneath. */}
+            <span className="text-sm font-semibold">Swap</span>
+            <span className="text-muted-foreground text-xs">{when(swap.settledAt)}</span>
+          </div>
+
+          <div className="mt-1.5 flex items-center gap-2 text-sm tabular-nums">
+            <span className="flex items-center gap-1.5 font-medium">
+              <TokenIcon symbol={swap.sentAsset} size={18} />
+              {amount(swap.sentAmount)} {swap.sentAsset}
+            </span>
+            <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+            <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
+              <TokenIcon symbol={swap.receivedAsset} size={18} />
+              <span className="truncate">
+                {amount(swap.receivedAmount)} {swap.receivedAsset}
               </span>
-              <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <TokenIcon symbol={s.receivedAsset} size={18} />
-                {amount(s.receivedAmount)} {s.receivedAsset}
-              </span>
+            </span>
+          </div>
+        </div>
+
+        <ChevronDown
+          className={cn(
+            'text-muted-foreground h-4 w-4 shrink-0 transition-transform',
+            expanded && 'rotate-180'
+          )}
+          aria-hidden
+        />
+      </button>
+
+      {expanded ? (
+        <div className="border-border flex flex-col gap-4 border-t px-4 pb-4 pt-4">
+          <div className="grid grid-cols-2 gap-4 text-sm tabular-nums sm:grid-cols-4">
+            <div>
+              <p className="text-muted-foreground text-xs">Sent</p>
+              <p className="text-foreground">
+                {amount(swap.sentAmount)} {swap.sentAsset}
+              </p>
             </div>
-            <div className="text-muted-foreground mt-1 flex items-center gap-3 text-xs">
-              <span>{when(s.settledAt)}</span>
-              <span>{s.hops === 0 ? 'direct' : `${s.hops} hop${s.hops === 1 ? '' : 's'}`}</span>
+            <div>
+              <p className="text-muted-foreground text-xs">Received</p>
+              <p className="text-foreground">
+                {amount(swap.receivedAmount)} {swap.receivedAsset}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Route</p>
+              <p className="text-foreground">
+                {swap.hops === 0 ? 'direct' : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Settled</p>
+              <p className="text-foreground">
+                {new Date(swap.settledAt).toLocaleString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </p>
             </div>
           </div>
+
+          <p className="text-muted-foreground break-all font-mono text-xs">{swap.txHash}</p>
 
           {/* Every row is checkable: the ledger is the record, and this is the
               link to it. */}
           <a
-            href={s.explorerUrl}
+            href={swap.explorerUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1.5 text-xs underline underline-offset-2"
+            className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
           >
-            View
-            <ExternalLink className="h-3 w-3" />
+            View on Stellar Expert
+            <ExternalLink className="h-3.5 w-3.5" />
           </a>
-        </Card>
-      ))}
-    </div>
+        </div>
+      ) : null}
+    </Card>
   )
 }

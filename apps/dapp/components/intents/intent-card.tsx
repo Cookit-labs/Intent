@@ -209,11 +209,15 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
               View on Stellar Expert
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
-          ) : (
+          ) : intent.status === 'settled' ? (
+            // Settled with no hash means this intent predates transaction
+            // recording, or never had an on-chain leg. Saying which is
+            // honest; implying the trade did not happen is not.
             <p className="text-muted-foreground text-xs">
-              No settlement transaction recorded for this intent.
+              This intent was settled before transaction hashes were recorded, so there is no
+              explorer link for it.
             </p>
-          )}
+          ) : null}
         </div>
       ) : null}
     </Card>
