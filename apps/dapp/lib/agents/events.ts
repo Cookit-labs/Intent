@@ -38,6 +38,15 @@ export interface CompetitionWinnerFrame {
   competitionId: string
   winner: AgentStrategyKey
   scores: Record<string, number>
+  /**
+   * The route the winning agent chose, when it chose one.
+   *
+   * Carried on the winner frame rather than fetched again by the client: the
+   * quote the agents actually compared is the one that should be offered for
+   * signing, and re-quoting here would show the user a different number than
+   * the competition was decided on.
+   */
+  route?: unknown
 }
 
 export interface CompetitionErrorFrame {

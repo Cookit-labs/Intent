@@ -5,12 +5,13 @@ import type { AgentProposalResult, AgentStrategyKey } from '../../../../lib/agen
 import { ALL_STRATEGIES } from '../../../../lib/agents/brain'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
-import { buildMarketContext } from '../../../../lib/agents/market-context'
+import { buildMarketContext, quoteRoutes } from '../../../../lib/agents/market-context'
 import { buildMockProposal } from '../../../../lib/agents/brains/mock-brain'
 import { getAgentBrain } from '../../../../lib/agents/registry'
 import { isBuyIntent, pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { parseIntent } from '../../../../lib/parse-intent'
+import { toBaseUnits } from '../../../../lib/swap/assets'
 
 /**
  * Runs one competition and streams each agent's proposal as it lands.
@@ -58,6 +59,24 @@ export async function POST(request: Request): Promise<Response> {
   const intent = parseIntent(text)
   const market = buildMarketContext(chain)
   const brain = getAgentBrain()
+
+  // Priced before the agents run, so they choose between real routes rather
+  // than describing hypothetical ones. Failing to quote is not fatal: the
+  // competition proceeds without executable routes and says so.
+  try {
+    const routes = await quoteRoutes(
+      chain,
+      intent.input.tokenIn,
+      intent.input.tokenOut,
+      // The parsed input quantity, which for a swap is what actually leaves
+      // the account. Deriving it from the USD figure instead would re-introduce
+      // the rounding the parser just resolved.
+      toBaseUnits(intent.input.amountIn)
+    )
+    if (routes.length > 0) market.routes = routes
+  } catch {
+    // Leaving routes unset is the honest outcome; agents reason without them.
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -135,11 +154,17 @@ export async function POST(request: Request): Promise<Response> {
       const winner = pickWinner(scored)
 
       if (winner !== null) {
+        // The winning agent's chosen route, resolved back to the full quote so
+        // the client can build a transaction from it without re-pricing.
+        const winningProposal = proposals.find((p) => p.strategy === winner)
+        const chosen = (market.routes ?? []).find((r) => r.id === winningProposal?.routeId)
+
         send({
           type: 'competition:winner',
           competitionId,
           winner,
           scores: Object.fromEntries(scored.map((s) => [s.strategy, s.score])),
+          ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })
       }
 

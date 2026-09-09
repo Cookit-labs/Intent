@@ -1,6 +1,9 @@
 import { CHAIN_DESCRIPTORS, isChainSlug } from '@intent/config'
 
-import type { MarketContext } from './brain'
+import type { MarketContext, QuotedRoute } from './brain'
+import { fromBaseUnits, resolveAsset } from '../swap/assets'
+import { collectQuotes } from '../swap/quote'
+import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { venues } from '../venues'
 
@@ -14,6 +17,49 @@ import { venues } from '../venues'
  *
  * When a real price feed exists, only this file changes.
  */
+/**
+ * Prices the intent against live liquidity, so agents choose between real
+ * routes instead of describing hypothetical ones.
+ *
+ * Returns an empty list rather than throwing when the pair is unswappable or
+ * the chain cannot execute. A competition with no routes is still a
+ * competition — the agents reason about the intent and simply cannot offer
+ * execution, which is honest rather than broken.
+ */
+export async function quoteRoutes(
+  chain: string,
+  fromSymbol: string,
+  toSymbol: string,
+  amount: string,
+  signal?: AbortSignal
+): Promise<QuotedRoute[]> {
+  if (chain !== 'stellar') return []
+
+  const from = resolveAsset(fromSymbol)
+  const to = resolveAsset(toSymbol)
+  if (from === undefined || to === undefined) return []
+  if (from.code === to.code && from.issuer === to.issuer) return []
+
+  const { quotes } = await collectQuotes(
+    [createHorizonQuoter()],
+    { kind: 'strict_send', from, to, sendAmount: amount },
+    signal
+  )
+
+  return quotes.map((quote, index) => ({
+    // Indexed by source so an agent naming a route cannot accidentally match
+    // one from a different competition.
+    id: `${quote.source}-${index + 1}`,
+    source: quote.source,
+    // Human-scale, because asking a model to divide by 10^7 invites arithmetic
+    // errors in exactly the number the user reads.
+    sendAmount: `${fromBaseUnits(quote.sendAmount)} ${quote.from.code}`,
+    receiveAmount: `${fromBaseUnits(quote.destAmount)} ${quote.to.code}`,
+    hops: quote.path.length,
+    quote,
+  }))
+}
+
 export function buildMarketContext(chain: string): MarketContext {
   const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : 'evm'
 

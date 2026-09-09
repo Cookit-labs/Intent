@@ -33,6 +33,9 @@ const request: ProposalRequest = {
 
 function goodArguments(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
+    // Required by the schema: strict mode has no optional fields, so an empty
+    // string is the "no route was offered" case.
+    routeId: '',
     reasoning: 'Slicing into six tranches over thirty minutes to limit impact.',
     projectedAvgPriceUsd: 3500,
     projectedSlippagePct: 0.18,
@@ -226,5 +229,35 @@ describe('validateProposal', () => {
     )
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.reasoning.length).toBeLessThanOrEqual(240)
+  })
+})
+
+describe('route selection', () => {
+  const ctx = {
+    referencePriceUsd: 3500,
+    allowedVenueIds: ['uniswap'],
+    allowedRouteIds: ['horizon-1', 'horizon-2'],
+  }
+
+  it('accepts a route that was offered', () => {
+    const r = validateProposal(JSON.parse(goodArguments({ routeId: 'horizon-1' })), ctx)
+    expect(r.ok).toBe(true)
+  })
+
+  it('REJECTS a route that was never offered', () => {
+    // A venue label can be dropped and the proposal still stands. A route id
+    // selects the transaction that gets signed, so a wrong one must fail the
+    // whole proposal rather than be substituted.
+    const r = validateProposal(JSON.parse(goodArguments({ routeId: 'made-up' })), ctx)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toMatch(/was not offered/)
+  })
+
+  it('allows an empty route id when nothing was offered', () => {
+    const r = validateProposal(JSON.parse(goodArguments({ routeId: '' })), {
+      referencePriceUsd: 3500,
+      allowedVenueIds: ['uniswap'],
+    })
+    expect(r.ok).toBe(true)
   })
 })

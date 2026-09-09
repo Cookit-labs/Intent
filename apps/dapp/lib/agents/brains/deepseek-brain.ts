@@ -115,6 +115,7 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         `Prices: ${priceList}`,
         `Venues available on ${req.chain}: ${venueList}`,
         `Volatility: ${req.market.volatilityHint}. Gas: ${req.market.gasHint}.`,
+        ...routeLines(req),
       ].join('\n'),
     },
     {
@@ -123,7 +124,10 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         `Intent: ${req.intent.outcome}`,
         `Parsed as: ${req.intent.input.type}, ${req.intent.input.tokenIn} -> ${req.intent.input.tokenOut}`,
         `Size: about $${Math.round(req.intent.escrowUsd)}`,
-        `Reference price: $${req.intent.referencePriceUsd}`,
+        // The routes above are live; this table is indicative and can be badly
+        // stale. Saying so stops an agent splitting the difference between the
+        // two and quoting a price neither source supports.
+        `Indicative reference only (prefer the quoted routes): $${req.intent.referencePriceUsd}`,
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
         '',
         'Submit your proposal.',
@@ -132,6 +136,59 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         .join('\n'),
     },
   ]
+}
+
+/**
+ * Presents the priced routes the agent must choose between.
+ *
+ * These are real quotes against real liquidity, so the instruction is explicit
+ * that they are not to be improved upon: the failure mode worth designing
+ * against is a model quoting a better number than the market offered.
+ */
+function routeLines(req: ProposalRequest): string[] {
+  const routes = req.market.routes ?? []
+  if (routes.length === 0) {
+    return [
+      '',
+      'No executable routes were found for this pair. Reason about the intent, and return an empty routeId.',
+    ]
+  }
+
+  return [
+    '',
+    'Executable routes, already priced against live liquidity:',
+    ...routes.map(
+      (r) =>
+        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} via ${r.source}, ${r.hops} hop(s)`
+    ),
+    'Choose one by putting its id in routeId. These prices are measured, not estimates —',
+    'do not quote a better number than the route you picked actually offers.',
+  ]
+}
+
+/**
+ * The USD rate the best offered route actually implies, per unit sold.
+ *
+ * Derived from the quote rather than the price table because the table is a
+ * rough scale for reasoning, while the route is what the market will pay right
+ * now. Undefined when nothing was quoted, in which case the table is all there
+ * is.
+ */
+function impliedRateUsd(req: ProposalRequest): number | undefined {
+  const routes = req.market.routes ?? []
+  if (routes.length === 0) return undefined
+
+  const outPrice = req.market.prices[req.intent.input.tokenOut]
+  if (outPrice === undefined) return undefined
+
+  const first = routes[0]
+  if (first === undefined) return undefined
+
+  const sent = Number.parseFloat(first.sendAmount)
+  const received = Number.parseFloat(first.receiveAmount)
+  if (!Number.isFinite(sent) || !Number.isFinite(received) || sent <= 0) return undefined
+
+  return (received * outPrice) / sent
 }
 
 function classifyStatus(status: number): BrainErrorCode {
@@ -256,8 +313,15 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
       }
 
       const validated = validateProposal(raw, {
-        referencePriceUsd: req.intent.referencePriceUsd,
+        // When a route was quoted, its implied rate is the reference: it came
+        // from live liquidity, while the price table is indicative and can be
+        // stale by a wide margin. Rejecting an agent for agreeing with the
+        // market would be exactly backwards.
+        referencePriceUsd: impliedRateUsd(req) ?? req.intent.referencePriceUsd,
         allowedVenueIds: req.market.venues.map((v) => v.id),
+        ...(req.market.routes !== undefined
+          ? { allowedRouteIds: req.market.routes.map((r) => r.id) }
+          : {}),
       })
 
       if (!validated.ok) {
@@ -274,6 +338,9 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         ok: true,
         proposal: {
           strategy: req.strategy,
+          // Empty means the agent had nothing to choose from; omitted rather
+          // than stored as '' so downstream code checks presence, not value.
+          ...(validated.value.routeId !== '' ? { routeId: validated.value.routeId } : {}),
           reasoning: validated.value.reasoning,
           projectedAvgPriceUsd: validated.value.projectedAvgPriceUsd,
           projectedSlippagePct: validated.value.projectedSlippagePct,

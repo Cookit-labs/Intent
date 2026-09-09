@@ -39,6 +39,34 @@ export interface MarketContext {
   venues: { id: string; name: string; category: string }[]
   volatilityHint: 'low' | 'normal' | 'elevated'
   gasHint: 'cheap' | 'normal' | 'expensive'
+  /**
+   * Executable routes, already priced against real liquidity.
+   *
+   * The agents choose between these; they never invent one. A model is good at
+   * judging which route suits an intent and bad at recalling what anything
+   * costs, so the quoting happens first and deterministically, and the result
+   * is handed over as fact — the same discipline already applied to `prices`.
+   *
+   * Empty when the pair has no route or the chain cannot execute, in which case
+   * agents reason about the intent without proposing execution.
+   */
+  routes?: QuotedRoute[]
+}
+
+/**
+ * A route as an agent sees it: enough to choose between options, plus the
+ * opaque handle needed to execute the one that wins.
+ */
+export interface QuotedRoute {
+  /** Stable id the agent names when picking. Not a venue label — a specific quote. */
+  id: string
+  source: string
+  /** Human-scale figures, so the model is not asked to divide by 10^7. */
+  sendAmount: string
+  receiveAmount: string
+  hops: number
+  /** The quote itself, passed through untouched for execution. */
+  quote: unknown
 }
 
 export interface ProposalRequest {
@@ -58,6 +86,14 @@ export interface ProposalRequest {
  */
 export interface AgentProposalResult {
   strategy: AgentStrategyKey
+  /**
+   * The route this agent would execute, when one was offered and chosen.
+   *
+   * Optional: the mock brain and any chain without execution leave it unset,
+   * and a proposal without a route is still a valid opinion — it just cannot
+   * be signed.
+   */
+  routeId?: string
   /** One or two sentences, shown in the competition panel. */
   reasoning: string
   projectedAvgPriceUsd: number

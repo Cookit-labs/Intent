@@ -24,6 +24,11 @@ export const SUBMIT_PROPOSAL_TOOL = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        routeId: {
+          type: 'string',
+          description:
+            'The id of the route you are choosing from the offered list. Use the empty string only when no routes were offered.',
+        },
         reasoning: {
           type: 'string',
           description:
@@ -56,6 +61,9 @@ export const SUBMIT_PROPOSAL_TOOL = {
         },
       },
       required: [
+        // Strict mode requires every property, so routeId is listed here and
+        // an empty string is the "no route offered" case rather than omission.
+        'routeId',
         'reasoning',
         'projectedAvgPriceUsd',
         'projectedSlippagePct',
@@ -78,6 +86,7 @@ export const MAX_SLIPPAGE_PCT = 5
 export const MAX_PRICE_DEVIATION = 0.2
 
 export const proposalToolSchema = z.object({
+  routeId: z.string(),
   reasoning: z.string().trim().min(1),
   projectedAvgPriceUsd: z.number().finite().positive(),
   projectedSlippagePct: z.number().finite().min(0).max(MAX_SLIPPAGE_PCT),
@@ -100,6 +109,12 @@ export type ProposalToolInput = z.infer<typeof proposalToolSchema>
 export interface ValidationContext {
   referencePriceUsd: number
   allowedVenueIds: string[]
+  /**
+   * Ids the agent may choose from. A route naming anything outside this set is
+   * rejected outright rather than substituted: unlike a venue label, a route id
+   * is about to be executed, and guessing at one would sign the wrong trade.
+   */
+  allowedRouteIds?: string[]
 }
 
 /**
@@ -124,6 +139,15 @@ export function validateProposal(
     Math.abs(value.projectedAvgPriceUsd - ctx.referencePriceUsd) / ctx.referencePriceUsd
   if (ctx.referencePriceUsd > 0 && deviation > MAX_PRICE_DEVIATION) {
     return { ok: false, reason: 'projected price is implausible against the reference' }
+  }
+
+  // Venues are display labels: dropping a bad one keeps an otherwise sound
+  // proposal in the race. A route id is not a label — it selects the
+  // transaction that gets signed, so a wrong one fails the proposal.
+  if (ctx.allowedRouteIds !== undefined && value.routeId !== '') {
+    if (!ctx.allowedRouteIds.includes(value.routeId)) {
+      return { ok: false, reason: `route ${value.routeId} was not offered` }
+    }
   }
 
   const allowed = new Set(ctx.allowedVenueIds)

@@ -9,6 +9,8 @@ export interface ParsedIntent {
 }
 
 const TOKEN_ALIASES: Record<string, string> = {
+  xlm: 'XLM',
+  lumens: 'XLM',
   eth: 'WETH',
   weth: 'WETH',
   btc: 'WBTC',
@@ -24,6 +26,9 @@ const TOKEN_ALIASES: Record<string, string> = {
  * and the projected fills would stop matching the parsed intent.
  */
 export const REFERENCE_PRICES_USD: Record<string, number> = {
+  // Indicative only. Anything executable is priced against live liquidity in
+  // `quoteRoutes`; this table exists so the model has a scale to reason at.
+  XLM: 0.58,
   USDC: 1,
   USDT: 1,
   WETH: 3500,
@@ -41,6 +46,41 @@ function detectType(text: string): IntentType {
     t.includes('limit') || t.includes('below') || t.includes('above') || t.includes('at $')
   if (t.includes('sell')) return limit ? 'limit_sell' : 'market_sell'
   return limit ? 'limit_buy' : 'market_buy'
+}
+
+/**
+ * Reads an explicit "swap A to B" pair out of the text.
+ *
+ * Returns undefined when the intent is not phrased as a directional swap, so
+ * the older buy-shaped heuristics still handle "accumulate" and "hedge".
+ */
+function detectSwapPair(text: string): { from: string; to: string } | undefined {
+  const t = text.toLowerCase()
+  if (!/\bswap\b|\bconvert\b|\btrade\b|\bsell\b/.test(t)) return undefined
+
+  // Scan for known symbols in the order they appear, rather than pattern
+  // matching around a connector word: "worth of" and "for" both look like
+  // connectors and picking the wrong one reverses the trade.
+  const found: { symbol: string; at: number }[] = []
+  for (const [alias, symbol] of Object.entries(TOKEN_ALIASES)) {
+    const m = new RegExp(`\\b${alias}\\b`).exec(t)
+    if (m !== null) found.push({ symbol, at: m.index })
+  }
+
+  // Deduplicate by symbol, keeping the earliest mention of each.
+  const bySymbol = new Map<string, number>()
+  for (const f of found) {
+    const existing = bySymbol.get(f.symbol)
+    if (existing === undefined || f.at < existing) bySymbol.set(f.symbol, f.at)
+  }
+
+  const ordered = [...bySymbol.entries()].sort((a, b) => a[1] - b[1]).map(([sym]) => sym)
+  if (ordered.length < 2) return undefined
+
+  // First mentioned is what leaves the account, second is what arrives.
+  const [from, to] = ordered
+  if (from === undefined || to === undefined || from === to) return undefined
+  return { from, to }
 }
 
 function detectToken(text: string, fallback: string): string {
@@ -84,15 +124,37 @@ function targetPrice(text: string): number | null {
 export function parseIntent(raw: string): ParsedIntent {
   const outcome = raw.trim()
   const type = detectType(outcome)
-  const tokenOut = detectToken(outcome, 'WETH')
-  const tokenIn = tokenOut === 'USDC' ? 'USDT' : 'USDC'
+
+  // A swap states both sides and a direction, which the buy-shaped path below
+  // cannot express: it assumes the user always spends a stablecoin on
+  // something volatile. "Swap $30 of XLM to USDC" is the opposite of that, and
+  // reading it that way produced the wrong pair, the wrong direction, and an
+  // amount out by three orders of magnitude.
+  const swap = detectSwapPair(outcome)
+  const tokenOut = swap?.to ?? detectToken(outcome, 'WETH')
+  const tokenIn = swap?.from ?? (tokenOut === 'USDC' ? 'USDT' : 'USDC')
   const referencePriceUsd = REFERENCE_PRICES_USD[tokenOut] ?? 3500
 
   const num = firstNumber(outcome) ?? 1
-  // If the number reads like a token quantity (small), value it; otherwise treat as USD.
+  // "$30 of X" is a USD figure; "30 X" is a quantity of X. The dollar sign is
+  // the only reliable signal, so it decides rather than the magnitude.
+  const pricedInUsd = /\$\s*[\d,]/.test(outcome) || /\bworth\b/.test(outcome.toLowerCase())
+  const sendPrice = REFERENCE_PRICES_USD[tokenIn] ?? 1
   const escrowUsd =
-    num > 0 && num < 1000 ? Math.round(num * referencePriceUsd) : Math.round(num || 5000)
-  const amountIn = String(escrowUsd)
+    swap !== undefined
+      ? pricedInUsd
+        ? Math.round(num)
+        : Math.round(num * sendPrice)
+      : num > 0 && num < 1000
+        ? Math.round(num * referencePriceUsd)
+        : Math.round(num || 5000)
+
+  // For a swap this is the quantity of the *input* token, which is what an
+  // execution actually sends.
+  const amountIn =
+    swap !== undefined && sendPrice > 0
+      ? (pricedInUsd ? num / sendPrice : num).toFixed(7).replace(/0+$/, '').replace(/\.$/, '')
+      : String(escrowUsd)
   const minAmountOut = (escrowUsd / referencePriceUsd).toFixed(4)
 
   return {
