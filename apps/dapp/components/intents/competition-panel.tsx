@@ -191,7 +191,7 @@ export function CompetitionPanel({
 
       {decided && Object.values(proposals).some((p) => p.degraded) ? (
         <p className="text-muted-foreground mt-1 text-center text-[11px]">
-          Simulated proposals — live agents unavailable.
+          Simulated proposals — live agents unavailable, so these cannot be executed.
         </p>
       ) : null}
 

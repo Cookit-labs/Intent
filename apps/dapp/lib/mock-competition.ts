@@ -112,6 +112,11 @@ export function buildProposals(parsed: ParsedIntent): Record<string, AgentPropos
       avgPriceUsd: base * a.priceRatio,
       slippagePct: a.slippagePct,
       score: Number((100 - a.slippagePct * 20).toFixed(1)),
+      // The offline race is simulated by definition, and saying so is the
+      // only signal that the live agents are not running. Without it a stale
+      // client build silently showed canned proposals — which carry no route,
+      // so nothing could be signed and the cause was invisible.
+      degraded: true,
     },
   ])
   return Object.fromEntries(entries)
