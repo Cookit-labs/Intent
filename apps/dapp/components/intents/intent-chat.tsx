@@ -58,6 +58,16 @@ export function IntentChat(): JSX.Element {
   function handleExecute(key: string): void {
     if (!parsed || executingKey) return
     setExecutingKey(key)
+
+    // A signable route stays here. The competition, the winner and the
+    // signature all belong to one conversation, and sending the user to a
+    // detail page mid-flow breaks it in two — the agents' reasoning scrolls
+    // away exactly when it is being acted on. SwapConfirm is already mounted
+    // below and picks the route up from the winning agent.
+    if (swap.phase !== 'idle') return
+
+    // Nothing to sign: the intent is recorded and the user is shown its
+    // progress page, which is the only place that story continues.
     createIntent.mutate(parsed.input, {
       // Chain-prefixed: a bare /intents/:id hits the compatibility redirect in
       // next.config.js and lands on the default chain, so executing an intent on

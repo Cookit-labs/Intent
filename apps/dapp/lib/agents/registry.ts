@@ -26,9 +26,14 @@ function loadDeepSeek(): AgentBrain | undefined {
     // eslint-disable-next-line
     const mod = require('./brains/deepseek-brain') as { deepseekBrain: AgentBrain }
     deepseekBrain = mod.deepseekBrain
-  } catch {
+  } catch (e) {
     // The module may not exist yet, or its dependency may be missing. Either
-    // way the mock covers it.
+    // way the mock covers it — but silently, which once hid a misconfigured
+    // provider behind four agents reciting canned mock text. Say why.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[agents] deepseek brain unavailable, falling back to mock: ${e instanceof Error ? e.message : String(e)}`
+    )
     deepseekLoadFailed = true
   }
   return deepseekBrain
@@ -40,6 +45,12 @@ export function getAgentBrain(): AgentBrain {
   if (configured === 'deepseek') {
     const brain = loadDeepSeek()
     if (brain !== undefined && brain.isConfigured()) return brain
+    // Loaded but unconfigured means the key is missing: a different fault from
+    // the module failing to load, and equally invisible before.
+    if (brain !== undefined) {
+      // eslint-disable-next-line no-console
+      console.warn('[agents] deepseek brain loaded but not configured (missing API key?)')
+    }
   }
 
   return mockBrain

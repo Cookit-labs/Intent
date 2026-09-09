@@ -336,7 +336,13 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         // from live liquidity, while the price table is indicative and can be
         // stale by a wide margin. Rejecting an agent for agreeing with the
         // market would be exactly backwards.
+        // Both bases are offered because both are shown to the agent: the
+        // route rate it is told to quote, and the market price it is told to
+        // sanity-check against.
         referencePriceUsd: impliedRateUsd(req) ?? req.intent.referencePriceUsd,
+        ...(impliedRateUsd(req) !== undefined
+          ? { altReferencePriceUsd: req.intent.referencePriceUsd }
+          : {}),
         allowedVenueIds: req.market.venues.map((v) => v.id),
         ...(req.market.routes !== undefined
           ? {

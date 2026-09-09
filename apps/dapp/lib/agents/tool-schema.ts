@@ -39,8 +39,15 @@ export const SUBMIT_PROPOSAL_TOOL = {
           description: 'Your projected average fill price in USD.',
         },
         projectedSlippagePct: {
+          // The bound is stated because it is enforced. Leaving it out of the
+          // schema rejected proposals for exceeding a limit the model was
+          // never told about, which reads as the model failing rather than the
+          // contract being incomplete.
           type: 'number',
-          description: 'Projected slippage as a percentage, e.g. 0.18 for 0.18%.',
+          minimum: 0,
+          maximum: 5,
+          description:
+            'Projected slippage as a percentage, e.g. 0.18 for 0.18%. Must be between 0 and 5.',
         },
         venues: {
           type: 'array',
@@ -108,6 +115,17 @@ export type ProposalToolInput = z.infer<typeof proposalToolSchema>
 
 export interface ValidationContext {
   referencePriceUsd: number
+  /**
+   * A second legitimate price basis, when one exists.
+   *
+   * On testnet the route rate and the real market rate genuinely disagree —
+   * synthetic liquidity puts XLM near $1.71 against a real ~$0.19 — and both
+   * are defensible answers to "what will this fill at". Validating against a
+   * single basis rejected every honest proposal and silently replaced all four
+   * agents with canned mock text, which is how one agent appeared to win every
+   * competition.
+   */
+  altReferencePriceUsd?: number
   allowedVenueIds: string[]
   /**
    * Ids the agent may choose from. A route naming anything outside this set is
@@ -135,10 +153,20 @@ export function validateProposal(
   }
 
   const value = parsed.data
-  const deviation =
-    Math.abs(value.projectedAvgPriceUsd - ctx.referencePriceUsd) / ctx.referencePriceUsd
-  if (ctx.referencePriceUsd > 0 && deviation > MAX_PRICE_DEVIATION) {
-    return { ok: false, reason: 'projected price is implausible against the reference' }
+
+  // Near *either* basis is plausible. The guard exists to catch a fabricated
+  // number, not to force a choice between two prices the app itself reports.
+  const bases = [ctx.referencePriceUsd, ctx.altReferencePriceUsd].filter(
+    (b): b is number => b !== undefined && b > 0
+  )
+  const implausible =
+    bases.length > 0 &&
+    bases.every((b) => Math.abs(value.projectedAvgPriceUsd - b) / b > MAX_PRICE_DEVIATION)
+  if (implausible) {
+    return {
+      ok: false,
+      reason: `projected price ${value.projectedAvgPriceUsd} is implausible against ${bases.map((b) => b.toFixed(4)).join(' or ')}`,
+    }
   }
 
   // Venues are display labels: dropping a bad one keeps an otherwise sound
