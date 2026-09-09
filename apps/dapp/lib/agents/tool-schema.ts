@@ -156,16 +156,24 @@ export function validateProposal(
 
   // Near *either* basis is plausible. The guard exists to catch a fabricated
   // number, not to force a choice between two prices the app itself reports.
-  const bases = [ctx.referencePriceUsd, ctx.altReferencePriceUsd].filter(
+  const stated = [ctx.referencePriceUsd, ctx.altReferencePriceUsd].filter(
     (b): b is number => b !== undefined && b > 0
   )
+
+  // A rate is only meaningful with a direction, and "average fill price" does
+  // not carry one. Buying XLM with USDC, the model quotes ~1.72 USDC per XLM
+  // while both references describe the same trade as ~0.18 XLM per USDC — the
+  // guard was comparing a rate against its own reciprocal and rejecting every
+  // agent, which dropped the whole competition to canned mock proposals that
+  // carry no route and therefore cannot be signed.
+  const bases = [...stated, ...stated.map((b) => 1 / b)]
   const implausible =
     bases.length > 0 &&
     bases.every((b) => Math.abs(value.projectedAvgPriceUsd - b) / b > MAX_PRICE_DEVIATION)
   if (implausible) {
     return {
       ok: false,
-      reason: `projected price ${value.projectedAvgPriceUsd} is implausible against ${bases.map((b) => b.toFixed(4)).join(' or ')}`,
+      reason: `projected price ${value.projectedAvgPriceUsd} is implausible against ${stated.map((b) => b.toFixed(4)).join(' or ')} (or their inverses)`,
     }
   }
 

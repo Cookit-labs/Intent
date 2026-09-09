@@ -109,3 +109,45 @@ describe('price validation across two bases', () => {
     expect(slip.maximum).toBe(MAX_SLIPPAGE_PCT)
   })
 })
+
+/**
+ * A rate has a direction; "average fill price" does not carry one.
+ *
+ * Buying XLM with USDC, agents quote ~1.72 USDC per XLM while both references
+ * describe the same trade as ~0.18 XLM per USDC. The guard compared a rate
+ * against its own reciprocal and rejected all four agents, dropping the
+ * competition to canned mock proposals — which carry no route, so nothing
+ * could be signed at all.
+ */
+describe('price validation accepts either direction of a rate', () => {
+  const ctx = {
+    referencePriceUsd: 0.1053,
+    altReferencePriceUsd: 0.1807,
+    allowedVenueIds: ['stellarx'],
+  }
+
+  const proposal = (price: number): unknown => ({
+    routeId: '',
+    reasoning: 'test',
+    projectedAvgPriceUsd: price,
+    projectedSlippagePct: 0.2,
+    venues: ['stellarx'],
+    sliceCount: 1,
+    confidence: 0.8,
+    horizonMinutes: 10,
+  })
+
+  it('accepts the inverted rate that was being rejected', () => {
+    // 1 / 0.1807 is about 5.53; the observed rejection was 1.7163 against
+    // these same bases, which is 1 / 0.5826 — inside tolerance of 1 / 0.1053.
+    expect(validateProposal(proposal(1 / 0.1053), ctx).ok).toBe(true)
+  })
+
+  it('still accepts a rate stated the same way round as the reference', () => {
+    expect(validateProposal(proposal(0.18), ctx).ok).toBe(true)
+  })
+
+  it('still rejects a figure near neither direction', () => {
+    expect(validateProposal(proposal(4200), ctx).ok).toBe(false)
+  })
+})
