@@ -1,12 +1,16 @@
 'use client'
 
 import { Sparkles } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
-import { useCreateIntent } from '../../hooks/use-intent'
+import { useCancelIntent, useCreateIntent } from '../../hooks/use-intent'
+import { useWallet } from '../../hooks/use-wallet'
+import { checkAffordability } from '../../lib/affordability'
+import { fetchStellarBalances } from '../../lib/stellar-account'
+import { useQuery } from '@tanstack/react-query'
+import { OpenIntentCard } from './open-intent-card'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
@@ -25,12 +29,26 @@ function TrafficLights(): JSX.Element {
 }
 
 export function IntentChat(): JSX.Element {
-  const router = useRouter()
   const createIntent = useCreateIntent()
+  const cancelIntent = useCancelIntent()
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
+  // The intent placed in this conversation, so an order that is waiting for a
+  // price can be watched — and withdrawn — without leaving the chat.
+  const [placedId, setPlacedId] = useState<string | null>(null)
+  const [affordError, setAffordError] = useState<string | null>(null)
   const { slug } = useChain()
+  const { address, isConnected } = useWallet()
+
+  // Balances, so an order can be checked against what the account actually
+  // holds before it is placed rather than after it fails.
+  const { data: balances } = useQuery({
+    queryKey: ['stellar-balances', address],
+    queryFn: () => fetchStellarBalances(address as string),
+    enabled: slug === 'stellar' && isConnected && address !== undefined,
+    staleTime: 15_000,
+  })
 
   // Agents run through the route only when explicitly enabled. The offline race
   // stays the default so a checkout with no configuration behaves as before.
@@ -51,16 +69,32 @@ export function IntentChat(): JSX.Element {
     // in the competition.
     setParsed(parseIntent(text, swap.usdPrices))
     setExecutingKey(null)
+    setPlacedId(null)
+    setAffordError(null)
   }
 
   function handleReset(): void {
     setMessage(null)
     setParsed(null)
     setExecutingKey(null)
+    setPlacedId(null)
+    setAffordError(null)
   }
 
   function handleExecute(key: string): void {
     if (!parsed || executingKey) return
+
+    // Refuse an order the account cannot fund. Without this a wallet holding
+    // $12 could open a $4,000 limit order, which the app then displayed as a
+    // live position for hours — an order that could only ever fail.
+    if (slug === 'stellar') {
+      const afford = checkAffordability(parsed.input.amountIn, parsed.input.tokenIn, balances)
+      if (!afford.ok) {
+        setAffordError(afford.message)
+        return
+      }
+    }
+    setAffordError(null)
     setExecutingKey(key)
 
     // Every intent is recorded, whichever way it goes. Skipping the record for
@@ -79,23 +113,12 @@ export function IntentChat(): JSX.Element {
       ...(isLimit && parsed.targetPriceUsd > 0 ? { limitPriceUsd: parsed.targetPriceUsd } : {}),
     }
 
-    // A signable route stays here. The competition, the winner and the
-    // signature all belong to one conversation, and sending the user to a
-    // detail page mid-flow breaks it in two — the agents' reasoning scrolls
-    // away exactly when it is being acted on. SwapConfirm is already mounted
-    // below and picks the route up from the winning agent.
-    if (swap.phase !== 'idle') {
-      createIntent.mutate(input, { onError: () => setExecutingKey(null) })
-      return
-    }
-
-    // Nothing to sign: the intent is recorded and the user is shown its
-    // progress page, which is the only place that story continues.
+    // Everything stays in the conversation. The competition, the winner, the
+    // signature and a resting order all belong to one thread — sending the
+    // user to a detail page broke it in two, scrolling the agents' reasoning
+    // away exactly when it was being acted on.
     createIntent.mutate(input, {
-      // Chain-prefixed: a bare /intents/:id hits the compatibility redirect in
-      // next.config.js and lands on the default chain, so executing an intent on
-      // Stellar would silently drop the user onto Arc.
-      onSuccess: (created) => router.push(`/${slug}/intents/${created.id}`),
+      onSuccess: (created) => setPlacedId(created.id),
       onError: () => setExecutingKey(null),
     })
   }
@@ -134,6 +157,28 @@ export function IntentChat(): JSX.Element {
               onExecute={handleExecute}
               executingKey={executingKey}
             />
+
+            {/* Said before anything is signed. An order the account cannot
+                fund is refused here rather than allowed to rest for hours and
+                then fail. */}
+            {affordError !== null ? (
+              <div className="border-border rounded-2xl border border-dashed p-4">
+                <p className="text-foreground text-sm">{affordError}</p>
+              </div>
+            ) : null}
+
+            {/* A resting order lives in the thread that placed it, with its
+                own cancel — the same conversation, not a separate page. */}
+            {placedId !== null ? (
+              <OpenIntentCard
+                intentId={placedId}
+                onCancel={(id) => cancelIntent.mutate(id)}
+                cancelling={cancelIntent.isPending}
+                cancelError={
+                  cancelIntent.isError ? (cancelIntent.error as Error).message : undefined
+                }
+              />
+            ) : null}
 
             {/* Appears only once an agent has won with an executable route, so
                 the race is never interrupted by a confirmation prompt. */}
