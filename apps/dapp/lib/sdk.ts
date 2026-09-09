@@ -50,7 +50,73 @@ function seed(): Intent[] {
   return []
 }
 
-const store: Intent[] = seed()
+/**
+ * Where history lives until a backend does.
+ *
+ * Persisted to localStorage because the alternative — a module-level array —
+ * loses every trade on reload, including ones that really settled on chain.
+ * A history that forgets what happened is worse than no history, because it
+ * looks authoritative.
+ */
+const STORAGE_KEY = 'intent.history.v1'
+
+function load(): Intent[] {
+  if (typeof window === 'undefined') return seed()
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    return raw === null ? seed() : (JSON.parse(raw) as Intent[])
+  } catch {
+    // Private-mode browsers throw on access; the session still works, it just
+    // will not remember across reloads.
+    return seed()
+  }
+}
+
+function persist(intents: Intent[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(intents))
+  } catch {
+    /* see load() */
+  }
+}
+
+const store: Intent[] = load()
+
+/**
+ * Records a swap that actually settled on chain.
+ *
+ * Called after submission rather than before, and only with a real hash: an
+ * entry here is a claim that something happened, and the explorer link has to
+ * lead somewhere real.
+ */
+export function recordSettledSwap(input: {
+  type: Intent['type']
+  tokenIn: string
+  tokenOut: string
+  amountIn: string
+  amountOut: string
+  txHash: string
+}): Intent {
+  const settled: Intent = {
+    id: id(),
+    userId: 'user_local',
+    type: input.type,
+    tokenIn: input.tokenIn,
+    tokenOut: input.tokenOut,
+    amountIn: input.amountIn,
+    minAmountOut: input.amountOut,
+    deadline: now(),
+    status: 'settled',
+    settlementTxHash: input.txHash,
+    createdAt: now(),
+    updatedAt: now(),
+  }
+
+  store.unshift(settled)
+  persist(store)
+  return settled
+}
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -76,6 +142,7 @@ const mockClient: DappClient = {
         updatedAt: now(),
       }
       store.unshift(created)
+      persist(store)
       return created
     },
     async list() {

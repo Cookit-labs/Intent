@@ -4,6 +4,8 @@ import type { Intent, IntentStatus } from '@intent/types'
 import { Card, cn } from '@intent/ui'
 import { ArrowRight } from 'lucide-react'
 import Link from 'next/link'
+import { ExternalLink } from 'lucide-react'
+import { stellarTestnet } from '@intent/config'
 import { Fragment } from 'react'
 
 import { intentTypeLabel } from '../../lib/intent-format'
@@ -142,6 +144,21 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
           <div className="mt-3">
             <ExecutionTrack view={view} />
           </div>
+
+          {/* A settled trade should be checkable without re-running it. The
+              explorer is the only source that is not this app's own word. */}
+          {intent.settlementTxHash !== undefined && intent.settlementTxHash !== '' ? (
+            <a
+              href={`${stellarTestnet.blockExplorerUrl}/tx/${intent.settlementTxHash}`}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1.5 text-xs underline underline-offset-2"
+            >
+              View on Stellar Expert
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : null}
         </div>
       </Card>
     </Link>
