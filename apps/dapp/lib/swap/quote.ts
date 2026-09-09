@@ -54,6 +54,16 @@ export interface SwapQuote {
    * different path is a different price.
    */
   path: AssetRef[]
+  /**
+   * What this route actually delivers, when that is not the classic asset named
+   * in `to`.
+   *
+   * A Soroban router settles in a contract token, which is a different asset
+   * from the classic issuer of the same code — Soroswap's USDC is not Circle's
+   * USDC. Recording it keeps `to` meaningful for display while making the
+   * substitution impossible to miss at the point a transaction gets built.
+   */
+  deliversAsset?: AssetRef
   /** When the quote was taken. Routes go stale; the caller re-quotes before building. */
   quotedAt: string
 }
@@ -65,9 +75,7 @@ export interface QuoteFailure {
   detail?: string
 }
 
-export type QuoteOutcome =
-  | { ok: true; quote: SwapQuote }
-  | { ok: false; failure: QuoteFailure }
+export type QuoteOutcome = { ok: true; quote: SwapQuote } | { ok: false; failure: QuoteFailure }
 
 export interface QuoteSource {
   id: QuoteSourceId

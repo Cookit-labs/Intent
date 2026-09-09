@@ -65,6 +65,21 @@ export interface QuotedRoute {
   sendAmount: string
   receiveAmount: string
   hops: number
+  /**
+   * Caveat about what this route actually delivers, when it differs from the
+   * others. Two venues quoting "USDC" may mean two different assets.
+   */
+  note?: string
+  /**
+   * False when the route can be priced but not yet signed.
+   *
+   * A venue can be worth comparing before it is worth executing: Soroswap's
+   * quote is real liquidity and belongs in the comparison, but building it
+   * needs a Soroban invocation this app does not do yet. Showing it while
+   * marking it unexecutable is more honest than hiding it and claiming
+   * Horizon was the only price available.
+   */
+  executable: boolean
   /** The quote itself, passed through untouched for execution. */
   quote: unknown
 }

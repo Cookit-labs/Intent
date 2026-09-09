@@ -4,6 +4,7 @@ import { knownSymbols, resolveAsset, toBaseUnits } from '../../../../lib/swap/as
 import { bestQuote, collectQuotes } from '../../../../lib/swap/quote'
 import type { QuoteRequest } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
+import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
 
 /**
  * Prices a swap across every configured liquidity source.
@@ -21,7 +22,7 @@ export const dynamic = 'force-dynamic'
 /** Bounds a single request. Quotes are cheap but not free. */
 const QUOTE_TIMEOUT_MS = 15_000
 
-const sources = [createHorizonQuoter()]
+const sources = [createHorizonQuoter(), createSoroswapQuoter()]
 
 export async function POST(request: Request): Promise<NextResponse> {
   let body: {
@@ -49,10 +50,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (from === undefined || to === undefined) {
     // Naming an unknown asset is refused rather than guessed at: the caller is
     // ultimately a model reading free text.
-    return NextResponse.json(
-      { error: 'unknown_asset', supported: knownSymbols() },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'unknown_asset', supported: knownSymbols() }, { status: 400 })
   }
   if (from.code === to.code && from.issuer === to.issuer) {
     return NextResponse.json({ error: 'from and to are the same asset' }, { status: 400 })

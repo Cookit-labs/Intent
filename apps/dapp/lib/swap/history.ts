@@ -1,5 +1,7 @@
 import { stellarTestnet } from '@intent/config'
 
+import { INTENT_MEMO } from './build-tx'
+
 /**
  * Swap history, read from the chain rather than remembered by the app.
  *
@@ -12,6 +14,11 @@ import { stellarTestnet } from '@intent/config'
  * Reading from Horizon inverts that: the ledger is the record, the app is just
  * a view of it. Nothing to persist, nothing to keep in sync, and a swap is
  * present exactly when it actually happened.
+ *
+ * The account's ledger holds every swap it has ever made, including ones from
+ * other Stellar apps entirely. Transactions this app builds carry a memo
+ * (`intent:swap:v1`), which is what separates "trades made here" from "every
+ * path payment this key has ever signed".
  */
 
 export interface SwapRecord {
@@ -24,6 +31,8 @@ export interface SwapRecord {
   receivedAsset: string
   /** Intermediate hops. Zero for a direct swap. */
   hops: number
+  /** True when the transaction carries this app's memo. */
+  fromThisApp: boolean
   explorerUrl: string
 }
 
@@ -42,8 +51,10 @@ interface HorizonOperation {
   path?: { asset_type: string; asset_code?: string }[]
 }
 
-interface OperationsResponse {
-  _embedded?: { records?: HorizonOperation[] }
+interface HorizonTransaction {
+  hash: string
+  memo?: string
+  memo_type?: string
 }
 
 function assetName(type: string | undefined, code: string | undefined): string {
@@ -55,6 +66,25 @@ export interface HistoryOptions {
   fetchImpl?: typeof fetch
   /** How many operations to scan. Swaps are a minority of account activity. */
   limit?: number
+  /**
+   * Restrict to trades this app made.
+   *
+   * Defaults to true, because a history screen inside an app is understood to
+   * be that app's history. The unfiltered view still exists for anyone who
+   * wants the whole account.
+   */
+  onlyThisApp?: boolean
+}
+
+async function fetchJson<T>(url: string, doFetch: typeof fetch): Promise<T | undefined> {
+  try {
+    const res = await doFetch(url, { headers: { Accept: 'application/json' } })
+    // A brand-new account 404s; that is empty history, not an error.
+    if (!res.ok) return undefined
+    return (await res.json()) as T
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -72,28 +102,27 @@ export async function fetchSwapHistory(
   const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
   const limit = options.limit ?? 100
+  const onlyThisApp = options.onlyThisApp ?? true
 
-  const url = `${horizonUrl}/accounts/${account}/operations?order=desc&limit=${limit}`
+  // Two calls because Horizon splits the data: operations carry the amounts,
+  // transactions carry the memo, and a swap needs both.
+  const [ops, txs] = await Promise.all([
+    fetchJson<{ _embedded?: { records?: HorizonOperation[] } }>(
+      `${horizonUrl}/accounts/${account}/operations?order=desc&limit=${limit}`,
+      doFetch
+    ),
+    fetchJson<{ _embedded?: { records?: HorizonTransaction[] } }>(
+      `${horizonUrl}/accounts/${account}/transactions?order=desc&limit=${limit}`,
+      doFetch
+    ),
+  ])
 
-  let res: Response
-  try {
-    res = await doFetch(url, { headers: { Accept: 'application/json' } })
-  } catch {
-    // An unreachable Horizon means no history to show, not a broken page.
-    return []
+  const memoByHash = new Map<string, string>()
+  for (const t of txs?._embedded?.records ?? []) {
+    if (t.memo_type === 'text' && t.memo !== undefined) memoByHash.set(t.hash, t.memo)
   }
 
-  // A brand-new account has no operations at all; that is empty, not an error.
-  if (!res.ok) return []
-
-  let body: OperationsResponse
-  try {
-    body = (await res.json()) as OperationsResponse
-  } catch {
-    return []
-  }
-
-  return (body._embedded?.records ?? [])
+  const swaps = (ops?._embedded?.records ?? [])
     .filter((op) => op.type.startsWith('path_payment'))
     // Self-payment is what makes it a swap rather than a transfer.
     .filter((op) => op.from !== undefined && op.from === op.to)
@@ -105,6 +134,17 @@ export async function fetchSwapHistory(
       receivedAmount: op.amount ?? '0',
       receivedAsset: assetName(op.asset_type, op.asset_code),
       hops: op.path?.length ?? 0,
+      fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
       explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
+
+  if (!onlyThisApp) return swaps
+
+  const stamped = swaps.filter((s) => s.fromThisApp)
+
+  // Swaps made before the memo existed carry no stamp, so filtering strictly
+  // would hide trades this app really did make. Falling back to the unfiltered
+  // list is the lesser wrong: showing a few extra swaps beats telling a user
+  // their trade never happened.
+  return stamped.length > 0 ? stamped : swaps
 }

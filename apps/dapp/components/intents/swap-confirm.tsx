@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2, ExternalLink, Loader2, TriangleAlert } from '
 
 import type { SwapPhase } from '../../hooks/use-swap'
 import type { SwapQuote } from '../../lib/swap/quote'
+import { TokenIcon } from '../ui/token-icon'
 
 /**
  * The last screen before money moves.
@@ -98,9 +99,11 @@ export function SwapConfirm({
           <CheckCircle2 className="text-success h-5 w-5" />
           <span className="font-medium">Swap complete</span>
         </div>
-        <p className="text-muted-foreground text-sm">
-          {amount(sendDisplay)} {quote?.from.code} became {amount(receiveDisplay)}{' '}
-          {quote?.to.code}.
+        <p className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm">
+          <TokenIcon symbol={quote?.from.code} size={16} />
+          {amount(sendDisplay)} {quote?.from.code} became
+          <TokenIcon symbol={quote?.to.code} size={16} />
+          {amount(receiveDisplay)} {quote?.to.code}.
         </p>
         {/* The explorer is the only independent proof the swap happened, so it
             is a button rather than a dim hash the eye slides past. */}
@@ -161,7 +164,8 @@ export function SwapConfirm({
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col">
           <span className="text-muted-foreground text-xs">You pay</span>
-          <span className="font-mono text-lg tabular-nums">
+          <span className="flex items-center gap-2 font-mono text-lg tabular-nums">
+            <TokenIcon symbol={quote?.from.code} size={22} />
             {amount(sendDisplay)} {quote?.from.code}
           </span>
           {sendUsd !== undefined ? (
@@ -171,7 +175,8 @@ export function SwapConfirm({
         <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0" />
         <div className="flex flex-col items-end">
           <span className="text-muted-foreground text-xs">You receive, about</span>
-          <span className="font-mono text-lg tabular-nums">
+          <span className="flex items-center gap-2 font-mono text-lg tabular-nums">
+            <TokenIcon symbol={quote?.to.code} size={22} />
             {amount(receiveDisplay)} {quote?.to.code}
           </span>
           {receiveUsd !== undefined ? (
@@ -223,8 +228,8 @@ export function SwapConfirm({
       {/* Said plainly rather than buried: the amount is an estimate, and the
           floor is enforced by the network, not by this screen. */}
       <p className="text-muted-foreground text-xs">
-        The received amount is an estimate. If the price moves more than 0.5%, the swap is
-        cancelled and nothing is spent.
+        The received amount is an estimate. If the price moves more than 0.5%, the swap is cancelled
+        and nothing is spent.
       </p>
     </Card>
   )

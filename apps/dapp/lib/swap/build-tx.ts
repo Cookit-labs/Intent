@@ -4,6 +4,7 @@ import {
   BASE_FEE,
   FeeBumpTransaction,
   Horizon,
+  Memo,
   Operation,
   TransactionBuilder,
 } from '@stellar/stellar-sdk'
@@ -27,6 +28,17 @@ import type { SwapQuote } from './quote'
  * of the operation, so a path that degrades between quoting and inclusion makes
  * the whole transaction fail rather than fill badly.
  */
+
+/**
+ * Marks a transaction as one this app produced.
+ *
+ * Without it, history can only be "every path payment this account ever made",
+ * which includes trades from any other Stellar app the user has touched.
+ * Stellar text memos cap at 28 bytes, so this is deliberately terse; the
+ * version suffix means the format can change later without silently
+ * reinterpreting old transactions.
+ */
+export const INTENT_MEMO = 'intent:swap:v1'
 
 /** How long a built transaction stays valid. Long enough to sign, short enough not to linger. */
 const TIMEOUT_SECONDS = 180
@@ -73,6 +85,12 @@ export async function buildSwapTransaction(options: BuildSwapOptions): Promise<B
   if (quote.source !== 'horizon') {
     throw new Error(`quote from ${quote.source} needs its own builder`)
   }
+  // Belt and braces: only Horizon quotes reach here today, and they never set
+  // this. If a future source does, a classic path payment would silently
+  // deliver a different asset than the one quoted.
+  if (quote.deliversAsset !== undefined) {
+    throw new Error(`quote from ${quote.source} settles in a non-classic asset`)
+  }
 
   const server = new Horizon.Server(horizonUrl)
   const source = await server.loadAccount(account)
@@ -115,6 +133,9 @@ export async function buildSwapTransaction(options: BuildSwapOptions): Promise<B
     networkPassphrase: stellarTestnet.networkPassphrase,
   })
     .addOperation(operation)
+    // Stamped so history can tell this app's trades from the rest of the
+    // account's activity.
+    .addMemo(Memo.text(INTENT_MEMO))
     .setTimeout(TIMEOUT_SECONDS)
     .build()
 

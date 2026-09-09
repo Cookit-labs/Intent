@@ -4,6 +4,7 @@ import type { MarketContext, QuotedRoute } from './brain'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
 import { collectQuotes } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
+import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { venues } from '../venues'
@@ -53,8 +54,12 @@ export async function quoteRoutes(
   if (from === undefined || to === undefined) return []
   if (from.code === to.code && from.issuer === to.issuer) return []
 
+  // Two independent pools, asked at once. Horizon covers the classic DEX and
+  // its AMMs; Soroswap is a Soroban contract with its own depth. Asking both
+  // is what makes this aggregation rather than a single venue with extra
+  // steps, and `collectQuotes` already tolerates either one being down.
   const { quotes } = await collectQuotes(
-    [createHorizonQuoter()],
+    [createHorizonQuoter(), createSoroswapQuoter()],
     { kind: 'strict_send', from, to, sendAmount: amount },
     signal
   )
@@ -76,6 +81,16 @@ export async function quoteRoutes(
     sendAmount: `${fromBaseUnits(quote.sendAmount)} ${quote.from.code}`,
     receiveAmount: `${fromBaseUnits(quote.destAmount)} ${quote.to.code}`,
     hops: quote.path.length,
+    // Soroban tokens are separate contracts from classic issuers, so the USDC
+    // Soroswap delivers is not the USDC Horizon delivers. Surfacing that keeps
+    // an agent from reading two quotes as interchangeable and picking purely
+    // on the larger number.
+    // Only routes this app can actually build are offerable. The rest are
+    // shown for comparison, which is the point of quoting two venues.
+    executable: quote.deliversAsset === undefined && quote.source === 'horizon',
+    ...(quote.deliversAsset !== undefined
+      ? { note: `settles in Soroban ${quote.to.code}, a different asset — not executable yet` }
+      : {}),
     quote,
   }))
 }

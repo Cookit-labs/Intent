@@ -32,13 +32,18 @@ const PRICING_USD_PER_MTOK: Record<string, { input: number; output: number }> = 
  * Covers the tool call plus the thinking tokens the model spends before it.
  *
  * These models reason before answering, and that reasoning is billed and
- * counted here. Measured: a single strategy uses 400-900 completion tokens, and
- * at a 400 ceiling the reply is cut off mid-thought — `finish_reason: length`,
- * no tool call at all. That surfaces as a schema failure, which reads like the
- * model misbehaving when the real cause is the budget. The headroom is
- * deliberate; unused tokens are not billed.
+ * counted here. Measured: a single strategy uses 400-900 completion tokens on a
+ * one-venue prompt, and at a 400 ceiling the reply is cut off mid-thought —
+ * `finish_reason: length`, no tool call at all. That surfaces as a schema
+ * failure, which reads like the model misbehaving when the real cause is the
+ * budget.
+ *
+ * Raised again once agents were given two venues to compare: weighing routes
+ * that deliver different assets is a genuinely harder question, and agents were
+ * observed spending the full 4,000 on it and still being truncated. The
+ * headroom is deliberate; unused tokens are not billed.
  */
-const MAX_OUTPUT_TOKENS = 4_000
+const MAX_OUTPUT_TOKENS = 8_000
 
 export interface DeepSeekBrainOptions {
   apiKey?: string
@@ -159,10 +164,17 @@ function routeLines(req: ProposalRequest): string[] {
     'Executable routes, already priced against live liquidity:',
     ...routes.map(
       (r) =>
-        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} via ${r.source}, ${r.hops} hop(s)`
+        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} via ${r.source}, ${r.hops} hop(s)` +
+        (r.executable ? '' : ' [COMPARISON ONLY, cannot be executed]') +
+        (r.note !== undefined ? ` [${r.note}]` : '')
     ),
     'Choose one by putting its id in routeId. These prices are measured, not estimates —',
     'do not quote a better number than the route you picked actually offers.',
+    // Comparing two venues on output alone is wrong when they deliver different
+    // assets, and picking an unexecutable one would promise a fill that cannot
+    // be signed.
+    'Routes marked COMPARISON ONLY deliver a different asset and must not be put',
+    'in routeId. Use them to judge whether the executable price is competitive.',
     '',
     // Said outright because the two numbers genuinely disagree. Without this an
     // agent notices the contradiction and splits the difference, quoting a
@@ -208,8 +220,7 @@ function classifyStatus(status: number): BrainErrorCode {
 export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBrain {
   const apiKey = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
   const model = options.model ?? process.env['DEEPSEEK_MODEL'] ?? 'deepseek-v4-flash'
-  const strictTools =
-    options.strictTools ?? process.env['DEEPSEEK_STRICT_TOOLS'] !== 'false'
+  const strictTools = options.strictTools ?? process.env['DEEPSEEK_STRICT_TOOLS'] !== 'false'
   // Strict tool schemas live on the beta endpoint; without them the standard
   // one is fine, since every response is validated application-side anyway.
   const baseUrl =
@@ -328,7 +339,12 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         referencePriceUsd: impliedRateUsd(req) ?? req.intent.referencePriceUsd,
         allowedVenueIds: req.market.venues.map((v) => v.id),
         ...(req.market.routes !== undefined
-          ? { allowedRouteIds: req.market.routes.map((r) => r.id) }
+          ? {
+              // Only executable routes are selectable. The prompt says so too,
+              // but a model that ignores it must still be refused here: an
+              // unexecutable winner is a fill the user cannot sign.
+              allowedRouteIds: req.market.routes.filter((r) => r.executable).map((r) => r.id),
+            }
           : {}),
       })
 

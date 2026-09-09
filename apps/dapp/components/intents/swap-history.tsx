@@ -6,6 +6,7 @@ import { ArrowRight, ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { fetchSwapHistory } from '../../lib/swap/history'
+import { TokenIcon } from '../ui/token-icon'
 
 /**
  * Swaps this account has made, read from the ledger.
@@ -55,11 +56,7 @@ export function SwapHistory(): JSX.Element | null {
 
   const swaps = data ?? []
   if (swaps.length === 0) {
-    return (
-      <Card className="text-muted-foreground p-6 text-sm">
-        No swaps yet for this account.
-      </Card>
-    )
+    return <Card className="text-muted-foreground p-6 text-sm">No swaps yet for this account.</Card>
   }
 
   return (
@@ -73,11 +70,13 @@ export function SwapHistory(): JSX.Element | null {
         <Card key={s.txHash} className="flex items-center gap-4 p-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm tabular-nums">
-              <span className="font-medium">
+              <span className="flex items-center gap-1.5 font-medium">
+                <TokenIcon symbol={s.sentAsset} size={18} />
                 {amount(s.sentAmount)} {s.sentAsset}
               </span>
               <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <TokenIcon symbol={s.receivedAsset} size={18} />
                 {amount(s.receivedAmount)} {s.receivedAsset}
               </span>
             </div>
