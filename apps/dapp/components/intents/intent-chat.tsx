@@ -276,6 +276,19 @@ export function IntentChat(): JSX.Element {
                 explorerUrl={swap.explorerUrl}
                 error={swap.error}
                 usdPrices={swap.usdPrices}
+                agentName={
+                  executingKey !== null ? competition.proposals[executingKey]?.name : undefined
+                }
+                sliceCount={
+                  executingKey !== null
+                    ? competition.proposals[executingKey]?.sliceCount
+                    : undefined
+                }
+                horizonMinutes={
+                  executingKey !== null
+                    ? competition.proposals[executingKey]?.horizonMinutes
+                    : undefined
+                }
                 onConfirm={swap.confirm}
                 onReset={swap.reset}
               />

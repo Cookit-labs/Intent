@@ -167,6 +167,8 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
                   slippagePct: frame.proposal.projectedSlippagePct,
                   score: 0,
                   reasoning: frame.proposal.reasoning,
+                  sliceCount: frame.proposal.sliceCount,
+                  horizonMinutes: frame.proposal.horizonMinutes,
                   degraded: frame.degraded,
                 },
               }))

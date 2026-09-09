@@ -57,6 +57,9 @@ export function SwapConfirm({
   explorerUrl,
   error,
   usdPrices,
+  agentName,
+  sliceCount,
+  horizonMinutes,
   onConfirm,
   onReset,
 }: {
@@ -78,6 +81,16 @@ export function SwapConfirm({
    * USDC" reading as a sensible return on a $30 order.
    */
   usdPrices: Record<string, number> | undefined
+  /**
+   * The agent whose plan is about to be signed.
+   *
+   * Every agent routes through the same quote today, so the amounts alone are
+   * identical whoever is chosen — naming the agent and its plan is the only
+   * thing on this card that reflects the choice the user just made.
+   */
+  agentName?: string | undefined
+  sliceCount?: number | undefined
+  horizonMinutes?: number | undefined
   onConfirm: () => void
   onReset: () => void
 }): JSX.Element | null {
@@ -186,6 +199,10 @@ export function SwapConfirm({
       </div>
 
       <div className="text-muted-foreground border-border flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs">
+        {agentName !== undefined ? <span className="text-foreground">{agentName}</span> : null}
+        {/* The agents differ in how they execute, not in which route they can
+            reach — one executable quote exists, so they all take it. */}
+        {sliceCount === 1 ? <span>single fill</span> : null}
         <span>via {quote?.source === 'horizon' ? 'Stellar DEX' : quote?.source}</span>
         <span>
           {quote?.path.length === 0
@@ -217,6 +234,20 @@ export function SwapConfirm({
           </Button>
         ) : null}
       </div>
+
+      {/* A sliced plan is what the agent proposed, not what this signature
+          does: one path payment is built whatever the plan says. Showing "5
+          slices" beside a single full-size transaction would misrepresent
+          what is about to be signed. */}
+      {sliceCount !== undefined && sliceCount > 1 ? (
+        <p className="text-muted-foreground text-xs">
+          {agentName ?? 'This agent'} proposed {sliceCount} slices
+          {horizonMinutes !== undefined && horizonMinutes > 0
+            ? ` over ${horizonMinutes} minutes`
+            : ''}
+          . Slicing is not executed yet — this signs the whole amount in one transaction.
+        </p>
+      ) : null}
 
       {distorted ? (
         <p className="text-warning text-xs">

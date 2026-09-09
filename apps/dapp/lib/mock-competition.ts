@@ -26,6 +26,17 @@ export interface AgentProposalView {
    * exactly as before.
    */
   reasoning?: string
+  /**
+   * How this agent proposes to execute, when a real one said.
+   *
+   * Every agent currently routes through the same quote — it is the only
+   * executable one — so the amounts on the confirm card are identical whoever
+   * is picked. The plan is where they actually differ: TWAP slices, momentum
+   * takes one shot. Without it, choosing a different agent changed nothing
+   * visible and looked hardcoded to the recommendation.
+   */
+  sliceCount?: number
+  horizonMinutes?: number
   /** True when this came from the offline fallback rather than a live agent. */
   degraded?: boolean
 }
