@@ -63,7 +63,9 @@ export function IntentTypeIcon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.4}
+      // Thin. At 1.4 the glyph read as bold next to the regular-weight text
+      // beside it, and the coin's ring nearly closed under its own stroke.
+      strokeWidth={1}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={cn('h-6 w-6', className)}

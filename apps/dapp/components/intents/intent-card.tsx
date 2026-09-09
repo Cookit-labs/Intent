@@ -12,6 +12,7 @@ import { intentTypeLabel } from '../../lib/intent-format'
 import { useChainHref } from '../../providers/chain-provider'
 import { useCancelIntent } from '../../hooks/use-intent'
 import { IntentTypeIcon } from './intent-type-icon'
+import { TokenIcon } from '../ui/token-icon'
 
 const PRICE_USD: Record<string, number> = {
   USDC: 1,
@@ -113,15 +114,16 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
     <Link href={chainHref(`/intents/${intent.id}`)} className="block">
       <Card className="hover:border-foreground/40 flex gap-4 p-5 transition-colors">
         {/* The glyph carries the meaning on its own, so the boxed frame it
-            used to sit in was only visual weight. A cancelled row is dimmed
-            rather than outlined differently. */}
-        <IntentTypeIcon
-          type={intent.type}
-          className={cn(
-            'mt-0.5 h-8 w-8 shrink-0',
-            view.failed ? 'text-muted-foreground' : 'text-foreground'
-          )}
-        />
+            used to sit in was only visual weight.
+
+            Pure black on every row, cancelled included. Dimming it made the
+            same icon look like two different marks depending on status, and
+            the row's state is already carried by its label and track.
+
+            Literal black rather than a token because that is what was asked
+            for. Safe while the app is `forcedTheme="light"`; if dark mode is
+            ever enabled this needs a token, or the icon disappears. */}
+        <IntentTypeIcon type={intent.type} className="mt-0.5 h-8 w-8 shrink-0 text-black" />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
@@ -136,12 +138,16 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
 
           <div className="mt-1.5 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2 text-sm tabular-nums">
-              <span className="font-medium">
+              <span className="flex items-center gap-1.5 font-medium">
+                <TokenIcon symbol={intent.tokenIn} size={18} />
                 {intent.amountIn} {intent.tokenIn}
               </span>
               <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground truncate">
-                {intent.minAmountOut} {intent.tokenOut}
+              <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
+                <TokenIcon symbol={intent.tokenOut} size={18} />
+                <span className="truncate">
+                  {intent.minAmountOut} {intent.tokenOut}
+                </span>
               </span>
             </div>
             <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
