@@ -83,41 +83,6 @@ function persist(intents: Intent[]): void {
 
 const store: Intent[] = load()
 
-/**
- * Records a swap that actually settled on chain.
- *
- * Called after submission rather than before, and only with a real hash: an
- * entry here is a claim that something happened, and the explorer link has to
- * lead somewhere real.
- */
-export function recordSettledSwap(input: {
-  type: Intent['type']
-  tokenIn: string
-  tokenOut: string
-  amountIn: string
-  amountOut: string
-  txHash: string
-}): Intent {
-  const settled: Intent = {
-    id: id(),
-    userId: 'user_local',
-    type: input.type,
-    tokenIn: input.tokenIn,
-    tokenOut: input.tokenOut,
-    amountIn: input.amountIn,
-    minAmountOut: input.amountOut,
-    deadline: now(),
-    status: 'settled',
-    settlementTxHash: input.txHash,
-    createdAt: now(),
-    updatedAt: now(),
-  }
-
-  store.unshift(settled)
-  persist(store)
-  return settled
-}
-
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 function project(intent: Intent): Intent {

@@ -7,7 +7,6 @@ import { useWallet } from './use-wallet'
 import { fromBaseUnits } from '../lib/swap/assets'
 import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
 import type { SwapQuote } from '../lib/swap/quote'
-import { recordSettledSwap } from '../lib/sdk'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 import type { SwapPhase } from './use-swap'
 
@@ -152,20 +151,6 @@ export function useSwapExecution(route: unknown): SwapExecution {
                 : 'The swap did not go through.',
           }))
           return
-        }
-
-        // Recorded only now, with the real hash. An entry in history is a
-        // claim that something happened, so it is written after the network
-        // confirms rather than when the user clicks sign.
-        if (result.hash !== undefined && quote !== undefined) {
-          recordSettledSwap({
-            type: 'market_buy',
-            tokenIn: quote.from.code,
-            tokenOut: quote.to.code,
-            amountIn: fromBaseUnits(quote.sendAmount),
-            amountOut: fromBaseUnits(quote.destAmount),
-            txHash: result.hash,
-          })
         }
 
         setState((s) => ({
