@@ -58,7 +58,13 @@ export function IntentChat(): JSX.Element {
 
   // Agents run through the route only when explicitly enabled. The offline race
   // stays the default so a checkout with no configuration behaves as before.
-  const useAgents = process.env['NEXT_PUBLIC_USE_AI'] === 'true'
+  // Opt *out* of live agents, not in. This value is inlined at build time, so
+  // a bundle compiled before the variable existed baked in `false` and the
+  // browser silently ran the offline race while the server's agents worked
+  // perfectly — every check passed and the UI still showed canned proposals.
+  // Defaulting to live means a stale or missing build value degrades to a
+  // visible failure from the route, not to a mock that cannot be executed.
+  const useAgents = process.env['NEXT_PUBLIC_USE_AI'] !== 'false'
   const live = useCompetition(useAgents ? parsed : null, slug)
   const offline = useMockCompetition(useAgents ? null : parsed)
   const competition = useAgents ? live : offline
