@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
+import type { CreateIntentInput } from '@intent/types'
+
 import { useCancelIntent, useCreateIntent, useSettleIntent } from '../../hooks/use-intent'
 import { useWallet } from '../../hooks/use-wallet'
 import { checkAffordability } from '../../lib/affordability'
@@ -39,6 +41,9 @@ export function IntentChat(): JSX.Element {
   // price can be watched — and withdrawn — without leaving the chat.
   const [placedId, setPlacedId] = useState<string | null>(null)
   const [affordError, setAffordError] = useState<string | null>(null)
+  // A market order held back until it settles, so an unsigned one leaves no
+  // trace in history.
+  const [pendingInput, setPendingInput] = useState<CreateIntentInput | null>(null)
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
 
@@ -71,12 +76,30 @@ export function IntentChat(): JSX.Element {
   // history unable to link to a trade that really happened.
   const settledHash = swap.phase === 'settled' ? swap.hash : undefined
   useEffect(() => {
-    if (placedId === null || settledHash === undefined) return
-    settleIntent.mutate({ id: placedId, txHash: settledHash })
-    // Deliberately keyed on the pair alone: re-running on every render of the
-    // mutation object would record the same hash repeatedly.
+    if (settledHash === undefined) return
+
+    // A limit order already exists; attach the hash to it.
+    if (placedId !== null) {
+      settleIntent.mutate({ id: placedId, txHash: settledHash })
+      return
+    }
+
+    // A market order is created only now, already settled — so it appears in
+    // history exactly when the trade became real, and never before.
+    if (pendingInput !== null) {
+      const input = pendingInput
+      setPendingInput(null)
+      createIntent.mutate(input, {
+        onSuccess: (created) => {
+          setPlacedId(created.id)
+          settleIntent.mutate({ id: created.id, txHash: settledHash })
+        },
+      })
+    }
+    // Deliberately narrow: re-running on every render of the mutation objects
+    // would record the same hash repeatedly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedId, settledHash])
+  }, [placedId, settledHash, pendingInput])
 
   // Declining in the wallet returns the swap to `review`, but the clicked
   // agent stayed marked as executing — its button spun forever and the others
@@ -97,6 +120,7 @@ export function IntentChat(): JSX.Element {
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
+    setPendingInput(null)
   }
 
   function handleReset(): void {
@@ -105,6 +129,7 @@ export function IntentChat(): JSX.Element {
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
+    setPendingInput(null)
   }
 
   function handleExecute(key: string): void {
@@ -139,14 +164,22 @@ export function IntentChat(): JSX.Element {
       ...(isLimit && parsed.targetPriceUsd > 0 ? { limitPriceUsd: parsed.targetPriceUsd } : {}),
     }
 
-    // Everything stays in the conversation. The competition, the winner, the
-    // signature and a resting order all belong to one thread — sending the
-    // user to a detail page broke it in two, scrolling the agents' reasoning
-    // away exactly when it was being acted on.
-    createIntent.mutate(input, {
-      onSuccess: (created) => setPlacedId(created.id),
-      onError: () => setExecutingKey(null),
-    })
+    // A limit order is recorded now, because resting unfilled is what it does
+    // and the user needs it listed to watch or withdraw.
+    //
+    // A market order is not. It is signed within moments or not at all, so
+    // recording it at the click created a row for a trade that had not
+    // happened and might never — one left unsigned sat in the list claiming
+    // to be live forever. It is recorded when it settles, by the effect below.
+    if (isLimit) {
+      createIntent.mutate(input, {
+        onSuccess: (created) => setPlacedId(created.id),
+        onError: () => setExecutingKey(null),
+      })
+      return
+    }
+
+    setPendingInput(input)
   }
 
   return (

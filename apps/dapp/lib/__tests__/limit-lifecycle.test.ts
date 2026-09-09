@@ -185,3 +185,56 @@ describe('only real transactions count as settled', () => {
     expect((await client.intents.get(created.id, { XLM: 0.1 })).status).toBe('cancelled')
   })
 })
+
+/**
+ * Only a limit order has an open state.
+ *
+ * A market order is signed within moments or not at all — it has nothing to
+ * wait for. One was being written the instant Execute was clicked, before any
+ * signature, so an unsigned swap sat in history reading "Swap · Open" forever,
+ * describing a trade that never happened.
+ */
+describe('market orders do not rest', () => {
+  const client = getIntentClient()
+
+  const market = {
+    chain: 'stellar' as const,
+    type: 'market_sell' as const,
+    tokenIn: 'XLM',
+    tokenOut: 'USDC',
+    amountIn: '1640',
+    minAmountOut: '300',
+  }
+
+  it('reports an unsigned market order past its deadline as failed', async () => {
+    const created = await client.intents.create({
+      ...market,
+      deadline: new Date(Date.now() - 1_000).toISOString(),
+    })
+    // Not pending: nobody is waiting on it, the signature never came.
+    expect((await client.intents.get(created.id)).status).toBe('failed')
+  })
+
+  it('still settles a market order that produced a hash', async () => {
+    const created = await client.intents.create({
+      ...market,
+      deadline: new Date(Date.now() + 60_000).toISOString(),
+    })
+    await client.intents.settle(created.id, 'e'.repeat(64))
+
+    const settled = await client.intents.get(created.id)
+    expect(settled.status).toBe('settled')
+    expect(settled.settlementTxHash).toBe('e'.repeat(64))
+  })
+
+  it('leaves a limit order resting past nothing but its deadline', async () => {
+    const created = await client.intents.create({
+      ...market,
+      type: 'limit_sell',
+      limitPriceUsd: 0.3,
+      deadline: new Date(Date.now() + 3_600_000).toISOString(),
+    })
+    // A limit order genuinely waits — that is what it is for.
+    expect((await client.intents.get(created.id)).status).toBe('pending')
+  })
+})

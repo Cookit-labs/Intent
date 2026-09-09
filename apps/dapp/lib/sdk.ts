@@ -60,19 +60,24 @@ function isLimitType(type: IntentType): boolean {
  * hash, because nothing had ever been submitted to the network.
  *
  * An intent is settled when, and only when, a transaction hash has been
- * recorded against it. Until then it is open: waiting for its price if it is a
- * limit order, or waiting to be executed if it is not. A limit order whose
- * deadline passes unfilled is cancelled, which is the truth — it did not
- * trade.
+ * recorded against it.
+ *
+ * Only a limit order has an open state to be in: it is a standing offer, and
+ * waiting is the whole point of it. A market order has no such state — it is
+ * signed and settles, or it does not happen. One left unsigned was abandoned,
+ * not pending, so it is reported as failed rather than sitting in the list
+ * forever claiming to be live.
  */
 function agedStatus(intent: Intent, marketPriceUsd?: number): IntentStatus {
   // A recorded hash is the only thing that settles an intent, and it is set
   // explicitly by `settle()` rather than inferred here.
   if (intent.status !== 'pending') return intent.status
 
+  const expired = Date.now() > new Date(intent.deadline).getTime()
+
   if (isLimitType(intent.type) && intent.limitPriceUsd !== undefined) {
     // Expired without filling. Not settled — nothing was traded.
-    if (Date.now() > new Date(intent.deadline).getTime()) return 'cancelled'
+    if (expired) return 'cancelled'
 
     // Whether the price has been reached or not, the order is still open:
     // reaching the price is not the same as having executed, and nothing
@@ -81,9 +86,9 @@ function agedStatus(intent: Intent, marketPriceUsd?: number): IntentStatus {
     return 'pending'
   }
 
-  // A market intent stays open until its swap is signed and confirmed, at
-  // which point `settle()` records the hash and moves it on.
-  return 'pending'
+  // A market order is signed within moments or not at all. Past its deadline
+  // with no hash, the signature never came.
+  return expired ? 'failed' : 'pending'
 }
 
 /**
@@ -121,9 +126,14 @@ const STORAGE_KEY = 'intent.history.v1'
  */
 function keepOnlyReal(intents: Intent[]): Intent[] {
   return intents.filter((i) => {
+    const hasHash = i.settlementTxHash !== undefined && i.settlementTxHash !== ''
     if (i.status === 'settled' || i.status === 'executing' || i.status === 'competition') {
-      return i.settlementTxHash !== undefined && i.settlementTxHash !== ''
+      return hasHash
     }
+    // A pending market order is an orphan: these used to be written the moment
+    // Execute was clicked, so one the user never signed sat in the list
+    // claiming to be live. Only a limit order genuinely rests unfilled.
+    if (i.status === 'pending' && !isLimitType(i.type) && !hasHash) return false
     return true
   })
 }
