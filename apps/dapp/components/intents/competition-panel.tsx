@@ -37,10 +37,18 @@ export function CompetitionPanel({
   state,
   onExecute,
   executingKey,
+  locked = false,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
   executingKey: string | null
+  /**
+   * True once a signature is with the wallet or the network.
+   *
+   * Selection stays open until then: picking an agent is not a commitment, and
+   * disabling the buttons on the first pick made it one.
+   */
+  locked?: boolean
 }): JSX.Element {
   const { proposals, revealed, phase, winner } = state
   const decided = phase === 'decided'
@@ -121,10 +129,11 @@ export function CompetitionPanel({
                   <button
                     type="button"
                     onClick={() => onExecute(agent.key)}
-                    // Only the agent being executed is disabled. Disabling all
-                    // of them meant a declined signature left every button
-                    // dead, with no way to pick again.
-                    disabled={isExecuting}
+                    // Disabled only while a signature is actually in flight.
+                    // Keying this to selection instead made the first pick
+                    // final — every other card went dead before anything had
+                    // been confirmed.
+                    disabled={locked}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
                       // Filled for the card in play — the picked one, or the
@@ -134,10 +143,16 @@ export function CompetitionPanel({
                         : 'border-border text-foreground hover:border-foreground/40 border'
                     )}
                   >
-                    {isExecuting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {/* Named for what it does. "Execute" implied the trade
+                    {/* The spinner belongs to work in progress, not to a
+                        selection — it ran on the picked card while nothing was
+                        happening, which read as a stuck request.
+
+                        Named for what it does: "Execute" implied the trade
                         went through on this click, when it opens a confirm
                         step where the wallet is actually asked to sign. */}
+                    {locked && isExecuting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
                     {isExecuting ? 'Selected' : 'Review'}
                   </button>
                 </div>

@@ -145,7 +145,17 @@ export function IntentChat(): JSX.Element {
   }
 
   function handleExecute(key: string): void {
-    if (!parsed || executingKey) return
+    // Selecting an agent is not a commitment, so it must stay changeable.
+    // Guarding on `executingKey` — set by the first Review click — meant the
+    // first pick was final: every other card became unclickable before the
+    // user had confirmed anything.
+    //
+    // A signature in flight is the real reason to refuse: past that point a
+    // transaction is with the wallet or the network, and switching routes
+    // would leave the wrong one submitted.
+    const inFlight =
+      swap.phase === 'signing' || swap.phase === 'submitting' || swap.phase === 'settled'
+    if (!parsed || inFlight) return
 
     // Refuse an order the account cannot fund. Without this a wallet holding
     // $12 could open a $4,000 limit order, which the app then displayed as a
@@ -227,6 +237,9 @@ export function IntentChat(): JSX.Element {
               state={competition}
               onExecute={handleExecute}
               executingKey={executingKey}
+              locked={
+                swap.phase === 'signing' || swap.phase === 'submitting' || swap.phase === 'settled'
+              }
             />
 
             {/* Said before anything is signed. An order the account cannot
