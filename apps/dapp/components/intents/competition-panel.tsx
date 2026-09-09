@@ -111,7 +111,10 @@ export function CompetitionPanel({
                   <button
                     type="button"
                     onClick={() => onExecute(agent.key)}
-                    disabled={executingKey !== null}
+                    // Only the agent being executed is disabled. Disabling all
+                    // of them meant a declined signature left every button
+                    // dead, with no way to pick again.
+                    disabled={isExecuting}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
                       isWinner

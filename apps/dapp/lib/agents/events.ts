@@ -22,6 +22,14 @@ export interface CompetitionProposalFrame {
   type: 'competition:proposal'
   competitionId: string
   proposal: AgentProposalResult
+  /**
+   * The executable route this agent chose, when it chose one.
+   *
+   * Carried per proposal, not only on the winner. The user picks who executes,
+   * so every agent's route has to reach the client — resolving only the
+   * winner's meant clicking any other agent signed the winner's trade.
+   */
+  route?: unknown
   /** True when the offline fallback produced this rather than a live agent. */
   degraded: boolean
 }

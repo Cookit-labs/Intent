@@ -35,6 +35,13 @@ export interface CompetitionWithRoute extends CompetitionState {
    * the user a different number than the agents compared.
    */
   route?: unknown
+  /**
+   * Each agent's own route, keyed by strategy.
+   *
+   * The user picks who executes, so the winner's route is not enough: without
+   * these, choosing any other agent silently signed the winner's trade.
+   */
+  routesByAgent: Record<string, unknown>
 }
 
 export function useCompetition(parsed: ParsedIntent | null, chain: string): CompetitionWithRoute {
@@ -44,6 +51,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   const [secondsLeft, setSecondsLeft] = useState(WINDOW_SECONDS)
   const [winner, setWinner] = useState<string | null>(null)
   const [route, setRoute] = useState<unknown>(undefined)
+  const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -54,6 +62,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setSecondsLeft(WINDOW_SECONDS)
       setWinner(null)
       setRoute(undefined)
+      setRoutesByAgent({})
       return
     }
 
@@ -76,6 +85,10 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     setPhase('competing')
     setSecondsLeft(WINDOW_SECONDS)
     setWinner(null)
+    // Stale routes from the previous intent would otherwise still be
+    // executable, signing a trade the user is no longer looking at.
+    setRoute(undefined)
+    setRoutesByAgent({})
 
     // A stream that stalls without erroring would leave the panel waiting on
     // agents that will never answer. Past this point it is not slowness but a
@@ -140,6 +153,10 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               const floor = REVEAL_DELAYS[order] ?? 0
               const { revealAtMs, delayMs } = planReveal(floor, Date.now() - startedAt)
               lastRevealRef.current = Math.max(lastRevealRef.current, revealAtMs)
+
+              if (frame.route !== undefined) {
+                setRoutesByAgent((prev) => ({ ...prev, [key]: frame.route }))
+              }
 
               setProposals((prev) => ({
                 ...prev,
@@ -208,6 +225,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     phase,
     secondsLeft,
     winner,
+    routesByAgent,
     ...(route !== undefined ? { route } : {}),
   }
 }

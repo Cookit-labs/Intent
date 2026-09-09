@@ -138,10 +138,14 @@ export async function POST(request: Request): Promise<Response> {
             })
 
             if (outcome.ok) {
+              // Resolve this agent's own route, so executing it signs what it
+              // proposed rather than what the winner proposed.
+              const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
               send({
                 type: 'competition:proposal',
                 competitionId,
                 proposal: outcome.proposal,
+                ...(own !== undefined ? { route: own.quote } : {}),
                 degraded: outcome.meta.degraded,
               })
               return outcome.proposal

@@ -58,9 +58,13 @@ export function IntentChat(): JSX.Element {
   const offline = useMockCompetition(useAgents ? null : parsed)
   const competition = useAgents ? live : offline
 
-  // Only the live path produces an executable route; the offline race has
-  // nothing to sign.
-  const swap = useSwapExecution(useAgents ? live.route : undefined)
+  // The route of whichever agent the user chose — not the winner's. Executing
+  // always signed `live.route`, so picking any other agent quietly submitted
+  // the recommended agent's trade instead of the one on the card that was
+  // clicked. Falls back to the winner's route only when an agent named none.
+  const chosenRoute =
+    executingKey !== null ? (live.routesByAgent[executingKey] ?? live.route) : undefined
+  const swap = useSwapExecution(useAgents ? chosenRoute : undefined)
 
   // The swap's hash belongs on the intent that asked for it. Without this the
   // hash was shown once in the confirmation card and then dropped, leaving
@@ -73,6 +77,15 @@ export function IntentChat(): JSX.Element {
     // mutation object would record the same hash repeatedly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedId, settledHash])
+
+  // Declining in the wallet returns the swap to `review`, but the clicked
+  // agent stayed marked as executing — its button spun forever and the others
+  // could not be chosen. Releasing it lets the user pick again, including a
+  // different agent.
+  const swapFailed = swap.phase === 'failed'
+  useEffect(() => {
+    if (swapFailed) setExecutingKey(null)
+  }, [swapFailed])
 
   function handleSubmit(text: string): void {
     setMessage(text)
