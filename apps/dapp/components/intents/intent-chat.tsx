@@ -1,7 +1,7 @@
 'use client'
 
 import { Sparkles } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
@@ -67,9 +67,19 @@ export function IntentChat(): JSX.Element {
   // always signed `live.route`, so picking any other agent quietly submitted
   // the recommended agent's trade instead of the one on the card that was
   // clicked. Falls back to the winner's route only when an agent named none.
-  const chosenRoute =
-    executingKey !== null ? (live.routesByAgent[executingKey] ?? live.route) : undefined
-  const swap = useSwapExecution(useAgents ? chosenRoute : undefined)
+  //
+  // Memoised on the identifying values rather than recomputed inline: the
+  // consumer resets its state whenever this reference changes, so returning a
+  // fresh one on every render reset the confirm card continuously and it never
+  // appeared.
+  const routesByAgent = live.routesByAgent
+  const winnerRoute = live.route
+  const chosenRoute = useMemo(() => {
+    if (!useAgents || executingKey === null) return undefined
+    return routesByAgent[executingKey] ?? winnerRoute
+  }, [useAgents, executingKey, routesByAgent, winnerRoute])
+
+  const swap = useSwapExecution(chosenRoute)
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -160,7 +170,11 @@ export function IntentChat(): JSX.Element {
     // Refuse an order the account cannot fund. Without this a wallet holding
     // $12 could open a $4,000 limit order, which the app then displayed as a
     // live position for hours — an order that could only ever fail.
-    if (slug === 'stellar') {
+    // Only refuse on a known shortfall. Balances load asynchronously, and
+    // checking before they arrive reported "connect a wallet" to a connected
+    // user and blocked the whole flow — a wallet that is merely slow is not a
+    // wallet that cannot pay.
+    if (slug === 'stellar' && balances !== undefined) {
       const afford = checkAffordability(parsed.input.amountIn, parsed.input.tokenIn, balances)
       if (!afford.ok) {
         setAffordError(afford.message)
