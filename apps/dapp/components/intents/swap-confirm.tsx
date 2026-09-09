@@ -36,12 +36,15 @@ export function SwapConfirm({
   onReset,
 }: {
   phase: SwapPhase
-  quote?: SwapQuote
-  sendDisplay?: string
-  receiveDisplay?: string
-  hash?: string
-  explorerUrl?: string
-  error?: string
+  // Explicit `| undefined` rather than `?`: under exactOptionalPropertyTypes a
+  // caller spreading state cannot pass an absent-or-undefined value into an
+  // optional prop, and every one of these is genuinely absent before a quote.
+  quote: SwapQuote | undefined
+  sendDisplay: string | undefined
+  receiveDisplay: string | undefined
+  hash: string | undefined
+  explorerUrl: string | undefined
+  error: string | undefined
   onConfirm: () => void
   onReset: () => void
 }): JSX.Element | null {

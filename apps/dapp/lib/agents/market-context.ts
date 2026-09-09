@@ -4,6 +4,7 @@ import type { MarketContext, QuotedRoute } from './brain'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
 import { collectQuotes } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
+import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { venues } from '../venues'
 
@@ -58,6 +59,25 @@ export async function quoteRoutes(
     hops: quote.path.length,
     quote,
   }))
+}
+
+/**
+ * Market context with live prices where they are available.
+ *
+ * Async because the price lookup is a network call. The synchronous version is
+ * kept for callers that cannot await, and for chains with no price source.
+ */
+export async function buildMarketContextAsync(chain: string): Promise<MarketContext> {
+  const base = buildMarketContext(chain)
+  if (chain !== 'stellar') return base
+
+  const prices = await fetchMarketPrices()
+  return {
+    ...base,
+    // Real mainnet prices replace the indicative table. Testnet execution
+    // still quotes its own synthetic rate; agents are told which is which.
+    prices: { ...base.prices, ...toPriceTable(prices) },
+  }
 }
 
 export function buildMarketContext(chain: string): MarketContext {

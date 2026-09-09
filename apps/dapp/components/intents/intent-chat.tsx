@@ -10,6 +10,8 @@ import { useCreateIntent } from '../../hooks/use-intent'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
+import { SwapConfirm } from './swap-confirm'
+import { useSwapExecution } from '../../hooks/use-swap-execution'
 import { ComposerInput } from './composer-input'
 
 function TrafficLights(): JSX.Element {
@@ -36,6 +38,10 @@ export function IntentChat(): JSX.Element {
   const live = useCompetition(useAgents ? parsed : null, slug)
   const offline = useMockCompetition(useAgents ? null : parsed)
   const competition = useAgents ? live : offline
+
+  // Only the live path produces an executable route; the offline race has
+  // nothing to sign.
+  const swap = useSwapExecution(useAgents ? live.route : undefined)
 
   function handleSubmit(text: string): void {
     setMessage(text)
@@ -91,6 +97,20 @@ export function IntentChat(): JSX.Element {
               state={competition}
               onExecute={handleExecute}
               executingKey={executingKey}
+            />
+
+            {/* Appears only once an agent has won with an executable route, so
+                the race is never interrupted by a confirmation prompt. */}
+            <SwapConfirm
+              phase={swap.phase}
+              quote={swap.quote}
+              sendDisplay={swap.sendDisplay}
+              receiveDisplay={swap.receiveDisplay}
+              hash={swap.hash}
+              explorerUrl={swap.explorerUrl}
+              error={swap.error}
+              onConfirm={swap.confirm}
+              onReset={swap.reset}
             />
           </div>
         )}

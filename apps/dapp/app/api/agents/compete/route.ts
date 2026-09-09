@@ -5,7 +5,7 @@ import type { AgentProposalResult, AgentStrategyKey } from '../../../../lib/agen
 import { ALL_STRATEGIES } from '../../../../lib/agents/brain'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
-import { buildMarketContext, quoteRoutes } from '../../../../lib/agents/market-context'
+import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { buildMockProposal } from '../../../../lib/agents/brains/mock-brain'
 import { getAgentBrain } from '../../../../lib/agents/registry'
 import { isBuyIntent, pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
@@ -57,7 +57,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const competitionId = randomUUID()
   const intent = parseIntent(text)
-  const market = buildMarketContext(chain)
+  const market = await buildMarketContextAsync(chain)
   const brain = getAgentBrain()
 
   // Priced before the agents run, so they choose between real routes rather

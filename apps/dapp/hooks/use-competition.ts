@@ -17,15 +17,27 @@ import type { ParsedIntent } from '../lib/parse-intent'
  * Cards reveal on a floor rather than a fixed timer — see `lib/agents/pacing.ts`
  * for why.
  */
+export interface CompetitionWithRoute extends CompetitionState {
+  /**
+   * The winning agent's chosen route, when it chose one.
+   *
+   * Carried through from the winner frame so the confirm step offers the exact
+   * quote the competition was decided on, rather than re-pricing and showing
+   * the user a different number than the agents compared.
+   */
+  route?: unknown
+}
+
 export function useCompetition(
   parsed: ParsedIntent | null,
   chain: string
-): CompetitionState {
+): CompetitionWithRoute {
   const [proposals, setProposals] = useState<Record<string, AgentProposalView>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
   const [secondsLeft, setSecondsLeft] = useState(WINDOW_SECONDS)
   const [winner, setWinner] = useState<string | null>(null)
+  const [route, setRoute] = useState<unknown>(undefined)
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -35,6 +47,7 @@ export function useCompetition(
       setPhase('idle')
       setSecondsLeft(WINDOW_SECONDS)
       setWinner(null)
+      setRoute(undefined)
       return
     }
 
@@ -124,6 +137,7 @@ export function useCompetition(
             if (frame.type === 'competition:winner') {
               const winnerKey = frame.winner
               const scores = frame.scores
+              if (frame.route !== undefined) setRoute(frame.route)
               setProposals((prev) => {
                 const next = { ...prev }
                 for (const [key, score] of Object.entries(scores)) {
@@ -163,5 +177,12 @@ export function useCompetition(
     }
   }, [parsed, chain])
 
-  return { proposals, revealed, phase, secondsLeft, winner }
+  return {
+    proposals,
+    revealed,
+    phase,
+    secondsLeft,
+    winner,
+    ...(route !== undefined ? { route } : {}),
+  }
 }

@@ -163,6 +163,14 @@ function routeLines(req: ProposalRequest): string[] {
     ),
     'Choose one by putting its id in routeId. These prices are measured, not estimates —',
     'do not quote a better number than the route you picked actually offers.',
+    '',
+    // Said outright because the two numbers genuinely disagree. Without this an
+    // agent notices the contradiction and splits the difference, quoting a
+    // price neither the market nor the route supports.
+    'Note: this is a testnet. Its liquidity is synthetic, so the rate a route',
+    'offers can differ sharply from the real market prices listed above. Quote',
+    'the rate of the route you picked. Use the market prices to judge whether',
+    'the trade makes sense, not to second-guess the route.',
   ]
 }
 
