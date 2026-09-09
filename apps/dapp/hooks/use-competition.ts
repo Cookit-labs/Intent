@@ -11,6 +11,15 @@ import { STRATEGIES, STRATEGY_ORDER } from '../lib/agents/strategies'
 import type { ParsedIntent } from '../lib/parse-intent'
 
 /**
+ * How long to wait before giving up on the stream entirely.
+ *
+ * Comfortably past the route's 60s-per-agent ceiling: this catches a
+ * connection that has stopped delivering without failing, which would
+ * otherwise leave the competition panel waiting on agents forever.
+ */
+const STREAM_TIMEOUT_MS = 120_000
+
+/**
  * Runs a competition against the agent route, returning the same shape as the
  * offline hook so the panel does not care which one is driving it.
  *
@@ -28,10 +37,7 @@ export interface CompetitionWithRoute extends CompetitionState {
   route?: unknown
 }
 
-export function useCompetition(
-  parsed: ParsedIntent | null,
-  chain: string
-): CompetitionWithRoute {
+export function useCompetition(parsed: ParsedIntent | null, chain: string): CompetitionWithRoute {
   const [proposals, setProposals] = useState<Record<string, AgentProposalView>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
@@ -71,13 +77,29 @@ export function useCompetition(
     setSecondsLeft(WINDOW_SECONDS)
     setWinner(null)
 
+    // A stream that stalls without erroring would leave the panel waiting on
+    // agents that will never answer. Past this point it is not slowness but a
+    // connection that is not coming back, and the user is owed an ending.
+    timeouts.push(
+      setTimeout(() => {
+        if (cancelled) return
+        abort.abort()
+        for (const key of STRATEGY_ORDER) {
+          setRevealed((prev) => ({ ...prev, [key]: true }))
+        }
+        setPhase('decided')
+      }, STREAM_TIMEOUT_MS)
+    )
+
     // The countdown is cosmetic: a 30-second window compressed into the race
     // duration, matching the original animation.
     let raf = 0
     const tick = (): void => {
       if (cancelled) return
       const elapsed = Date.now() - startedAt
-      setSecondsLeft(Math.ceil(Math.max(0, WINDOW_SECONDS - (elapsed / RACE_DURATION) * WINDOW_SECONDS)))
+      setSecondsLeft(
+        Math.ceil(Math.max(0, WINDOW_SECONDS - (elapsed / RACE_DURATION) * WINDOW_SECONDS))
+      )
       if (elapsed < RACE_DURATION) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -151,7 +173,10 @@ export function useCompetition(
                   setWinner(winnerKey)
                   setPhase('decided')
                 },
-                Math.max(0, planDecision(DECIDE_AT, lastRevealRef.current) - (Date.now() - startedAt))
+                Math.max(
+                  0,
+                  planDecision(DECIDE_AT, lastRevealRef.current) - (Date.now() - startedAt)
+                )
               )
             }
           }

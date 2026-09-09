@@ -7,6 +7,28 @@ import { Bot, Loader2, Radio } from 'lucide-react'
 import type { CompetitionState } from '../../hooks/use-mock-competition'
 import { AGENTS } from '../../lib/mock-competition'
 
+/**
+ * Three dots that keep moving while an agent reasons.
+ *
+ * Staggered rather than blinking together so the motion reads as ongoing work.
+ * Reduced-motion users get static dots — the placeholder's presence already
+ * carries the meaning, so the animation is decoration.
+ */
+function ThinkingDots(): JSX.Element {
+  return (
+    <span className="flex items-center gap-1" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="bg-muted-foreground/60 h-1.5 w-1.5 rounded-full motion-reduce:animate-none"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
+        />
+      ))}
+    </span>
+  )
+}
+
 function money(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -23,10 +45,16 @@ export function CompetitionPanel({
   const { proposals, revealed, phase, winner } = state
   const decided = phase === 'decided'
   const revealedAgents = AGENTS.filter((a) => revealed[a.key])
+  // Agents answer independently and slowly — tens of seconds each. The panel
+  // used to show a "broadcasting" line only while *nothing* had arrived, so as
+  // soon as the first agent replied every sign of activity vanished and the
+  // screen sat motionless while the rest were still working. That reads as a
+  // crash, not as progress.
+  const pendingAgents = decided ? [] : AGENTS.filter((a) => !revealed[a.key])
 
   return (
     <div className="flex flex-col gap-3">
-      {revealedAgents.length === 0 ? (
+      {revealedAgents.length === 0 && !decided ? (
         <div className="text-muted-foreground flex items-center gap-2 text-sm">
           <Radio className="h-4 w-4 animate-pulse motion-reduce:animate-none" />
           Broadcasting to the agent network…
@@ -100,6 +128,33 @@ export function CompetitionPanel({
           )
         })}
       </AnimatePresence>
+
+      {/* One placeholder per agent still thinking, named so the wait is
+          legible: the user can see who is outstanding rather than wondering
+          whether anything is still happening. */}
+      {pendingAgents.map((agent) => (
+        <div key={`pending-${agent.key}`} className="flex items-start gap-3">
+          <span
+            className="mt-0.5 h-9 w-9 shrink-0 animate-pulse rounded-full opacity-40 motion-reduce:animate-none"
+            style={{ backgroundImage: agent.gradient }}
+            aria-hidden
+          />
+          <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-semibold">{agent.name}</span>
+              <span className="text-muted-foreground text-xs">{agent.tag}</span>
+            </div>
+            <div
+              className="mt-2 flex items-center gap-1.5"
+              role="status"
+              aria-label={`${agent.name} is thinking`}
+            >
+              <ThinkingDots />
+              <span className="text-muted-foreground text-xs">thinking…</span>
+            </div>
+          </div>
+        </div>
+      ))}
 
       {decided && Object.values(proposals).some((p) => p.degraded) ? (
         <p className="text-muted-foreground mt-1 text-center text-[11px]">

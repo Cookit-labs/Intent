@@ -69,3 +69,62 @@ describe('order type', () => {
     expect(parseIntent(text, PRICES).input.type).toBe(expected)
   })
 })
+
+/**
+ * A dollar budget must survive parsing unchanged.
+ *
+ * "Buy $200 worth of XLM" was escrowing $37. The non-swap branch multiplied a
+ * figure that was already in dollars by the token price, so the order shrank by
+ * whatever XLM happened to cost — and moved with the market, meaning the same
+ * sentence meant something different every hour. Buy-side intents never carry a
+ * swap keyword, so this path took every one of them.
+ */
+describe('budget intents keep their stated size', () => {
+  const live = { XLM: 0.1838, USDC: 1, USDT: 1, WETH: 3500 }
+
+  it('escrows the stated dollar amount, not a price-scaled one', () => {
+    expect(parseIntent('Buy $200 worth of XLM', live).escrowUsd).toBe(200)
+  })
+
+  it('holds regardless of what the token costs', () => {
+    // The defect's signature: the size tracked the price.
+    const cheap = parseIntent('Buy $200 worth of XLM', { ...live, XLM: 0.05 })
+    const dear = parseIntent('Buy $200 worth of XLM', { ...live, XLM: 4.2 })
+    expect(cheap.escrowUsd).toBe(200)
+    expect(dear.escrowUsd).toBe(200)
+  })
+
+  it('reads an accumulate intent with splits and a price cap', () => {
+    const p = parseIntent('Accumulate $200 worth of XLM below a $0.19 price across 6 splits', live)
+    expect(p.escrowUsd).toBe(200)
+    // The cap, not the budget. Taking the first dollar figure read this as a
+    // $200 limit price.
+    expect(p.targetPriceUsd).toBeCloseTo(0.19, 5)
+  })
+
+  it('reads a price cap written with an article', () => {
+    // "below a $0.19 price" — the article used to break the match entirely.
+    expect(parseIntent('Buy $200 of XLM below a $0.19 price', live).targetPriceUsd).toBeCloseTo(
+      0.19,
+      5
+    )
+  })
+
+  it('still treats a bare quantity as a token count', () => {
+    // "Buy 200 XLM" is 200 XLM, roughly $37 — the one case where scaling by
+    // price is correct.
+    expect(parseIntent('Buy 200 XLM', live).escrowUsd).toBe(37)
+  })
+
+  it('does not mistake a limit price for a budget', () => {
+    const p = parseIntent('Sell 100 XLM at $0.25 or better', live)
+    expect(p.input.amountIn).toBe('100')
+    expect(p.targetPriceUsd).toBeCloseTo(0.25, 5)
+  })
+
+  it('leaves swap sizing unchanged', () => {
+    const p = parseIntent('Swap $30 worth of XLM to USDC', live)
+    expect(p.escrowUsd).toBe(30)
+    expect(Number(p.input.amountIn)).toBeCloseTo(30 / 0.1838, 2)
+  })
+})

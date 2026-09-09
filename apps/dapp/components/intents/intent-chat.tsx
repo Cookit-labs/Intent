@@ -45,7 +45,11 @@ export function IntentChat(): JSX.Element {
 
   function handleSubmit(text: string): void {
     setMessage(text)
-    setParsed(parseIntent(text))
+    // Parsed against the same live prices the server uses. Without them this
+    // fell back to an indicative table that had XLM at $0.58 against a real
+    // ~$0.18, so the same sentence produced one size here and a different one
+    // in the competition.
+    setParsed(parseIntent(text, swap.usdPrices))
     setExecutingKey(null)
   }
 

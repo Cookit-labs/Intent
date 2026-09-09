@@ -142,11 +142,20 @@ function scaleAmount(raw: string, suffix: string | undefined): number {
   return n
 }
 
-// A price target if the text names one (e.g. "below $3,200", "at $30k").
+/**
+ * A price target if the text names one (e.g. "below $3,200", "at $30k").
+ *
+ * A qualifier is required. Taking the first dollar figure in the sentence read
+ * "buy $200 of XLM below $0.19" as a $200 limit price — the budget, not the
+ * cap — because the budget is written first. A price target is always
+ * introduced by a word like "below" or "at"; an unqualified figure is a size.
+ */
 function targetPrice(text: string): number | null {
-  const dollar = text.match(/\$\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
-  if (dollar) return scaleAmount(dollar[1]!, dollar[2])
-  const worded = text.match(/(?:below|above|at|under|over)\s+\$?\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
+  // The optional article matters: people write "below a $0.19 price", and
+  // requiring the number to follow the qualifier directly missed it entirely.
+  const worded = text.match(
+    /(?:below|above|at|under|over|beneath|max|maximum|min|minimum)\s+(?:a|an|the)?\s*\$?\s?([\d,]+(?:\.\d+)?)\s?([km])?/i
+  )
   if (worded) return scaleAmount(worded[1]!, worded[2])
   return null
 }
@@ -187,6 +196,10 @@ export function parseIntent(
   // Prefer the quantity written next to the input token. A limit order names
   // two numbers — "sell 100 XLM at $0.25" — and taking the first one found is
   // a coin toss between the size and the price.
+  // Sell-side intents name a quantity of what leaves; buy-side name a quantity
+  // of what arrives. The two need opposite treatment when no dollar sign is
+  // present, so the distinction is made once here.
+  const isSellSide = /sell/i.test(outcome)
   const tokenQty = amountForToken(outcome, tokenIn)
   // The dollar amount, when the size is stated as a budget rather than a
   // quantity. Read separately so "$30 worth of XLM" does not reuse the 30 as a
@@ -217,20 +230,39 @@ export function parseIntent(
     ? (dollarAmount ?? firstNumber(outcome) ?? 1)
     : (tokenQty ?? firstNumber(outcome) ?? 1)
   const sendPrice = priceOf(tokenIn) ?? 1
-  const escrowUsd =
-    swap !== undefined
-      ? pricedInUsd
-        ? Math.round(num)
-        : Math.round(num * sendPrice)
+  // A figure written with a dollar sign is already in dollars. The non-swap
+  // branch used to multiply it by the token price regardless, so "buy $200 of
+  // XLM" escrowed $200 x $0.18 = $37 — and, worse, the number moved with the
+  // price, so the same sentence meant something different every hour.
+  //
+  // Only a bare token quantity ("buy 200 XLM") needs converting to USD.
+  const escrowUsd = pricedInUsd
+    ? Math.round(num)
+    : swap !== undefined
+      ? Math.round(num * sendPrice)
       : num > 0 && num < 1000
         ? Math.round(num * referencePriceUsd)
         : Math.round(num || 5000)
 
   // For a swap this is the quantity of the *input* token, which is what an
   // execution actually sends.
+  // What actually leaves the account, denominated in the input token. For a
+  // stablecoin input this equals the USD figure, which is why the bug above
+  // stayed invisible for buy-side intents until the escrow was checked.
   const amountIn =
-    swap !== undefined && sendPrice > 0
-      ? (pricedInUsd ? num / sendPrice : num).toFixed(7).replace(/0+$/, '').replace(/\.$/, '')
+    sendPrice > 0
+      ? (pricedInUsd
+          ? num / sendPrice
+          : // A bare quantity names the token being *bought* on a buy-side
+            // intent ("buy 200 XLM"), so the amount sent is its USD value in
+            // the input token — not 200 of the input token.
+            swap === undefined && !isSellSide
+            ? (num * referencePriceUsd) / sendPrice
+            : num
+        )
+          .toFixed(7)
+          .replace(/0+$/, '')
+          .replace(/\.$/, '')
       : String(escrowUsd)
   const minAmountOut = (escrowUsd / referencePriceUsd).toFixed(4)
 
