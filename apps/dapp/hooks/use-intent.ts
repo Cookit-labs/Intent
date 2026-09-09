@@ -2,6 +2,7 @@
 
 import type { CreateIntentInput, Intent } from '@intent/types'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useRef } from 'react'
 
 import { getIntentClient } from '../lib/sdk'
 import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
@@ -47,24 +48,40 @@ export function useIntents(chain?: string) {
   const setIntents = useIntentStore((s) => s.setIntents)
   const { data: prices } = useMarketPrices()
 
+  // Prices are read inside the query, never part of its key. Keying on them
+  // minted a brand-new query every time the price refreshed, so React Query
+  // saw a cache miss, `isLoading` went true, and the whole list collapsed to
+  // skeletons — a visible flicker every thirty seconds on a page that had not
+  // changed. A ref keeps the latest prices reachable without identifying the
+  // query by them.
+  const pricesRef = useRef(prices)
+  pricesRef.current = prices
+
   return useQuery({
-    queryKey: [...(chain === undefined ? intentKeys.all : intentKeys.forChain(chain)), prices],
+    queryKey: chain === undefined ? intentKeys.all : intentKeys.forChain(chain),
     queryFn: async () => {
-      const data = await client.intents.list(chain, prices)
+      const data = await client.intents.list(chain, pricesRef.current)
       setIntents(data)
       return data
     },
     // Limit orders are open positions: they fill when the market reaches them,
     // not when the page happens to be reloaded.
     refetchInterval: 10_000,
+    // Keep showing the settled list while a refetch is in flight. Without this
+    // every poll blanks the page it is refreshing.
+    placeholderData: (previous) => previous,
   })
 }
 
 export function useIntent(id: string) {
   const { data: prices } = useMarketPrices()
+  const pricesRef = useRef(prices)
+  pricesRef.current = prices
+
   return useQuery({
-    queryKey: [...intentKeys.detail(id), prices],
-    queryFn: () => client.intents.get(id, prices),
+    queryKey: intentKeys.detail(id),
+    queryFn: () => client.intents.get(id, pricesRef.current),
+    placeholderData: (previous) => previous,
     // Poll while the intent is still progressing so the lifecycle animates.
     refetchInterval: (query) => (isLive(query.state.data) ? 1500 : false),
   })

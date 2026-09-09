@@ -11,6 +11,7 @@ import { Fragment } from 'react'
 import { intentTypeLabel } from '../../lib/intent-format'
 import { useChainHref } from '../../providers/chain-provider'
 import { useCancelIntent } from '../../hooks/use-intent'
+import { IntentTypeIcon } from './intent-type-icon'
 
 const PRICE_USD: Record<string, number> = {
   USDC: 1,
@@ -111,14 +112,16 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   return (
     <Link href={chainHref(`/intents/${intent.id}`)} className="block">
       <Card className="hover:border-foreground/40 flex gap-4 p-5 transition-colors">
-        <span
+        {/* The glyph carries the meaning on its own, so the boxed frame it
+            used to sit in was only visual weight. A cancelled row is dimmed
+            rather than outlined differently. */}
+        <IntentTypeIcon
+          type={intent.type}
           className={cn(
-            'flex h-11 w-11 shrink-0 items-center justify-center rounded-md border text-sm font-semibold',
-            view.failed ? 'border-border text-muted-foreground' : 'border-border text-foreground'
+            'mt-0.5 h-8 w-8 shrink-0',
+            view.failed ? 'text-muted-foreground' : 'text-foreground'
           )}
-        >
-          {intent.tokenOut.charAt(0)}
-        </span>
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
