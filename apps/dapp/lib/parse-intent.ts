@@ -75,6 +75,16 @@ function detectSwapPair(text: string): { from: string; to: string } | undefined 
   }
 
   const ordered = [...bySymbol.entries()].sort((a, b) => a[1] - b[1]).map(([sym]) => sym)
+
+  // "Sell 100 XLM at $0.25" names only one asset, but the direction is not
+  // ambiguous: selling X means X leaves and a stablecoin arrives. Without this
+  // the buy-shaped fallback below reads it backwards as USDC -> XLM.
+  if (ordered.length === 1 && /\bsell\b/.test(t)) {
+    const only = ordered[0]
+    if (only !== undefined && only !== 'USDC') return { from: only, to: 'USDC' }
+    return undefined
+  }
+
   if (ordered.length < 2) return undefined
 
   // First mentioned is what leaves the account, second is what arrives.
@@ -91,6 +101,31 @@ function detectToken(text: string, fallback: string): string {
     }
   }
   return fallback
+}
+
+/**
+ * The quantity attached to a specific token, e.g. the 100 in "sell 100 XLM".
+ *
+ * Anchoring to the symbol matters for limit orders: "sell 100 XLM at $0.25"
+ * contains two numbers, and taking the first one found is a coin toss between
+ * the size and the price. Returns undefined when no number sits next to the
+ * token, so the caller can fall back rather than guess.
+ */
+function amountForToken(text: string, symbol: string): number | undefined {
+  const aliases = Object.entries(TOKEN_ALIASES)
+    .filter(([, sym]) => sym === symbol)
+    .map(([alias]) => alias)
+  if (aliases.length === 0) return undefined
+
+  const t = text.toLowerCase().replace(/,/g, '')
+  for (const alias of aliases) {
+    // "100 xlm" and "xlm 100" both occur in natural phrasing.
+    const before = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(?:worth\\s+of\\s+)?${alias}\\b`).exec(t)
+    if (before?.[1] !== undefined) return Number(before[1])
+    const after = new RegExp(`${alias}\\b\\s*(\\d+(?:\\.\\d+)?)`).exec(t)
+    if (after?.[1] !== undefined) return Number(after[1])
+  }
+  return undefined
 }
 
 // First plain number in the text (e.g. "2.0 ETH", "15,000 USDC").
@@ -149,10 +184,38 @@ export function parseIntent(
     livePrices?.[symbol] ?? REFERENCE_PRICES_USD[symbol]
   const referencePriceUsd = priceOf(tokenOut) ?? 3500
 
-  const num = firstNumber(outcome) ?? 1
-  // "$30 of X" is a USD figure; "30 X" is a quantity of X. The dollar sign is
-  // the only reliable signal, so it decides rather than the magnitude.
-  const pricedInUsd = /\$\s*[\d,]/.test(outcome) || /\bworth\b/.test(outcome.toLowerCase())
+  // Prefer the quantity written next to the input token. A limit order names
+  // two numbers — "sell 100 XLM at $0.25" — and taking the first one found is
+  // a coin toss between the size and the price.
+  const tokenQty = amountForToken(outcome, tokenIn)
+  // The dollar amount, when the size is stated as a budget rather than a
+  // quantity. Read separately so "$30 worth of XLM" does not reuse the 30 as a
+  // token count.
+  const dollarAmount = (() => {
+    const m = /\$\s*([\d,]+(?:\.\d+)?)/.exec(outcome)
+    return m?.[1] !== undefined ? Number(m[1].replace(/,/g, '')) : undefined
+  })()
+
+  // "$30 of X" is a USD figure; "30 X" is a quantity of X.
+  //
+  // A dollar sign directly on the size wins, since "$30 worth of XLM" states a
+  // budget. But a limit order also carries a dollar sign — on the *price*, as
+  // in "sell 100 XLM at $0.25" — so the marker only counts when it precedes
+  // the token rather than trailing a limit clause.
+  // Requires an actual token name after the figure, not merely a letter:
+  // "$0.25 or better" would otherwise read as a budget because "or" starts
+  // with one, turning a limit price into an order size.
+  const symbols = Object.keys(TOKEN_ALIASES).join('|')
+  const budgetForm = new RegExp(
+    `\\$\\s*[\\d,.]+\\s*(?:worth\\s+)?(?:of\\s+)?(?:${symbols})\\b`,
+    'i'
+  ).test(outcome)
+  const pricedInUsd = budgetForm || (tokenQty === undefined && /\$\s*[\d,]/.test(outcome))
+
+  // A budget is measured in dollars; anything else is a quantity of the token.
+  const num = pricedInUsd
+    ? (dollarAmount ?? firstNumber(outcome) ?? 1)
+    : (tokenQty ?? firstNumber(outcome) ?? 1)
   const sendPrice = priceOf(tokenIn) ?? 1
   const escrowUsd =
     swap !== undefined

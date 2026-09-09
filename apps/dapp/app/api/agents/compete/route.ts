@@ -22,6 +22,11 @@ import { toBaseUnits } from '../../../../lib/swap/assets'
  *
  * Node runtime: `node:crypto` and the provider client are not edge-safe.
  */
+/** Limit orders refuse to trade through their price; market orders do not. */
+function isLimitOrder(type: string): boolean {
+  return type === 'limit_buy' || type === 'limit_sell'
+}
+
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -75,7 +80,19 @@ export async function POST(request: Request): Promise<Response> {
       // The parsed input quantity, which for a swap is what actually leaves
       // the account. Deriving it from the USD figure instead would re-introduce
       // the rounding the parser just resolved.
-      toBaseUnits(intent.input.amountIn)
+      toBaseUnits(intent.input.amountIn),
+      undefined,
+      // A limit order states a price it will not trade through. Expressed as a
+      // minimum output so the quoter can decline: sell 100 XLM at $0.25 means
+      // at least 25 USDC must come back, and anything less is not the trade
+      // that was asked for.
+      isLimitOrder(intent.input.type) && intent.targetPriceUsd > 0
+        ? {
+            minReceive: toBaseUnits(
+              (Number(intent.input.amountIn) * intent.targetPriceUsd).toFixed(7)
+            ),
+          }
+        : {}
     )
     if (routes.length > 0) market.routes = routes
   } catch {

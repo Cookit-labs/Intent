@@ -10,7 +10,7 @@ type Tab = 'compose' | 'activity'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'compose', label: 'Compose' },
-  { id: 'activity', label: 'Activity' },
+  { id: 'activity', label: 'History' },
 ]
 
 export default function IntentsPage(): JSX.Element {

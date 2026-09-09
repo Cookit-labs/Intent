@@ -27,12 +27,24 @@ import { venues } from '../venues'
  * competition — the agents reason about the intent and simply cannot offer
  * execution, which is honest rather than broken.
  */
+export interface QuoteRoutesOptions {
+  /**
+   * Minimum acceptable output, in base units.
+   *
+   * A limit order only makes sense if it can decline. Without this a "sell 100
+   * XLM at $0.25" quote is indistinguishable from a market order and fills at
+   * whatever the book offers, which is the opposite of what was asked.
+   */
+  minReceive?: string
+}
+
 export async function quoteRoutes(
   chain: string,
   fromSymbol: string,
   toSymbol: string,
   amount: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: QuoteRoutesOptions = {}
 ): Promise<QuotedRoute[]> {
   if (chain !== 'stellar') return []
 
@@ -47,7 +59,14 @@ export async function quoteRoutes(
     signal
   )
 
-  return quotes.map((quote, index) => ({
+  // A limit that the market cannot meet returns nothing, so the competition
+  // reports "no route" rather than offering a fill the user did not ask for.
+  const acceptable =
+    options.minReceive === undefined
+      ? quotes
+      : quotes.filter((q) => BigInt(q.destAmount) >= BigInt(options.minReceive as string))
+
+  return acceptable.map((quote, index) => ({
     // Indexed by source so an agent naming a route cannot accidentally match
     // one from a different competition.
     id: `${quote.source}-${index + 1}`,

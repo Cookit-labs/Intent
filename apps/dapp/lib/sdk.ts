@@ -38,57 +38,16 @@ function agedStatus(createdAtIso: string, base: IntentStatus): IntentStatus {
   return 'settled'
 }
 
+/**
+ * No seeded intents.
+ *
+ * This used to return four fabricated intents with invented transaction
+ * hashes. They rendered identically to real ones, so a user could not tell
+ * which of their trades had actually happened — the history is only useful if
+ * everything in it is true.
+ */
 function seed(): Intent[] {
-  const base = {
-    userId: 'user_local',
-    deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
-    createdAt: now(),
-    updatedAt: now(),
-  }
-  return [
-    {
-      ...base,
-      id: 'intent_1',
-      type: 'market_buy',
-      tokenIn: 'USDC',
-      tokenOut: 'WETH',
-      amountIn: '5000',
-      minAmountOut: '1.42',
-      status: 'settled',
-      escrowTxHash: '0xa1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
-      settlementTxHash: '0xb2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3',
-    },
-    {
-      ...base,
-      id: 'intent_2',
-      type: 'accumulate',
-      tokenIn: 'USDC',
-      tokenOut: 'ARB',
-      amountIn: '2500',
-      minAmountOut: '1980',
-      status: 'competition',
-    },
-    {
-      ...base,
-      id: 'intent_3',
-      type: 'rebalance',
-      tokenIn: 'USDT',
-      tokenOut: 'USDC',
-      amountIn: '10000',
-      minAmountOut: '9985',
-      status: 'executing',
-    },
-    {
-      ...base,
-      id: 'intent_4',
-      type: 'limit_sell',
-      tokenIn: 'WETH',
-      tokenOut: 'USDC',
-      amountIn: '3',
-      minAmountOut: '10500',
-      status: 'failed',
-    },
-  ]
+  return []
 }
 
 const store: Intent[] = seed()
