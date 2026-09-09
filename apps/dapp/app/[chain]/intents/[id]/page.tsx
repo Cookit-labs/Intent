@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import { IntentStatusBadge } from '../../../../components/intents/intent-status-badge'
 import { useIntent } from '../../../../hooks/use-intent'
 import { intentTypeLabel } from '../../../../lib/intent-format'
+import { useChain } from '../../../../providers/chain-provider'
 
 const STEPS: { status: IntentStatus; label: string }[] = [
   { status: 'pending', label: 'Escrowed' },
@@ -26,6 +27,7 @@ export default function IntentDetailPage(): JSX.Element {
   const params = useParams<{ id: string; chain: string }>()
   const chain = params.chain
   const { data: intent, isLoading, isError, error } = useIntent(params.id)
+  const { descriptor } = useChain()
 
   if (isLoading) {
     return (
@@ -143,8 +145,12 @@ export default function IntentDetailPage(): JSX.Element {
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Settlement</p>
+            {/* Read from the active chain rather than hardcoded: this said
+                "USDC on Arc" on every intent, including Stellar ones signed
+                with a Stellar wallet. */}
             <p className="text-foreground flex items-center gap-1">
-              USDC on Arc <Badge variant="outline">testnet</Badge>
+              {intent.tokenIn} on {descriptor.name}{' '}
+              <Badge variant="outline">{descriptor.networkLabel}</Badge>
             </p>
           </div>
         </div>

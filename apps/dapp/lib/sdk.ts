@@ -8,7 +8,14 @@ import type { CreateIntentInput, Intent, IntentStatus } from '@intent/types'
  */
 export interface IntentApi {
   create(input: CreateIntentInput): Promise<Intent>
-  list(): Promise<Intent[]>
+  /**
+   * Intents for one chain.
+   *
+   * Chain-scoped because an intent is a promise about a specific network: a
+   * Stellar wallet cannot act on an Arc order, and listing both together
+   * offered the user trades they had no way to settle.
+   */
+  list(chain?: string): Promise<Intent[]>
   get(id: string): Promise<Intent>
 }
 
@@ -102,6 +109,7 @@ const mockClient: DappClient = {
         amountIn: input.amountIn,
         minAmountOut: input.minAmountOut,
         deadline: input.deadline,
+        ...(input.chain !== undefined ? { chain: input.chain } : {}),
         status: 'pending',
         createdAt: now(),
         updatedAt: now(),
@@ -110,9 +118,14 @@ const mockClient: DappClient = {
       persist(store)
       return created
     },
-    async list() {
+    async list(chain) {
       await delay(300)
-      return store.map(project)
+      const all = store.map(project)
+      if (chain === undefined) return all
+      // Intents recorded before chains were tracked have no slug. They are
+      // kept rather than hidden — a settled trade disappearing from history
+      // is worse than one appearing under both chains.
+      return all.filter((i) => i.chain === undefined || i.chain === chain)
     },
     async get(intentId) {
       await delay(200)

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
+import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
 import { TokenIcon } from '../ui/token-icon'
 
@@ -33,14 +34,27 @@ function when(iso: string): string {
 
 export function SwapHistory(): JSX.Element | null {
   const { address, isConnected } = useWallet()
+  const { slug, descriptor } = useChain()
+  // This reads Stellar's ledger specifically. Running it while Arc is active
+  // would show Stellar trades under an Arc wallet, which is exactly the
+  // cross-chain bleed the chain segment exists to prevent.
+  const supported = slug === 'stellar'
 
   const { data, isLoading } = useQuery({
-    queryKey: ['swap-history', address],
+    queryKey: ['swap-history', slug, address],
     queryFn: () => fetchSwapHistory(address as string),
-    enabled: isConnected && address !== undefined,
+    enabled: supported && isConnected && address !== undefined,
     // Settled trades do not change, so this only needs to catch new ones.
     staleTime: 30_000,
   })
+
+  if (!supported) {
+    return (
+      <Card className="text-muted-foreground p-6 text-sm">
+        On-chain swap history is not available on {descriptor.name} yet.
+      </Card>
+    )
+  }
 
   if (!isConnected) {
     return (
@@ -62,7 +76,9 @@ export function SwapHistory(): JSX.Element | null {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-muted-foreground flex items-baseline justify-between text-xs">
-        <span>On-chain swaps</span>
+        {/* Named by chain: history is per-network, and saying so removes any
+            doubt about which ledger these came from. */}
+        <span>On-chain swaps · {descriptor.name}</span>
         <span>{swaps.length}</span>
       </div>
 

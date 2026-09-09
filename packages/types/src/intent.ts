@@ -1,3 +1,5 @@
+import type { ChainSlug } from './chain'
+
 export type IntentStatus =
   | 'pending'
   | 'competition'
@@ -19,6 +21,14 @@ export type IntentType =
 export interface Intent {
   id: string
   userId: string
+  /**
+   * Which chain this intent belongs to.
+   *
+   * Optional because intents recorded before chains were distinguished carry
+   * no slug, and dropping them from history would be worse than showing them.
+   * Everything created from here on sets it.
+   */
+  chain?: ChainSlug
   type: IntentType
   tokenIn: string
   tokenOut: string
@@ -33,6 +43,7 @@ export interface Intent {
 }
 
 export interface CreateIntentInput {
+  chain?: ChainSlug
   type: IntentType
   tokenIn: string
   tokenOut: string

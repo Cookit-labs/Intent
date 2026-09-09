@@ -10,6 +10,9 @@ const client = getIntentClient()
 
 export const intentKeys = {
   all: ['intents'] as const,
+  // Keyed by chain so switching networks refetches rather than showing the
+  // previous chain's cached list.
+  forChain: (chain: string) => ['intents', { chain }] as const,
   detail: (id: string) => ['intents', id] as const,
 }
 
@@ -22,12 +25,12 @@ function isLive(intent?: Intent): boolean {
   )
 }
 
-export function useIntents() {
+export function useIntents(chain?: string) {
   const setIntents = useIntentStore((s) => s.setIntents)
   return useQuery({
-    queryKey: intentKeys.all,
+    queryKey: chain === undefined ? intentKeys.all : intentKeys.forChain(chain),
     queryFn: async () => {
-      const data = await client.intents.list()
+      const data = await client.intents.list(chain)
       setIntents(data)
       return data
     },

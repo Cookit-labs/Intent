@@ -63,16 +63,24 @@ export function IntentChat(): JSX.Element {
     if (!parsed || executingKey) return
     setExecutingKey(key)
 
+    // Every intent is recorded, whichever way it goes. Skipping the record for
+    // signable routes kept the user in the chat but left the trade out of
+    // history entirely, so an executed limit buy simply never appeared.
+    const input = { ...parsed.input, chain: slug }
+
     // A signable route stays here. The competition, the winner and the
     // signature all belong to one conversation, and sending the user to a
     // detail page mid-flow breaks it in two — the agents' reasoning scrolls
     // away exactly when it is being acted on. SwapConfirm is already mounted
     // below and picks the route up from the winning agent.
-    if (swap.phase !== 'idle') return
+    if (swap.phase !== 'idle') {
+      createIntent.mutate(input, { onError: () => setExecutingKey(null) })
+      return
+    }
 
     // Nothing to sign: the intent is recorded and the user is shown its
     // progress page, which is the only place that story continues.
-    createIntent.mutate(parsed.input, {
+    createIntent.mutate(input, {
       // Chain-prefixed: a bare /intents/:id hits the compatibility redirect in
       // next.config.js and lands on the default chain, so executing an intent on
       // Stellar would silently drop the user onto Arc.
