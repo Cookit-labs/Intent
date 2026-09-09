@@ -121,7 +121,19 @@ function targetPrice(text: string): number | null {
  * This is the mock stand-in for the backend's intent parser; it never fails,
  * always producing a valid CreateIntentInput so the competition can run.
  */
-export function parseIntent(raw: string): ParsedIntent {
+export function parseIntent(
+  raw: string,
+  /**
+   * Live prices, when the caller has them.
+   *
+   * The built-in table is indicative and drifts: it valued XLM at $0.58 while
+   * the market was near $0.19, so "$30 of XLM" resolved to 51.7 XLM instead of
+   * 158.5 — a third of what the user asked to spend. Callers that can fetch
+   * real prices pass them here; the table is the fallback for those that
+   * cannot, since this function is synchronous by design.
+   */
+  livePrices?: Record<string, number>
+): ParsedIntent {
   const outcome = raw.trim()
   const type = detectType(outcome)
 
@@ -133,13 +145,15 @@ export function parseIntent(raw: string): ParsedIntent {
   const swap = detectSwapPair(outcome)
   const tokenOut = swap?.to ?? detectToken(outcome, 'WETH')
   const tokenIn = swap?.from ?? (tokenOut === 'USDC' ? 'USDT' : 'USDC')
-  const referencePriceUsd = REFERENCE_PRICES_USD[tokenOut] ?? 3500
+  const priceOf = (symbol: string): number | undefined =>
+    livePrices?.[symbol] ?? REFERENCE_PRICES_USD[symbol]
+  const referencePriceUsd = priceOf(tokenOut) ?? 3500
 
   const num = firstNumber(outcome) ?? 1
   // "$30 of X" is a USD figure; "30 X" is a quantity of X. The dollar sign is
   // the only reliable signal, so it decides rather than the magnitude.
   const pricedInUsd = /\$\s*[\d,]/.test(outcome) || /\bworth\b/.test(outcome.toLowerCase())
-  const sendPrice = REFERENCE_PRICES_USD[tokenIn] ?? 1
+  const sendPrice = priceOf(tokenIn) ?? 1
   const escrowUsd =
     swap !== undefined
       ? pricedInUsd

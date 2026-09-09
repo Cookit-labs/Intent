@@ -109,6 +109,7 @@ export function IntentChat(): JSX.Element {
               hash={swap.hash}
               explorerUrl={swap.explorerUrl}
               error={swap.error}
+              usdPrices={swap.usdPrices}
               onConfirm={swap.confirm}
               onReset={swap.reset}
             />

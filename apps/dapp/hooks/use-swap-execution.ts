@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import { fromBaseUnits } from '../lib/swap/assets'
+import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
 import type { SwapQuote } from '../lib/swap/quote'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 import type { SwapPhase } from './use-swap'
@@ -25,6 +26,8 @@ export interface SwapExecutionState {
   hash?: string
   explorerUrl?: string
   error?: string
+  /** Real market prices, so the card can show what the amounts are worth. */
+  usdPrices?: Record<string, number>
 }
 
 export interface SwapExecution extends SwapExecutionState {
@@ -36,6 +39,21 @@ export function useSwapExecution(route: unknown): SwapExecution {
   const { adapter } = useChain()
   const { address, isConnected } = useWallet()
   const [state, setState] = useState<SwapExecutionState>({ phase: 'idle' })
+  const [usdPrices, setUsdPrices] = useState<Record<string, number> | undefined>(undefined)
+
+  // Fetched once per mount rather than per render: prices move slowly, and the
+  // figure here is context for a decision, not the number being signed.
+  useEffect(() => {
+    let cancelled = false
+    void fetchMarketPrices()
+      .then((p) => {
+        if (!cancelled) setUsdPrices(toPriceTable(p))
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // A new winning route replaces whatever was on screen. Without this a second
   // intent would show the previous swap's result.
@@ -149,5 +167,5 @@ export function useSwapExecution(route: unknown): SwapExecution {
     void run()
   }, [state.quote, address, isConnected, adapter])
 
-  return { ...state, confirm, reset }
+  return { ...state, ...(usdPrices !== undefined ? { usdPrices } : {}), confirm, reset }
 }

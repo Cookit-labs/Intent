@@ -56,8 +56,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const competitionId = randomUUID()
-  const intent = parseIntent(text)
+  // Prices are fetched first so the parser can size "$30 of XLM" against the
+  // real market. The built-in table drifts badly — it valued XLM at $0.58
+  // against a market near $0.19 — and sizing from it spends a third of what
+  // the user asked for.
   const market = await buildMarketContextAsync(chain)
+  const intent = parseIntent(text, market.prices)
   const brain = getAgentBrain()
 
   // Priced before the agents run, so they choose between real routes rather

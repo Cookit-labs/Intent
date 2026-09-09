@@ -17,6 +17,29 @@ import type { SwapQuote } from '../../lib/swap/quote'
  * to be one. It shows the numbers, then hands over.
  */
 
+/** The USD value of an amount, or undefined when the price is unknown. */
+function sendUsdRaw(
+  value: string | undefined,
+  symbol: string | undefined,
+  prices: Record<string, number> | undefined
+): number | undefined {
+  if (value === undefined || symbol === undefined || prices === undefined) return undefined
+  const price = prices[symbol]
+  const qty = Number(value)
+  if (price === undefined || !Number.isFinite(qty)) return undefined
+  return qty * price
+}
+
+function usdValue(
+  value: string | undefined,
+  symbol: string | undefined,
+  prices: Record<string, number> | undefined
+): string | undefined {
+  const usd = sendUsdRaw(value, symbol, prices)
+  if (usd === undefined) return undefined
+  return `~$${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+}
+
 function amount(value: string | undefined): string {
   if (value === undefined) return '—'
   const n = Number(value)
@@ -32,6 +55,7 @@ export function SwapConfirm({
   hash,
   explorerUrl,
   error,
+  usdPrices,
   onConfirm,
   onReset,
 }: {
@@ -45,6 +69,14 @@ export function SwapConfirm({
   hash: string | undefined
   explorerUrl: string | undefined
   error: string | undefined
+  /**
+   * Real USD prices per symbol, for showing what the amounts are worth.
+   *
+   * On testnet the quoted rate is synthetic and can be an order of magnitude
+   * off the real market, so showing the dollar value is what stops "88.4134
+   * USDC" reading as a sensible return on a $30 order.
+   */
+  usdPrices: Record<string, number> | undefined
   onConfirm: () => void
   onReset: () => void
 }): JSX.Element | null {
@@ -70,16 +102,21 @@ export function SwapConfirm({
           {amount(sendDisplay)} {quote?.from.code} became {amount(receiveDisplay)}{' '}
           {quote?.to.code}.
         </p>
+        {/* The explorer is the only independent proof the swap happened, so it
+            is a button rather than a dim hash the eye slides past. */}
         {explorerUrl !== undefined ? (
           <a
             href={explorerUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 font-mono text-xs underline underline-offset-2"
+            className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors"
           >
-            {hash?.slice(0, 16)}…
-            <ExternalLink className="h-3 w-3" />
+            View on Stellar Expert
+            <ExternalLink className="h-3.5 w-3.5" />
           </a>
+        ) : null}
+        {hash !== undefined ? (
+          <span className="text-muted-foreground font-mono text-xs">{hash}</span>
         ) : null}
         <Button variant="outline" size="sm" onClick={onReset} className="self-start">
           Done
@@ -105,6 +142,19 @@ export function SwapConfirm({
   }
 
   const busy = phase === 'signing' || phase === 'submitting'
+  const sendUsd = usdValue(sendDisplay, quote?.from.code, usdPrices)
+  const receiveUsd = usdValue(receiveDisplay, quote?.to.code, usdPrices)
+  // A wide gap between the two means the venue's rate disagrees with the real
+  // market, which on testnet it always does. Saying so beats letting a user
+  // read a synthetic return as a real one.
+  const distorted =
+    sendUsdRaw(sendDisplay, quote?.from.code, usdPrices) !== undefined &&
+    sendUsdRaw(receiveDisplay, quote?.to.code, usdPrices) !== undefined &&
+    Math.abs(
+      (sendUsdRaw(receiveDisplay, quote?.to.code, usdPrices) as number) /
+        (sendUsdRaw(sendDisplay, quote?.from.code, usdPrices) as number) -
+        1
+    ) > 0.25
 
   return (
     <Card className="flex flex-col gap-4 p-5">
@@ -114,6 +164,9 @@ export function SwapConfirm({
           <span className="font-mono text-lg tabular-nums">
             {amount(sendDisplay)} {quote?.from.code}
           </span>
+          {sendUsd !== undefined ? (
+            <span className="text-muted-foreground text-xs tabular-nums">{sendUsd}</span>
+          ) : null}
         </div>
         <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0" />
         <div className="flex flex-col items-end">
@@ -121,6 +174,9 @@ export function SwapConfirm({
           <span className="font-mono text-lg tabular-nums">
             {amount(receiveDisplay)} {quote?.to.code}
           </span>
+          {receiveUsd !== undefined ? (
+            <span className="text-muted-foreground text-xs tabular-nums">{receiveUsd}</span>
+          ) : null}
         </div>
       </div>
 
@@ -156,6 +212,13 @@ export function SwapConfirm({
           </Button>
         ) : null}
       </div>
+
+      {distorted ? (
+        <p className="text-warning text-xs">
+          This testnet venue&apos;s rate differs sharply from the real market, so the amount you
+          receive is not what this trade would return on mainnet.
+        </p>
+      ) : null}
 
       {/* Said plainly rather than buried: the amount is an estimate, and the
           floor is enforced by the network, not by this screen. */}
