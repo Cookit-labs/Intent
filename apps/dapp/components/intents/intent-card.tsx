@@ -2,13 +2,11 @@
 
 import type { Intent, IntentStatus } from '@intent/types'
 import { Card, cn } from '@intent/ui'
-import { ArrowRight } from 'lucide-react'
-import Link from 'next/link'
-import { ExternalLink } from 'lucide-react'
+import { ArrowRight, ChevronDown, ExternalLink } from 'lucide-react'
+import { useState } from 'react'
 import { stellarTestnet } from '@intent/config'
 
 import { intentTypeLabel } from '../../lib/intent-format'
-import { useChainHref } from '../../providers/chain-provider'
 import { useCancelIntent } from '../../hooks/use-intent'
 import { IntentTypeIcon } from './intent-type-icon'
 import { TokenIcon } from '../ui/token-icon'
@@ -69,12 +67,25 @@ function usd(intent: Intent): string {
 
 export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   const view = statusView(intent.status)
-  const chainHref = useChainHref()
   const cancelIntent = useCancelIntent()
+  const [expanded, setExpanded] = useState(false)
   const open = intent.status === 'pending' && intent.limitPriceUsd !== undefined
+  const explorerUrl =
+    intent.settlementTxHash !== undefined && intent.settlementTxHash !== ''
+      ? `${stellarTestnet.blockExplorerUrl}/tx/${intent.settlementTxHash}`
+      : undefined
+
   return (
-    <Link href={chainHref(`/intents/${intent.id}`)} className="block">
-      <Card className="hover:border-foreground/40 flex gap-4 p-5 transition-colors">
+    <Card className="overflow-hidden">
+      {/* The row expands in place rather than linking to a page of its own.
+          Everything an intent has to say fits here, and navigating away to
+          read four fields lost the list the user was working through. */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="hover:bg-muted/40 flex w-full gap-4 p-5 text-left transition-colors"
+      >
         {/* The glyph carries the meaning on its own, so the boxed frame it
             used to sit in was only visual weight.
 
@@ -116,47 +127,95 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
               {usd(intent)}
             </span>
           </div>
+        </div>
 
-          {/* Cancelling from the list saves a round trip to the detail page,
-              which matters for the one action a waiting order exists to allow.
-              stopPropagation because the whole card is a link. */}
+        <ChevronDown
+          className={cn(
+            'text-muted-foreground mt-1 h-4 w-4 shrink-0 transition-transform',
+            expanded && 'rotate-180'
+          )}
+          aria-hidden
+        />
+      </button>
+
+      {expanded ? (
+        <div className="border-border flex flex-col gap-4 border-t px-5 pb-5 pt-4">
+          <div className="grid grid-cols-2 gap-4 text-sm tabular-nums sm:grid-cols-4">
+            <div>
+              <p className="text-muted-foreground text-xs">You pay</p>
+              <p className="text-foreground">
+                {intent.amountIn} {intent.tokenIn}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Minimum received</p>
+              <p className="text-foreground">
+                {intent.minAmountOut} {intent.tokenOut}
+              </p>
+            </div>
+            {intent.limitPriceUsd !== undefined ? (
+              <div>
+                <p className="text-muted-foreground text-xs">Limit price</p>
+                <p className="text-foreground">
+                  ${intent.limitPriceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}
+                </p>
+              </div>
+            ) : null}
+            <div>
+              <p className="text-muted-foreground text-xs">Deadline</p>
+              <p className="text-foreground">
+                {new Date(intent.deadline).toLocaleString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </p>
+            </div>
+          </div>
+
+          {/* An open order is a standing offer, so the ability to take it back
+              belongs wherever the order is shown. */}
           {open ? (
-            <div className="mt-3 flex items-center gap-3">
-              <span className="text-muted-foreground text-xs">
-                Waiting for $
-                {intent.limitPriceUsd?.toLocaleString('en-US', { maximumFractionDigits: 6 })}
-              </span>
+            <div className="flex flex-col gap-2">
+              <p className="text-muted-foreground text-xs">
+                Waiting for {intent.tokenOut} to reach $
+                {intent.limitPriceUsd?.toLocaleString('en-US', { maximumFractionDigits: 6 })}.
+                Nothing has been spent.
+              </p>
               <button
                 type="button"
                 disabled={cancelIntent.isPending}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  cancelIntent.mutate(intent.id)
-                }}
-                className="border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-50"
+                onClick={() => cancelIntent.mutate(intent.id)}
+                className="border-border text-foreground hover:border-foreground/40 w-fit rounded-full border px-4 py-1.5 text-xs transition-colors disabled:opacity-50"
               >
-                {cancelIntent.isPending ? 'Cancelling…' : 'Cancel'}
+                {cancelIntent.isPending ? 'Cancelling…' : 'Cancel order'}
               </button>
+              {cancelIntent.isError ? (
+                <p className="text-foreground text-xs">{(cancelIntent.error as Error).message}</p>
+              ) : null}
             </div>
           ) : null}
 
           {/* A settled trade should be checkable without re-running it. The
               explorer is the only source that is not this app's own word. */}
-          {intent.settlementTxHash !== undefined && intent.settlementTxHash !== '' ? (
+          {explorerUrl !== undefined ? (
             <a
-              href={`${stellarTestnet.blockExplorerUrl}/tx/${intent.settlementTxHash}`}
+              href={explorerUrl}
               target="_blank"
               rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="text-muted-foreground hover:text-foreground mt-3 inline-flex items-center gap-1.5 text-xs underline underline-offset-2"
+              className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
             >
               View on Stellar Expert
-              <ExternalLink className="h-3 w-3" />
+              <ExternalLink className="h-3.5 w-3.5" />
             </a>
-          ) : null}
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              No settlement transaction recorded for this intent.
+            </p>
+          )}
         </div>
-      </Card>
-    </Link>
+      ) : null}
+    </Card>
   )
 }
