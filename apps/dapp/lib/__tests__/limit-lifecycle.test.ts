@@ -36,7 +36,7 @@ describe('limit intents wait for their price', () => {
     expect(seen.status).toBe('pending')
   })
 
-  it('progresses once the market reaches the limit', async () => {
+  it('stays open even once the market reaches the limit', async () => {
     const created = await client.intents.create({
       ...base,
       type: 'accumulate',
@@ -44,8 +44,12 @@ describe('limit intents wait for their price', () => {
       limitPriceUsd: 0.19,
     })
 
+    // Reaching the price is not the same as having traded. Nothing signs or
+    // submits for a resting order yet, so advancing the status here would
+    // claim a transaction that does not exist — which is what filled history
+    // with settled rows carrying no hash.
     const seen = await client.intents.get(created.id, { XLM: 0.18 })
-    expect(seen.status).not.toBe('pending')
+    expect(seen.status).toBe('pending')
   })
 
   it('does not claim a fill when no price is known', async () => {
@@ -115,7 +119,7 @@ describe('open intents can be withdrawn', () => {
     expect(cancelled.status).toBe('cancelled')
   })
 
-  it('refuses to cancel an intent already past pending', async () => {
+  it('refuses to cancel an intent that has already settled', async () => {
     const created = await client.intents.create({
       chain: 'stellar',
       type: 'market_buy',
@@ -126,9 +130,58 @@ describe('open intents can be withdrawn', () => {
       deadline: new Date(Date.now() + 3_600_000).toISOString(),
     })
 
-    // Market intents leave 'pending' on a timer; once executing, the chain
-    // owns the outcome and this app must not claim otherwise.
-    await new Promise((r) => setTimeout(r, 3_200))
+    // Settled means a transaction hash was recorded, so the chain owns the
+    // outcome and this app must not claim otherwise. Nothing leaves 'pending'
+    // on a timer any more.
+    await client.intents.settle(created.id, 'c'.repeat(64))
     await expect(client.intents.cancel(created.id)).rejects.toThrow(/no longer be cancelled/)
+  })
+})
+
+/**
+ * Nothing reports as completed without a transaction behind it.
+ *
+ * The old lifecycle marked every intent `settled` fourteen seconds after
+ * creation, so history filled with rows that read as finished trades and had
+ * no hash — none of them had ever been submitted to a network.
+ */
+describe('only real transactions count as settled', () => {
+  const client = getIntentClient()
+
+  const input = {
+    chain: 'stellar' as const,
+    type: 'market_buy' as const,
+    tokenIn: 'USDC',
+    tokenOut: 'XLM',
+    amountIn: '200',
+    minAmountOut: '1000',
+    deadline: new Date(Date.now() + 3_600_000).toISOString(),
+  }
+
+  it('does not settle a market intent on elapsed time', async () => {
+    const created = await client.intents.create(input)
+    // Well past the fourteen seconds the old timer used.
+    expect((await client.intents.get(created.id)).status).toBe('pending')
+  })
+
+  it('settles only once a hash is recorded', async () => {
+    const created = await client.intents.create(input)
+    expect((await client.intents.get(created.id)).status).toBe('pending')
+
+    await client.intents.settle(created.id, 'd'.repeat(64))
+
+    const settled = await client.intents.get(created.id)
+    expect(settled.status).toBe('settled')
+    expect(settled.settlementTxHash).toBe('d'.repeat(64))
+  })
+
+  it('cancels an expired limit order rather than settling it', async () => {
+    const created = await client.intents.create({
+      ...input,
+      type: 'limit_buy',
+      deadline: new Date(Date.now() - 1_000).toISOString(),
+      limitPriceUsd: 0.19,
+    })
+    expect((await client.intents.get(created.id, { XLM: 0.1 })).status).toBe('cancelled')
   })
 })

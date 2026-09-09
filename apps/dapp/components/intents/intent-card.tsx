@@ -49,7 +49,10 @@ function statusLabel(intent: Intent): string {
     case 'executing':
       return 'Executing · live'
     case 'pending':
-      return 'Escrowed'
+      // Nothing is escrowed and nothing has been spent — the order is simply
+      // open. "Escrowed" claimed funds had been committed, which was never
+      // true here.
+      return intent.limitPriceUsd !== undefined ? 'Open · waiting for price' : 'Open'
     case 'settled':
       return `Settled · ${timeAgo(intent.createdAt)}`
     case 'failed':

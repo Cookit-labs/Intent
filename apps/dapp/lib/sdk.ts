@@ -52,50 +52,38 @@ function isLimitType(type: IntentType): boolean {
 }
 
 /**
- * Freshly-created mock intents advance through the lifecycle based on elapsed
- * time since creation. This previews Slice 2 (competition) and Slice 3
- * (settlement) without a backend, deterministically and without timers.
+ * The status an intent should be reported as.
  *
- * Limit intents are the exception, and deliberately so. Every intent used to
- * reach `settled` fourteen seconds after creation whatever its type, so an
- * order to buy *below* $0.19 filled at $0.1972 almost immediately and could
- * never be cancelled, because there was no window in which to cancel it. A
- * limit order that ignores its own limit price is not a limit order.
+ * Nothing here invents progress. Every intent used to climb to `settled`
+ * fourteen seconds after creation on a timer, with no transaction behind it —
+ * so history filled with rows that claimed to be completed trades and had no
+ * hash, because nothing had ever been submitted to the network.
  *
- * So a limit intent stays `pending` — open, cancellable, waiting — until the
- * market reaches its price or its deadline passes. Settlement is decided by
- * the price, which is the whole point of the order type.
+ * An intent is settled when, and only when, a transaction hash has been
+ * recorded against it. Until then it is open: waiting for its price if it is a
+ * limit order, or waiting to be executed if it is not. A limit order whose
+ * deadline passes unfilled is cancelled, which is the truth — it did not
+ * trade.
  */
 function agedStatus(intent: Intent, marketPriceUsd?: number): IntentStatus {
+  // A recorded hash is the only thing that settles an intent, and it is set
+  // explicitly by `settle()` rather than inferred here.
   if (intent.status !== 'pending') return intent.status
 
-  const ageMs = Date.now() - new Date(intent.createdAt).getTime()
-
   if (isLimitType(intent.type) && intent.limitPriceUsd !== undefined) {
-    // An expired limit order did not fill. It is not settled, and calling it
-    // so would claim a trade that never happened.
+    // Expired without filling. Not settled — nothing was traded.
     if (Date.now() > new Date(intent.deadline).getTime()) return 'cancelled'
 
-    // Without a live price the honest state is "still waiting", not "filled".
-    if (marketPriceUsd === undefined) return 'pending'
-
-    const buying = !intent.type.includes('sell')
-    const reached = buying
-      ? marketPriceUsd <= intent.limitPriceUsd
-      : marketPriceUsd >= intent.limitPriceUsd
-    if (!reached) return 'pending'
-
-    // Price met: run the same short lifecycle a market order would.
-    const sinceFillMs = ageMs
-    if (sinceFillMs < 4_000) return 'competition'
-    if (sinceFillMs < 8_000) return 'executing'
-    return 'settled'
+    // Whether the price has been reached or not, the order is still open:
+    // reaching the price is not the same as having executed, and nothing
+    // signs or submits a transaction for a resting order yet.
+    void marketPriceUsd
+    return 'pending'
   }
 
-  if (ageMs < 3_000) return 'pending'
-  if (ageMs < 9_000) return 'competition'
-  if (ageMs < 14_000) return 'executing'
-  return 'settled'
+  // A market intent stays open until its swap is signed and confirmed, at
+  // which point `settle()` records the hash and moves it on.
+  return 'pending'
 }
 
 /**
@@ -120,11 +108,42 @@ function seed(): Intent[] {
  */
 const STORAGE_KEY = 'intent.history.v1'
 
+/**
+ * Drops records that claim to have completed without a transaction behind
+ * them.
+ *
+ * The old lifecycle marked every intent `settled` on a timer, so stored
+ * history contains rows that read as finished trades and have no hash — they
+ * were never submitted to any network. Keeping them would mean a history that
+ * is mostly fiction, which is worse than a short one.
+ *
+ * Cancelled records are kept: they claim no trade, so they are still true.
+ */
+function keepOnlyReal(intents: Intent[]): Intent[] {
+  return intents.filter((i) => {
+    if (i.status === 'settled' || i.status === 'executing' || i.status === 'competition') {
+      return i.settlementTxHash !== undefined && i.settlementTxHash !== ''
+    }
+    return true
+  })
+}
+
 function load(): Intent[] {
   if (typeof window === 'undefined') return seed()
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    return raw === null ? seed() : (JSON.parse(raw) as Intent[])
+    if (raw === null) return seed()
+    const stored = JSON.parse(raw) as Intent[]
+    const real = keepOnlyReal(stored)
+    // Rewrite once, so the fabricated rows do not come back on next load.
+    if (real.length !== stored.length) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(real))
+      } catch {
+        /* see below */
+      }
+    }
+    return real
   } catch {
     // Private-mode browsers throw on access; the session still works, it just
     // will not remember across reloads.
