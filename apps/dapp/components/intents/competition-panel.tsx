@@ -65,8 +65,9 @@ export function CompetitionPanel({
         {revealedAgents.map((agent) => {
           const proposal = proposals[agent.key]
           const isWinner = decided && winner === agent.key
-          const dimmed = decided && !isWinner
           const isExecuting = executingKey === agent.key
+          // A picked card is never dimmed: it is the one being acted on.
+          const dimmed = decided && !isWinner && !isExecuting
           return (
             <motion.div
               key={agent.key}
@@ -82,8 +83,17 @@ export function CompetitionPanel({
               />
               <div
                 className={cn(
-                  'flex-1 rounded-2xl rounded-tl-sm border p-4',
-                  isWinner ? 'border-brand' : 'border-border'
+                  'flex-1 rounded-2xl rounded-tl-sm border p-4 transition-colors',
+                  // The agent the user picked takes the strongest mark, and it
+                  // outranks the recommendation: once a choice is made, which
+                  // card is about to be signed matters more than which one was
+                  // suggested. Recommended keeps the brand colour, so the two
+                  // states stay distinguishable when they are different cards.
+                  isExecuting
+                    ? 'border-foreground ring-foreground/20 ring-1'
+                    : isWinner
+                      ? 'border-brand'
+                      : 'border-border'
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -117,7 +127,9 @@ export function CompetitionPanel({
                     disabled={isExecuting}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
-                      isWinner
+                      // Filled for the card in play — the picked one, or the
+                      // recommendation before a pick is made.
+                      isExecuting || isWinner
                         ? 'bg-foreground text-background hover:bg-foreground/90'
                         : 'border-border text-foreground hover:border-foreground/40 border'
                     )}
