@@ -36,6 +36,9 @@ export const REFERENCE_PRICES_USD: Record<string, number> = {
   WBTC: 95000,
 }
 
+/** Assets that stand in for cash, so a swap into one reads as a sell. */
+const STABLES = new Set(['USDC', 'USDT'])
+
 function detectType(text: string): IntentType {
   const t = text.toLowerCase()
   if (t.includes('hedge')) return 'hedge'
@@ -51,6 +54,16 @@ function detectType(text: string): IntentType {
   // open-ended TWAP and dropped the one instruction that mattered, the price
   // the user would not trade through.
   if (!limit && (t.includes('accumulate') || t.includes('dca'))) return 'accumulate'
+
+  // "Swap X to Y" states a direction the buy/sell keywords do not. Selling a
+  // volatile asset for a stablecoin is a sell, whatever verb was used —
+  // without this, "Swap $300 of XLM to USDC" was labelled a market *buy*.
+  const pair = detectSwapPair(text)
+  if (pair !== undefined && !t.includes('buy') && !t.includes('sell')) {
+    const intoStable = STABLES.has(pair.to)
+    if (intoStable) return limit ? 'limit_sell' : 'market_sell'
+    return limit ? 'limit_buy' : 'market_buy'
+  }
 
   if (t.includes('sell')) return limit ? 'limit_sell' : 'market_sell'
   return limit ? 'limit_buy' : 'market_buy'

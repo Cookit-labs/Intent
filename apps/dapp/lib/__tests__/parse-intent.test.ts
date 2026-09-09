@@ -62,7 +62,10 @@ describe('sizing', () => {
 describe('order type', () => {
   it.each([
     ['Sell 100 XLM at $0.25 or better', 'limit_sell'],
-    ['Swap 30 XLM to USDC', 'market_buy'],
+    // Into a stablecoin, so a sell. This asserted market_buy while the
+    // direction was being ignored.
+    ['Swap 30 XLM to USDC', 'market_sell'],
+    ['Swap 30 USDC to XLM', 'market_buy'],
     // Names a price, so it is a limit buy described as accumulation rather
     // than an open-ended one. See the price-decides-type cases below.
     ['Accumulate 2 ETH below $3,200', 'limit_buy'],
@@ -163,7 +166,34 @@ describe('a named price decides the intent type', () => {
     expect(parseIntent('Sell 100 XLM at $0.25 or better', live).input.type).toBe('limit_sell')
   })
 
-  it('leaves a plain swap as a market buy', () => {
-    expect(parseIntent('Swap $30 worth of XLM to USDC', live).input.type).toBe('market_buy')
+  it('leaves a plain swap as a market order, sided by direction', () => {
+    expect(parseIntent('Swap $30 worth of XLM to USDC', live).input.type).toBe('market_sell')
+  })
+})
+
+/**
+ * "Swap X to Y" states a direction that buy/sell keywords do not.
+ *
+ * Every swap was classified market_buy, so selling XLM for USDC was labelled a
+ * buy — the row read "Market buy 1640 XLM -> 300 USDC", which is backwards.
+ */
+describe('swap direction sets buy or sell', () => {
+  const live = { XLM: 0.1838, USDC: 1, USDT: 1 }
+
+  it('reads a swap into a stablecoin as a sell', () => {
+    expect(parseIntent('Swap $300 worth of XLM to USDC', live).input.type).toBe('market_sell')
+  })
+
+  it('reads a swap out of a stablecoin as a buy', () => {
+    expect(parseIntent('Swap 100 USDC to XLM', live).input.type).toBe('market_buy')
+  })
+
+  it('keeps the direction when a price is named', () => {
+    expect(parseIntent('Swap 50 XLM to USDC above $0.30', live).input.type).toBe('limit_sell')
+  })
+
+  it('does not override an explicit buy or sell', () => {
+    expect(parseIntent('Buy $200 worth of XLM', live).input.type).toBe('market_buy')
+    expect(parseIntent('Sell 100 XLM at $0.25 or better', live).input.type).toBe('limit_sell')
   })
 })

@@ -1,8 +1,13 @@
 import type { IntentType } from '@intent/types'
 
 export const INTENT_TYPES: { value: IntentType; label: string; hint: string }[] = [
-  { value: 'market_buy', label: 'Market buy', hint: 'Acquire now at best available price' },
-  { value: 'market_sell', label: 'Market sell', hint: 'Sell now at best available price' },
+  // "Swap" rather than "Market buy"/"Market sell": both are a swap between
+  // two assets executed at the going rate, and the direction is already
+  // visible in the amounts on the row. Matches "Limit swap" below, so the
+  // only distinction the label draws is the one that matters — whether the
+  // order waits for a price.
+  { value: 'market_buy', label: 'Swap', hint: 'Acquire now at best available price' },
+  { value: 'market_sell', label: 'Swap', hint: 'Sell now at best available price' },
   // "Limit swap" rather than "Limit buy"/"Limit sell": every one of these is
   // a swap between two assets, and the direction is already visible in the
   // amounts on the row. The type still distinguishes them internally, because

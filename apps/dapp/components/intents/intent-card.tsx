@@ -14,6 +14,9 @@ import { TokenIcon } from '../ui/token-icon'
 const PRICE_USD: Record<string, number> = {
   USDC: 1,
   USDT: 1,
+  // Absent, an XLM-denominated intent showed "—" where its value belongs.
+  // Indicative only: the row states a rough size, not a settlement figure.
+  XLM: 0.19,
   WETH: 3500,
   ETH: 3500,
   ARB: 1.25,
