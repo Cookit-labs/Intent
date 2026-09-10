@@ -103,13 +103,18 @@ export function useSwapExecution(route: unknown): SwapExecution {
             phase: 'failed',
             error:
               built.error === 'quote_expired'
-                ? 'That price is no longer current. Submit the intent again for a fresh quote.'
-                : (built.error ?? 'Could not build the swap.'),
+                ? 'This quote is too old to build against. Submit the intent again for a fresh one.'
+                : built.error === 'no_route'
+                  ? 'No route is available for this pair right now.'
+                  : (built.error ?? 'Could not build the swap.'),
           }))
           return
         }
 
-        const signed = await adapter.signTransaction?.({ xdr: built.xdr, address: address as string })
+        const signed = await adapter.signTransaction?.({
+          xdr: built.xdr,
+          address: address as string,
+        })
         if (signed === undefined) return
 
         if (!signed.ok) {
@@ -160,7 +165,11 @@ export function useSwapExecution(route: unknown): SwapExecution {
           ...(result.explorerUrl !== undefined ? { explorerUrl: result.explorerUrl } : {}),
         }))
       } catch {
-        setState((s) => ({ ...s, phase: 'failed', error: 'Something went wrong submitting the swap.' }))
+        setState((s) => ({
+          ...s,
+          phase: 'failed',
+          error: 'Something went wrong submitting the swap.',
+        }))
       }
     }
 
