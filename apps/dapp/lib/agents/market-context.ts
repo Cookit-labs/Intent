@@ -1,6 +1,11 @@
 import { CHAIN_DESCRIPTORS, isChainSlug } from '@intent/config'
 
-import type { MarketContext } from './brain'
+import type { MarketContext, QuotedRoute } from './brain'
+import { fromBaseUnits, resolveAsset } from '../swap/assets'
+import { collectQuotes } from '../swap/quote'
+import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
+import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
+import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { venues } from '../venues'
 
@@ -14,6 +19,101 @@ import { venues } from '../venues'
  *
  * When a real price feed exists, only this file changes.
  */
+/**
+ * Prices the intent against live liquidity, so agents choose between real
+ * routes instead of describing hypothetical ones.
+ *
+ * Returns an empty list rather than throwing when the pair is unswappable or
+ * the chain cannot execute. A competition with no routes is still a
+ * competition — the agents reason about the intent and simply cannot offer
+ * execution, which is honest rather than broken.
+ */
+export interface QuoteRoutesOptions {
+  /**
+   * Minimum acceptable output, in base units.
+   *
+   * A limit order only makes sense if it can decline. Without this a "sell 100
+   * XLM at $0.25" quote is indistinguishable from a market order and fills at
+   * whatever the book offers, which is the opposite of what was asked.
+   */
+  minReceive?: string
+}
+
+export async function quoteRoutes(
+  chain: string,
+  fromSymbol: string,
+  toSymbol: string,
+  amount: string,
+  signal?: AbortSignal,
+  options: QuoteRoutesOptions = {}
+): Promise<QuotedRoute[]> {
+  if (chain !== 'stellar') return []
+
+  const from = resolveAsset(fromSymbol)
+  const to = resolveAsset(toSymbol)
+  if (from === undefined || to === undefined) return []
+  if (from.code === to.code && from.issuer === to.issuer) return []
+
+  // Two independent pools, asked at once. Horizon covers the classic DEX and
+  // its AMMs; Soroswap is a Soroban contract with its own depth. Asking both
+  // is what makes this aggregation rather than a single venue with extra
+  // steps, and `collectQuotes` already tolerates either one being down.
+  const { quotes } = await collectQuotes(
+    [createHorizonQuoter(), createSoroswapQuoter()],
+    { kind: 'strict_send', from, to, sendAmount: amount },
+    signal
+  )
+
+  // A limit that the market cannot meet returns nothing, so the competition
+  // reports "no route" rather than offering a fill the user did not ask for.
+  const acceptable =
+    options.minReceive === undefined
+      ? quotes
+      : quotes.filter((q) => BigInt(q.destAmount) >= BigInt(options.minReceive as string))
+
+  return acceptable.map((quote, index) => ({
+    // Indexed by source so an agent naming a route cannot accidentally match
+    // one from a different competition.
+    id: `${quote.source}-${index + 1}`,
+    source: quote.source,
+    // Human-scale, because asking a model to divide by 10^7 invites arithmetic
+    // errors in exactly the number the user reads.
+    sendAmount: `${fromBaseUnits(quote.sendAmount)} ${quote.from.code}`,
+    receiveAmount: `${fromBaseUnits(quote.destAmount)} ${quote.to.code}`,
+    hops: quote.path.length,
+    // Soroban tokens are separate contracts from classic issuers, so the USDC
+    // Soroswap delivers is not the USDC Horizon delivers. Surfacing that keeps
+    // an agent from reading two quotes as interchangeable and picking purely
+    // on the larger number.
+    // Only routes this app can actually build are offerable. The rest are
+    // shown for comparison, which is the point of quoting two venues.
+    executable: quote.deliversAsset === undefined && quote.source === 'horizon',
+    ...(quote.deliversAsset !== undefined
+      ? { note: `settles in Soroban ${quote.to.code}, a different asset — not executable yet` }
+      : {}),
+    quote,
+  }))
+}
+
+/**
+ * Market context with live prices where they are available.
+ *
+ * Async because the price lookup is a network call. The synchronous version is
+ * kept for callers that cannot await, and for chains with no price source.
+ */
+export async function buildMarketContextAsync(chain: string): Promise<MarketContext> {
+  const base = buildMarketContext(chain)
+  if (chain !== 'stellar') return base
+
+  const prices = await fetchMarketPrices()
+  return {
+    ...base,
+    // Real mainnet prices replace the indicative table. Testnet execution
+    // still quotes its own synthetic rate; agents are told which is which.
+    prices: { ...base.prices, ...toPriceTable(prices) },
+  }
+}
+
 export function buildMarketContext(chain: string): MarketContext {
   const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : 'evm'
 

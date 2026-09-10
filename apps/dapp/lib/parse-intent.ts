@@ -9,6 +9,8 @@ export interface ParsedIntent {
 }
 
 const TOKEN_ALIASES: Record<string, string> = {
+  xlm: 'XLM',
+  lumens: 'XLM',
   eth: 'WETH',
   weth: 'WETH',
   btc: 'WBTC',
@@ -24,6 +26,9 @@ const TOKEN_ALIASES: Record<string, string> = {
  * and the projected fills would stop matching the parsed intent.
  */
 export const REFERENCE_PRICES_USD: Record<string, number> = {
+  // Indicative only. Anything executable is priced against live liquidity in
+  // `quoteRoutes`; this table exists so the model has a scale to reason at.
+  XLM: 0.58,
   USDC: 1,
   USDT: 1,
   WETH: 3500,
@@ -31,16 +36,82 @@ export const REFERENCE_PRICES_USD: Record<string, number> = {
   WBTC: 95000,
 }
 
+/** Assets that stand in for cash, so a swap into one reads as a sell. */
+const STABLES = new Set(['USDC', 'USDT'])
+
 function detectType(text: string): IntentType {
   const t = text.toLowerCase()
   if (t.includes('hedge')) return 'hedge'
   if (t.includes('rebalance')) return 'rebalance'
   if (t.includes('route') || t.includes('liquidity')) return 'route_liquidity'
-  if (t.includes('accumulate') || t.includes('dca')) return 'accumulate'
+
   const limit =
     t.includes('limit') || t.includes('below') || t.includes('above') || t.includes('at $')
+
+  // A named price decides the type, even when the text also says "accumulate".
+  // "Accumulate $200 of XLM below $0.19" is a limit buy that happens to be
+  // described as accumulation — matching the word first classified it as an
+  // open-ended TWAP and dropped the one instruction that mattered, the price
+  // the user would not trade through.
+  if (!limit && (t.includes('accumulate') || t.includes('dca'))) return 'accumulate'
+
+  // "Swap X to Y" states a direction the buy/sell keywords do not. Selling a
+  // volatile asset for a stablecoin is a sell, whatever verb was used —
+  // without this, "Swap $300 of XLM to USDC" was labelled a market *buy*.
+  const pair = detectSwapPair(text)
+  if (pair !== undefined && !t.includes('buy') && !t.includes('sell')) {
+    const intoStable = STABLES.has(pair.to)
+    if (intoStable) return limit ? 'limit_sell' : 'market_sell'
+    return limit ? 'limit_buy' : 'market_buy'
+  }
+
   if (t.includes('sell')) return limit ? 'limit_sell' : 'market_sell'
   return limit ? 'limit_buy' : 'market_buy'
+}
+
+/**
+ * Reads an explicit "swap A to B" pair out of the text.
+ *
+ * Returns undefined when the intent is not phrased as a directional swap, so
+ * the older buy-shaped heuristics still handle "accumulate" and "hedge".
+ */
+function detectSwapPair(text: string): { from: string; to: string } | undefined {
+  const t = text.toLowerCase()
+  if (!/\bswap\b|\bconvert\b|\btrade\b|\bsell\b/.test(t)) return undefined
+
+  // Scan for known symbols in the order they appear, rather than pattern
+  // matching around a connector word: "worth of" and "for" both look like
+  // connectors and picking the wrong one reverses the trade.
+  const found: { symbol: string; at: number }[] = []
+  for (const [alias, symbol] of Object.entries(TOKEN_ALIASES)) {
+    const m = new RegExp(`\\b${alias}\\b`).exec(t)
+    if (m !== null) found.push({ symbol, at: m.index })
+  }
+
+  // Deduplicate by symbol, keeping the earliest mention of each.
+  const bySymbol = new Map<string, number>()
+  for (const f of found) {
+    const existing = bySymbol.get(f.symbol)
+    if (existing === undefined || f.at < existing) bySymbol.set(f.symbol, f.at)
+  }
+
+  const ordered = [...bySymbol.entries()].sort((a, b) => a[1] - b[1]).map(([sym]) => sym)
+
+  // "Sell 100 XLM at $0.25" names only one asset, but the direction is not
+  // ambiguous: selling X means X leaves and a stablecoin arrives. Without this
+  // the buy-shaped fallback below reads it backwards as USDC -> XLM.
+  if (ordered.length === 1 && /\bsell\b/.test(t)) {
+    const only = ordered[0]
+    if (only !== undefined && only !== 'USDC') return { from: only, to: 'USDC' }
+    return undefined
+  }
+
+  if (ordered.length < 2) return undefined
+
+  // First mentioned is what leaves the account, second is what arrives.
+  const [from, to] = ordered
+  if (from === undefined || to === undefined || from === to) return undefined
+  return { from, to }
 }
 
 function detectToken(text: string, fallback: string): string {
@@ -51,6 +122,31 @@ function detectToken(text: string, fallback: string): string {
     }
   }
   return fallback
+}
+
+/**
+ * The quantity attached to a specific token, e.g. the 100 in "sell 100 XLM".
+ *
+ * Anchoring to the symbol matters for limit orders: "sell 100 XLM at $0.25"
+ * contains two numbers, and taking the first one found is a coin toss between
+ * the size and the price. Returns undefined when no number sits next to the
+ * token, so the caller can fall back rather than guess.
+ */
+function amountForToken(text: string, symbol: string): number | undefined {
+  const aliases = Object.entries(TOKEN_ALIASES)
+    .filter(([, sym]) => sym === symbol)
+    .map(([alias]) => alias)
+  if (aliases.length === 0) return undefined
+
+  const t = text.toLowerCase().replace(/,/g, '')
+  for (const alias of aliases) {
+    // "100 xlm" and "xlm 100" both occur in natural phrasing.
+    const before = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(?:worth\\s+of\\s+)?${alias}\\b`).exec(t)
+    if (before?.[1] !== undefined) return Number(before[1])
+    const after = new RegExp(`${alias}\\b\\s*(\\d+(?:\\.\\d+)?)`).exec(t)
+    if (after?.[1] !== undefined) return Number(after[1])
+  }
+  return undefined
 }
 
 // First plain number in the text (e.g. "2.0 ETH", "15,000 USDC").
@@ -67,11 +163,20 @@ function scaleAmount(raw: string, suffix: string | undefined): number {
   return n
 }
 
-// A price target if the text names one (e.g. "below $3,200", "at $30k").
+/**
+ * A price target if the text names one (e.g. "below $3,200", "at $30k").
+ *
+ * A qualifier is required. Taking the first dollar figure in the sentence read
+ * "buy $200 of XLM below $0.19" as a $200 limit price — the budget, not the
+ * cap — because the budget is written first. A price target is always
+ * introduced by a word like "below" or "at"; an unqualified figure is a size.
+ */
 function targetPrice(text: string): number | null {
-  const dollar = text.match(/\$\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
-  if (dollar) return scaleAmount(dollar[1]!, dollar[2])
-  const worded = text.match(/(?:below|above|at|under|over)\s+\$?\s?([\d,]+(?:\.\d+)?)\s?([km])?/i)
+  // The optional article matters: people write "below a $0.19 price", and
+  // requiring the number to follow the qualifier directly missed it entirely.
+  const worded = text.match(
+    /(?:below|above|at|under|over|beneath|max|maximum|min|minimum)\s+(?:a|an|the)?\s*\$?\s?([\d,]+(?:\.\d+)?)\s?([km])?/i
+  )
   if (worded) return scaleAmount(worded[1]!, worded[2])
   return null
 }
@@ -81,18 +186,105 @@ function targetPrice(text: string): number | null {
  * This is the mock stand-in for the backend's intent parser; it never fails,
  * always producing a valid CreateIntentInput so the competition can run.
  */
-export function parseIntent(raw: string): ParsedIntent {
+export function parseIntent(
+  raw: string,
+  /**
+   * Live prices, when the caller has them.
+   *
+   * The built-in table is indicative and drifts: it valued XLM at $0.58 while
+   * the market was near $0.19, so "$30 of XLM" resolved to 51.7 XLM instead of
+   * 158.5 — a third of what the user asked to spend. Callers that can fetch
+   * real prices pass them here; the table is the fallback for those that
+   * cannot, since this function is synchronous by design.
+   */
+  livePrices?: Record<string, number>
+): ParsedIntent {
   const outcome = raw.trim()
   const type = detectType(outcome)
-  const tokenOut = detectToken(outcome, 'WETH')
-  const tokenIn = tokenOut === 'USDC' ? 'USDT' : 'USDC'
-  const referencePriceUsd = REFERENCE_PRICES_USD[tokenOut] ?? 3500
 
-  const num = firstNumber(outcome) ?? 1
-  // If the number reads like a token quantity (small), value it; otherwise treat as USD.
-  const escrowUsd =
-    num > 0 && num < 1000 ? Math.round(num * referencePriceUsd) : Math.round(num || 5000)
-  const amountIn = String(escrowUsd)
+  // A swap states both sides and a direction, which the buy-shaped path below
+  // cannot express: it assumes the user always spends a stablecoin on
+  // something volatile. "Swap $30 of XLM to USDC" is the opposite of that, and
+  // reading it that way produced the wrong pair, the wrong direction, and an
+  // amount out by three orders of magnitude.
+  const swap = detectSwapPair(outcome)
+  const tokenOut = swap?.to ?? detectToken(outcome, 'WETH')
+  const tokenIn = swap?.from ?? (tokenOut === 'USDC' ? 'USDT' : 'USDC')
+  const priceOf = (symbol: string): number | undefined =>
+    livePrices?.[symbol] ?? REFERENCE_PRICES_USD[symbol]
+  const referencePriceUsd = priceOf(tokenOut) ?? 3500
+
+  // Prefer the quantity written next to the input token. A limit order names
+  // two numbers — "sell 100 XLM at $0.25" — and taking the first one found is
+  // a coin toss between the size and the price.
+  // Sell-side intents name a quantity of what leaves; buy-side name a quantity
+  // of what arrives. The two need opposite treatment when no dollar sign is
+  // present, so the distinction is made once here.
+  const isSellSide = /sell/i.test(outcome)
+  const tokenQty = amountForToken(outcome, tokenIn)
+  // The dollar amount, when the size is stated as a budget rather than a
+  // quantity. Read separately so "$30 worth of XLM" does not reuse the 30 as a
+  // token count.
+  const dollarAmount = (() => {
+    const m = /\$\s*([\d,]+(?:\.\d+)?)/.exec(outcome)
+    return m?.[1] !== undefined ? Number(m[1].replace(/,/g, '')) : undefined
+  })()
+
+  // "$30 of X" is a USD figure; "30 X" is a quantity of X.
+  //
+  // A dollar sign directly on the size wins, since "$30 worth of XLM" states a
+  // budget. But a limit order also carries a dollar sign — on the *price*, as
+  // in "sell 100 XLM at $0.25" — so the marker only counts when it precedes
+  // the token rather than trailing a limit clause.
+  // Requires an actual token name after the figure, not merely a letter:
+  // "$0.25 or better" would otherwise read as a budget because "or" starts
+  // with one, turning a limit price into an order size.
+  const symbols = Object.keys(TOKEN_ALIASES).join('|')
+  const budgetForm = new RegExp(
+    `\\$\\s*[\\d,.]+\\s*(?:worth\\s+)?(?:of\\s+)?(?:${symbols})\\b`,
+    'i'
+  ).test(outcome)
+  const pricedInUsd = budgetForm || (tokenQty === undefined && /\$\s*[\d,]/.test(outcome))
+
+  // A budget is measured in dollars; anything else is a quantity of the token.
+  const num = pricedInUsd
+    ? (dollarAmount ?? firstNumber(outcome) ?? 1)
+    : (tokenQty ?? firstNumber(outcome) ?? 1)
+  const sendPrice = priceOf(tokenIn) ?? 1
+  // A figure written with a dollar sign is already in dollars. The non-swap
+  // branch used to multiply it by the token price regardless, so "buy $200 of
+  // XLM" escrowed $200 x $0.18 = $37 — and, worse, the number moved with the
+  // price, so the same sentence meant something different every hour.
+  //
+  // Only a bare token quantity ("buy 200 XLM") needs converting to USD.
+  const escrowUsd = pricedInUsd
+    ? Math.round(num)
+    : swap !== undefined
+      ? Math.round(num * sendPrice)
+      : num > 0 && num < 1000
+        ? Math.round(num * referencePriceUsd)
+        : Math.round(num || 5000)
+
+  // For a swap this is the quantity of the *input* token, which is what an
+  // execution actually sends.
+  // What actually leaves the account, denominated in the input token. For a
+  // stablecoin input this equals the USD figure, which is why the bug above
+  // stayed invisible for buy-side intents until the escrow was checked.
+  const amountIn =
+    sendPrice > 0
+      ? (pricedInUsd
+          ? num / sendPrice
+          : // A bare quantity names the token being *bought* on a buy-side
+            // intent ("buy 200 XLM"), so the amount sent is its USD value in
+            // the input token — not 200 of the input token.
+            swap === undefined && !isSellSide
+            ? (num * referencePriceUsd) / sendPrice
+            : num
+        )
+          .toFixed(7)
+          .replace(/0+$/, '')
+          .replace(/\.$/, '')
+      : String(escrowUsd)
   const minAmountOut = (escrowUsd / referencePriceUsd).toFixed(4)
 
   return {

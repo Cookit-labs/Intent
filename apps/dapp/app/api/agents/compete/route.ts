@@ -5,12 +5,13 @@ import type { AgentProposalResult, AgentStrategyKey } from '../../../../lib/agen
 import { ALL_STRATEGIES } from '../../../../lib/agents/brain'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
-import { buildMarketContext } from '../../../../lib/agents/market-context'
+import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { buildMockProposal } from '../../../../lib/agents/brains/mock-brain'
 import { getAgentBrain } from '../../../../lib/agents/registry'
 import { isBuyIntent, pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { parseIntent } from '../../../../lib/parse-intent'
+import { toBaseUnits } from '../../../../lib/swap/assets'
 
 /**
  * Runs one competition and streams each agent's proposal as it lands.
@@ -21,6 +22,11 @@ import { parseIntent } from '../../../../lib/parse-intent'
  *
  * Node runtime: `node:crypto` and the provider client are not edge-safe.
  */
+/** Limit orders refuse to trade through their price; market orders do not. */
+function isLimitOrder(type: string): boolean {
+  return type === 'limit_buy' || type === 'limit_sell'
+}
+
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -55,9 +61,43 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const competitionId = randomUUID()
-  const intent = parseIntent(text)
-  const market = buildMarketContext(chain)
+  // Prices are fetched first so the parser can size "$30 of XLM" against the
+  // real market. The built-in table drifts badly — it valued XLM at $0.58
+  // against a market near $0.19 — and sizing from it spends a third of what
+  // the user asked for.
+  const market = await buildMarketContextAsync(chain)
+  const intent = parseIntent(text, market.prices)
   const brain = getAgentBrain()
+
+  // Priced before the agents run, so they choose between real routes rather
+  // than describing hypothetical ones. Failing to quote is not fatal: the
+  // competition proceeds without executable routes and says so.
+  try {
+    const routes = await quoteRoutes(
+      chain,
+      intent.input.tokenIn,
+      intent.input.tokenOut,
+      // The parsed input quantity, which for a swap is what actually leaves
+      // the account. Deriving it from the USD figure instead would re-introduce
+      // the rounding the parser just resolved.
+      toBaseUnits(intent.input.amountIn),
+      undefined,
+      // A limit order states a price it will not trade through. Expressed as a
+      // minimum output so the quoter can decline: sell 100 XLM at $0.25 means
+      // at least 25 USDC must come back, and anything less is not the trade
+      // that was asked for.
+      isLimitOrder(intent.input.type) && intent.targetPriceUsd > 0
+        ? {
+            minReceive: toBaseUnits(
+              (Number(intent.input.amountIn) * intent.targetPriceUsd).toFixed(7)
+            ),
+          }
+        : {}
+    )
+    if (routes.length > 0) market.routes = routes
+  } catch {
+    // Leaving routes unset is the honest outcome; agents reason without them.
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -98,10 +138,14 @@ export async function POST(request: Request): Promise<Response> {
             })
 
             if (outcome.ok) {
+              // Resolve this agent's own route, so executing it signs what it
+              // proposed rather than what the winner proposed.
+              const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
               send({
                 type: 'competition:proposal',
                 competitionId,
                 proposal: outcome.proposal,
+                ...(own !== undefined ? { route: own.quote } : {}),
                 degraded: outcome.meta.degraded,
               })
               return outcome.proposal
@@ -135,11 +179,17 @@ export async function POST(request: Request): Promise<Response> {
       const winner = pickWinner(scored)
 
       if (winner !== null) {
+        // The winning agent's chosen route, resolved back to the full quote so
+        // the client can build a transaction from it without re-pricing.
+        const winningProposal = proposals.find((p) => p.strategy === winner)
+        const chosen = (market.routes ?? []).find((r) => r.id === winningProposal?.routeId)
+
         send({
           type: 'competition:winner',
           competitionId,
           winner,
           scores: Object.fromEntries(scored.map((s) => [s.strategy, s.score])),
+          ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })
       }
 

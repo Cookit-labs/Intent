@@ -11,21 +11,47 @@ import { STRATEGIES, STRATEGY_ORDER } from '../lib/agents/strategies'
 import type { ParsedIntent } from '../lib/parse-intent'
 
 /**
+ * How long to wait before giving up on the stream entirely.
+ *
+ * Comfortably past the route's 60s-per-agent ceiling: this catches a
+ * connection that has stopped delivering without failing, which would
+ * otherwise leave the competition panel waiting on agents forever.
+ */
+const STREAM_TIMEOUT_MS = 120_000
+
+/**
  * Runs a competition against the agent route, returning the same shape as the
  * offline hook so the panel does not care which one is driving it.
  *
  * Cards reveal on a floor rather than a fixed timer — see `lib/agents/pacing.ts`
  * for why.
  */
-export function useCompetition(
-  parsed: ParsedIntent | null,
-  chain: string
-): CompetitionState {
+export interface CompetitionWithRoute extends CompetitionState {
+  /**
+   * The winning agent's chosen route, when it chose one.
+   *
+   * Carried through from the winner frame so the confirm step offers the exact
+   * quote the competition was decided on, rather than re-pricing and showing
+   * the user a different number than the agents compared.
+   */
+  route?: unknown
+  /**
+   * Each agent's own route, keyed by strategy.
+   *
+   * The user picks who executes, so the winner's route is not enough: without
+   * these, choosing any other agent silently signed the winner's trade.
+   */
+  routesByAgent: Record<string, unknown>
+}
+
+export function useCompetition(parsed: ParsedIntent | null, chain: string): CompetitionWithRoute {
   const [proposals, setProposals] = useState<Record<string, AgentProposalView>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
   const [secondsLeft, setSecondsLeft] = useState(WINDOW_SECONDS)
   const [winner, setWinner] = useState<string | null>(null)
+  const [route, setRoute] = useState<unknown>(undefined)
+  const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -35,6 +61,8 @@ export function useCompetition(
       setPhase('idle')
       setSecondsLeft(WINDOW_SECONDS)
       setWinner(null)
+      setRoute(undefined)
+      setRoutesByAgent({})
       return
     }
 
@@ -57,6 +85,24 @@ export function useCompetition(
     setPhase('competing')
     setSecondsLeft(WINDOW_SECONDS)
     setWinner(null)
+    // Stale routes from the previous intent would otherwise still be
+    // executable, signing a trade the user is no longer looking at.
+    setRoute(undefined)
+    setRoutesByAgent({})
+
+    // A stream that stalls without erroring would leave the panel waiting on
+    // agents that will never answer. Past this point it is not slowness but a
+    // connection that is not coming back, and the user is owed an ending.
+    timeouts.push(
+      setTimeout(() => {
+        if (cancelled) return
+        abort.abort()
+        for (const key of STRATEGY_ORDER) {
+          setRevealed((prev) => ({ ...prev, [key]: true }))
+        }
+        setPhase('decided')
+      }, STREAM_TIMEOUT_MS)
+    )
 
     // The countdown is cosmetic: a 30-second window compressed into the race
     // duration, matching the original animation.
@@ -64,7 +110,9 @@ export function useCompetition(
     const tick = (): void => {
       if (cancelled) return
       const elapsed = Date.now() - startedAt
-      setSecondsLeft(Math.ceil(Math.max(0, WINDOW_SECONDS - (elapsed / RACE_DURATION) * WINDOW_SECONDS)))
+      setSecondsLeft(
+        Math.ceil(Math.max(0, WINDOW_SECONDS - (elapsed / RACE_DURATION) * WINDOW_SECONDS))
+      )
       if (elapsed < RACE_DURATION) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -106,6 +154,10 @@ export function useCompetition(
               const { revealAtMs, delayMs } = planReveal(floor, Date.now() - startedAt)
               lastRevealRef.current = Math.max(lastRevealRef.current, revealAtMs)
 
+              if (frame.route !== undefined) {
+                setRoutesByAgent((prev) => ({ ...prev, [key]: frame.route }))
+              }
+
               setProposals((prev) => ({
                 ...prev,
                 [key]: {
@@ -115,6 +167,8 @@ export function useCompetition(
                   slippagePct: frame.proposal.projectedSlippagePct,
                   score: 0,
                   reasoning: frame.proposal.reasoning,
+                  sliceCount: frame.proposal.sliceCount,
+                  horizonMinutes: frame.proposal.horizonMinutes,
                   degraded: frame.degraded,
                 },
               }))
@@ -124,6 +178,7 @@ export function useCompetition(
             if (frame.type === 'competition:winner') {
               const winnerKey = frame.winner
               const scores = frame.scores
+              if (frame.route !== undefined) setRoute(frame.route)
               setProposals((prev) => {
                 const next = { ...prev }
                 for (const [key, score] of Object.entries(scores)) {
@@ -137,7 +192,10 @@ export function useCompetition(
                   setWinner(winnerKey)
                   setPhase('decided')
                 },
-                Math.max(0, planDecision(DECIDE_AT, lastRevealRef.current) - (Date.now() - startedAt))
+                Math.max(
+                  0,
+                  planDecision(DECIDE_AT, lastRevealRef.current) - (Date.now() - startedAt)
+                )
               )
             }
           }
@@ -163,5 +221,13 @@ export function useCompetition(
     }
   }, [parsed, chain])
 
-  return { proposals, revealed, phase, secondsLeft, winner }
+  return {
+    proposals,
+    revealed,
+    phase,
+    secondsLeft,
+    winner,
+    routesByAgent,
+    ...(route !== undefined ? { route } : {}),
+  }
 }

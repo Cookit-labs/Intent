@@ -5,8 +5,10 @@ import Link from 'next/link'
 
 import { AGENT_RANKING, formatCount, formatVolumeUsd } from '../../lib/agent-roster'
 import { AgentAvatar } from './agent-avatar'
+import { useChainHref } from '../../providers/chain-provider'
 
 export function AgentLeaderboard(): JSX.Element {
+  const chainHref = useChainHref()
   return (
     <div className="border-border overflow-hidden rounded-xl border">
       <div className="border-border text-muted-foreground grid grid-cols-[2rem_1fr_5rem_5rem_5rem] items-center gap-4 border-b px-5 py-3 text-xs sm:grid-cols-[2rem_1fr_6rem_6rem_6rem]">
@@ -19,7 +21,7 @@ export function AgentLeaderboard(): JSX.Element {
       {AGENT_RANKING.map((agent, i) => (
         <Link
           key={agent.key}
-          href={`/agents/${agent.key}`}
+          href={chainHref(`/agents/${agent.key}`)}
           className={cn(
             'border-border grid grid-cols-[2rem_1fr_5rem_5rem_5rem] items-center gap-4 px-5 py-4 transition-colors last:border-b-0 sm:grid-cols-[2rem_1fr_6rem_6rem_6rem]',
             'hover:bg-muted/40 border-b',

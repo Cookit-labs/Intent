@@ -24,6 +24,11 @@ export const SUBMIT_PROPOSAL_TOOL = {
       type: 'object',
       additionalProperties: false,
       properties: {
+        routeId: {
+          type: 'string',
+          description:
+            'The id of the route you are choosing from the offered list. Use the empty string only when no routes were offered.',
+        },
         reasoning: {
           type: 'string',
           description:
@@ -34,8 +39,15 @@ export const SUBMIT_PROPOSAL_TOOL = {
           description: 'Your projected average fill price in USD.',
         },
         projectedSlippagePct: {
+          // The bound is stated because it is enforced. Leaving it out of the
+          // schema rejected proposals for exceeding a limit the model was
+          // never told about, which reads as the model failing rather than the
+          // contract being incomplete.
           type: 'number',
-          description: 'Projected slippage as a percentage, e.g. 0.18 for 0.18%.',
+          minimum: 0,
+          maximum: 5,
+          description:
+            'Projected slippage as a percentage, e.g. 0.18 for 0.18%. Must be between 0 and 5.',
         },
         venues: {
           type: 'array',
@@ -56,6 +68,9 @@ export const SUBMIT_PROPOSAL_TOOL = {
         },
       },
       required: [
+        // Strict mode requires every property, so routeId is listed here and
+        // an empty string is the "no route offered" case rather than omission.
+        'routeId',
         'reasoning',
         'projectedAvgPriceUsd',
         'projectedSlippagePct',
@@ -78,6 +93,7 @@ export const MAX_SLIPPAGE_PCT = 5
 export const MAX_PRICE_DEVIATION = 0.2
 
 export const proposalToolSchema = z.object({
+  routeId: z.string(),
   reasoning: z.string().trim().min(1),
   projectedAvgPriceUsd: z.number().finite().positive(),
   projectedSlippagePct: z.number().finite().min(0).max(MAX_SLIPPAGE_PCT),
@@ -99,7 +115,24 @@ export type ProposalToolInput = z.infer<typeof proposalToolSchema>
 
 export interface ValidationContext {
   referencePriceUsd: number
+  /**
+   * A second legitimate price basis, when one exists.
+   *
+   * On testnet the route rate and the real market rate genuinely disagree —
+   * synthetic liquidity puts XLM near $1.71 against a real ~$0.19 — and both
+   * are defensible answers to "what will this fill at". Validating against a
+   * single basis rejected every honest proposal and silently replaced all four
+   * agents with canned mock text, which is how one agent appeared to win every
+   * competition.
+   */
+  altReferencePriceUsd?: number
   allowedVenueIds: string[]
+  /**
+   * Ids the agent may choose from. A route naming anything outside this set is
+   * rejected outright rather than substituted: unlike a venue label, a route id
+   * is about to be executed, and guessing at one would sign the wrong trade.
+   */
+  allowedRouteIds?: string[]
 }
 
 /**
@@ -120,10 +153,37 @@ export function validateProposal(
   }
 
   const value = parsed.data
-  const deviation =
-    Math.abs(value.projectedAvgPriceUsd - ctx.referencePriceUsd) / ctx.referencePriceUsd
-  if (ctx.referencePriceUsd > 0 && deviation > MAX_PRICE_DEVIATION) {
-    return { ok: false, reason: 'projected price is implausible against the reference' }
+
+  // Near *either* basis is plausible. The guard exists to catch a fabricated
+  // number, not to force a choice between two prices the app itself reports.
+  const stated = [ctx.referencePriceUsd, ctx.altReferencePriceUsd].filter(
+    (b): b is number => b !== undefined && b > 0
+  )
+
+  // A rate is only meaningful with a direction, and "average fill price" does
+  // not carry one. Buying XLM with USDC, the model quotes ~1.72 USDC per XLM
+  // while both references describe the same trade as ~0.18 XLM per USDC — the
+  // guard was comparing a rate against its own reciprocal and rejecting every
+  // agent, which dropped the whole competition to canned mock proposals that
+  // carry no route and therefore cannot be signed.
+  const bases = [...stated, ...stated.map((b) => 1 / b)]
+  const implausible =
+    bases.length > 0 &&
+    bases.every((b) => Math.abs(value.projectedAvgPriceUsd - b) / b > MAX_PRICE_DEVIATION)
+  if (implausible) {
+    return {
+      ok: false,
+      reason: `projected price ${value.projectedAvgPriceUsd} is implausible against ${stated.map((b) => b.toFixed(4)).join(' or ')} (or their inverses)`,
+    }
+  }
+
+  // Venues are display labels: dropping a bad one keeps an otherwise sound
+  // proposal in the race. A route id is not a label — it selects the
+  // transaction that gets signed, so a wrong one fails the proposal.
+  if (ctx.allowedRouteIds !== undefined && value.routeId !== '') {
+    if (!ctx.allowedRouteIds.includes(value.routeId)) {
+      return { ok: false, reason: `route ${value.routeId} was not offered` }
+    }
   }
 
   const allowed = new Set(ctx.allowedVenueIds)

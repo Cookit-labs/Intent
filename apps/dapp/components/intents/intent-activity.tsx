@@ -29,8 +29,8 @@ function Section({ title, intents }: { title: string; intents: Intent[] }): JSX.
 }
 
 export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.Element {
-  const { data: intents, isLoading, isError, error } = useIntents()
   const { slug } = useChain()
+  const { data: intents, isLoading, isError, error } = useIntents(slug)
 
   const active = intents?.filter((i) => ACTIVE.has(i.status)) ?? []
   const done = intents?.filter((i) => !ACTIVE.has(i.status)) ?? []

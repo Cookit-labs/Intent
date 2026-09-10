@@ -26,6 +26,17 @@ export interface AgentProposalView {
    * exactly as before.
    */
   reasoning?: string
+  /**
+   * How this agent proposes to execute, when a real one said.
+   *
+   * Every agent currently routes through the same quote — it is the only
+   * executable one — so the amounts on the confirm card are identical whoever
+   * is picked. The plan is where they actually differ: TWAP slices, momentum
+   * takes one shot. Without it, choosing a different agent changed nothing
+   * visible and looked hardcoded to the recommendation.
+   */
+  sliceCount?: number
+  horizonMinutes?: number
   /** True when this came from the offline fallback rather than a live agent. */
   degraded?: boolean
 }
@@ -101,6 +112,11 @@ export function buildProposals(parsed: ParsedIntent): Record<string, AgentPropos
       avgPriceUsd: base * a.priceRatio,
       slippagePct: a.slippagePct,
       score: Number((100 - a.slippagePct * 20).toFixed(1)),
+      // The offline race is simulated by definition, and saying so is the
+      // only signal that the live agents are not running. Without it a stale
+      // client build silently showed canned proposals — which carry no route,
+      // so nothing could be signed and the cause was invisible.
+      degraded: true,
     },
   ])
   return Object.fromEntries(entries)

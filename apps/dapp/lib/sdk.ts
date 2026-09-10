@@ -1,4 +1,4 @@
-import type { CreateIntentInput, Intent, IntentStatus } from '@intent/types'
+import type { CreateIntentInput, Intent, IntentStatus, IntentType } from '@intent/types'
 
 /**
  * Minimal client surface the dapp consumes. Mirrors the intents section of
@@ -8,8 +8,30 @@ import type { CreateIntentInput, Intent, IntentStatus } from '@intent/types'
  */
 export interface IntentApi {
   create(input: CreateIntentInput): Promise<Intent>
-  list(): Promise<Intent[]>
-  get(id: string): Promise<Intent>
+  /**
+   * Withdraw an intent that has not started executing.
+   *
+   * A limit order is a standing offer, so the ability to take it back is part
+   * of the order type rather than a convenience.
+   */
+  cancel(id: string): Promise<Intent>
+  /**
+   * Record the transaction that settled an intent.
+   *
+   * Without this the swap's hash was produced, shown once, and dropped — the
+   * intent and the transaction that fulfilled it were never connected, so
+   * history could not offer a link to a trade that had genuinely happened.
+   */
+  settle(id: string, txHash: string): Promise<Intent>
+  /**
+   * Intents for one chain.
+   *
+   * Chain-scoped because an intent is a promise about a specific network: a
+   * Stellar wallet cannot act on an Arc order, and listing both together
+   * offered the user trades they had no way to settle.
+   */
+  list(chain?: string, prices?: Record<string, number>): Promise<Intent[]>
+  get(id: string, prices?: Record<string, number>): Promise<Intent>
 }
 
 export interface DappClient {
@@ -24,79 +46,136 @@ function id(): string {
   return `intent_${seq}`
 }
 
+/** Limit intents wait for a price; market intents take what is offered. */
+function isLimitType(type: IntentType): boolean {
+  return type === 'limit_buy' || type === 'limit_sell' || type === 'accumulate'
+}
+
 /**
- * Freshly-created mock intents advance through the lifecycle based on elapsed
- * time since creation. This previews Slice 2 (competition) and Slice 3
- * (settlement) without a backend, deterministically and without timers.
+ * The status an intent should be reported as.
+ *
+ * Nothing here invents progress. Every intent used to climb to `settled`
+ * fourteen seconds after creation on a timer, with no transaction behind it —
+ * so history filled with rows that claimed to be completed trades and had no
+ * hash, because nothing had ever been submitted to the network.
+ *
+ * An intent is settled when, and only when, a transaction hash has been
+ * recorded against it.
+ *
+ * Only a limit order has an open state to be in: it is a standing offer, and
+ * waiting is the whole point of it. A market order has no such state — it is
+ * signed and settles, or it does not happen. One left unsigned was abandoned,
+ * not pending, so it is reported as failed rather than sitting in the list
+ * forever claiming to be live.
  */
-function agedStatus(createdAtIso: string, base: IntentStatus): IntentStatus {
-  if (base !== 'pending') return base
-  const ageMs = Date.now() - new Date(createdAtIso).getTime()
-  if (ageMs < 3_000) return 'pending'
-  if (ageMs < 9_000) return 'competition'
-  if (ageMs < 14_000) return 'executing'
-  return 'settled'
-}
+function agedStatus(intent: Intent, marketPriceUsd?: number): IntentStatus {
+  // A recorded hash is the only thing that settles an intent, and it is set
+  // explicitly by `settle()` rather than inferred here.
+  if (intent.status !== 'pending') return intent.status
 
-function seed(): Intent[] {
-  const base = {
-    userId: 'user_local',
-    deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
-    createdAt: now(),
-    updatedAt: now(),
+  const expired = Date.now() > new Date(intent.deadline).getTime()
+
+  if (isLimitType(intent.type) && intent.limitPriceUsd !== undefined) {
+    // Expired without filling. Not settled — nothing was traded.
+    if (expired) return 'cancelled'
+
+    // Whether the price has been reached or not, the order is still open:
+    // reaching the price is not the same as having executed, and nothing
+    // signs or submits a transaction for a resting order yet.
+    void marketPriceUsd
+    return 'pending'
   }
-  return [
-    {
-      ...base,
-      id: 'intent_1',
-      type: 'market_buy',
-      tokenIn: 'USDC',
-      tokenOut: 'WETH',
-      amountIn: '5000',
-      minAmountOut: '1.42',
-      status: 'settled',
-      escrowTxHash: '0xa1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
-      settlementTxHash: '0xb2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3',
-    },
-    {
-      ...base,
-      id: 'intent_2',
-      type: 'accumulate',
-      tokenIn: 'USDC',
-      tokenOut: 'ARB',
-      amountIn: '2500',
-      minAmountOut: '1980',
-      status: 'competition',
-    },
-    {
-      ...base,
-      id: 'intent_3',
-      type: 'rebalance',
-      tokenIn: 'USDT',
-      tokenOut: 'USDC',
-      amountIn: '10000',
-      minAmountOut: '9985',
-      status: 'executing',
-    },
-    {
-      ...base,
-      id: 'intent_4',
-      type: 'limit_sell',
-      tokenIn: 'WETH',
-      tokenOut: 'USDC',
-      amountIn: '3',
-      minAmountOut: '10500',
-      status: 'failed',
-    },
-  ]
+
+  // A market order is signed within moments or not at all. Past its deadline
+  // with no hash, the signature never came.
+  return expired ? 'failed' : 'pending'
 }
 
-const store: Intent[] = seed()
+/**
+ * No seeded intents.
+ *
+ * This used to return four fabricated intents with invented transaction
+ * hashes. They rendered identically to real ones, so a user could not tell
+ * which of their trades had actually happened — the history is only useful if
+ * everything in it is true.
+ */
+function seed(): Intent[] {
+  return []
+}
+
+/**
+ * Where history lives until a backend does.
+ *
+ * Persisted to localStorage because the alternative — a module-level array —
+ * loses every trade on reload, including ones that really settled on chain.
+ * A history that forgets what happened is worse than no history, because it
+ * looks authoritative.
+ */
+const STORAGE_KEY = 'intent.history.v1'
+
+/**
+ * Drops records that claim to have completed without a transaction behind
+ * them.
+ *
+ * The old lifecycle marked every intent `settled` on a timer, so stored
+ * history contains rows that read as finished trades and have no hash — they
+ * were never submitted to any network. Keeping them would mean a history that
+ * is mostly fiction, which is worse than a short one.
+ *
+ * Cancelled records are kept: they claim no trade, so they are still true.
+ */
+function keepOnlyReal(intents: Intent[]): Intent[] {
+  return intents.filter((i) => {
+    const hasHash = i.settlementTxHash !== undefined && i.settlementTxHash !== ''
+    if (i.status === 'settled' || i.status === 'executing' || i.status === 'competition') {
+      return hasHash
+    }
+    // A pending market order is an orphan: these used to be written the moment
+    // Execute was clicked, so one the user never signed sat in the list
+    // claiming to be live. Only a limit order genuinely rests unfilled.
+    if (i.status === 'pending' && !isLimitType(i.type) && !hasHash) return false
+    return true
+  })
+}
+
+function load(): Intent[] {
+  if (typeof window === 'undefined') return seed()
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (raw === null) return seed()
+    const stored = JSON.parse(raw) as Intent[]
+    const real = keepOnlyReal(stored)
+    // Rewrite once, so the fabricated rows do not come back on next load.
+    if (real.length !== stored.length) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(real))
+      } catch {
+        /* see below */
+      }
+    }
+    return real
+  } catch {
+    // Private-mode browsers throw on access; the session still works, it just
+    // will not remember across reloads.
+    return seed()
+  }
+}
+
+function persist(intents: Intent[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(intents))
+  } catch {
+    /* see load() */
+  }
+}
+
+const store: Intent[] = load()
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-function project(intent: Intent): Intent {
-  return { ...intent, status: agedStatus(intent.createdAt, intent.status) }
+function project(intent: Intent, prices?: Record<string, number>): Intent {
+  return { ...intent, status: agedStatus(intent, prices?.[intent.tokenOut]) }
 }
 
 const mockClient: DappClient = {
@@ -112,22 +191,60 @@ const mockClient: DappClient = {
         amountIn: input.amountIn,
         minAmountOut: input.minAmountOut,
         deadline: input.deadline,
+        ...(input.chain !== undefined ? { chain: input.chain } : {}),
+        ...(input.limitPriceUsd !== undefined ? { limitPriceUsd: input.limitPriceUsd } : {}),
         status: 'pending',
         createdAt: now(),
         updatedAt: now(),
       }
       store.unshift(created)
+      persist(store)
       return created
     },
-    async list() {
+    async list(chain, prices) {
       await delay(300)
-      return store.map(project)
+      const all = store.map((i) => project(i, prices))
+      if (chain === undefined) return all
+      // Intents recorded before chains were tracked have no slug. They are
+      // kept rather than hidden — a settled trade disappearing from history
+      // is worse than one appearing under both chains.
+      return all.filter((i) => i.chain === undefined || i.chain === chain)
     },
-    async get(intentId) {
+    async get(intentId, prices) {
       await delay(200)
       const found = store.find((i) => i.id === intentId)
       if (!found) throw new Error(`Intent ${intentId} not found`)
-      return project(found)
+      return project(found, prices)
+    },
+    async cancel(intentId) {
+      await delay(300)
+      const found = store.find((i) => i.id === intentId)
+      if (!found) throw new Error(`Intent ${intentId} not found`)
+
+      // Only an order that has not yet been acted on can be withdrawn. Once a
+      // transaction is signed and submitted the chain owns the outcome, and
+      // marking it cancelled here would claim otherwise.
+      const live = project(found)
+      if (live.status !== 'pending') {
+        throw new Error('This intent is already being executed and can no longer be cancelled.')
+      }
+
+      found.status = 'cancelled'
+      found.updatedAt = now()
+      persist(store)
+      return { ...found }
+    },
+    async settle(intentId, txHash) {
+      const found = store.find((i) => i.id === intentId)
+      if (!found) throw new Error(`Intent ${intentId} not found`)
+
+      found.settlementTxHash = txHash
+      // The chain has confirmed it, so the time-based projection no longer
+      // applies — this is settled because a transaction says so.
+      found.status = 'settled'
+      found.updatedAt = now()
+      persist(store)
+      return { ...found }
     },
   },
 }

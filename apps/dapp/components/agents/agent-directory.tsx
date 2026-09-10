@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 import { AGENT_PROFILES, formatVolumeUsd, type AgentProfile } from '../../lib/agent-roster'
 import { AgentAvatar } from './agent-avatar'
+import { useChainHref } from '../../providers/chain-provider'
 
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
@@ -16,9 +17,10 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
 }
 
 function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
+  const chainHref = useChainHref()
   return (
     <Link
-      href={`/agents/${agent.key}`}
+      href={chainHref(`/agents/${agent.key}`)}
       className="border-border hover:border-foreground/40 flex flex-col gap-4 rounded-xl border p-5 transition-colors"
     >
       <div className="flex items-center gap-3">

@@ -7,6 +7,28 @@ import { Bot, Loader2, Radio } from 'lucide-react'
 import type { CompetitionState } from '../../hooks/use-mock-competition'
 import { AGENTS } from '../../lib/mock-competition'
 
+/**
+ * Three dots that keep moving while an agent reasons.
+ *
+ * Staggered rather than blinking together so the motion reads as ongoing work.
+ * Reduced-motion users get static dots — the placeholder's presence already
+ * carries the meaning, so the animation is decoration.
+ */
+function ThinkingDots(): JSX.Element {
+  return (
+    <span className="flex items-center gap-1" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="bg-muted-foreground/60 h-1.5 w-1.5 rounded-full motion-reduce:animate-none"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
+        />
+      ))}
+    </span>
+  )
+}
+
 function money(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
@@ -15,18 +37,32 @@ export function CompetitionPanel({
   state,
   onExecute,
   executingKey,
+  locked = false,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
   executingKey: string | null
+  /**
+   * True once a signature is with the wallet or the network.
+   *
+   * Selection stays open until then: picking an agent is not a commitment, and
+   * disabling the buttons on the first pick made it one.
+   */
+  locked?: boolean
 }): JSX.Element {
   const { proposals, revealed, phase, winner } = state
   const decided = phase === 'decided'
   const revealedAgents = AGENTS.filter((a) => revealed[a.key])
+  // Agents answer independently and slowly — tens of seconds each. The panel
+  // used to show a "broadcasting" line only while *nothing* had arrived, so as
+  // soon as the first agent replied every sign of activity vanished and the
+  // screen sat motionless while the rest were still working. That reads as a
+  // crash, not as progress.
+  const pendingAgents = decided ? [] : AGENTS.filter((a) => !revealed[a.key])
 
   return (
     <div className="flex flex-col gap-3">
-      {revealedAgents.length === 0 ? (
+      {revealedAgents.length === 0 && !decided ? (
         <div className="text-muted-foreground flex items-center gap-2 text-sm">
           <Radio className="h-4 w-4 animate-pulse motion-reduce:animate-none" />
           Broadcasting to the agent network…
@@ -37,8 +73,9 @@ export function CompetitionPanel({
         {revealedAgents.map((agent) => {
           const proposal = proposals[agent.key]
           const isWinner = decided && winner === agent.key
-          const dimmed = decided && !isWinner
           const isExecuting = executingKey === agent.key
+          // A picked card is never dimmed: it is the one being acted on.
+          const dimmed = decided && !isWinner && !isExecuting
           return (
             <motion.div
               key={agent.key}
@@ -54,8 +91,17 @@ export function CompetitionPanel({
               />
               <div
                 className={cn(
-                  'flex-1 rounded-2xl rounded-tl-sm border p-4',
-                  isWinner ? 'border-brand' : 'border-border'
+                  'flex-1 rounded-2xl rounded-tl-sm border p-4 transition-colors',
+                  // The agent the user picked takes the strongest mark, and it
+                  // outranks the recommendation: once a choice is made, which
+                  // card is about to be signed matters more than which one was
+                  // suggested. Recommended keeps the brand colour, so the two
+                  // states stay distinguishable when they are different cards.
+                  isExecuting
+                    ? 'border-foreground ring-foreground/20 ring-1'
+                    : isWinner
+                      ? 'border-brand'
+                      : 'border-border'
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -83,16 +129,31 @@ export function CompetitionPanel({
                   <button
                     type="button"
                     onClick={() => onExecute(agent.key)}
-                    disabled={executingKey !== null}
+                    // Disabled only while a signature is actually in flight.
+                    // Keying this to selection instead made the first pick
+                    // final — every other card went dead before anything had
+                    // been confirmed.
+                    disabled={locked}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
-                      isWinner
+                      // Filled for the card in play — the picked one, or the
+                      // recommendation before a pick is made.
+                      isExecuting || isWinner
                         ? 'bg-foreground text-background hover:bg-foreground/90'
                         : 'border-border text-foreground hover:border-foreground/40 border'
                     )}
                   >
-                    {isExecuting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    Execute
+                    {/* The spinner belongs to work in progress, not to a
+                        selection — it ran on the picked card while nothing was
+                        happening, which read as a stuck request.
+
+                        Named for what it does: "Execute" implied the trade
+                        went through on this click, when it opens a confirm
+                        step where the wallet is actually asked to sign. */}
+                    {locked && isExecuting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    {isExecuting ? 'Selected' : 'Review'}
                   </button>
                 </div>
               </div>
@@ -101,9 +162,36 @@ export function CompetitionPanel({
         })}
       </AnimatePresence>
 
+      {/* One placeholder per agent still thinking, named so the wait is
+          legible: the user can see who is outstanding rather than wondering
+          whether anything is still happening. */}
+      {pendingAgents.map((agent) => (
+        <div key={`pending-${agent.key}`} className="flex items-start gap-3">
+          <span
+            className="mt-0.5 h-9 w-9 shrink-0 animate-pulse rounded-full opacity-40 motion-reduce:animate-none"
+            style={{ backgroundImage: agent.gradient }}
+            aria-hidden
+          />
+          <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-semibold">{agent.name}</span>
+              <span className="text-muted-foreground text-xs">{agent.tag}</span>
+            </div>
+            <div
+              className="mt-2 flex items-center gap-1.5"
+              role="status"
+              aria-label={`${agent.name} is thinking`}
+            >
+              <ThinkingDots />
+              <span className="text-muted-foreground text-xs">thinking…</span>
+            </div>
+          </div>
+        </div>
+      ))}
+
       {decided && Object.values(proposals).some((p) => p.degraded) ? (
         <p className="text-muted-foreground mt-1 text-center text-[11px]">
-          Simulated proposals — live agents unavailable.
+          Simulated proposals — live agents unavailable, so these cannot be executed.
         </p>
       ) : null}
 

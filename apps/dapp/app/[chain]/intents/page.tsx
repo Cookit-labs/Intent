@@ -4,13 +4,14 @@ import { cn } from '@intent/ui'
 import { useState } from 'react'
 
 import { IntentActivity } from '../../../components/intents/intent-activity'
+import { SwapHistory } from '../../../components/intents/swap-history'
 import { IntentChat } from '../../../components/intents/intent-chat'
 
 type Tab = 'compose' | 'activity'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'compose', label: 'Compose' },
-  { id: 'activity', label: 'Activity' },
+  { id: 'activity', label: 'History' },
 ]
 
 export default function IntentsPage(): JSX.Element {
@@ -43,7 +44,16 @@ export default function IntentsPage(): JSX.Element {
         ))}
       </div>
 
-      {tab === 'compose' ? <IntentChat /> : <IntentActivity onCompose={() => setTab('compose')} />}
+      {tab === 'compose' ? (
+        <IntentChat />
+      ) : (
+        <div className="flex flex-col gap-8">
+          {/* On-chain swaps first: they are the trades that actually happened,
+              as opposed to intents the app is tracking locally. */}
+          <SwapHistory />
+          <IntentActivity onCompose={() => setTab('compose')} />
+        </div>
+      )}
     </div>
   )
 }
