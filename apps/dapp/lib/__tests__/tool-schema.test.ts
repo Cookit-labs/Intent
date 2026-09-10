@@ -151,3 +151,54 @@ describe('price validation accepts either direction of a rate', () => {
     expect(validateProposal(proposal(4200), ctx).ok).toBe(false)
   })
 })
+
+/**
+ * On testnet the route rate and the real market disagree by roughly nine
+ * times, because the pool is synthetically seeded.
+ *
+ * The rate handed to validation was computed as (received x market price) /
+ * sent — a USD value ratio, not an exchange rate. Multiplying by the real
+ * price dragged it back toward the market and away from the pool the agents
+ * were quoting, so every honest proposal fell outside tolerance, all four
+ * agents were rejected, and the competition served mock proposals that carry
+ * no route and cannot be signed.
+ */
+describe('the route rate is the route rate', () => {
+  // 50 USDC in, 128.8345 XLM out.
+  const routeRate = 128.8345 / 50
+
+  const ctx = {
+    referencePriceUsd: routeRate,
+    // The real market, which on testnet is far from the pool.
+    altReferencePriceUsd: 0.181,
+    allowedVenueIds: ['stellarx'],
+  }
+
+  const proposal = (price: number): unknown => ({
+    routeId: '',
+    reasoning: 'test',
+    projectedAvgPriceUsd: price,
+    projectedSlippagePct: 0.2,
+    venues: ['stellarx'],
+    sliceCount: 1,
+    confidence: 0.8,
+    horizonMinutes: 10,
+  })
+
+  it('accepts a quote at the route rate', () => {
+    expect(validateProposal(proposal(routeRate), ctx).ok).toBe(true)
+  })
+
+  it('accepts the inverse of the route rate', () => {
+    // Same trade, stated the other way round.
+    expect(validateProposal(proposal(1 / routeRate), ctx).ok).toBe(true)
+  })
+
+  it('accepts a quote at the real market rate', () => {
+    expect(validateProposal(proposal(0.181), ctx).ok).toBe(true)
+  })
+
+  it('still rejects a fabricated figure', () => {
+    expect(validateProposal(proposal(880), ctx).ok).toBe(false)
+  })
+})

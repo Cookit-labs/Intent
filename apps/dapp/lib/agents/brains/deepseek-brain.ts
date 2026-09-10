@@ -198,17 +198,25 @@ function impliedRateUsd(req: ProposalRequest): number | undefined {
   const routes = req.market.routes ?? []
   if (routes.length === 0) return undefined
 
-  const outPrice = req.market.prices[req.intent.input.tokenOut]
-  if (outPrice === undefined) return undefined
-
   const first = routes[0]
   if (first === undefined) return undefined
 
   const sent = Number.parseFloat(first.sendAmount)
   const received = Number.parseFloat(first.receiveAmount)
-  if (!Number.isFinite(sent) || !Number.isFinite(received) || sent <= 0) return undefined
+  if (!Number.isFinite(sent) || !Number.isFinite(received) || sent <= 0 || received <= 0) {
+    return undefined
+  }
 
-  return (received * outPrice) / sent
+  // The route's own rate, with no market price applied.
+  //
+  // This used to multiply by the destination's real price, producing a USD
+  // value ratio rather than an exchange rate — which on testnet dragged the
+  // figure back toward the real market and away from the synthetic pool the
+  // agents are actually quoting. The two differ by roughly nine times here, so
+  // every honest proposal fell outside tolerance and all four agents were
+  // rejected, leaving the competition to serve mock proposals that carry no
+  // route and cannot be signed.
+  return received / sent
 }
 
 function classifyStatus(status: number): BrainErrorCode {
