@@ -1,11 +1,31 @@
 import type { CreateIntentInput, IntentType } from '@intent/types'
 
+import { detectRealWorldAsset } from './rwa-phrases'
+
 export interface ParsedIntent {
   outcome: string
   input: CreateIntentInput
   escrowUsd: number
   referencePriceUsd: number
+  /**
+   * A price to reason about, always present.
+   *
+   * Falls back to the reference spot price when the text names none, so the
+   * agent prompt always has a scale to argue at. That fallback makes it
+   * unusable for deciding whether the user actually asked for a price — use
+   * `limitPriceUsd` for that.
+   */
   targetPriceUsd: number
+  /**
+   * The price the user actually named, and nothing else.
+   *
+   * Undefined when the text states no figure, which `targetPriceUsd` cannot
+   * express because its fallback is non-zero. The distinction only starts to
+   * matter once an order rests on the orderbook: an offer placed at the
+   * current spot price crosses the spread and fills immediately, which is a
+   * market order wearing a limit order's label.
+   */
+  limitPriceUsd?: number
 }
 
 const TOKEN_ALIASES: Record<string, string> = {
@@ -18,6 +38,11 @@ const TOKEN_ALIASES: Record<string, string> = {
   arb: 'ARB',
   usdc: 'USDC',
   usdt: 'USDT',
+  // Tokenized sovereign debt. The plain-English names matter more than the
+  // tickers here: nobody types "CETES", they type "Mexican treasuries".
+  cetes: 'CETES',
+  ustry: 'USTRY',
+  ktb: 'KTB',
 }
 
 /**
@@ -34,6 +59,13 @@ export const REFERENCE_PRICES_USD: Record<string, number> = {
   WETH: 3500,
   ARB: 1.25,
   WBTC: 95000,
+  // Tokenized sovereign debt, priced per unit rather than per bond. Indicative
+  // like the rest of this table: anything executable is priced against live
+  // liquidity. Without an entry these fell through to the WETH default and
+  // sized a $100 treasury purchase as though each unit cost $3,500.
+  CETES: 0.055,
+  USTRY: 1.05,
+  KTB: 0.00075,
 }
 
 /** Assets that stand in for cash, so a swap into one reads as a sell. */
@@ -115,6 +147,12 @@ function detectSwapPair(text: string): { from: string; to: string } | undefined 
 }
 
 function detectToken(text: string, fallback: string): string {
+  // Real-world assets first: they are named in words rather than tickers, so
+  // "Mexican treasury bills" would otherwise fall past every alias and land on
+  // the default, which is a completely unrelated asset.
+  const rwa = detectRealWorldAsset(text)
+  if (rwa !== undefined) return rwa
+
   const t = text.toLowerCase()
   for (const [alias, symbol] of Object.entries(TOKEN_ALIASES)) {
     if (symbol !== 'USDC' && symbol !== 'USDT' && new RegExp(`\\b${alias}\\b`).test(t)) {
@@ -221,7 +259,14 @@ export function parseIntent(
   // of what arrives. The two need opposite treatment when no dollar sign is
   // present, so the distinction is made once here.
   const isSellSide = /sell/i.test(outcome)
-  const tokenQty = amountForToken(outcome, tokenIn)
+  // A buy names the quantity of what *arrives*: "buy 300 XLM" spends USDC to
+  // get 300 XLM, so the figure sits next to the output token rather than the
+  // input one. Looking only at `tokenIn` found nothing on a buy, and the
+  // caller then fell through to the first dollar figure in the sentence —
+  // which on "buy 300 XLM below $0.30" is the limit price. A 300-XLM order
+  // became a $0.30 one, and only when a limit was present, which is what hid
+  // it for so long.
+  const tokenQty = amountForToken(outcome, tokenIn) ?? amountForToken(outcome, tokenOut)
   // The dollar amount, when the size is stated as a budget rather than a
   // quantity. Read separately so "$30 worth of XLM" does not reuse the 30 as a
   // token count.
@@ -287,11 +332,17 @@ export function parseIntent(
       : String(escrowUsd)
   const minAmountOut = (escrowUsd / referencePriceUsd).toFixed(4)
 
+  // Evaluated once: `targetPriceUsd` falls back so the agent prompt always has
+  // a figure, while `limitPriceUsd` stays absent so nothing downstream mistakes
+  // the fallback for something the user asked for.
+  const stated = targetPrice(outcome) ?? undefined
+
   return {
     outcome,
     escrowUsd,
     referencePriceUsd,
-    targetPriceUsd: targetPrice(outcome) ?? referencePriceUsd,
+    targetPriceUsd: stated ?? referencePriceUsd,
+    ...(stated !== undefined ? { limitPriceUsd: stated } : {}),
     input: {
       type,
       tokenIn,

@@ -46,6 +46,22 @@ export interface Intent {
   status: IntentStatus
   escrowTxHash?: string
   settlementTxHash?: string
+  /**
+   * The order resting on Stellar's book for this intent.
+   *
+   * Present once a limit order has actually been placed, and the handle needed
+   * to withdraw it. Its absence on a pending limit intent means the order was
+   * recorded but never reached the network.
+   */
+  stellarOfferId?: string
+  /**
+   * The transaction that placed the resting order.
+   *
+   * Distinct from `settlementTxHash`, which records a trade. Placing an order
+   * is a real, verifiable event that is *not* a fill, and conflating the two
+   * would put an unfilled order in history as a completed trade.
+   */
+  placementTxHash?: string
   createdAt: string
   updatedAt: string
 }

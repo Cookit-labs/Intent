@@ -32,6 +32,9 @@ export interface SubmitFailure {
     | 'expired'
     | 'rejected'
     | 'network_error'
+    | 'offer_cross_self'
+    | 'low_reserve'
+    | 'offer_not_found'
   detail?: string
   /** Present when the transaction reached a ledger and failed there. */
   hash?: string
@@ -61,6 +64,13 @@ function classify(codes: HorizonSubmitResponse['extras']): SubmitFailure['reason
   const tx = codes?.result_codes?.transaction ?? ''
   const ops = codes?.result_codes?.operations ?? []
   const all = [tx, ...ops].join(' ')
+
+  // Offer-specific codes come first: `low_reserve` also contains no substring
+  // the broader checks would catch, but `cross_self` must be distinguished
+  // from an ordinary rejection to be explainable.
+  if (all.includes('cross_self')) return 'offer_cross_self'
+  if (all.includes('low_reserve')) return 'low_reserve'
+  if (all.includes('offer_not_found')) return 'offer_not_found'
 
   if (all.includes('under_dest_min')) return 'under_dest_min'
   if (all.includes('no_trust') || all.includes('no_issuer')) return 'no_trustline'
@@ -152,4 +162,9 @@ export const FAILURE_MESSAGES: Record<SubmitFailure['reason'], string> = {
   expired: 'The transaction took too long to submit and expired. Request a fresh quote.',
   rejected: 'The network rejected the transaction.',
   network_error: 'Could not reach the network.',
+  offer_cross_self:
+    'This order would trade against one of your own resting orders. Cancel the other one first.',
+  low_reserve:
+    'Not enough XLM to hold another open order. Each one reserves 0.5 XLM until it is cancelled.',
+  offer_not_found: 'That order is no longer on the book — it has already filled or been cancelled.',
 }

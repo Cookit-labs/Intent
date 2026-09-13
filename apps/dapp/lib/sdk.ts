@@ -1,4 +1,7 @@
-import type { CreateIntentInput, Intent, IntentStatus, IntentType } from '@intent/types'
+import type { CreateIntentInput, Intent, IntentStatus } from '@intent/types'
+
+import { createBackendClient } from './api/intent-client'
+import { isLimitType } from './intent-kind'
 
 /**
  * Minimal client surface the dapp consumes. Mirrors the intents section of
@@ -24,6 +27,15 @@ export interface IntentApi {
    */
   settle(id: string, txHash: string): Promise<Intent>
   /**
+   * Record that an order is now resting on the book.
+   *
+   * Separate from `settle` because placing an order is not a trade. Both
+   * produce a real transaction hash, and treating the placing one as a
+   * settlement would put an unfilled order in history as a completed swap —
+   * the same fabrication the timer used to produce, arrived at honestly.
+   */
+  place(id: string, offerId: string, txHash: string): Promise<Intent>
+  /**
    * Intents for one chain.
    *
    * Chain-scoped because an intent is a promise about a specific network: a
@@ -44,11 +56,6 @@ let seq = 100
 function id(): string {
   seq += 1
   return `intent_${seq}`
-}
-
-/** Limit intents wait for a price; market intents take what is offered. */
-function isLimitType(type: IntentType): boolean {
-  return type === 'limit_buy' || type === 'limit_sell' || type === 'accumulate'
 }
 
 /**
@@ -124,7 +131,7 @@ const STORAGE_KEY = 'intent.history.v1'
  *
  * Cancelled records are kept: they claim no trade, so they are still true.
  */
-function keepOnlyReal(intents: Intent[]): Intent[] {
+export function keepOnlyReal(intents: Intent[]): Intent[] {
   return intents.filter((i) => {
     const hasHash = i.settlementTxHash !== undefined && i.settlementTxHash !== ''
     if (i.status === 'settled' || i.status === 'executing' || i.status === 'competition') {
@@ -134,6 +141,13 @@ function keepOnlyReal(intents: Intent[]): Intent[] {
     // Execute was clicked, so one the user never signed sat in the list
     // claiming to be live. Only a limit order genuinely rests unfilled.
     if (i.status === 'pending' && !isLimitType(i.type) && !hasHash) return false
+
+    // An order claiming a place on the book must name the offer holding it.
+    // One with a placement hash and no offer id describes a resting order the
+    // ledger has never heard of, which is the same class of claim as a settled
+    // row with no transaction.
+    if (i.placementTxHash !== undefined && i.stellarOfferId === undefined) return false
+
     return true
   })
 }
@@ -246,18 +260,36 @@ const mockClient: DappClient = {
       persist(store)
       return { ...found }
     },
+    async place(intentId, offerId, txHash) {
+      const found = store.find((i) => i.id === intentId)
+      if (!found) throw new Error(`Intent ${intentId} not found`)
+
+      found.stellarOfferId = offerId
+      found.placementTxHash = txHash
+      // Deliberately still pending. The order is on the book, which is a real
+      // event with a real hash, but nothing has traded — marking it settled
+      // here would recreate the exact fiction the old timer produced.
+      found.updatedAt = now()
+      persist(store)
+      return { ...found }
+    },
   },
 }
 
 const useMock = process.env['NEXT_PUBLIC_USE_MOCK'] !== 'false'
 
+/**
+ * Built once, on first use.
+ *
+ * Deliberately not at module scope. The previous version threw during import
+ * whenever the backend was selected, so a misconfiguration took down every
+ * page that rendered any intent hook rather than failing the one query that
+ * needed the server.
+ */
+let backend: DappClient | undefined
+
 export function getIntentClient(): DappClient {
-  // Real IntentClient wiring lands when the Go backend exists; until then the
-  // mock is the default (backend is currently empty).
-  if (!useMock) {
-    throw new Error(
-      'Live backend client not implemented yet. Set NEXT_PUBLIC_USE_MOCK=true (default) until the API is available.'
-    )
-  }
-  return mockClient
+  if (useMock) return mockClient
+  backend ??= createBackendClient()
+  return backend
 }

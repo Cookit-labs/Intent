@@ -8,7 +8,15 @@ import { getIntentClient } from '../lib/sdk'
 import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
 import { useIntentStore } from '../stores/intent.store'
 
-const client = getIntentClient()
+/**
+ * Resolved per call rather than once at import.
+ *
+ * Holding the client in a module constant meant construction happened when
+ * this file was first imported, so a backend misconfiguration crashed every
+ * page rendering any intent hook. Resolving inside each query makes it a
+ * failed request instead, which React Query already knows how to show.
+ */
+const client = () => getIntentClient()
 
 export const intentKeys = {
   all: ['intents'] as const,
@@ -60,7 +68,7 @@ export function useIntents(chain?: string) {
   return useQuery({
     queryKey: chain === undefined ? intentKeys.all : intentKeys.forChain(chain),
     queryFn: async () => {
-      const data = await client.intents.list(chain, pricesRef.current)
+      const data = await client().intents.list(chain, pricesRef.current)
       setIntents(data)
       return data
     },
@@ -80,7 +88,7 @@ export function useIntent(id: string) {
 
   return useQuery({
     queryKey: intentKeys.detail(id),
-    queryFn: () => client.intents.get(id, pricesRef.current),
+    queryFn: () => client().intents.get(id, pricesRef.current),
     placeholderData: (previous) => previous,
     // Poll while the intent is still progressing so the lifecycle animates.
     refetchInterval: (query) => (isLive(query.state.data) ? 1500 : false),
@@ -92,7 +100,7 @@ export function useCreateIntent() {
   const addIntent = useIntentStore((s) => s.addIntent)
 
   return useMutation({
-    mutationFn: (input: CreateIntentInput) => client.intents.create(input),
+    mutationFn: (input: CreateIntentInput) => client().intents.create(input),
     onSuccess: (created) => {
       addIntent(created)
       queryClient.invalidateQueries({ queryKey: intentKeys.all })
@@ -112,7 +120,7 @@ export function useCancelIntent() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) => client.intents.cancel(id),
+    mutationFn: (id: string) => client().intents.cancel(id),
     onSuccess: (cancelled) => {
       queryClient.invalidateQueries({ queryKey: intentKeys.all })
       queryClient.setQueryData(intentKeys.detail(cancelled.id), cancelled)
@@ -131,10 +139,30 @@ export function useSettleIntent() {
 
   return useMutation({
     mutationFn: ({ id, txHash }: { id: string; txHash: string }) =>
-      client.intents.settle(id, txHash),
+      client().intents.settle(id, txHash),
     onSuccess: (settled) => {
       queryClient.invalidateQueries({ queryKey: intentKeys.all })
       queryClient.setQueryData(intentKeys.detail(settled.id), settled)
+    },
+  })
+}
+
+/**
+ * Records that an intent's order is now resting on the book.
+ *
+ * Separate from settling: the order exists and the hash is real, but nothing
+ * has traded. Marking it settled here would put an unfilled order in history
+ * as a completed swap.
+ */
+export function usePlaceIntent() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, offerId, txHash }: { id: string; offerId: string; txHash: string }) =>
+      client().intents.place(id, offerId, txHash),
+    onSuccess: (placed) => {
+      queryClient.invalidateQueries({ queryKey: intentKeys.all })
+      queryClient.setQueryData(intentKeys.detail(placed.id), placed)
     },
   })
 }

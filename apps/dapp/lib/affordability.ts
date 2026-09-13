@@ -1,4 +1,5 @@
 import type { StellarBalances } from './stellar-account'
+import { resolveVerifiedAsset } from './swap/asset-registry'
 
 /**
  * Can this account actually pay for the intent it just asked for?
@@ -39,6 +40,16 @@ export interface Affordability {
  */
 const XLM_HEADROOM = 1.5
 
+/**
+ * Extra XLM held while an order sits on the book.
+ *
+ * Stellar raises an account's minimum balance by half a lumen for every open
+ * offer, and releases it when the offer is cancelled or filled. It is not a
+ * fee — it comes back — but it is unspendable in the meantime, so an account
+ * with just enough to swap can still be unable to place a resting order.
+ */
+const OFFER_RESERVE_XLM = 0.5
+
 function format(n: number): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 4 })
 }
@@ -46,7 +57,14 @@ function format(n: number): string {
 export function checkAffordability(
   amountIn: string,
   tokenIn: string,
-  balances: StellarBalances | undefined
+  balances: StellarBalances | undefined,
+  /**
+   * True when the amount will rest on the book rather than trade at once.
+   *
+   * Adds the per-offer reserve to the headroom. Off by default so an ordinary
+   * swap is not asked to leave behind lumens it does not need.
+   */
+  restingOrder = false
 ): Affordability {
   if (balances === undefined) {
     return {
@@ -75,14 +93,17 @@ export function checkAffordability(
     const held = Number(balances.xlm)
     // The reserve is not spendable, so comparing against the raw balance would
     // approve an order the network then refuses.
-    const spendable = Math.max(0, held - XLM_HEADROOM)
+    const headroom = XLM_HEADROOM + (restingOrder ? OFFER_RESERVE_XLM : 0)
+    const spendable = Math.max(0, held - headroom)
     if (required > spendable) {
       return {
         ok: false,
         reason: 'insufficient',
         available: format(spendable),
         required: format(required),
-        message: `Not enough XLM. This order needs ${format(required)} XLM and ${format(spendable)} is spendable — the rest covers fees and the account reserve.`,
+        message: restingOrder
+          ? `Not enough XLM. This order needs ${format(required)} XLM and ${format(spendable)} is spendable — the rest covers fees, the account reserve, and the ${OFFER_RESERVE_XLM} XLM held while the order rests.`
+          : `Not enough XLM. This order needs ${format(required)} XLM and ${format(spendable)} is spendable — the rest covers fees and the account reserve.`,
       }
     }
     return {
@@ -94,23 +115,33 @@ export function checkAffordability(
     }
   }
 
-  if (symbol === 'USDC') {
-    if (!balances.hasUsdcTrustline) {
+  // Any issued asset the app has verified, not just USDC. Hardcoding one asset
+  // per branch stopped working the moment tokenized treasuries were tradeable,
+  // and refusing them as unknown would have been wrong rather than cautious.
+  const asset = resolveVerifiedAsset(symbol)
+  if (asset !== undefined && asset.issuer !== undefined) {
+    const line = balances.trustlines[asset.code]
+
+    // The issuer is checked, not just the code. An account holding a token
+    // called CETES from an unrelated issuer cannot spend Etherfuse CETES, and
+    // treating them as interchangeable is the confusion the registry exists to
+    // prevent.
+    if (line === undefined || line.issuer !== asset.issuer) {
       return {
         ok: false,
         reason: 'no_trustline',
-        message:
-          'This account has no USDC trustline, so it cannot hold or spend USDC. Add the trustline first.',
+        message: `This account has no ${asset.code} trustline, so it cannot hold or spend ${asset.code}. Add the trustline first.`,
       }
     }
-    const held = Number(balances.usdc ?? '0')
+
+    const held = Number(line.balance)
     if (required > held) {
       return {
         ok: false,
         reason: 'insufficient',
         available: format(held),
         required: format(required),
-        message: `Not enough USDC. This order needs ${format(required)} USDC and the account holds ${format(held)}.`,
+        message: `Not enough ${asset.code}. This order needs ${format(required)} ${asset.code} and the account holds ${format(held)}.`,
       }
     }
     return {

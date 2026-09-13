@@ -16,6 +16,12 @@ const funded: StellarBalances = {
   usdc: '150',
   hasUsdcTrustline: true,
   exists: true,
+  // The trustline map is the real source of truth now; `usdc` and
+  // `hasUsdcTrustline` are the older single-asset view of the same fact and
+  // must agree with it.
+  trustlines: {
+    USDC: { balance: '150', issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5' },
+  },
 }
 
 describe('affordability', () => {
@@ -39,6 +45,10 @@ describe('affordability', () => {
       ...funded,
       hasUsdcTrustline: false,
       usdc: undefined,
+      // Cleared here too: the trustline map is what the check actually reads,
+      // and leaving USDC in it while claiming no trustline describes an
+      // account that cannot exist.
+      trustlines: {},
     })
     expect(out.ok).toBe(false)
     expect(out.reason).toBe('no_trustline')
@@ -62,6 +72,7 @@ describe('affordability', () => {
       usdc: undefined,
       hasUsdcTrustline: false,
       exists: false,
+      trustlines: {},
     })
     expect(out.ok).toBe(false)
     expect(out.reason).toBe('unfunded')
@@ -77,5 +88,99 @@ describe('affordability', () => {
     const out = checkAffordability('1', 'WETH', funded)
     expect(out.ok).toBe(false)
     expect(out.reason).toBe('unknown_asset')
+  })
+})
+
+/**
+ * A resting order costs more than the trade it will make.
+ *
+ * Stellar raises the account's minimum balance by half a lumen for every open
+ * offer. It comes back when the order fills or is withdrawn, so it is not a
+ * fee — but it is unspendable while the order waits, and an account with just
+ * enough to swap can still be refused when placing one.
+ */
+describe('an order that rests needs extra headroom', () => {
+  const funded = {
+    xlm: '3',
+    usdc: '100',
+    hasUsdcTrustline: true,
+    exists: true,
+    trustlines: {
+      USDC: { balance: '100', issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5' },
+    },
+  }
+
+  it('allows a swap that a resting order could not afford', () => {
+    // 3 XLM held, 1.5 headroom, so 1.5 spendable as an immediate swap.
+    expect(checkAffordability('1.4', 'XLM', funded).ok).toBe(true)
+  })
+
+  it('refuses the same amount once it has to rest', () => {
+    // The extra 0.5 reserve leaves only 1.0 spendable.
+    const resting = checkAffordability('1.4', 'XLM', funded, true)
+    expect(resting.ok).toBe(false)
+    expect(resting.message).toMatch(/while the order rests/)
+  })
+
+  it('still allows a resting order that fits', () => {
+    expect(checkAffordability('0.9', 'XLM', funded, true).ok).toBe(true)
+  })
+})
+
+/**
+ * Tokenized treasuries need the same checks as any other issued asset.
+ *
+ * The check was written around USDC with a field per asset, which stopped
+ * scaling the moment a second issued asset became tradeable. Refusing CETES as
+ * "unknown" would have been wrong rather than cautious.
+ */
+describe('real-world assets are checked like any other issued asset', () => {
+  const ETHERFUSE = 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4'
+
+  const holder: StellarBalances = {
+    xlm: '500',
+    usdc: '150',
+    hasUsdcTrustline: true,
+    exists: true,
+    trustlines: {
+      USDC: { balance: '150', issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5' },
+      CETES: { balance: '2000', issuer: ETHERFUSE },
+    },
+  }
+
+  it('allows spending a treasury balance the account holds', () => {
+    expect(checkAffordability('1000', 'CETES', holder).ok).toBe(true)
+  })
+
+  it('refuses more than is held', () => {
+    const out = checkAffordability('5000', 'CETES', holder)
+    expect(out.ok).toBe(false)
+    expect(out.reason).toBe('insufficient')
+  })
+
+  it('refuses when the account cannot hold the asset at all', () => {
+    const out = checkAffordability('10', 'CETES', { ...holder, trustlines: {} })
+    expect(out.ok).toBe(false)
+    expect(out.reason).toBe('no_trustline')
+    expect(out.message).toContain('CETES')
+  })
+
+  it('refuses a token that shares the ticker but not the issuer', () => {
+    // The attack the asset registry exists to stop, reaching this layer: an
+    // account holding some other account's "CETES" cannot spend Etherfuse
+    // CETES, and treating the two as the same asset would approve an order
+    // that fails on-chain.
+    const impostor = {
+      ...holder,
+      trustlines: {
+        CETES: {
+          balance: '9999',
+          issuer: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        },
+      },
+    }
+    const out = checkAffordability('10', 'CETES', impostor)
+    expect(out.ok).toBe(false)
+    expect(out.reason).toBe('no_trustline')
   })
 })
