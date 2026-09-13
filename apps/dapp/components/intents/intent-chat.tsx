@@ -420,8 +420,13 @@ export function IntentChat(): JSX.Element {
         </button>
       </div>
 
-      {/* Body */}
-      <div className="relative flex-1 overflow-y-auto p-4">
+      {/* Body.
+          The overlay panels are siblings of the scroll area rather than
+          children of it. As children, `absolute inset-0` resolved against the
+          *scrolled content* — so once a competition filled the thread, the
+          panel was pinned above the visible region and appeared not to open at
+          all. It rendered; it was simply scrolled off screen. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
         {rulesOpen ? (
           <StandingRulesPanel
             rules={standing.rules}
@@ -474,161 +479,169 @@ export function IntentChat(): JSX.Element {
             }}
           />
         ) : null}
-        {!parsed || !message ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <p className="text-muted-foreground max-w-sm text-sm">
-              Say what you want to happen. Autonomous agents compete to find the best execution —
-              you pick who executes.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {/* A reopened conversation shows the prices that were quoted when
+
+        {/* The scrolling thread. Separate from the wrapper above so the
+            overlays position against the panel rather than against content
+            that moves under them. */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {!parsed || !message ? (
+            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+              <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
+                <Sparkles className="h-5 w-5" />
+              </span>
+              <p className="text-muted-foreground max-w-sm text-sm">
+                Say what you want to happen. Autonomous agents compete to find the best execution —
+                you pick who executes.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {/* A reopened conversation shows the prices that were quoted when
                 it ran. Saying so matters: signing against a rate from an hour
                 ago is a different decision from signing a fresh one. */}
-            {restored !== null ? (
-              <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs">
-                <Clock className="h-3.5 w-3.5" />
-                Reopened from{' '}
-                {new Date(restored.createdAt).toLocaleString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
-                <button
-                  type="button"
-                  onClick={() => handleSubmit(restored.text)}
-                  className="hover:text-foreground underline underline-offset-2"
-                >
-                  run again
-                </button>
-              </div>
-            ) : null}
+              {restored !== null ? (
+                <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs">
+                  <Clock className="h-3.5 w-3.5" />
+                  Reopened from{' '}
+                  {new Date(restored.createdAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit(restored.text)}
+                    className="hover:text-foreground underline underline-offset-2"
+                  >
+                    run again
+                  </button>
+                </div>
+              ) : null}
 
-            <div className="flex justify-end">
-              <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
-                {message}
+              <div className="flex justify-end">
+                <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+                  {message}
+                </div>
               </div>
-            </div>
-            <CompetitionPanel
-              state={competition}
-              onExecute={handleExecute}
-              executingKey={executingKey}
-              locked={
-                swap.phase === 'signing' || swap.phase === 'submitting' || swap.phase === 'settled'
-              }
-            />
-
-            {/* Said before anything is signed. An order the account cannot
-                fund is refused here rather than allowed to rest for hours and
-                then fail. */}
-            {affordError !== null ? (
-              <div className="border-border rounded-2xl border border-dashed p-4">
-                <p className="text-foreground text-sm">{affordError}</p>
-              </div>
-            ) : null}
-
-            {/* A resting order lives in the thread that placed it, with its
-                own cancel — the same conversation, not a separate page. */}
-            {placedId !== null ? (
-              <OpenIntentCard
-                intentId={placedId}
-                onCancel={(id) => cancelIntent.mutate(id)}
-                cancelling={cancelIntent.isPending}
-                cancelError={
-                  cancelIntent.isError ? (cancelIntent.error as Error).message : undefined
+              <CompetitionPanel
+                state={competition}
+                onExecute={handleExecute}
+                executingKey={executingKey}
+                locked={
+                  swap.phase === 'signing' ||
+                  swap.phase === 'submitting' ||
+                  swap.phase === 'settled'
                 }
               />
-            ) : null}
 
-            {/* A limit order goes to the book rather than through a swap, so
+              {/* Said before anything is signed. An order the account cannot
+                fund is refused here rather than allowed to rest for hours and
+                then fail. */}
+              {affordError !== null ? (
+                <div className="border-border rounded-2xl border border-dashed p-4">
+                  <p className="text-foreground text-sm">{affordError}</p>
+                </div>
+              ) : null}
+
+              {/* A resting order lives in the thread that placed it, with its
+                own cancel — the same conversation, not a separate page. */}
+              {placedId !== null ? (
+                <OpenIntentCard
+                  intentId={placedId}
+                  onCancel={(id) => cancelIntent.mutate(id)}
+                  cancelling={cancelIntent.isPending}
+                  cancelError={
+                    cancelIntent.isError ? (cancelIntent.error as Error).message : undefined
+                  }
+                />
+              ) : null}
+
+              {/* A limit order goes to the book rather than through a swap, so
                 it gets its own card. Both are never active at once: the intent
                 is one or the other. */}
-            {limit.phase !== 'idle' && parsed !== null ? (
-              <LimitConfirm
-                order={limit}
-                sellSymbol={parsed.input.tokenIn}
-                buySymbol={parsed.input.tokenOut}
-                onPlaced={(hash) => {
-                  // The placing transaction is a real, verifiable event, but it
-                  // is not a fill — the order is only now waiting. Recording it
-                  // on the conversation lets history link to it without
-                  // claiming the trade happened.
-                  if (turnId !== null) {
-                    updateTurn(turnId, { txHash: hash })
-                    setTurns(loadTurns(slug))
-                  }
+              {limit.phase !== 'idle' && parsed !== null ? (
+                <LimitConfirm
+                  order={limit}
+                  sellSymbol={parsed.input.tokenIn}
+                  buySymbol={parsed.input.tokenOut}
+                  onPlaced={(hash) => {
+                    // The placing transaction is a real, verifiable event, but it
+                    // is not a fill — the order is only now waiting. Recording it
+                    // on the conversation lets history link to it without
+                    // claiming the trade happened.
+                    if (turnId !== null) {
+                      updateTurn(turnId, { txHash: hash })
+                      setTurns(loadTurns(slug))
+                    }
 
-                  // The offer id comes from the ledger rather than the
-                  // submission: Horizon reports the placed order on the
-                  // account, and reading it back is what makes the recorded id
-                  // the one that actually exists.
-                  if (placedId !== null && address !== undefined) {
-                    void fetch(`/api/offers?account=${encodeURIComponent(address)}`)
-                      .then((r) => r.json())
-                      .then((body: { offers?: { id: string }[] }) => {
-                        const newest = body.offers?.at(-1)
-                        if (newest !== undefined) {
-                          placeIntent.mutate({
-                            id: placedId,
-                            offerId: newest.id,
-                            txHash: hash,
-                          })
-                        }
-                      })
-                      .catch(() => undefined)
-                  }
-                }}
-              />
-            ) : null}
+                    // The offer id comes from the ledger rather than the
+                    // submission: Horizon reports the placed order on the
+                    // account, and reading it back is what makes the recorded id
+                    // the one that actually exists.
+                    if (placedId !== null && address !== undefined) {
+                      void fetch(`/api/offers?account=${encodeURIComponent(address)}`)
+                        .then((r) => r.json())
+                        .then((body: { offers?: { id: string }[] }) => {
+                          const newest = body.offers?.at(-1)
+                          if (newest !== undefined) {
+                            placeIntent.mutate({
+                              id: placedId,
+                              offerId: newest.id,
+                              txHash: hash,
+                            })
+                          }
+                        })
+                        .catch(() => undefined)
+                    }
+                  }}
+                />
+              ) : null}
 
-            {/* Everything currently resting, read from the ledger rather than
+              {/* Everything currently resting, read from the ledger rather than
                 remembered here, so a fill that happened elsewhere still shows. */}
-            <OpenOrders
-              account={slug === 'stellar' ? address : undefined}
-              cancelling={limit.phase === 'signing' || limit.phase === 'submitting'}
-              onCancel={(offer) => limit.cancel(offer.id, offer.sellingAsset, offer.buyingAsset)}
-            />
+              <OpenOrders
+                account={slug === 'stellar' ? address : undefined}
+                cancelling={limit.phase === 'signing' || limit.phase === 'submitting'}
+                onCancel={(offer) => limit.cancel(offer.id, offer.sellingAsset, offer.buyingAsset)}
+              />
 
-            {/* Appears only once an agent has won with an executable route, so
+              {/* Appears only once an agent has won with an executable route, so
                 the race is never interrupted by a confirmation prompt.
                 Hidden while an order is going to the book: the intent is a
                 resting order or an immediate swap, never both, and showing two
                 confirmation cards would leave the user to guess which one
                 their signature applies to. */}
-            <div ref={confirmRef} hidden={limit.phase !== 'idle'}>
-              <SwapConfirm
-                phase={swap.phase}
-                quote={swap.quote}
-                sendDisplay={swap.sendDisplay}
-                receiveDisplay={swap.receiveDisplay}
-                hash={swap.hash}
-                explorerUrl={swap.explorerUrl}
-                error={swap.error}
-                usdPrices={swap.usdPrices}
-                agentName={
-                  executingKey !== null ? competition.proposals[executingKey]?.name : undefined
-                }
-                sliceCount={
-                  executingKey !== null
-                    ? competition.proposals[executingKey]?.sliceCount
-                    : undefined
-                }
-                horizonMinutes={
-                  executingKey !== null
-                    ? competition.proposals[executingKey]?.horizonMinutes
-                    : undefined
-                }
-                onConfirm={swap.confirm}
-                onReset={swap.reset}
-              />
+              <div ref={confirmRef} hidden={limit.phase !== 'idle'}>
+                <SwapConfirm
+                  phase={swap.phase}
+                  quote={swap.quote}
+                  sendDisplay={swap.sendDisplay}
+                  receiveDisplay={swap.receiveDisplay}
+                  hash={swap.hash}
+                  explorerUrl={swap.explorerUrl}
+                  error={swap.error}
+                  usdPrices={swap.usdPrices}
+                  agentName={
+                    executingKey !== null ? competition.proposals[executingKey]?.name : undefined
+                  }
+                  sliceCount={
+                    executingKey !== null
+                      ? competition.proposals[executingKey]?.sliceCount
+                      : undefined
+                  }
+                  horizonMinutes={
+                    executingKey !== null
+                      ? competition.proposals[executingKey]?.horizonMinutes
+                      : undefined
+                  }
+                  onConfirm={swap.confirm}
+                  onReset={swap.reset}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Composer */}
