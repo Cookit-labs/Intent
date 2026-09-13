@@ -31,6 +31,10 @@ import { CompetitionPanel } from './competition-panel'
 import { SwapConfirm } from './swap-confirm'
 import { useSwapExecution } from '../../hooks/use-swap-execution'
 import { useLimitOrder } from '../../hooks/use-limit-order'
+import { usePlanExecution } from '../../hooks/use-plan-execution'
+import { PlanConfirm } from './plan-confirm'
+import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
+import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
@@ -133,6 +137,9 @@ export function IntentChat(): JSX.Element {
   // A resting order is a different transaction from a swap and has its own
   // state: it can be refused before it is ever built, which a swap cannot.
   const limit = useLimitOrder()
+  // Multi-step plans. Separate from the swap hook because a plan is a
+  // different thing to approve: an ordered list rather than one number.
+  const planExec = usePlanExecution()
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -356,6 +363,46 @@ export function IntentChat(): JSX.Element {
       return
     }
 
+    // A split is two actions in one signature: part filled now, the remainder
+    // rested. It is the only proposal shape that becomes more than one
+    // operation, and the reason four agents can produce genuinely different
+    // transactions rather than four descriptions of the same one.
+    if (
+      slug === 'stellar' &&
+      chosenPlan?.executionMode === 'split' &&
+      chosenPlan.splitPct !== undefined &&
+      restingPrice !== undefined
+    ) {
+      const total = Number(parsed.input.amountIn)
+      const fillNow = (total * chosenPlan.splitPct) / 100
+      const rested = total - fillNow
+
+      const from = resolveAsset(parsed.input.tokenIn)
+      const to = resolveAsset(parsed.input.tokenOut)
+
+      if (from !== undefined && to !== undefined && fillNow > 0 && rested > 0) {
+        planExec.prepare([
+          {
+            kind: 'swap',
+            from,
+            to,
+            sendAmount: toBaseUnits(fillNow.toFixed(7)),
+            // The floor is enforced by the network. A nominal value here would
+            // be a swap with no protection at all.
+            minReceive: '1',
+          },
+          {
+            kind: 'rest',
+            selling: from,
+            buying: to,
+            amount: rested.toFixed(7),
+            price: toPriceFraction(String(restingPrice)),
+          },
+        ])
+        return
+      }
+    }
+
     // A market-typed intent still reaches the book when the chosen agent
     // decided to wait. The execution shape belongs to the plan the user picked,
     // not to how the text was classified — that is what makes choosing a
@@ -560,6 +607,20 @@ export function IntentChat(): JSX.Element {
               {/* A limit order goes to the book rather than through a swap, so
                 it gets its own card. Both are never active at once: the intent
                 is one or the other. */}
+              {/* A plan is several actions under one signature, so it gets its
+                own card: the ordered list is what the user is approving. */}
+              {planExec.phase !== 'idle' ? (
+                <PlanConfirm
+                  plan={planExec}
+                  onSettled={(hash) => {
+                    if (turnId !== null) {
+                      updateTurn(turnId, { txHash: hash })
+                      setTurns(loadTurns(slug))
+                    }
+                  }}
+                />
+              ) : null}
+
               {limit.phase !== 'idle' && parsed !== null ? (
                 <LimitConfirm
                   order={limit}
@@ -612,7 +673,7 @@ export function IntentChat(): JSX.Element {
                 resting order or an immediate swap, never both, and showing two
                 confirmation cards would leave the user to guess which one
                 their signature applies to. */}
-              <div ref={confirmRef} hidden={limit.phase !== 'idle'}>
+              <div ref={confirmRef} hidden={limit.phase !== 'idle' || planExec.phase !== 'idle'}>
                 <SwapConfirm
                   phase={swap.phase}
                   quote={swap.quote}
