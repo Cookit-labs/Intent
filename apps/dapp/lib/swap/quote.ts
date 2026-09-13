@@ -77,6 +77,20 @@ export interface QuoteFailure {
 
 export type QuoteOutcome = { ok: true; quote: SwapQuote } | { ok: false; failure: QuoteFailure }
 
+/**
+ * Every distinct route a source can offer, best first.
+ *
+ * A venue often has several genuinely different ways to fill the same swap —
+ * Stellar will route through an intermediate asset when that beats going
+ * direct, and the two can differ by more than a factor of two. Collapsing them
+ * to the single best answer is right when one trade is being built, and wrong
+ * when four agents are meant to choose between options: a competition over a
+ * list of one is a formality.
+ */
+export type MultiQuoteOutcome =
+  | { ok: true; quotes: SwapQuote[] }
+  | { ok: false; failure: QuoteFailure }
+
 export interface QuoteSource {
   id: QuoteSourceId
   displayName: string
@@ -87,6 +101,14 @@ export interface QuoteSource {
    * it. One quoter failing still leaves the other's route usable.
    */
   quote: (req: QuoteRequest, signal?: AbortSignal) => Promise<QuoteOutcome>
+  /**
+   * Every route this source can offer, rather than only its best.
+   *
+   * Optional because not every venue has more than one answer to give: a
+   * single-pool AMM quotes one price and that is the whole truth. Sources that
+   * omit it are simply treated as offering the one quote they return.
+   */
+  quoteAll?: (req: QuoteRequest, signal?: AbortSignal) => Promise<MultiQuoteOutcome>
 }
 
 /**

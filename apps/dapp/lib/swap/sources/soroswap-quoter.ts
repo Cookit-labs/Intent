@@ -1,4 +1,5 @@
 import { stellarTestnet } from '@intent/config'
+import { Asset } from '@stellar/stellar-sdk'
 import {
   Account,
   Address,
@@ -44,8 +45,16 @@ const ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
  * number that comes back gives no hint that it happened.
  */
 const CONTRACTS: Record<string, string> = {
+  // The canonical Stellar Asset Contract for each classic asset, derived from
+  // the asset itself and therefore not a matter of opinion.
+  //
+  // USDC previously pointed at `CB3TLW74…`, which is a Soroswap test token
+  // that calls itself "USDCoin" and shares the ticker. Every quote against it
+  // was priced in an asset the user does not hold and cannot spend — the exact
+  // ticker-impersonation the asset registry exists to catch, reached through a
+  // hardcoded constant rather than a lookup.
   XLM: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-  USDC: 'CB3TLW74NBIOT3BUWOZ3TUM6RFDF6A4GVIRUQRQZABG5KPOUL4JJOV2F',
+  USDC: 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA',
 }
 
 /**
@@ -157,11 +166,24 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
             // The router quotes a direct pair here, so there are no hops to
             // replay. Multi-hop routing would need the path echoed back.
             path: [],
-            // `to` names the classic asset the user asked for, but this route
-            // settles in Soroswap's own token. Stated rather than implied: a
-            // builder that ignored the difference would sign a transaction for
-            // an asset the user never chose.
-            deliversAsset: { kind: 'contract', code: req.to.code, contract: toContract },
+            // Now that the contracts above are canonical SACs, this route
+            // settles in the *same* asset the user named — a Stellar Asset
+            // Contract is the classic asset, reachable from Soroban, not a
+            // separate token.
+            //
+            // The field stays because it is the honest answer for any future
+            // source that does deliver something else, and because a builder
+            // silently substituting an asset is the failure it exists to
+            // prevent. It is simply no longer set for this one.
+            ...(isCanonicalSac(req.to, toContract)
+              ? {}
+              : {
+                  deliversAsset: {
+                    kind: 'contract' as const,
+                    code: req.to.code,
+                    contract: toContract,
+                  },
+                }),
             quotedAt: new Date().toISOString(),
           },
         }
@@ -181,3 +203,24 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
 }
 
 export { ROUTER as SOROSWAP_ROUTER, CONTRACTS as SOROSWAP_CONTRACTS }
+
+/**
+ * Whether a contract id is the canonical Stellar Asset Contract for an asset.
+ *
+ * A SAC is derived from the asset itself, so this is a fact rather than a
+ * judgement: if the ids match, the contract *is* that classic asset and a
+ * route through it delivers exactly what the user asked for. If they do not,
+ * the contract is some other token that may share a ticker — which is how
+ * every Soroswap quote came to be priced in a test token called "USDCoin".
+ */
+function isCanonicalSac(asset: ClassicAsset, contractId: string): boolean {
+  try {
+    const sdkAsset =
+      asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
+    return sdkAsset.contractId(stellarTestnet.networkPassphrase) === contractId
+  } catch {
+    // An asset we cannot construct cannot be matched, and guessing would
+    // defeat the point of the check.
+    return false
+  }
+}

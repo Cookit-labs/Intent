@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { assertSelfSwap } from '../../../../lib/swap/build-tx'
+import { assertSelfInvoke } from '../../../../lib/swap/build-soroban'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 
 /**
@@ -27,13 +28,27 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   if (typeof body.account === 'string' && body.account !== '') {
+    // Either shape is acceptable here, but each must satisfy its own
+    // assertion — a path payment proves the destination is the sender, and a
+    // router call proves the recipient argument is. Accepting one envelope
+    // under the other's check would let a transaction through with a
+    // guarantee that was never verified for its shape.
     try {
       assertSelfSwap(body.signedXdr, body.account)
-    } catch (e) {
-      return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'refusing to submit' },
-        { status: 400 }
-      )
+    } catch (classicError) {
+      try {
+        assertSelfInvoke(body.signedXdr, body.account)
+      } catch {
+        // Reported as the classic failure: that is the common case, and the
+        // Soroban message would be confusing for what is almost always a
+        // malformed path payment.
+        return NextResponse.json(
+          {
+            error: classicError instanceof Error ? classicError.message : 'refusing to submit',
+          },
+          { status: 400 }
+        )
+      }
     }
   }
 

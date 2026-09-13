@@ -2,7 +2,7 @@ import { stellarTestnet } from '@intent/config'
 
 import type { AssetRef } from '../assets'
 import { fromCanonical, toBaseUnits, toCanonical, toHorizonParams } from '../assets'
-import type { QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
+import type { MultiQuoteOutcome, QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
 
 /**
  * Quotes against Stellar's built-in DEX.
@@ -56,7 +56,7 @@ export function createHorizonQuoter(options: HorizonQuoterOptions = {}): QuoteSo
     displayName: 'Stellar DEX',
     isConfigured: () => horizonUrl !== '',
 
-    async quote(req: QuoteRequest, signal?: AbortSignal): Promise<QuoteOutcome> {
+    async quoteAll(req: QuoteRequest, signal?: AbortSignal): Promise<MultiQuoteOutcome> {
       const params = new URLSearchParams()
       let endpoint: string
 
@@ -117,31 +117,50 @@ export function createHorizonQuoter(options: HorizonQuoterOptions = {}): QuoteSo
         return { ok: false, failure: { source: 'horizon', reason: 'no_route' } }
       }
 
-      // Horizon returns candidates unordered, so pick explicitly rather than
-      // trusting position: most delivered on a fixed input, least spent on a
-      // fixed output.
-      const best = records.reduce((a, b) => {
-        if (req.kind === 'strict_receive') {
-          return BigInt(toBaseUnits(b.source_amount)) < BigInt(toBaseUnits(a.source_amount)) ? b : a
-        }
-        return BigInt(toBaseUnits(b.destination_amount)) > BigInt(toBaseUnits(a.destination_amount))
-          ? b
-          : a
-      })
-
-      return {
-        ok: true,
-        quote: {
-          source: 'horizon',
+      // Horizon returns candidates unordered, so rank them explicitly rather
+      // than trusting position: most delivered on a fixed input, least spent
+      // on a fixed output. Every one of these is a real, executable path — a
+      // route through an intermediate asset can beat going direct by more than
+      // a factor of two — so they are all returned and the caller decides.
+      const quotedAt = new Date().toISOString()
+      const quotes = records
+        .map((r) => ({
+          source: 'horizon' as const,
           kind: req.kind,
           from: req.from,
           to: req.to,
-          sendAmount: toBaseUnits(best.source_amount),
-          destAmount: toBaseUnits(best.destination_amount),
-          path: best.path.map(hopToAsset),
-          quotedAt: new Date().toISOString(),
-        },
+          sendAmount: toBaseUnits(r.source_amount),
+          destAmount: toBaseUnits(r.destination_amount),
+          // Each route keeps its own path. Replaying the wrong one is a
+          // different trade at a different price.
+          path: r.path.map(hopToAsset),
+          quotedAt,
+        }))
+        .sort((a, b) =>
+          req.kind === 'strict_receive'
+            ? Number(BigInt(a.sendAmount) - BigInt(b.sendAmount))
+            : Number(BigInt(b.destAmount) - BigInt(a.destAmount))
+        )
+
+      return { ok: true, quotes }
+    },
+
+    /**
+     * The single best route.
+     *
+     * Kept as the primary interface because building a transaction needs one
+     * answer, not a list. Delegates so the ranking cannot drift between the
+     * two.
+     */
+    async quote(req: QuoteRequest, signal?: AbortSignal): Promise<QuoteOutcome> {
+      const all = await this.quoteAll!(req, signal)
+      if (!all.ok) return { ok: false, failure: all.failure }
+
+      const best = all.quotes[0]
+      if (best === undefined) {
+        return { ok: false, failure: { source: 'horizon', reason: 'no_route' } }
       }
+      return { ok: true, quote: best }
     },
   }
 }
