@@ -93,6 +93,9 @@ export const venues: Venue[] = [
     chains: ['Stellar'],
     bestFor: 'Soroban AMM swaps',
     url: 'https://soroswap.finance',
+    integration: 'executes',
+    capability:
+      'Intents route here through the Soroban router. On identical assets it has quoted several times the classic DEX price.',
   },
   {
     id: 'aquarius',
@@ -102,6 +105,7 @@ export const venues: Venue[] = [
     chains: ['Stellar'],
     bestFor: 'Incentivised AMM pools',
     url: 'https://aqua.network',
+    integration: 'listed',
   },
   {
     id: 'stellarx',
@@ -111,6 +115,45 @@ export const venues: Venue[] = [
     chains: ['Stellar'],
     bestFor: 'Native SDEX orderbook',
     url: 'https://www.stellarx.com',
+    integration: 'executes',
+    capability:
+      'Swaps and resting limit orders settle on the network’s own order book, read and written directly rather than through a venue.',
+  },
+  {
+    id: 'etherfuse',
+    name: 'Etherfuse',
+    family: 'stellar' as const,
+    category: 'rwa',
+    chains: ['Stellar'],
+    bestFor: 'Tokenized sovereign debt',
+    url: 'https://etherfuse.com',
+    integration: 'executes',
+    capability:
+      'Buy tokenized Mexican, US and Korean treasury bills. They settle through the same path payments as any other classic asset, so no separate execution path was needed.',
+  },
+  {
+    id: 'stellar-pools',
+    name: 'Stellar Liquidity Pools',
+    family: 'stellar' as const,
+    category: 'pool',
+    chains: ['Stellar'],
+    bestFor: 'Fee income with no protocol risk',
+    url: 'https://developers.stellar.org/docs/build/guides/liquidity-pools',
+    integration: 'executes',
+    capability:
+      'Deposit both sides of a pair and earn a share of the 0.3% fee on trades routed through it. The network runs these, so there is no contract to trust and nothing that can be shut down.',
+  },
+  {
+    id: 'blend',
+    name: 'Blend Capital',
+    family: 'stellar' as const,
+    category: 'lending',
+    chains: ['Stellar'],
+    bestFor: 'Supply and borrow against collateral',
+    url: 'https://blend.capital',
+    integration: 'quotes',
+    capability:
+      'Reserves and interest rates are read live, so agents can reason about real yield. Supplying is not signed yet: borrowing introduces liquidation risk the app does not model.',
   },
   {
     id: 'phoenix',
