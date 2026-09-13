@@ -1,23 +1,38 @@
 'use client'
 
-import { Sparkles } from 'lucide-react'
+import { cn } from '@intent/ui'
+import { Bell, Clock, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import type { CreateIntentInput } from '@intent/types'
 
-import { useCancelIntent, useCreateIntent, useSettleIntent } from '../../hooks/use-intent'
+import {
+  useCancelIntent,
+  useCreateIntent,
+  usePlaceIntent,
+  useSettleIntent,
+} from '../../hooks/use-intent'
 import { useWallet } from '../../hooks/use-wallet'
 import { checkAffordability } from '../../lib/affordability'
+import { isLimitType } from '../../lib/intent-kind'
 import { fetchStellarBalances } from '../../lib/stellar-account'
 import { useQuery } from '@tanstack/react-query'
 import { OpenIntentCard } from './open-intent-card'
+import { ChatHistoryPanel } from './chat-history-panel'
+import { StandingRulesPanel } from './standing-rules-panel'
+import { useStandingRules } from '../../hooks/use-standing-rules'
+import { parseStandingIntent } from '../../lib/parse-standing'
+import { clearTurns, loadTurns, saveTurn, updateTurn, type ChatTurn } from '../../lib/chat-history'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
 import { SwapConfirm } from './swap-confirm'
 import { useSwapExecution } from '../../hooks/use-swap-execution'
+import { useLimitOrder } from '../../hooks/use-limit-order'
+import { LimitConfirm } from './limit-confirm'
+import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
 
 function TrafficLights(): JSX.Element {
@@ -34,6 +49,7 @@ export function IntentChat(): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
   const settleIntent = useSettleIntent()
+  const placeIntent = usePlaceIntent()
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
@@ -44,6 +60,19 @@ export function IntentChat(): JSX.Element {
   // A market order held back until it settles, so an unsigned one leaves no
   // trace in history.
   const [pendingInput, setPendingInput] = useState<CreateIntentInput | null>(null)
+  // The conversation being recorded, so its outcome can be attached later.
+  const [turnId, setTurnId] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)
+  // Standing rules watch prices while this page is open. Deliberately not a
+  // server-side job yet, and the panel says so.
+  const standing = useStandingRules()
+  const [turns, setTurns] = useState<ChatTurn[]>([])
+  // A conversation reopened from history. While set, the panel renders what
+  // was recorded rather than starting a new competition — reopening used to
+  // resubmit the text, which threw away the agents' answers and produced a
+  // different set, so nothing was actually preserved.
+  const [restored, setRestored] = useState<ChatTurn | null>(null)
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
 
@@ -65,9 +94,21 @@ export function IntentChat(): JSX.Element {
   // Defaulting to live means a stale or missing build value degrades to a
   // visible failure from the route, not to a mock that cannot be executed.
   const useAgents = process.env['NEXT_PUBLIC_USE_AI'] !== 'false'
-  const live = useCompetition(useAgents ? parsed : null, slug)
-  const offline = useMockCompetition(useAgents ? null : parsed)
-  const competition = useAgents ? live : offline
+  const live = useCompetition(useAgents && restored === null ? parsed : null, slug)
+  const offline = useMockCompetition(useAgents || restored !== null ? null : parsed)
+  const liveCompetition = useAgents ? live : offline
+
+  // A restored turn is already decided: every agent revealed, a winner picked.
+  const competition =
+    restored !== null
+      ? {
+          proposals: restored.proposals,
+          revealed: Object.fromEntries(Object.keys(restored.proposals).map((k) => [k, true])),
+          phase: 'decided' as const,
+          secondsLeft: 0,
+          winner: restored.winner,
+        }
+      : liveCompetition
 
   // The route of whichever agent the user chose — not the winner's. Executing
   // always signed `live.route`, so picking any other agent quietly submitted
@@ -78,14 +119,20 @@ export function IntentChat(): JSX.Element {
   // consumer resets its state whenever this reference changes, so returning a
   // fresh one on every render reset the confirm card continuously and it never
   // appeared.
-  const routesByAgent = live.routesByAgent
-  const winnerRoute = live.route
+  // Routes come from the restored turn when one is open, so a reopened
+  // conversation is still executable rather than a read-only transcript.
+  const routesByAgent = restored?.routesByAgent ?? live.routesByAgent
+  const winnerRoute = restored !== null ? undefined : live.route
   const chosenRoute = useMemo(() => {
     if (!useAgents || executingKey === null) return undefined
     return routesByAgent[executingKey] ?? winnerRoute
   }, [useAgents, executingKey, routesByAgent, winnerRoute])
 
   const swap = useSwapExecution(chosenRoute)
+
+  // A resting order is a different transaction from a swap and has its own
+  // state: it can be refused before it is ever built, which a swap cannot.
+  const limit = useLimitOrder()
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -105,6 +152,12 @@ export function IntentChat(): JSX.Element {
   const settledHash = swap.phase === 'settled' ? swap.hash : undefined
   useEffect(() => {
     if (settledHash === undefined) return
+
+    // The conversation keeps the outcome, so history can link to the trade.
+    if (turnId !== null) {
+      updateTurn(turnId, { txHash: settledHash })
+      setTurns(loadTurns(slug))
+    }
 
     // A limit order already exists; attach the hash to it.
     if (placedId !== null) {
@@ -138,7 +191,50 @@ export function IntentChat(): JSX.Element {
     if (swapFailed) setExecutingKey(null)
   }, [swapFailed])
 
+  useEffect(() => {
+    setTurns(loadTurns(slug))
+  }, [slug])
+
+  // Record the conversation once the competition settles on a winner, so the
+  // agents' reasoning survives a reload even if nothing is ever signed.
+  // Only a live competition writes a turn. A restored one is already decided,
+  // so saving it again would overwrite the record with a copy of itself and
+  // drop the outcome fields it had accumulated.
+  const decided = restored === null && liveCompetition.phase === 'decided'
+  useEffect(() => {
+    if (!decided || turnId === null || message === null) return
+    saveTurn({
+      id: turnId,
+      chain: slug,
+      text: message,
+      createdAt: new Date().toISOString(),
+      proposals: liveCompetition.proposals,
+      winner: liveCompetition.winner,
+      routesByAgent: live.routesByAgent,
+    })
+    setTurns(loadTurns(slug))
+    // Keyed on the decision, not on the proposals object, which is rebuilt on
+    // every frame of the reveal animation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decided, turnId, message, slug])
+
   function handleSubmit(text: string): void {
+    // A rule is not a trade. "Buy XLM if it drops to $0.16" describes when to
+    // act, and running a competition on it now would execute at a price the
+    // user explicitly said they did not want.
+    //
+    // Anything expressible as a resting order is deliberately *not* caught
+    // here — the parser declines it, so it becomes a real order on Stellar's
+    // book rather than a promise this app has to stay open to keep.
+    const rule = parseStandingIntent(text, swap.usdPrices ?? {}, slug)
+    if (rule !== null) {
+      standing.add(rule)
+      setMessage(text)
+      setParsed(null)
+      setRulesOpen(true)
+      return
+    }
+
     setMessage(text)
     // Parsed against the same live prices the server uses. Without them this
     // fell back to an indicative table that had XLM at $0.58 against a real
@@ -149,6 +245,9 @@ export function IntentChat(): JSX.Element {
     setPlacedId(null)
     setAffordError(null)
     setPendingInput(null)
+    setTurnId(crypto.randomUUID())
+    setHistoryOpen(false)
+    setRestored(null)
   }
 
   function handleReset(): void {
@@ -158,6 +257,8 @@ export function IntentChat(): JSX.Element {
     setPlacedId(null)
     setAffordError(null)
     setPendingInput(null)
+    setRestored(null)
+    setTurnId(null)
   }
 
   function handleExecute(key: string): void {
@@ -181,7 +282,15 @@ export function IntentChat(): JSX.Element {
     // user and blocked the whole flow — a wallet that is merely slow is not a
     // wallet that cannot pay.
     if (slug === 'stellar' && balances !== undefined) {
-      const afford = checkAffordability(parsed.input.amountIn, parsed.input.tokenIn, balances)
+      // A resting order also locks half a lumen until it is withdrawn, so it
+      // needs more headroom than a swap that settles at once.
+      const willRest = isLimitType(parsed.input.type) && parsed.limitPriceUsd !== undefined
+      const afford = checkAffordability(
+        parsed.input.amountIn,
+        parsed.input.tokenIn,
+        balances,
+        willRest
+      )
       if (!afford.ok) {
         setAffordError(afford.message)
         return
@@ -189,6 +298,7 @@ export function IntentChat(): JSX.Element {
     }
     setAffordError(null)
     setExecutingKey(key)
+    if (turnId !== null) updateTurn(turnId, { executedBy: key })
 
     // Every intent is recorded, whichever way it goes. Skipping the record for
     // signable routes kept the user in the chat but left the trade out of
@@ -196,14 +306,30 @@ export function IntentChat(): JSX.Element {
     // The limit price travels with the intent. Parsed but never stored, it was
     // discarded at creation — so a limit order became indistinguishable from a
     // market order the moment it was placed, and filled immediately.
-    const isLimit =
-      parsed.input.type === 'limit_buy' ||
-      parsed.input.type === 'limit_sell' ||
-      parsed.input.type === 'accumulate'
+    //
+    // Only a price the user actually named counts. `targetPriceUsd` falls back
+    // to spot, so the old guard was true for every intent and stamped a limit
+    // price equal to the current market onto orders that never asked for one.
+    const isLimit = isLimitType(parsed.input.type)
+
+    // The plan belongs to the agent the user chose. Its resting price has
+    // already been settled against the live book server-side, so a price that
+    // would cross the spread arrived here as a fill rather than as patience.
+    //
+    // A price the user typed still wins over the agent's: that is the one part
+    // of an intent a model does not get to move.
+    const chosenPlan = competition.proposals[key]
+    const restingPrice =
+      chosenPlan?.executionMode === 'rest'
+        ? (parsed.limitPriceUsd ?? chosenPlan.restPriceUsd)
+        : undefined
+
     const input = {
       ...parsed.input,
       chain: slug,
-      ...(isLimit && parsed.targetPriceUsd > 0 ? { limitPriceUsd: parsed.targetPriceUsd } : {}),
+      ...(isLimit && parsed.limitPriceUsd !== undefined
+        ? { limitPriceUsd: parsed.limitPriceUsd }
+        : {}),
     }
 
     // A limit order is recorded now, because resting unfilled is what it does
@@ -218,6 +344,29 @@ export function IntentChat(): JSX.Element {
         onSuccess: (created) => setPlacedId(created.id),
         onError: () => setExecutingKey(null),
       })
+
+      if (slug === 'stellar' && restingPrice !== undefined) {
+        limit.prepare({
+          sellSymbol: parsed.input.tokenIn,
+          buySymbol: parsed.input.tokenOut,
+          amount: parsed.input.amountIn,
+          limitPriceUsd: restingPrice,
+        })
+      }
+      return
+    }
+
+    // A market-typed intent still reaches the book when the chosen agent
+    // decided to wait. The execution shape belongs to the plan the user picked,
+    // not to how the text was classified — that is what makes choosing a
+    // different agent mean something.
+    if (slug === 'stellar' && restingPrice !== undefined) {
+      limit.prepare({
+        sellSymbol: parsed.input.tokenIn,
+        buySymbol: parsed.input.tokenOut,
+        amount: parsed.input.amountIn,
+        limitPriceUsd: restingPrice,
+      })
       return
     }
 
@@ -225,17 +374,106 @@ export function IntentChat(): JSX.Element {
   }
 
   return (
-    <div className="border-border bg-card flex h-[70vh] max-h-[720px] min-h-[520px] flex-col overflow-hidden rounded-2xl border">
+    <div className="border-border bg-card flex h-[75vh] max-h-[720px] min-h-[420px] flex-col overflow-hidden rounded-xl border sm:min-h-[520px] sm:rounded-2xl">
       {/* Window chrome */}
       <div className="border-border relative flex shrink-0 items-center border-b px-4 py-3">
         <TrafficLights />
         <span className="text-muted-foreground absolute left-1/2 -translate-x-1/2 text-xs">
           Live settlement
         </span>
+        {/* Past conversations. The chat keeps nothing across a reload on its
+            own, so without this the agents' reasoning is lost the moment the
+            page refreshes or a second intent is composed. */}
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          aria-label="Past intents"
+          aria-expanded={historyOpen}
+          className={cn(
+            'ml-auto rounded-full p-1.5 transition-colors',
+            historyOpen
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+          )}
+        >
+          <Clock className="h-4 w-4" />
+        </button>
+
+        {/* Standing rules. Badged when one has come due, because a rule that
+            is ready and unnoticed is the same as a rule that never fired. */}
+        <button
+          type="button"
+          onClick={() => setRulesOpen((v) => !v)}
+          aria-label="Standing rules"
+          aria-expanded={rulesOpen}
+          className={cn(
+            'relative rounded-full p-1.5 transition-colors',
+            rulesOpen
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+          )}
+        >
+          <Bell className="h-4 w-4" />
+          {standing.due.length > 0 ? (
+            <span className="bg-foreground absolute right-1 top-1 h-1.5 w-1.5 rounded-full" />
+          ) : null}
+        </button>
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="relative flex-1 overflow-y-auto p-4">
+        {rulesOpen ? (
+          <StandingRulesPanel
+            rules={standing.rules}
+            prices={standing.prices}
+            onCancel={standing.cancel}
+            onClose={() => setRulesOpen(false)}
+            onExecute={(rule) => {
+              // A due rule is a decision, not a trade. It becomes an ordinary
+              // intent the user reviews and signs — nothing spends money
+              // without a signature, which is what makes a browser-side
+              // watcher acceptable at all.
+              setRulesOpen(false)
+              handleSubmit(`Swap ${rule.action.amountIn} ${rule.action.from} to ${rule.action.to}`)
+            }}
+          />
+        ) : null}
+
+        {historyOpen ? (
+          <ChatHistoryPanel
+            turns={turns}
+            onSelect={(turn) => {
+              // Reopen exactly what was recorded. This used to resubmit the
+              // text, which started a fresh competition and produced different
+              // answers — the conversation was not being restored at all.
+              setHistoryOpen(false)
+              setRestored(turn)
+              setMessage(turn.text)
+              setParsed(parseIntent(turn.text, swap.usdPrices))
+              setTurnId(turn.id)
+              setExecutingKey(turn.executedBy ?? null)
+              setPlacedId(null)
+              setPendingInput(null)
+              setAffordError(null)
+            }}
+            onNew={() => {
+              // A new conversation, not a replacement. Everything already
+              // recorded stays in the list and stays reopenable — the point is
+              // to hop between intents, so starting one must never cost you
+              // the last.
+              setHistoryOpen(false)
+              handleReset()
+              // Reread rather than trusting local state: the turn just left
+              // behind may have gained a hash while it was open.
+              setTurns(loadTurns(slug))
+            }}
+            onClose={() => setHistoryOpen(false)}
+            onClear={() => {
+              clearTurns(slug)
+              setTurns([])
+            }}
+          />
+        ) : null}
         {!parsed || !message ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
             <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
@@ -248,6 +486,29 @@ export function IntentChat(): JSX.Element {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            {/* A reopened conversation shows the prices that were quoted when
+                it ran. Saying so matters: signing against a rate from an hour
+                ago is a different decision from signing a fresh one. */}
+            {restored !== null ? (
+              <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs">
+                <Clock className="h-3.5 w-3.5" />
+                Reopened from{' '}
+                {new Date(restored.createdAt).toLocaleString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+                <button
+                  type="button"
+                  onClick={() => handleSubmit(restored.text)}
+                  className="hover:text-foreground underline underline-offset-2"
+                >
+                  run again
+                </button>
+              </div>
+            ) : null}
+
             <div className="flex justify-end">
               <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
                 {message}
@@ -284,9 +545,62 @@ export function IntentChat(): JSX.Element {
               />
             ) : null}
 
+            {/* A limit order goes to the book rather than through a swap, so
+                it gets its own card. Both are never active at once: the intent
+                is one or the other. */}
+            {limit.phase !== 'idle' && parsed !== null ? (
+              <LimitConfirm
+                order={limit}
+                sellSymbol={parsed.input.tokenIn}
+                buySymbol={parsed.input.tokenOut}
+                onPlaced={(hash) => {
+                  // The placing transaction is a real, verifiable event, but it
+                  // is not a fill — the order is only now waiting. Recording it
+                  // on the conversation lets history link to it without
+                  // claiming the trade happened.
+                  if (turnId !== null) {
+                    updateTurn(turnId, { txHash: hash })
+                    setTurns(loadTurns(slug))
+                  }
+
+                  // The offer id comes from the ledger rather than the
+                  // submission: Horizon reports the placed order on the
+                  // account, and reading it back is what makes the recorded id
+                  // the one that actually exists.
+                  if (placedId !== null && address !== undefined) {
+                    void fetch(`/api/offers?account=${encodeURIComponent(address)}`)
+                      .then((r) => r.json())
+                      .then((body: { offers?: { id: string }[] }) => {
+                        const newest = body.offers?.at(-1)
+                        if (newest !== undefined) {
+                          placeIntent.mutate({
+                            id: placedId,
+                            offerId: newest.id,
+                            txHash: hash,
+                          })
+                        }
+                      })
+                      .catch(() => undefined)
+                  }
+                }}
+              />
+            ) : null}
+
+            {/* Everything currently resting, read from the ledger rather than
+                remembered here, so a fill that happened elsewhere still shows. */}
+            <OpenOrders
+              account={slug === 'stellar' ? address : undefined}
+              cancelling={limit.phase === 'signing' || limit.phase === 'submitting'}
+              onCancel={(offer) => limit.cancel(offer.id, offer.sellingAsset, offer.buyingAsset)}
+            />
+
             {/* Appears only once an agent has won with an executable route, so
-                the race is never interrupted by a confirmation prompt. */}
-            <div ref={confirmRef}>
+                the race is never interrupted by a confirmation prompt.
+                Hidden while an order is going to the book: the intent is a
+                resting order or an immediate swap, never both, and showing two
+                confirmation cards would leave the user to guess which one
+                their signature applies to. */}
+            <div ref={confirmRef} hidden={limit.phase !== 'idle'}>
               <SwapConfirm
                 phase={swap.phase}
                 quote={swap.quote}

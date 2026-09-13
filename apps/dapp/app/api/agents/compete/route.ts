@@ -10,8 +10,13 @@ import { buildMockProposal } from '../../../../lib/agents/brains/mock-brain'
 import { getAgentBrain } from '../../../../lib/agents/registry'
 import { isBuyIntent, pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
+import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
-import { toBaseUnits } from '../../../../lib/swap/assets'
+import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
+import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
+import type { OrderBookTop } from '../../../../lib/swap/limit-price'
+import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
+import type { ParsedIntent } from '../../../../lib/parse-intent'
 
 /**
  * Runs one competition and streams each agent's proposal as it lands.
@@ -22,11 +27,6 @@ import { toBaseUnits } from '../../../../lib/swap/assets'
  *
  * Node runtime: `node:crypto` and the provider client are not edge-safe.
  */
-/** Limit orders refuse to trade through their price; market orders do not. */
-function isLimitOrder(type: string): boolean {
-  return type === 'limit_buy' || type === 'limit_sell'
-}
-
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -44,6 +44,47 @@ const MAX_INTENT_CHARS = 500
 const AGENT_TIMEOUT_MS = 60_000
 
 const WINDOW_SECONDS = 30
+
+/**
+ * Settles what an agent's proposal actually does, against the live book.
+ *
+ * Runs server-side so a resting price is bounded before it ever reaches the
+ * browser. The agent's judgement about *whether* to wait is kept; the price it
+ * waits at is not taken on trust, because that number decides whether the order
+ * ever fills and a language model produced it from free text.
+ *
+ * A plan that cannot rest becomes a fill rather than a rejection. The agent
+ * reasoned soundly about everything else, and dropping the whole proposal would
+ * substitute a mock that carries no route and cannot be signed — the failure
+ * that once made a single agent appear to win every competition.
+ */
+function settlePlan(
+  proposal: AgentProposalResult,
+  intent: ParsedIntent,
+  book: OrderBookTop | undefined
+): AgentProposalResult {
+  if (proposal.executionMode !== 'rest') return proposal
+
+  // Omitting the key rather than setting it undefined: `exactOptionalPropertyTypes`
+  // treats the two as different, and a fill has no resting price at all.
+  const { restPriceUsd: _dropped, ...filling } = proposal
+  const asFill: AgentProposalResult = { ...filling, executionMode: 'fill' }
+
+  const selling = resolveAsset(intent.input.tokenIn)
+  if (selling === undefined || book === undefined) return asFill
+
+  const plan = resolveExecutionPlan({
+    mode: 'rest',
+    agentPriceUsd: proposal.restPriceUsd ?? 0,
+    statedLimitPriceUsd: intent.limitPriceUsd,
+    selling,
+    book,
+  })
+
+  if (!plan.ok || plan.restPriceUsd === undefined) return asFill
+
+  return { ...proposal, executionMode: 'rest', restPriceUsd: plan.restPriceUsd }
+}
 
 export async function POST(request: Request): Promise<Response> {
   let text: string
@@ -86,10 +127,15 @@ export async function POST(request: Request): Promise<Response> {
       // minimum output so the quoter can decline: sell 100 XLM at $0.25 means
       // at least 25 USDC must come back, and anything less is not the trade
       // that was asked for.
-      isLimitOrder(intent.input.type) && intent.targetPriceUsd > 0
+      //
+      // Keyed on `limitPriceUsd` rather than `targetPriceUsd`: the latter falls
+      // back to spot when the user named no price, so the old `> 0` test passed
+      // for every intent and floored unpriced orders at the current market —
+      // a limit derived from the market is not a limit.
+      isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
         ? {
             minReceive: toBaseUnits(
-              (Number(intent.input.amountIn) * intent.targetPriceUsd).toFixed(7)
+              (Number(intent.input.amountIn) * intent.limitPriceUsd).toFixed(7)
             ),
           }
         : {}
@@ -97,6 +143,27 @@ export async function POST(request: Request): Promise<Response> {
     if (routes.length > 0) market.routes = routes
   } catch {
     // Leaving routes unset is the honest outcome; agents reason without them.
+  }
+
+  // One read for the whole competition: every agent's resting price is checked
+  // against the same book, so four proposals are judged on identical facts.
+  let book: OrderBookTop | undefined
+  if (chain === 'stellar') {
+    const from = resolveAsset(intent.input.tokenIn)
+    const to = resolveAsset(intent.input.tokenOut)
+    if (from !== undefined && to !== undefined) {
+      // Quoted in one orientation regardless of trade direction, because that
+      // is the orientation the prices are expressed in.
+      const base = from.issuer === undefined ? from : to
+      const counter = from.issuer === undefined ? to : from
+      try {
+        book = await fetchOrderBookTop(base, counter)
+      } catch {
+        // Without a book nothing can rest, and `settlePlan` turns every
+        // resting proposal into a fill rather than guessing at a price.
+        book = undefined
+      }
+    }
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -141,14 +208,24 @@ export async function POST(request: Request): Promise<Response> {
               // Resolve this agent's own route, so executing it signs what it
               // proposed rather than what the winner proposed.
               const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
+
+              // Settle the plan against the live book before it reaches the
+              // client. An agent choosing to wait is judgement worth keeping;
+              // the price it waits at is bounded, because that number decides
+              // whether the order ever fills and a model produced it. A plan
+              // that would cross the spread falls back to filling now, which
+              // is what it would have done anyway — stated honestly rather
+              // than dressed as patience.
+              const proposal = settlePlan(outcome.proposal, intent, book)
+
               send({
                 type: 'competition:proposal',
                 competitionId,
-                proposal: outcome.proposal,
+                proposal,
                 ...(own !== undefined ? { route: own.quote } : {}),
                 degraded: outcome.meta.degraded,
               })
-              return outcome.proposal
+              return proposal
             }
 
             // A failed agent falls back to its simulated proposal rather than

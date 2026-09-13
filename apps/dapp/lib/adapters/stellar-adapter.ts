@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
+import { clearSession, ensureSession } from '../api/auth'
 
 /**
  * Remembers that a session was established, so a reload can restore it.
@@ -142,6 +143,17 @@ function useStellarWallet(): ChainWallet {
         setAddress(picked)
         writeSession({ address: picked, verified: true })
 
+        // Trade the signature for a backend session. Previously the wallet
+        // signed a login message and the signature was discarded, so "signed
+        // in" meant only that this browser said so — the server had no way to
+        // tell one caller from another and scoped data by an address the
+        // caller simply asserted.
+        //
+        // Failure here is not fatal: swapping and placing orders are on-chain
+        // and need no server. Only saved history does, and it degrades to the
+        // local store rather than blocking the wallet connection.
+        void ensureSession(picked).catch(() => undefined)
+
         const net = await StellarWalletsKit.getNetwork()
         setNetwork(net.networkPassphrase)
       } catch (e) {
@@ -163,6 +175,10 @@ function useStellarWallet(): ChainWallet {
       // Order matters: clear our record first so the restore effect cannot race
       // the kit's teardown and re-establish the session.
       writeSession(undefined)
+      // The backend token outlives the wallet connection unless it is dropped
+      // here: disconnecting and reconnecting a different account would
+      // otherwise keep acting as the first one.
+      clearSession()
       setAddress(undefined)
       setNetwork(undefined)
       setError(undefined)
