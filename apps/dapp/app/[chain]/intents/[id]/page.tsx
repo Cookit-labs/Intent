@@ -32,7 +32,7 @@ export default function IntentDetailPage(): JSX.Element {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
         <Card className="bg-muted/40 h-64 animate-pulse" />
       </div>
     )
@@ -40,7 +40,7 @@ export default function IntentDetailPage(): JSX.Element {
 
   if (isError || !intent) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
         <Card className="text-foreground p-6 text-sm">
           {(error as Error)?.message ?? 'Intent not found.'}
         </Card>
@@ -53,7 +53,7 @@ export default function IntentDetailPage(): JSX.Element {
   const settled = intent.status === 'settled'
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
+    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="font-display text-2xl font-semibold tracking-tight">
@@ -163,7 +163,7 @@ export default function IntentDetailPage(): JSX.Element {
 
       {/* Details */}
       <Card className="p-6">
-        <div className="grid grid-cols-2 gap-4 font-mono text-sm">
+        <div className="grid grid-cols-1 gap-3 font-mono text-sm sm:grid-cols-2 sm:gap-4">
           <div>
             <p className="text-muted-foreground text-xs">You pay</p>
             <p className="text-foreground">

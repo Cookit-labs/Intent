@@ -45,7 +45,7 @@ function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
 
       <p className="text-muted-foreground text-sm leading-relaxed">{agent.blurb}</p>
 
-      <div className="border-border grid grid-cols-3 gap-4 border-t pt-4">
+      <div className="border-border grid grid-cols-3 gap-2 border-t pt-4 sm:gap-4">
         <Stat label="Reputation" value={String(agent.reputation)} />
         <Stat label="Win rate" value={`${Math.round(agent.winRate * 100)}%`} />
         <Stat label="Volume" value={formatVolumeUsd(agent.volumeUsd)} />
