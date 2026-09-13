@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2, ExternalLink, Loader2, TriangleAlert } from '
 
 import type { SwapPhase } from '../../hooks/use-swap'
 import type { SwapQuote } from '../../lib/swap/quote'
+import { needsTrustCaution, trustSummary, verificationOf } from '../../lib/swap/asset-registry'
 import { TokenIcon } from '../ui/token-icon'
 
 /**
@@ -132,7 +133,7 @@ export function SwapConfirm({
           </a>
         ) : null}
         {hash !== undefined ? (
-          <span className="text-muted-foreground font-mono text-xs">{hash}</span>
+          <span className="text-muted-foreground break-all font-mono text-xs">{hash}</span>
         ) : null}
         <Button variant="outline" size="sm" onClick={onReset} className="self-start">
           Done
@@ -171,6 +172,16 @@ export function SwapConfirm({
         (sendUsdRaw(sendDisplay, quote?.from.code, usdPrices) as number) -
         1
     ) > 0.25
+
+  // The asset being *received* is the one worth explaining: that is what the
+  // user ends up holding, and it is the side most likely to be unfamiliar.
+  const receiving = quote?.to.code
+  const assetNote =
+    receiving !== undefined && verificationOf(receiving)?.category === 'rwa'
+      ? verificationOf(receiving)?.description
+      : undefined
+  const trustCaution =
+    receiving !== undefined && needsTrustCaution(receiving) ? trustSummary(receiving) : undefined
 
   return (
     <Card className="flex flex-col gap-4 p-5">
@@ -211,6 +222,24 @@ export function SwapConfirm({
         </span>
         <span>0.5% max slippage</span>
       </div>
+
+      {/* What the asset is, and how well its issuer is established. A ticker
+          says neither, and both matter more for a tokenized bond than for a
+          currency the user already recognises. */}
+      {assetNote !== undefined ? (
+        <p className="text-muted-foreground text-xs">{assetNote}</p>
+      ) : null}
+
+      {/* Shown only when the issuer's domain has not confirmed it. Phrased as
+          the specific gap rather than a generic warning: the vague version
+          reads as "possibly a scam", and the canonical testnet USDC is not
+          one — its issuer simply names a site that lists only mainnet. */}
+      {trustCaution !== undefined ? (
+        <div className="border-border text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed p-2.5 text-xs">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{trustCaution}</span>
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-2">
         <Button onClick={onConfirm} disabled={busy}>

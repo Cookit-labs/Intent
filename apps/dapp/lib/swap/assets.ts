@@ -1,5 +1,7 @@
 import { STELLAR_USDC } from '@intent/config'
 
+import { resolveVerifiedAsset, toClassicAsset, verifiedSymbols } from './asset-registry'
+
 /**
  * Resolving a token symbol to something the network understands.
  *
@@ -93,21 +95,23 @@ export const USDC: ClassicAsset = {
 /**
  * The assets a user may name in an intent.
  *
- * Deliberately a small allowlist rather than anything resolvable. An intent is
- * free text interpreted by a model, and "swap my ETH for SCAMCOIN" must fail at
- * the boundary rather than resolve to whatever issuer happens to answer.
+ * Deliberately an allowlist rather than anything resolvable. An intent is free
+ * text interpreted by a model, and "swap my ETH for SCAMCOIN" must fail at the
+ * boundary rather than resolve to whatever issuer happens to answer.
+ *
+ * The list itself lives in `asset-registry.ts`, where each entry records the
+ * domain that vouches for its issuer. That mattered little when the list held
+ * two entries and there was nothing to impersonate; it matters a great deal now
+ * that it holds tokenized treasuries, because testnet is full of anonymous
+ * accounts issuing tokens with borrowed tickers.
  */
-const KNOWN: Record<string, ClassicAsset> = {
-  XLM: XLM,
-  USDC: USDC,
-}
-
 export function resolveAsset(symbol: string): ClassicAsset | undefined {
-  return KNOWN[symbol.trim().toUpperCase()]
+  const verified = resolveVerifiedAsset(symbol)
+  return verified === undefined ? undefined : toClassicAsset(verified)
 }
 
 export function knownSymbols(): string[] {
-  return Object.keys(KNOWN)
+  return verifiedSymbols()
 }
 
 /** Horizon names the native asset by type rather than by code. */
