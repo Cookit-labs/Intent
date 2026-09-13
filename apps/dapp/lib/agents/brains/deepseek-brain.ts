@@ -43,7 +43,13 @@ const PRICING_USD_PER_MTOK: Record<string, { input: number; output: number }> = 
  * observed spending the full 4,000 on it and still being truncated. The
  * headroom is deliberate; unused tokens are not billed.
  */
-const MAX_OUTPUT_TOKENS = 8_000
+// Raised again after an agent was observed spending the full 8,000 on a
+// four-asset prompt and still being cut off mid-thought — `finish_reason:
+// length`, no tool call, which surfaces as a schema failure and gets replaced
+// by a canned proposal. Unused tokens are not billed, so the headroom costs
+// nothing and the failure it prevents is the one that makes the whole
+// competition look fabricated.
+const MAX_OUTPUT_TOKENS = 16_000
 
 export interface DeepSeekBrainOptions {
   apiKey?: string
@@ -118,6 +124,16 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
       content: [
         `Market context (as of ${req.market.asOf}):`,
         `Prices: ${priceList}`,
+        // Named explicitly, with what each one is. A model that has only ever
+        // seen currencies in this prompt has no reason to consider tokenized
+        // sovereign debt, and would never propose it however well it suited
+        // the intent.
+        ...(req.market.assets !== undefined && req.market.assets.length > 0
+          ? [
+              'Assets you may trade:',
+              ...req.market.assets.map((a) => `  ${a.code} — ${a.what} (${a.trust})`),
+            ]
+          : []),
         `Venues available on ${req.chain}: ${venueList}`,
         `Volatility: ${req.market.volatilityHint}. Gas: ${req.market.gasHint}.`,
         ...routeLines(req),
@@ -132,7 +148,8 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         // The routes above are live; this table is indicative and can be badly
         // stale. Saying so stops an agent splitting the difference between the
         // two and quoting a price neither source supports.
-        `Indicative reference only (prefer the quoted routes): $${req.intent.referencePriceUsd}`,
+        `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
+        'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
         '',
         'Submit your proposal.',
@@ -164,7 +181,7 @@ function routeLines(req: ProposalRequest): string[] {
     'Executable routes, already priced against live liquidity:',
     ...routes.map(
       (r) =>
-        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} via ${r.source}, ${r.hops} hop(s)` +
+        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} on ${r.source}, ${r.via ?? `${r.hops} hop(s)`}` +
         (r.executable ? '' : ' [COMPARISON ONLY, cannot be executed]') +
         (r.note !== undefined ? ` [${r.note}]` : '')
     ),
@@ -194,29 +211,36 @@ function routeLines(req: ProposalRequest): string[] {
  * now. Undefined when nothing was quoted, in which case the table is all there
  * is.
  */
-function impliedRateUsd(req: ProposalRequest): number | undefined {
-  const routes = req.market.routes ?? []
-  if (routes.length === 0) return undefined
+/**
+ * The rate each offered route implies, as an exchange rate.
+ *
+ * Every route, not just the first. That distinction is the whole point: the
+ * agents are shown two venues whose prices genuinely differ — Horizon quoting
+ * 503 XLM for 500 USDC against Soroswap's 4,732 for the same input — and an
+ * agent choosing the better one was being judged against the worse one's rate.
+ *
+ * The result was that all four agents quoted 0.1056, the honest Soroswap rate,
+ * and all four were rejected as implausible. The server then substituted
+ * canned mock proposals, so the app displayed strategies citing Curve and
+ * Uniswap on a Stellar intent. It looked hardcoded because it was — the real
+ * agents had been reasoning correctly and getting thrown away.
+ *
+ * No market price is applied. These are exchange rates; multiplying by a
+ * destination price produces a USD value ratio, which is a different quantity
+ * and does not belong in the same comparison.
+ */
+function impliedRates(req: ProposalRequest): number[] {
+  const rates: number[] = []
 
-  const first = routes[0]
-  if (first === undefined) return undefined
-
-  const sent = Number.parseFloat(first.sendAmount)
-  const received = Number.parseFloat(first.receiveAmount)
-  if (!Number.isFinite(sent) || !Number.isFinite(received) || sent <= 0 || received <= 0) {
-    return undefined
+  for (const route of req.market.routes ?? []) {
+    const sent = Number.parseFloat(route.sendAmount)
+    const received = Number.parseFloat(route.receiveAmount)
+    if (!Number.isFinite(sent) || !Number.isFinite(received)) continue
+    if (sent <= 0 || received <= 0) continue
+    rates.push(received / sent)
   }
 
-  // The route's own rate, with no market price applied.
-  //
-  // This used to multiply by the destination's real price, producing a USD
-  // value ratio rather than an exchange rate — which on testnet dragged the
-  // figure back toward the real market and away from the synthetic pool the
-  // agents are actually quoting. The two differ by roughly nine times here, so
-  // every honest proposal fell outside tolerance and all four agents were
-  // rejected, leaving the competition to serve mock proposals that carry no
-  // route and cannot be signed.
-  return received / sent
+  return rates
 }
 
 function classifyStatus(status: number): BrainErrorCode {
@@ -347,10 +371,11 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         // Both bases are offered because both are shown to the agent: the
         // route rate it is told to quote, and the market price it is told to
         // sanity-check against.
-        referencePriceUsd: impliedRateUsd(req) ?? req.intent.referencePriceUsd,
-        ...(impliedRateUsd(req) !== undefined
-          ? { altReferencePriceUsd: req.intent.referencePriceUsd }
-          : {}),
+        referencePriceUsd: req.intent.referencePriceUsd,
+        // Every route's rate is a legitimate answer, because an agent may
+        // pick any of them. Passing only one made choosing the better venue
+        // look like a fabrication.
+        routeRates: impliedRates(req),
         allowedVenueIds: req.market.venues.map((v) => v.id),
         ...(req.market.routes !== undefined
           ? {
@@ -386,6 +411,18 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
           sliceCount: validated.value.sliceCount,
           confidence: validated.value.confidence,
           horizonMinutes: validated.value.horizonMinutes,
+          executionMode: validated.value.executionMode,
+          // Zero is how a filling proposal expresses "no resting price", since
+          // strict mode has no optional properties. Carrying it through as a
+          // real zero would read as a price of nothing.
+          ...((validated.value.executionMode === 'rest' ||
+            validated.value.executionMode === 'split') &&
+          validated.value.restPriceUsd > 0
+            ? { restPriceUsd: validated.value.restPriceUsd }
+            : {}),
+          ...(validated.value.executionMode === 'split'
+            ? { splitPct: validated.value.splitPct }
+            : {}),
         },
         meta: meta(model, Date.now() - startedAt, body.usage, false),
       }

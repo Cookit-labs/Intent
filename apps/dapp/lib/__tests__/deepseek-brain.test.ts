@@ -43,6 +43,9 @@ function goodArguments(overrides: Record<string, unknown> = {}): string {
     sliceCount: 6,
     confidence: 0.8,
     horizonMinutes: 30,
+    executionMode: 'fill',
+    restPriceUsd: 0,
+    splitPct: 0,
     ...overrides,
   })
 }
@@ -59,7 +62,9 @@ function respondWith(payload: unknown, status = 200): typeof fetch {
 
 function toolResponse(args: string): unknown {
   return {
-    choices: [{ message: { tool_calls: [{ function: { name: 'submit_proposal', arguments: args } }] } }],
+    choices: [
+      { message: { tool_calls: [{ function: { name: 'submit_proposal', arguments: args } }] } },
+    ],
     usage: { prompt_tokens: 1200, completion_tokens: 180, prompt_cache_hit_tokens: 900 },
   }
 }
@@ -211,7 +216,10 @@ describe('validateProposal', () => {
   const ctx = { referencePriceUsd: 3500, allowedVenueIds: ['uniswap', 'curve'] }
 
   it('drops venues that were not offered rather than failing', () => {
-    const result = validateProposal(JSON.parse(goodArguments({ venues: ['uniswap', 'sushi'] })), ctx)
+    const result = validateProposal(
+      JSON.parse(goodArguments({ venues: ['uniswap', 'sushi'] })),
+      ctx
+    )
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.venues).toEqual(['uniswap'])
   })
@@ -223,10 +231,7 @@ describe('validateProposal', () => {
   })
 
   it('truncates an over-long reasoning to fit the bubble', () => {
-    const result = validateProposal(
-      JSON.parse(goodArguments({ reasoning: 'x'.repeat(1000) })),
-      ctx
-    )
+    const result = validateProposal(JSON.parse(goodArguments({ reasoning: 'x'.repeat(1000) })), ctx)
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.reasoning.length).toBeLessThanOrEqual(240)
   })

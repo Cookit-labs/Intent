@@ -29,14 +29,19 @@ export interface AgentProposalView {
   /**
    * How this agent proposes to execute, when a real one said.
    *
-   * Every agent currently routes through the same quote — it is the only
-   * executable one — so the amounts on the confirm card are identical whoever
-   * is picked. The plan is where they actually differ: TWAP slices, momentum
-   * takes one shot. Without it, choosing a different agent changed nothing
-   * visible and looked hardcoded to the recommendation.
+   * This is where the agents actually differ. Without it every proposal
+   * reached the same builder and produced the same transaction, so choosing a
+   * different agent changed nothing visible and looked hardcoded to the
+   * recommendation.
    */
   sliceCount?: number
   horizonMinutes?: number
+  /** Whether this plan trades now or waits on the book. */
+  executionMode?: 'fill' | 'rest' | 'split'
+  /** On a split, the percentage filled now. */
+  splitPct?: number
+  /** The price this agent would wait at, when it proposes waiting. */
+  restPriceUsd?: number
   /** True when this came from the offline fallback rather than a live agent. */
   degraded?: boolean
 }

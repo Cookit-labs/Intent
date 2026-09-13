@@ -2,7 +2,7 @@
 
 import { cn } from '@intent/ui'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bot, Loader2, Radio } from 'lucide-react'
+import { Bot, TriangleAlert, Loader2, Radio } from 'lucide-react'
 
 import type { CompetitionState } from '../../hooks/use-mock-competition'
 import { AGENTS } from '../../lib/mock-competition'
@@ -109,7 +109,17 @@ export function CompetitionPanel({
                     <span className="text-sm font-semibold">{agent.name}</span>
                     <span className="text-muted-foreground text-xs">{agent.tag}</span>
                   </div>
-                  {isWinner ? (
+                  {/* Marked on the card itself, not in a footnote after the
+                      race ends. A canned substitute for a failed agent reads
+                      exactly like real reasoning otherwise — which is how
+                      strategies citing Curve and Uniswap appeared on a Stellar
+                      intent and looked like something an agent had decided. */}
+                  {proposal?.degraded === true ? (
+                    <span className="border-border text-muted-foreground flex shrink-0 items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px]">
+                      <TriangleAlert className="h-3 w-3" />
+                      Did not respond
+                    </span>
+                  ) : isWinner ? (
                     <span className="bg-foreground text-background flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">
                       <Bot className="h-3 w-3" />
                       Recommended
@@ -117,11 +127,48 @@ export function CompetitionPanel({
                   ) : null}
                 </div>
 
-                <p className="text-foreground mt-2 text-sm">
+                <p
+                  className={cn(
+                    'mt-2 text-sm',
+                    // Dimmed and italic: this is placeholder text, and it
+                    // should not read with the same authority as a real plan.
+                    proposal?.degraded === true ? 'text-muted-foreground italic' : 'text-foreground'
+                  )}
+                >
                   {proposal?.reasoning ?? agent.reasoning}
                 </p>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
+                {proposal?.degraded === true ? (
+                  <p className="text-muted-foreground mt-1 text-[11px]">
+                    This agent timed out, so a placeholder is shown. It cannot be executed.
+                  </p>
+                ) : null}
+
+                {/* What this agent would actually do, before the user picks.
+                    The agents differ in their plan, not only their prose, and
+                    a difference invisible until after signing is no better
+                    than no difference at all. */}
+                <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+                  {proposal?.executionMode === 'rest' ? (
+                    <span className="text-foreground">
+                      rests at {money(proposal.restPriceUsd ?? 0)}
+                    </span>
+                  ) : proposal?.executionMode === 'fill' ? (
+                    <span className="text-foreground">fills now</span>
+                  ) : null}
+                  {proposal !== undefined &&
+                  proposal.sliceCount !== undefined &&
+                  proposal.sliceCount > 1 ? (
+                    <span>{proposal.sliceCount} slices</span>
+                  ) : null}
+                  {proposal?.executionMode === 'rest' &&
+                  proposal.horizonMinutes !== undefined &&
+                  proposal.horizonMinutes > 0 ? (
+                    <span>over {proposal.horizonMinutes}m</span>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
                   <span className="bg-muted text-foreground rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">
                     {money(proposal?.avgPriceUsd ?? 0)} avg ·{' '}
                     {(proposal?.slippagePct ?? agent.slippagePct).toFixed(2)}% slip
@@ -133,7 +180,10 @@ export function CompetitionPanel({
                     // Keying this to selection instead made the first pick
                     // final — every other card went dead before anything had
                     // been confirmed.
-                    disabled={locked}
+                    // A placeholder has no route, so there is nothing to
+                    // review. Leaving it clickable would send the user to a
+                    // confirm screen that cannot build a transaction.
+                    disabled={locked || proposal?.degraded === true}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
                       // Filled for the card in play — the picked one, or the

@@ -7,6 +7,7 @@ import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
+import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
 import { venues } from '../venues'
 
 /**
@@ -58,11 +59,20 @@ export async function quoteRoutes(
   // its AMMs; Soroswap is a Soroban contract with its own depth. Asking both
   // is what makes this aggregation rather than a single venue with extra
   // steps, and `collectQuotes` already tolerates either one being down.
-  const { quotes } = await collectQuotes(
-    [createHorizonQuoter(), createSoroswapQuoter()],
-    { kind: 'strict_send', from, to, sendAmount: amount },
-    signal
-  )
+  const req = { kind: 'strict_send' as const, from, to, sendAmount: amount }
+
+  // Every distinct Horizon path, not just its best. Stellar routes through an
+  // intermediate asset when that beats going direct, and the two can differ by
+  // more than a factor of two — collapsing them handed four agents a list of
+  // one, which is why they kept reaching the same answer. They were not
+  // failing to think; there was nothing to choose between.
+  const horizon = createHorizonQuoter()
+  const [horizonAll, others] = await Promise.all([
+    horizon.quoteAll?.(req, signal),
+    collectQuotes([createSoroswapQuoter()], req, signal),
+  ])
+
+  const quotes = [...(horizonAll?.ok === true ? horizonAll.quotes : []), ...others.quotes]
 
   // A limit that the market cannot meet returns nothing, so the competition
   // reports "no route" rather than offering a fill the user did not ask for.
@@ -81,13 +91,25 @@ export async function quoteRoutes(
     sendAmount: `${fromBaseUnits(quote.sendAmount)} ${quote.from.code}`,
     receiveAmount: `${fromBaseUnits(quote.destAmount)} ${quote.to.code}`,
     hops: quote.path.length,
+    // Which assets the route passes through, so several Horizon paths for the
+    // same pair are distinguishable. "2 hops" twice tells an agent nothing;
+    // "via EURC" versus "direct" is a choice it can reason about.
+    via: quote.path.length === 0 ? 'direct' : quote.path.map((h) => h.code).join(' → '),
     // Soroban tokens are separate contracts from classic issuers, so the USDC
     // Soroswap delivers is not the USDC Horizon delivers. Surfacing that keeps
     // an agent from reading two quotes as interchangeable and picking purely
     // on the larger number.
     // Only routes this app can actually build are offerable. The rest are
     // shown for comparison, which is the point of quoting two venues.
-    executable: quote.deliversAsset === undefined && quote.source === 'horizon',
+    // Executable when the route delivers the asset it names. The venue no
+    // longer decides: a Soroswap route through canonical Stellar Asset
+    // Contracts settles in the same XLM a path payment would, and refusing it
+    // meant the agents could see a 3.7x better price and never take it.
+    //
+    // `deliversAsset` remains the guard, and it is the right one — it is set
+    // precisely when a route would hand over a token that merely shares a
+    // ticker with what the user asked for.
+    executable: quote.deliversAsset === undefined,
     ...(quote.deliversAsset !== undefined
       ? { note: `settles in Soroban ${quote.to.code}, a different asset — not executable yet` }
       : {}),
@@ -120,6 +142,18 @@ export function buildMarketContext(chain: string): MarketContext {
   return {
     asOf: new Date().toISOString(),
     prices: { ...REFERENCE_PRICES_USD },
+    // What the agent may actually trade, with a plain-English description of
+    // each. Without this an agent has no way to know tokenized sovereign debt
+    // is on the menu, and would reason only about the currencies it has seen
+    // in prior prompts.
+    assets: tradeableSymbols().map((code) => ({
+      code,
+      what: verificationOf(code)?.description ?? code,
+      // How well the issuer is established. An agent weighing an unfamiliar
+      // asset should know whether the organisation named actually confirms it
+      // issued the thing, and the difference is invisible from a ticker.
+      trust: trustSummary(code) ?? 'Verification unknown.',
+    })),
     // Naming a venue that does not exist on the active chain is a plausible
     // failure for a model, so the list it may choose from is filtered here
     // rather than validated after the fact.

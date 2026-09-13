@@ -169,6 +169,16 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
                   reasoning: frame.proposal.reasoning,
                   sliceCount: frame.proposal.sliceCount,
                   horizonMinutes: frame.proposal.horizonMinutes,
+                  // The plan, not just the prose. Picking an agent has to
+                  // select what it proposed to do, not only which route it
+                  // named.
+                  executionMode: frame.proposal.executionMode,
+                  ...(frame.proposal.restPriceUsd !== undefined
+                    ? { restPriceUsd: frame.proposal.restPriceUsd }
+                    : {}),
+                  ...(frame.proposal.splitPct !== undefined
+                    ? { splitPct: frame.proposal.splitPct }
+                    : {}),
                   degraded: frame.degraded,
                 },
               }))

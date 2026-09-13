@@ -40,6 +40,19 @@ export interface MarketContext {
   volatilityHint: 'low' | 'normal' | 'elevated'
   gasHint: 'cheap' | 'normal' | 'expensive'
   /**
+   * Assets the agent may name, and what each one actually is.
+   *
+   * Supplied rather than assumed for the same reason prices are: a model asked
+   * to recall which tokens exist will confidently invent one. It also means an
+   * agent can propose buying tokenized treasuries at all — it cannot suggest an
+   * asset class it was never told about.
+   *
+   * Only assets with a live market appear here. Etherfuse issues four bonds on
+   * testnet and one of them trades; offering the rest would invite a confident
+   * plan that fails at quote time.
+   */
+  assets?: { code: string; what: string; trust: string }[]
+  /**
    * Executable routes, already priced against real liquidity.
    *
    * The agents choose between these; they never invent one. A model is good at
@@ -65,6 +78,14 @@ export interface QuotedRoute {
   sendAmount: string
   receiveAmount: string
   hops: number
+  /**
+   * The assets this route passes through, or 'direct'.
+   *
+   * Several routes for one pair are otherwise indistinguishable in the prompt:
+   * "2 hops" twice says nothing an agent can choose on, while "via EURC"
+   * against "direct" is a real difference.
+   */
+  via?: string
   /**
    * Caveat about what this route actually delivers, when it differs from the
    * others. Two venues quoting "USDC" may mean two different assets.
@@ -120,6 +141,39 @@ export interface AgentProposalResult {
   /** Self-reported, 0-1. Advisory only — it does not feed scoring. */
   confidence: number
   horizonMinutes: number
+  /**
+   * What this plan actually does.
+   *
+   * The agents used to differ only in prose: every proposal reached the same
+   * builder and produced the same transaction, so choosing between them
+   * changed nothing the user could see. This is the field that makes a
+   * proposal a plan.
+   */
+  /**
+   * True when this is a canned substitute for an agent that failed.
+   *
+   * Carried on the proposal rather than only on the transport frame, because
+   * scoring has to see it: a substitute has no route, cannot be signed, and
+   * must never be recommended over real work.
+   */
+  degraded?: boolean
+  executionMode: 'fill' | 'rest' | 'split'
+  /**
+   * On a split, the percentage filled immediately; the remainder rests.
+   *
+   * Absent on any other mode. A split is the first proposal shape that becomes
+   * more than one operation, which is what lets four agents produce genuinely
+   * different transactions rather than four descriptions of the same one.
+   */
+  splitPct?: number
+  /**
+   * The price to rest at, when resting.
+   *
+   * Absent for an immediate fill. Bounded by `resolveExecutionPlan` rather
+   * than trusted: an agent naming this number is deciding whether the order
+   * ever fills.
+   */
+  restPriceUsd?: number
 }
 
 export type BrainErrorCode =
