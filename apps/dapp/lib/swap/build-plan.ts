@@ -79,7 +79,39 @@ export interface PoolAction {
   maxPrice: PriceFraction
 }
 
-export type PlanAction = SwapAction | RestAction | TrustAction | PoolAction
+/**
+ * Supply an asset to a lending pool.
+ *
+ * Unlike every other action here, this one **cannot share a transaction**.
+ * Soroban permits exactly one operation per transaction — verified on testnet
+ * twice — so a lend is built as its own envelope by `buildBlendSupply` and
+ * signed separately. It appears in this union so a plan can *describe* a
+ * sequence containing one; `buildPlan` refuses to fold it into a shared
+ * envelope rather than building something the network would reject.
+ */
+export interface LendAction {
+  kind: 'lend'
+  /** The reserve's asset, as a contract id. Read from the pool, never derived. */
+  asset: string
+  /** Base units. */
+  amount: string
+  venue: 'blend'
+}
+
+export type PlanAction = SwapAction | RestAction | TrustAction | PoolAction | LendAction
+
+/**
+ * Actions that must be signed on their own.
+ *
+ * Kept as a set rather than a check at the point of use, so adding another
+ * Soroban action later cannot forget the constraint.
+ */
+const NEEDS_OWN_TRANSACTION = new Set<PlanAction['kind']>(['lend'])
+
+/** Whether an action has to be signed by itself. */
+export function needsOwnTransaction(action: PlanAction): boolean {
+  return NEEDS_OWN_TRANSACTION.has(action.kind)
+}
 
 export interface BuildPlanOptions {
   account: string
@@ -171,6 +203,18 @@ function operationFor(action: PlanAction, account: string): xdr.Operation {
         maxPrice: action.maxPrice,
       })
     }
+
+    case 'lend': {
+      // Unreachable: `buildPlan` rejects a lend before it gets here. Kept
+      // explicit rather than left to the exhaustiveness check, because the
+      // failure it prevents — a Soroban operation quietly folded into a classic
+      // envelope — would be rejected by the network with a message that names
+      // none of this.
+      throw new Error(
+        'a lend cannot share a transaction: Soroban permits one operation per transaction, ' +
+          'so it is built and signed on its own'
+      )
+    }
   }
 }
 
@@ -198,6 +242,17 @@ export async function buildPlan(options: BuildPlanOptions): Promise<BuiltPlan> {
 
   if (actions.length === 0) {
     throw new Error('a plan needs at least one action')
+  }
+
+  // Checked before anything else, and by name, so the caller learns *which*
+  // action cannot be folded in. A sequence containing a lend is legitimate —
+  // it is simply signed a step at a time rather than all at once.
+  const soloAction = actions.find(needsOwnTransaction)
+  if (soloAction !== undefined) {
+    throw new Error(
+      `a ${soloAction.kind} action must be signed on its own, not folded into a plan. ` +
+        'Soroban permits exactly one operation per transaction.'
+    )
   }
   // Checked before building rather than after, so an over-long plan fails
   // without a pointless Horizon round trip.
