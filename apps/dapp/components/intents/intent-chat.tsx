@@ -35,7 +35,7 @@ import { usePlanExecution } from '../../hooks/use-plan-execution'
 import { PlanConfirm } from './plan-confirm'
 import { useSequence } from '../../hooks/use-sequence'
 import { SequenceConfirm } from './sequence-confirm'
-import { parseCompoundIntent } from '../../lib/parse-compound'
+import { parseCompoundIntent, type FollowOnAction } from '../../lib/parse-compound'
 import { BLEND_XLM } from '../../lib/lend/reserves'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
@@ -81,6 +81,10 @@ export function IntentChat(): JSX.Element {
   // resubmit the text, which threw away the agents' answers and produced a
   // different set, so nothing was actually preserved.
   const [restored, setRestored] = useState<ChatTurn | null>(null)
+  // What the intent asked to happen after the trade, when it asked for
+  // anything. Held rather than acted on: the sequence starts when an agent is
+  // chosen, not when the sentence is typed.
+  const [followOn, setFollowOn] = useState<FollowOnAction | null>(null)
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
 
@@ -255,35 +259,15 @@ export function IntentChat(): JSX.Element {
     const single = parseIntent(text, swap.usdPrices)
     setParsed(single)
 
-    // "Buy XLM then supply it to Blend" is two actions, and they cannot share
-    // a signature: Soroban permits one operation per transaction. Detected
-    // here so the sequence card can show both steps before the first is
-    // signed. Returns null for ordinary intents, which is most of them.
-    const compound = parseCompoundIntent(text, swap.usdPrices ?? {})
-    const from = compound !== null ? resolveAsset(compound.head.input.tokenIn) : undefined
-    const to = compound !== null ? resolveAsset(compound.head.input.tokenOut) : undefined
-
-    // Both sides must resolve to assets the app has verified. An unresolved
-    // asset is not a reason to guess — the ordinary single-intent path below
-    // still runs, so the user gets a normal competition rather than nothing.
-    if (compound !== null && from !== undefined && to !== undefined) {
-      sequence.prepare({
-        kind: 'swap-then-lend',
-        swap: {
-          kind: 'swap',
-          from,
-          to,
-          sendAmount: toBaseUnits(compound.head.input.amountIn),
-          // The floor is set when the step is actually quoted; a sequence is
-          // reviewed before either step is priced.
-          minReceive: '1',
-        },
-        lendAsset: BLEND_XLM,
-        venue: compound.followOn.venue,
-      })
-    } else {
-      sequence.reset()
-    }
+    // "Buy XLM then supply it to Blend" is two actions that cannot share a
+    // signature. Recorded here, but *not* started: a sequence begins when the
+    // user picks an agent, exactly like every other execution shape. Building
+    // it on submit put a live card and a build request in front of someone who
+    // had not chosen anything yet.
+    setFollowOn(parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null)
+    // Anything left from a previous attempt goes now. Nothing was signed, so
+    // nothing should survive the restart.
+    sequence.reset()
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
@@ -302,6 +286,11 @@ export function IntentChat(): JSX.Element {
     setPendingInput(null)
     setRestored(null)
     setTurnId(null)
+    // Cleared with everything else. Leaving it behind kept a card from the
+    // previous attempt on screen, mid-sequence, with nothing signed — which
+    // read as a stuck transaction that had never existed.
+    setFollowOn(null)
+    sequence.reset()
   }
 
   function handleExecute(key: string): void {
@@ -399,6 +388,36 @@ export function IntentChat(): JSX.Element {
       return
     }
 
+    // A sequence: swap now, then supply the proceeds. Started here rather than
+    // on submit, so it runs against the route the chosen agent actually picked
+    // and inherits the same slippage floor as an ordinary swap. Building it at
+    // submit time bypassed the competition entirely and quoted no floor at all.
+    if (slug === 'stellar' && followOn !== null && followOn.kind === 'lend') {
+      const from = resolveAsset(parsed.input.tokenIn)
+      const to = resolveAsset(parsed.input.tokenOut)
+
+      if (from !== undefined && to !== undefined) {
+        sequence.prepare({
+          kind: 'swap-then-lend',
+          swap: {
+            kind: 'swap',
+            from,
+            to,
+            sendAmount: toBaseUnits(parsed.input.amountIn),
+            // Priced server-side. The client cannot compute an honest floor:
+            // it would have to trust a quote taken before the trade runs, and
+            // the plan route re-quotes and applies slippage the same way the
+            // swap route does. Zero asks for that rather than asserting a
+            // floor of one stroop, which is no protection at all.
+            minReceive: '0',
+          },
+          lendAsset: BLEND_XLM,
+          venue: followOn.venue,
+        })
+        return
+      }
+    }
+
     // A split is two actions in one signature: part filled now, the remainder
     // rested. It is the only proposal shape that becomes more than one
     // operation, and the reason four agents can produce genuinely different
@@ -423,9 +442,12 @@ export function IntentChat(): JSX.Element {
             from,
             to,
             sendAmount: toBaseUnits(fillNow.toFixed(7)),
-            // The floor is enforced by the network. A nominal value here would
-            // be a swap with no protection at all.
-            minReceive: '1',
+            // Priced server-side. The comment here used to say a nominal value
+            // would be no protection and then pass one anyway: the network
+            // enforces whatever floor it is given, and one stroop permits any
+            // fill at all. Zero asks the build route to re-quote and apply the
+            // same tolerance an ordinary swap gets.
+            minReceive: '0',
           },
           {
             kind: 'rest',
