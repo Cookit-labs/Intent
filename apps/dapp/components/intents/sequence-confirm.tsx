@@ -85,7 +85,6 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
   }
 
   const busy = phase === 'signing' || phase === 'submitting'
-  const isLast = current >= steps.length - 1
 
   return (
     <Card className="flex flex-col gap-4 p-5">
@@ -127,7 +126,6 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
             {current === 0 ? 'Cancel' : 'Stop here'}
           </Button>
         ) : null}
-        {!busy && isLast ? null : null}
       </div>
     </Card>
   )

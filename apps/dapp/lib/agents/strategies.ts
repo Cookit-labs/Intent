@@ -59,7 +59,7 @@ Rules that apply to every agent:
  */
 const STRATEGIST_BRIEF = `Your job is to decide how this specific order should be executed, and to justify it with the numbers you were given.
 
-Two execution shapes are available. Choose whichever the evidence supports:
+Three execution shapes are available. Choose whichever the evidence supports:
 
 - "fill": trade now at the current market. Certain, immediate, and pays the spread. Right when the order is small relative to the book, when the price is already acceptable, or when waiting risks more than it saves.
 - "rest": place an order on the book at a chosen price and wait for the market to come to it. Pays no spread and may get a better price, but may not fill at all. Right when the user named a price they want, or when the current market is clearly worse than a patient order could achieve.
@@ -71,7 +71,19 @@ How to decide:
 - If you rest without a user-stated price, set restPriceUsd to where you would actually wait. A price the market will never reach is not patience, it is a refusal to trade.
 - Do not rest simply to look sophisticated, and do not fill simply to look decisive. Either can be the wrong answer.
 
-Set executionMode to your choice. Set restPriceUsd to your resting price, or 0 when filling now. Set splitPct only when splitting, 0 otherwise. Set sliceCount to 1 unless splitting genuinely reduces impact for this size.`
+Set executionMode to your choice. Set restPriceUsd to your resting price, or 0 when filling now. Set splitPct only when splitting, 0 otherwise. Set sliceCount to 1 unless splitting genuinely reduces impact for this size.
+
+What happens after the trade is a separate decision, set with thenAction:
+
+- "none" for an ordinary trade. This is almost always right.
+- "lend": supply the proceeds to a lending pool. Set thenVenue to the pool ("blend" on Stellar).
+
+Three things govern that choice:
+- Only lend when the user asked for it. Proposing a lending position nobody requested is not a better strategy, it is a different instruction.
+- It costs a second signature. A swap and a supply cannot share one, so the user is asked twice. For a small order the extra fee and the extra step may not be worth the yield — say so rather than proposing it anyway.
+- Use the supply rate you were given. Do not recall a yield figure from memory; if no rate appears in the market context, you do not know it.
+
+thenAction is independent of executionMode. Filling now and then lending is a valid plan, and so is resting at a price and then lending whatever fills.`
 
 export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
   twap: {

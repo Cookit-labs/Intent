@@ -28,6 +28,8 @@ const base = {
   executionMode: 'fill' as const,
   restPriceUsd: 0,
   splitPct: 0,
+  thenAction: 'none',
+  thenVenue: '',
 }
 
 const ctx = {
