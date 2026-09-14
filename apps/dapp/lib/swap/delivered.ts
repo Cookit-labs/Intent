@@ -16,6 +16,12 @@ import { xdr } from '@stellar/stellar-sdk'
  * papered over with a fallback: the caller must tell the user to supply
  * manually rather than proceed on a guess.
  *
+ * **Only classic path payments can be read here.** A Soroban router reports its
+ * output as a contract return value, which lives in `result_meta_xdr` — and
+ * Horizon's transaction endpoint does not return that field. A caller that
+ * needs the delivered amount from a router swap must measure the balance
+ * instead; see `deliveredByBalanceChange`.
+ *
  * **Decoded XDR exposes plain properties, not accessor methods.** `r.result`
  * rather than `r.result()`, all the way down. Verified against an encoded
  * result rather than inferred from the type definitions, which describe the

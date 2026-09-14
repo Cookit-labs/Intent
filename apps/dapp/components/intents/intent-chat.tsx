@@ -441,29 +441,26 @@ export function IntentChat(): JSX.Element {
     // and inherits the same slippage floor as an ordinary swap. Building it at
     // submit time bypassed the competition entirely and quoted no floor at all.
     if (slug === 'stellar' && followOn !== null && followOn.kind === 'lend') {
-      const from = resolveAsset(parsed.input.tokenIn)
-      const to = resolveAsset(parsed.input.tokenOut)
-
-      if (from !== undefined && to !== undefined) {
+      // The chosen agent's route, passed through untouched. A sequence builds
+      // it with the ordinary swap builder, so whichever venue the agent picked
+      // is the venue that executes — previously every sequence was forced down
+      // a classic path payment, which on this pair delivers about a third of
+      // what a Soroswap route does and so could never meet its own floor.
+      const route = routesByAgent[key] ?? winnerRoute
+      if (route !== undefined) {
         sequence.prepare({
           kind: 'swap-then-lend',
-          swap: {
-            kind: 'swap',
-            from,
-            to,
-            sendAmount: toBaseUnits(parsed.input.amountIn),
-            // Priced server-side. The client cannot compute an honest floor:
-            // it would have to trust a quote taken before the trade runs, and
-            // the plan route re-quotes and applies slippage the same way the
-            // swap route does. Zero asks for that rather than asserting a
-            // floor of one stroop, which is no protection at all.
-            minReceive: '0',
-          },
+          quote: route,
+          receiveSymbol: parsed.input.tokenOut,
           lendAsset: BLEND_XLM,
           venue: followOn.venue,
+          swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for ${parsed.input.tokenOut}`,
         })
         return
       }
+
+      // No executable route means no honest sequence. Falling through to the
+      // ordinary swap path is better than building one that cannot fill.
     }
 
     // A split is two actions in one signature: part filled now, the remainder

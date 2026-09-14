@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
-import type { PlanAction } from '../lib/swap/build-plan'
 import { blendPositionUrl } from '../lib/swap/contract-registry'
+import { balanceOf, deliveredByBalanceChange } from '../lib/swap/delivered-balance'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 
 /**
@@ -87,10 +87,23 @@ export interface SequenceState {
 /** A swap, then a supply of whatever it delivered. */
 export interface SwapThenLend {
   kind: 'swap-then-lend'
-  swap: PlanAction
+  /** The symbol the swap delivers, so its arrival can be measured. */
+  receiveSymbol: string
+  /**
+   * The route the chosen agent picked, built through whichever venue it names.
+   *
+   * A quote rather than a bare action, because the venue is the whole point.
+   * Building every sequence as a classic path payment ignored the agent's
+   * choice and, on USDC to XLM, sent a trade down a path delivering a third of
+   * what the agent had quoted — so it reverted on its own slippage floor every
+   * time.
+   */
+  quote: unknown
   /** The reserve's asset, as a contract id. */
   lendAsset: string
   venue: string
+  /** Shown in review before the first signature. */
+  swapLabel?: string
 }
 
 export interface Sequence extends SequenceState {
@@ -104,11 +117,6 @@ export interface Sequence extends SequenceState {
 }
 
 const EMPTY: SequenceState = { phase: 'idle', steps: [], current: 0 }
-
-/** Removes a leading "1. " from a server-numbered step label. */
-function stripStepNumber(label: string | undefined): string | undefined {
-  return label?.replace(/^\s*\d+\.\s*/, '')
-}
 
 export function useSequence(): Sequence {
   const { adapter } = useChain()
@@ -145,16 +153,17 @@ export function useSequence(): Sequence {
         setState({ ...EMPTY, phase: 'building' })
 
         try {
-          const res = await fetch('/api/plan/build', {
+          // The same endpoint an ordinary swap uses, so a sequence inherits its
+          // venue dispatch: a Soroswap route builds a router call, a classic
+          // route builds a path payment. The plan endpoint could only ever
+          // build the latter, which is why an agent's Soroswap quote became a
+          // Horizon trade that could not meet its own floor.
+          const res = await fetch('/api/swap/build', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account: signer, actions: [req.swap] }),
+            body: JSON.stringify({ account: signer, quote: req.quote }),
           })
-          const built = (await res.json()) as {
-            xdr?: string
-            description?: string[]
-            error?: string
-          }
+          const built = (await res.json()) as { xdr?: string; error?: string }
 
           if (built.xdr === undefined) {
             setState({
@@ -173,11 +182,7 @@ export function useSequence(): Sequence {
             current: 0,
             xdr: built.xdr,
             steps: [
-              // `describePlan` numbers its steps ("1. Swap"), and the card
-              // numbers them too, so the prefix is stripped rather than shown
-              // twice. The card owns the ordering: a sequence's steps are not
-              // the same list as a plan's.
-              { label: stripStepNumber(built.description?.[0]) ?? 'Swap' },
+              { label: req.swapLabel ?? 'Swap' },
               { label: `Supply the result to ${req.venue === 'blend' ? 'Blend' : req.venue}` },
             ],
           })
@@ -240,6 +245,11 @@ export function useSequence(): Sequence {
     const stepIndex = state.current
 
     async function run(): Promise<void> {
+      // Captured before the swap runs, so what it delivers can be measured as
+      // a difference. A router reports its output as a contract return value
+      // that Horizon does not expose, so the account is the only honest source.
+      const before = stepIndex === 0 ? await balanceOf(signer, req.receiveSymbol) : undefined
+
       setState((s) => {
         const next: SequenceState = { ...s, phase: 'signing' }
         // Consumed here, so a re-render cannot raise a second prompt for the
@@ -319,8 +329,18 @@ export function useSequence(): Sequence {
 
       // The step that makes a sequence worth the second signature: the supply
       // is sized to what arrived, not to what was predicted.
+      //
+      // Measured from the account rather than read from the transaction. The
+      // result only carries a delivered amount for a classic path payment, and
+      // an agent that picks a Soroban router produces neither — which stopped
+      // the sequence after a swap that had actually succeeded.
       if (stepIndex === 0) {
-        if (result.delivered === undefined) {
+        const delivered =
+          before !== undefined
+            ? await deliveredByBalanceChange(signer, req.receiveSymbol, before)
+            : result.delivered
+
+        if (delivered === undefined) {
           setState((s) => ({
             ...s,
             phase: 'failed',
@@ -330,7 +350,7 @@ export function useSequence(): Sequence {
           }))
           return
         }
-        await buildLend(signer, req.lendAsset, result.delivered)
+        await buildLend(signer, req.lendAsset, delivered)
       }
     }
 
