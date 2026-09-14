@@ -1,5 +1,7 @@
 import { stellarTestnet } from '@intent/config'
 
+import { deliveredFromResultXdr } from './delivered'
+
 /**
  * Submitting a signed swap and finding out whether it worked.
  *
@@ -20,6 +22,15 @@ export interface SubmitSuccess {
   ledger: number
   /** Explorer link, so a user can verify rather than trust the UI. */
   explorerUrl: string
+  /**
+   * What the swap actually delivered, in base units, when it can be read.
+   *
+   * Absent for transactions that delivered nothing, such as placing an offer.
+   * A sequence needs this to size its next step against what arrived rather
+   * than against what was quoted, and must stop rather than guess when it is
+   * missing.
+   */
+  delivered?: string
 }
 
 export interface SubmitFailure {
@@ -46,6 +57,8 @@ interface HorizonSubmitResponse {
   hash?: string
   ledger?: number
   successful?: boolean
+  /** Base64 transaction result, carrying the amount actually delivered. */
+  result_xdr?: string
   extras?: {
     result_codes?: {
       transaction?: string
@@ -143,11 +156,18 @@ export async function submitSignedSwap(
     return { ok: false, reason: 'network_error', detail: 'Horizon returned no hash' }
   }
 
+  // Read rather than estimated. A caller sequencing a second step against this
+  // one needs what arrived, and every alternative source for that figure is a
+  // quote taken before the swap ran.
+  const delivered =
+    body.result_xdr !== undefined ? deliveredFromResultXdr(body.result_xdr) : undefined
+
   return {
     ok: true,
     hash: body.hash,
     ledger: body.ledger ?? 0,
     explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${body.hash}`,
+    ...(delivered !== undefined ? { delivered } : {}),
   }
 }
 

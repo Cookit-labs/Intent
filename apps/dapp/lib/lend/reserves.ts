@@ -78,6 +78,22 @@ const BORROW_COMPOUNDS_PER_YEAR = 365
 /** Any account works: a simulation touches neither balance nor sequence. */
 const READ_ONLY_SOURCE = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVVUX'
 
+/**
+ * Blend's XLM reserve, as a contract id.
+ *
+ * Taken from the pool's own `get_reserve_list` rather than derived with
+ * `sacFor`. The distinction is not pedantic: Blend's *USDC* is a third distinct
+ * issuer from Circle's and Soroswap's, so a ticker-derived id would name an
+ * asset this pool has never heard of. XLM happens to be the canonical SAC, and
+ * hardcoding a derived one anyway would set the precedent that breaks on the
+ * next asset.
+ *
+ * Callers that accept user input should still check `readReserveList` rather
+ * than trusting this constant; it exists for the one asset the app supplies
+ * today.
+ */
+export const BLEND_XLM = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
+
 export interface ReserveConfig {
   index: number
   decimals: number
