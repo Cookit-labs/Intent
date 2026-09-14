@@ -105,6 +105,11 @@ export interface Sequence extends SequenceState {
 
 const EMPTY: SequenceState = { phase: 'idle', steps: [], current: 0 }
 
+/** Removes a leading "1. " from a server-numbered step label. */
+function stripStepNumber(label: string | undefined): string | undefined {
+  return label?.replace(/^\s*\d+\.\s*/, '')
+}
+
 export function useSequence(): Sequence {
   const { adapter } = useChain()
   const { address, isConnected } = useWallet()
@@ -168,7 +173,11 @@ export function useSequence(): Sequence {
             current: 0,
             xdr: built.xdr,
             steps: [
-              { label: built.description?.[0] ?? 'Swap' },
+              // `describePlan` numbers its steps ("1. Swap"), and the card
+              // numbers them too, so the prefix is stripped rather than shown
+              // twice. The card owns the ordering: a sequence's steps are not
+              // the same list as a plan's.
+              { label: stripStepNumber(built.description?.[0]) ?? 'Swap' },
               { label: `Supply the result to ${req.venue === 'blend' ? 'Blend' : req.venue}` },
             ],
           })

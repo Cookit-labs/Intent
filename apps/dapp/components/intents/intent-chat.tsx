@@ -783,8 +783,19 @@ export function IntentChat(): JSX.Element {
                 Hidden while an order is going to the book: the intent is a
                 resting order or an immediate swap, never both, and showing two
                 confirmation cards would leave the user to guess which one
-                their signature applies to. */}
-              <div ref={confirmRef} hidden={limit.phase !== 'idle' || planExec.phase !== 'idle'}>
+                their signature applies to.
+
+                A sequence hides it for the same reason, and the omission was
+                visible: a bundled intent showed both a sequence card and a
+                plain swap card, each with its own sign button, for the same
+                trade. Signing the wrong one would have run the swap alone and
+                silently dropped the supply. */}
+              <div
+                ref={confirmRef}
+                hidden={
+                  limit.phase !== 'idle' || planExec.phase !== 'idle' || sequence.phase !== 'idle'
+                }
+              >
                 <SwapConfirm
                   phase={swap.phase}
                   quote={swap.quote}
