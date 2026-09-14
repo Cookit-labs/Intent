@@ -33,6 +33,10 @@ import { useSwapExecution } from '../../hooks/use-swap-execution'
 import { useLimitOrder } from '../../hooks/use-limit-order'
 import { usePlanExecution } from '../../hooks/use-plan-execution'
 import { PlanConfirm } from './plan-confirm'
+import { useSequence } from '../../hooks/use-sequence'
+import { SequenceConfirm } from './sequence-confirm'
+import { parseCompoundIntent } from '../../lib/parse-compound'
+import { BLEND_XLM } from '../../lib/lend/reserves'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
@@ -140,6 +144,7 @@ export function IntentChat(): JSX.Element {
   // Multi-step plans. Separate from the swap hook because a plan is a
   // different thing to approve: an ordered list rather than one number.
   const planExec = usePlanExecution()
+  const sequence = useSequence()
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -247,7 +252,38 @@ export function IntentChat(): JSX.Element {
     // fell back to an indicative table that had XLM at $0.58 against a real
     // ~$0.18, so the same sentence produced one size here and a different one
     // in the competition.
-    setParsed(parseIntent(text, swap.usdPrices))
+    const single = parseIntent(text, swap.usdPrices)
+    setParsed(single)
+
+    // "Buy XLM then supply it to Blend" is two actions, and they cannot share
+    // a signature: Soroban permits one operation per transaction. Detected
+    // here so the sequence card can show both steps before the first is
+    // signed. Returns null for ordinary intents, which is most of them.
+    const compound = parseCompoundIntent(text, swap.usdPrices ?? {})
+    const from = compound !== null ? resolveAsset(compound.head.input.tokenIn) : undefined
+    const to = compound !== null ? resolveAsset(compound.head.input.tokenOut) : undefined
+
+    // Both sides must resolve to assets the app has verified. An unresolved
+    // asset is not a reason to guess — the ordinary single-intent path below
+    // still runs, so the user gets a normal competition rather than nothing.
+    if (compound !== null && from !== undefined && to !== undefined) {
+      sequence.prepare({
+        kind: 'swap-then-lend',
+        swap: {
+          kind: 'swap',
+          from,
+          to,
+          sendAmount: toBaseUnits(compound.head.input.amountIn),
+          // The floor is set when the step is actually quoted; a sequence is
+          // reviewed before either step is priced.
+          minReceive: '1',
+        },
+        lendAsset: BLEND_XLM,
+        venue: compound.followOn.venue,
+      })
+    } else {
+      sequence.reset()
+    }
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
@@ -609,6 +645,11 @@ export function IntentChat(): JSX.Element {
                 is one or the other. */}
               {/* A plan is several actions under one signature, so it gets its
                 own card: the ordered list is what the user is approving. */}
+              {/* A sequence is several transactions signed one at a time,
+                which a plan card must not be used for: it would promise an
+                atomicity Soroban cannot give across contract calls. */}
+              {sequence.phase !== 'idle' ? <SequenceConfirm sequence={sequence} /> : null}
+
               {planExec.phase !== 'idle' ? (
                 <PlanConfirm
                   plan={planExec}
