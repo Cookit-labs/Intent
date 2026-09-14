@@ -151,9 +151,9 @@ export const venues: Venue[] = [
     chains: ['Stellar'],
     bestFor: 'Supply and borrow against collateral',
     url: 'https://blend.capital',
-    integration: 'quotes',
+    integration: 'executes',
     capability:
-      'Reserves and interest rates are read live, so agents can reason about real yield. Supplying is not signed yet: borrowing introduces liquidation risk the app does not model.',
+      'Reserves and rates are read live, and XLM can be supplied. Borrowing stays out of scope on purpose: a supply-only position cannot be liquidated, and that guarantee holds only while nothing here can open a liability.',
   },
   {
     id: 'phoenix',

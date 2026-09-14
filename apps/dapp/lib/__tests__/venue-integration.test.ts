@@ -34,10 +34,20 @@ describe('integration status is claimed accurately', () => {
     expect(byId('etherfuse')?.integration).toBe('executes')
   })
 
-  it('marks Blend as quoting only', () => {
-    // Its testnet pools are real, but nothing signs a supply yet — and its
-    // USDC is a third distinct issuer from Circle's and Soroswap's.
-    expect(byId('blend')?.integration).toBe('quotes')
+  it('marks Blend as executing, now that a supply can be signed', () => {
+    // XLM only. Its USDC is a third distinct issuer from Circle's and
+    // Soroswap's, which is why a lend target is read from the pool's own
+    // reserve list rather than derived from a ticker.
+    expect(byId('blend')?.integration).toBe('executes')
+  })
+
+  it('does not claim Blend can borrow', () => {
+    // Deliberate scope, not an omission. A supply-only position cannot be
+    // liquidated, and that stays true only while nothing here opens a
+    // liability — so the capability text must not imply otherwise.
+    const capability = byId('blend')?.capability ?? ''
+    expect(capability).toMatch(/borrow/i)
+    expect(capability).toMatch(/out of scope/i)
   })
 
   it('leaves an unintegrated venue unclaimed', () => {
