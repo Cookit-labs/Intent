@@ -229,6 +229,17 @@ function routeLines(req: ProposalRequest): string[] {
  * destination price produces a USD value ratio, which is a different quantity
  * and does not belong in the same comparison.
  */
+/**
+ * Lending venues the intent's chain can actually execute against.
+ *
+ * Empty on any chain without a lending integration, which is every chain but
+ * Stellar today. An agent that proposes lending on Arc is not punished for it:
+ * the follow-on is downgraded and the trade stands.
+ */
+function lendingVenuesFor(req: ProposalRequest): string[] {
+  return req.chain === 'stellar' ? ['blend'] : []
+}
+
 function impliedRates(req: ProposalRequest): number[] {
   const rates: number[] = []
 
@@ -385,6 +396,11 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
               allowedRouteIds: req.market.routes.filter((r) => r.executable).map((r) => r.id),
             }
           : {}),
+        // Which lending venues this chain can actually reach. An agent naming
+        // one that is absent has its follow-on downgraded rather than its
+        // whole proposal rejected — rejection substitutes a canned mock, which
+        // is worse than a sound trade without its optional second step.
+        lendingVenueIds: lendingVenuesFor(req),
       })
 
       if (!validated.ok) {
@@ -422,6 +438,12 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
             : {}),
           ...(validated.value.executionMode === 'split'
             ? { splitPct: validated.value.splitPct }
+            : {}),
+          // Omitted rather than carried as 'none', so downstream code checks
+          // presence like it does for every other optional field here.
+          // Validation has already downgraded anything this chain cannot do.
+          ...(validated.value.thenAction === 'lend'
+            ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
             : {}),
         },
         meta: meta(model, Date.now() - startedAt, body.usage, false),

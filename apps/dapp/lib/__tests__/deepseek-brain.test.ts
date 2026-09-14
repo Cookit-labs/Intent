@@ -46,6 +46,8 @@ function goodArguments(overrides: Record<string, unknown> = {}): string {
     executionMode: 'fill',
     restPriceUsd: 0,
     splitPct: 0,
+    thenAction: 'none',
+    thenVenue: '',
     ...overrides,
   })
 }

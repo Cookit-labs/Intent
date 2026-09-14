@@ -89,6 +89,17 @@ export const SUBMIT_PROPOSAL_TOOL = {
           description:
             'The price to rest at, in USD per unit of the asset being bought. Required when executionMode is "rest"; use 0 when filling now.',
         },
+        thenAction: {
+          type: 'string',
+          enum: ['none', 'lend'],
+          description:
+            'What happens to the proceeds after the trade. "none" for an ordinary trade. "lend" supplies them to a lending pool as a second, separately signed step — only when the user asked for it. This is independent of executionMode: you may fill now and then lend, or rest and then lend.',
+        },
+        thenVenue: {
+          type: 'string',
+          description:
+            'Where to lend, when thenAction is "lend". Use "blend" on Stellar. Use an empty string otherwise.',
+        },
       },
       required: [
         // Strict mode requires every property, so routeId is listed here and
@@ -104,6 +115,8 @@ export const SUBMIT_PROPOSAL_TOOL = {
         'executionMode',
         'restPriceUsd',
         'splitPct',
+        'thenAction',
+        'thenVenue',
       ],
     },
   },
@@ -145,6 +158,22 @@ export const proposalToolSchema = z.object({
   // Zero when filling. Strict mode admits no optional properties, so absence
   // has to be expressed as a value rather than an omission.
   restPriceUsd: z.number().finite().min(0),
+  // What happens *after* the trade, kept separate from how the trade executes.
+  //
+  // Folding this into `executionMode` as a fourth value would conflate two
+  // independent choices: "fill now" and "then supply it" are not alternatives,
+  // and an agent should be able to say either *fill now, then supply* or *rest
+  // at a price, then supply*. A combined enum needs an entry per pairing and
+  // grows multiplicatively with every action added.
+  thenAction: z.enum(['none', 'lend']),
+  // Empty on an ordinary trade, following the same sentinel idiom as `routeId`.
+  // A separate field rather than being implied by `thenAction`, because a
+  // second lending venue is a matter of time and an enum widened later is worse
+  // than one that reads a venue from the start.
+  thenVenue: z.string(),
+  // Deliberately no amount. A follow-on always applies to the proceeds of the
+  // step before it, which are not known until that step confirms — inviting an
+  // agent to name a figure would invite one already stale by signing time.
 })
 
 export type ProposalToolInput = z.infer<typeof proposalToolSchema>
@@ -179,6 +208,14 @@ export interface ValidationContext {
    * is about to be executed, and guessing at one would sign the wrong trade.
    */
   allowedRouteIds?: string[]
+  /**
+   * Lending venues this chain can actually execute against.
+   *
+   * Empty or absent on a chain with no lending integration, which is Arc
+   * today. A lend follow-on there is downgraded rather than rejected — see the
+   * note on the downgrade below.
+   */
+  lendingVenueIds?: string[]
 }
 
 /**
@@ -278,12 +315,26 @@ export function validateProposal(
   const allowed = new Set(ctx.allowedVenueIds)
   const venues = value.venues.filter((v) => allowed.has(v))
 
+  // A follow-on this chain cannot perform is **downgraded, not rejected**.
+  //
+  // That asymmetry is deliberate and is the lesson of an earlier bug. A
+  // rejected proposal is replaced by a canned mock, so refusing an otherwise
+  // sound trade over its follow-on would swap a real agent's reasoning for
+  // fabricated text — which is exactly how every agent came to look hardcoded
+  // once already. The trade itself is still valid; only the extra step is not.
+  const lendingVenues = new Set(ctx.lendingVenueIds ?? [])
+  const lendIsPossible = value.thenAction === 'lend' && lendingVenues.has(value.thenVenue)
+  const thenAction = lendIsPossible ? value.thenAction : 'none'
+  const thenVenue = lendIsPossible ? value.thenVenue : ''
+
   return {
     ok: true,
     value: {
       ...value,
       reasoning: value.reasoning.slice(0, MAX_REASONING_CHARS),
       venues: venues.length > 0 ? venues : ctx.allowedVenueIds.slice(0, 1),
+      thenAction,
+      thenVenue,
     },
   }
 }

@@ -81,6 +81,8 @@ describe('price validation across two bases', () => {
     executionMode: 'fill',
     restPriceUsd: 0,
     splitPct: 0,
+    thenAction: 'none',
+    thenVenue: '',
   })
 
   it('accepts a price near the route rate', () => {
@@ -141,6 +143,8 @@ describe('price validation accepts either direction of a rate', () => {
     executionMode: 'fill',
     restPriceUsd: 0,
     splitPct: 0,
+    thenAction: 'none',
+    thenVenue: '',
   })
 
   it('accepts the inverted rate that was being rejected', () => {
@@ -192,6 +196,8 @@ describe('the route rate is the route rate', () => {
     executionMode: 'fill',
     restPriceUsd: 0,
     splitPct: 0,
+    thenAction: 'none',
+    thenVenue: '',
   })
 
   it('accepts a quote at the route rate', () => {

@@ -9,6 +9,7 @@ import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
 import { venues } from '../venues'
+import { BLEND_XLM, readReserve } from '../lend/reserves'
 
 /**
  * Assembles the facts an agent is allowed to reason from.
@@ -127,12 +128,41 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
   const base = buildMarketContext(chain)
   if (chain !== 'stellar') return base
 
-  const prices = await fetchMarketPrices()
+  const [prices, lending] = await Promise.all([fetchMarketPrices(), fetchLendingRates()])
+
   return {
     ...base,
     // Real mainnet prices replace the indicative table. Testnet execution
     // still quotes its own synthetic rate; agents are told which is which.
     prices: { ...base.prices, ...toPriceTable(prices) },
+    // Omitted rather than empty when the read fails, so an agent sees "no
+    // lending data" instead of "lending pays nothing".
+    ...(lending.length > 0 ? { lending } : {}),
+  }
+}
+
+/**
+ * Live supply rates from the lending pools this chain integrates.
+ *
+ * Failure is silent and returns nothing. A competition should not collapse
+ * because a lending pool was unreachable — the trade is still the main event,
+ * and an agent given no rate simply will not propose supplying.
+ */
+async function fetchLendingRates(): Promise<
+  { venue: string; asset: string; supplyApy: number; utilisation: number }[]
+> {
+  try {
+    const reserve = await readReserve(BLEND_XLM)
+    return [
+      {
+        venue: 'blend',
+        asset: 'XLM',
+        supplyApy: Number(reserve.supplyApy.toFixed(2)),
+        utilisation: Number((reserve.utilisation * 100).toFixed(2)),
+      },
+    ]
+  } catch {
+    return []
   }
 }
 

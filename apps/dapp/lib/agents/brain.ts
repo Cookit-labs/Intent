@@ -53,6 +53,16 @@ export interface MarketContext {
    */
   assets?: { code: string; what: string; trust: string }[]
   /**
+   * Live lending rates, when the chain has a lending integration.
+   *
+   * Supplied rather than recalled, for the same reason prices are: a model
+   * asked to remember a yield will confidently invent one, and a fabricated
+   * APY beside a real trade is worse than no figure at all. Absent on chains
+   * with no lending, which is how an agent learns the option does not exist
+   * rather than being told not to use it.
+   */
+  lending?: { venue: string; asset: string; supplyApy: number; utilisation: number }[]
+  /**
    * Executable routes, already priced against real liquidity.
    *
    * The agents choose between these; they never invent one. A model is good at
@@ -158,6 +168,17 @@ export interface AgentProposalResult {
    */
   degraded?: boolean
   executionMode: 'fill' | 'rest' | 'split'
+  /**
+   * What happens to the proceeds after the trade.
+   *
+   * Separate from `executionMode` because how a trade executes and what
+   * follows it are independent choices: an agent may fill now and then supply,
+   * or rest at a price and then supply. Absent means an ordinary trade, which
+   * is almost all of them.
+   */
+  thenAction?: 'lend'
+  /** Where the follow-on supplies, when there is one. */
+  thenVenue?: string
   /**
    * On a split, the percentage filled immediately; the remainder rests.
    *
