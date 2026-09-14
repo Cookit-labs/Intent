@@ -132,3 +132,37 @@ describe('the plan is atomic and self-directed', () => {
     }
   })
 })
+
+describe('a lend cannot share a signature', () => {
+  const supply: PlanAction = {
+    kind: 'lend',
+    asset: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
+    amount: '10000000',
+    venue: 'blend',
+  }
+
+  it('refuses a lend folded into a plan', async () => {
+    // Soroban permits exactly one operation per transaction, verified on
+    // testnet twice. Building this anyway would produce an envelope the
+    // network rejects with a message naming none of the above.
+    await expect(plan([swapHalf, supply])).rejects.toThrow(/must be signed on its own/)
+  })
+
+  it('refuses a lend even on its own, through this builder', async () => {
+    // Not a plan of one: `buildBlendSupply` owns this shape, and letting it
+    // through here would mean two builders producing the same transaction with
+    // only one of them asserting the recipient.
+    await expect(plan([supply])).rejects.toThrow(/must be signed on its own/)
+  })
+
+  it('names the action that cannot be folded in', async () => {
+    // The caller has to know *which* step to sequence separately.
+    await expect(plan([swapHalf, supply])).rejects.toThrow(/lend/)
+  })
+
+  it('still builds a plan of foldable steps', async () => {
+    // The guard must not have made ordinary multi-step harder.
+    const built = await plan([swapHalf, restRemainder])
+    expect(built.steps).toHaveLength(2)
+  })
+})
