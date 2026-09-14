@@ -5,7 +5,6 @@ import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { applySlippage } from '../../../../lib/swap/assets'
 import { collectQuotes } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
-import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
 
 /**
  * Builds a multi-step plan for signature.
@@ -87,25 +86,30 @@ async function priceSwapFloors(actions: PlanAction[]): Promise<PlanAction[]> {
     actions.map(async (action) => {
       if (action.kind !== 'swap' || action.minReceive !== '0') return action
 
-      const { quotes } = await collectQuotes([createSoroswapQuoter(), createHorizonQuoter()], {
+      // **Quoted against Horizon only, deliberately.** A plan step becomes a
+      // classic path payment, and only Horizon prices that path. Soroswap
+      // quotes a Soroban router call, which is a different operation this
+      // builder cannot produce.
+      //
+      // Pricing against the best source across both was a real bug: on
+      // USDC to XLM, Soroswap quotes roughly 3.7x what the classic path can
+      // deliver, so the floor came from a venue the transaction never used and
+      // the swap failed on-chain with `op_under_dest_min`. A floor must come
+      // from the route that will actually execute.
+      const { quotes, failures } = await collectQuotes([createHorizonQuoter()], {
         kind: 'strict_send',
         from: action.from,
         to: action.to,
         sendAmount: action.sendAmount,
       })
 
-      // The best price across sources, so the floor reflects the route the
-      // trade can actually take rather than whichever quoter answered first.
-      const best = quotes.reduce<(typeof quotes)[number] | undefined>(
-        (bestSoFar, q) =>
-          bestSoFar === undefined || BigInt(q.destAmount) > BigInt(bestSoFar.destAmount)
-            ? q
-            : bestSoFar,
-        undefined
-      )
-
+      const best = quotes[0]
       if (best === undefined) {
-        throw new Error('no route could price this swap, so no floor can be set for it')
+        const why = failures[0]?.reason
+        throw new Error(
+          `no classic path could price this swap${why !== undefined ? `: ${why}` : ''}, ` +
+            'so no floor can be set for it'
+        )
       }
 
       return { ...action, minReceive: applySlippage(best.destAmount, DEFAULT_SLIPPAGE_BPS) }

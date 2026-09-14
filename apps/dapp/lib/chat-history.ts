@@ -33,6 +33,34 @@ export interface ChatTurn {
   txHash?: string
   /** Which agent the user chose, when they chose one. */
   executedBy?: string
+  /**
+   * The steps of a bundled intent, when this turn was one.
+   *
+   * A bundle is several transactions fulfilling a single instruction, and
+   * listing it as "swap" would describe only its first third. Each entry keeps
+   * its own hash, so the row can link to every transaction rather than to
+   * whichever one happened to settle first.
+   */
+  bundle?: BundleStep[]
+}
+
+/** One transaction inside a bundled intent. */
+export interface BundleStep {
+  /** What this step did, in words. */
+  label: string
+  hash?: string
+  /** Where the transaction can be seen. */
+  explorerUrl?: string
+  /**
+   * Where the *result* can be seen, when that is a different protocol.
+   *
+   * A supply's explorer link proves the transaction happened; the position it
+   * created lives in the lending protocol's own interface, and that is what
+   * someone tracking a bundle actually wants to open.
+   */
+  positionUrl?: string
+  /** The protocol this step touched, for labelling its link. */
+  venue?: string
 }
 
 const STORAGE_KEY = 'intent.chat.v1'

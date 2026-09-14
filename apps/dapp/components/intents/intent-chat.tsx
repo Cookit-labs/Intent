@@ -207,11 +207,27 @@ export function IntentChat(): JSX.Element {
   // goes on to supply: someone who stops after step one still made a trade,
   // and history should show it.
   const sequenceHash = sequence.steps[0]?.hash
+  // Every settled step, so history can list the whole bundle rather than its
+  // first transaction. Serialised for the dependency array below: the steps
+  // array is rebuilt on each render, so comparing it by reference would
+  // re-record on every tick.
+  const sequenceSteps = JSON.stringify(sequence.steps.filter((step) => step.hash !== undefined))
   useEffect(() => {
     if (sequenceHash === undefined || parsed === null) return
 
     if (turnId !== null) {
-      updateTurn(turnId, { txHash: sequenceHash })
+      updateTurn(turnId, {
+        txHash: sequenceHash,
+        // Recorded as a bundle, not a swap. One instruction became several
+        // transactions, and naming it after the first would hide the rest.
+        bundle: (JSON.parse(sequenceSteps) as typeof sequence.steps).map((step) => ({
+          label: step.label,
+          ...(step.hash !== undefined ? { hash: step.hash } : {}),
+          ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
+          ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
+          ...(step.positionUrl !== undefined ? { venue: 'Blend' } : {}),
+        })),
+      })
       setTurns(loadTurns(slug))
     }
 
@@ -225,9 +241,10 @@ export function IntentChat(): JSX.Element {
       }
     )
     // Narrow for the same reason as above: widening this re-records the hash
-    // on every render of the mutation objects.
+    // on every render of the mutation objects. `sequenceSteps` is a string, so
+    // it changes only when a step actually settles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sequenceHash])
+  }, [sequenceHash, sequenceSteps])
 
   // Declining in the wallet returns the swap to `review`, but the clicked
   // agent stayed marked as executing — its button spun forever and the others
