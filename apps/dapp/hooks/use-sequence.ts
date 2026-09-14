@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import type { PlanAction } from '../lib/swap/build-plan'
+import { blendPositionUrl } from '../lib/swap/contract-registry'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 
 /**
@@ -46,6 +47,15 @@ export interface SequenceStep {
   /** Set once this step confirms. */
   hash?: string
   explorerUrl?: string
+  /**
+   * Where the *result* of this step can be seen, when that is somewhere other
+   * than a block explorer.
+   *
+   * A supply's explorer link proves the transaction happened; it does not show
+   * the position it created, its balance, or the rate it earns. Those are what
+   * someone who just lent actually wants.
+   */
+  positionUrl?: string
   /** What the step actually delivered, in base units. Known only after it settles. */
   delivered?: string
 }
@@ -263,6 +273,9 @@ export function useSequence(): Sequence {
                 ...(result.hash !== undefined ? { hash: result.hash } : {}),
                 ...(result.explorerUrl !== undefined ? { explorerUrl: result.explorerUrl } : {}),
                 ...(result.delivered !== undefined ? { delivered: result.delivered } : {}),
+                // Only the supply has somewhere else worth looking. A swap is
+                // fully described by its transaction; a position is not.
+                ...(stepIndex > 0 ? { positionUrl: blendPositionUrl() } : {}),
               }
             : step
         )
