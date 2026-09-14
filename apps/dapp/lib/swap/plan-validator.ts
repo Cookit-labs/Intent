@@ -1,5 +1,13 @@
 import { stellarTestnet } from '@intent/config'
-import { FeeBumpTransaction, TransactionBuilder, type Operation } from '@stellar/stellar-sdk'
+import {
+  Address,
+  FeeBumpTransaction,
+  TransactionBuilder,
+  xdr,
+  type Operation,
+} from '@stellar/stellar-sdk'
+
+import { labelForCall } from './contract-registry'
 
 /**
  * Validating a transaction that does several things at once.
@@ -51,6 +59,9 @@ const ALLOWED_OPERATIONS = new Set([
   'createPassiveSellOffer',
   'liquidityPoolDeposit',
   'liquidityPoolWithdraw',
+  // Permitted by type, but not on that alone: the contract and function are
+  // checked against the registry below. Allowing the type by itself would admit
+  // a call to any contract on the network and narrate it as a swap.
   'invokeHostFunction',
   // Buying an asset the account cannot yet hold requires this first, and
   // splitting it into a separate signature is exactly what multi-step exists
@@ -64,6 +75,71 @@ const DELIVERS_TO_DESTINATION = new Set(['pathPaymentStrictSend', 'pathPaymentSt
 export interface PlanStep {
   index: number
   type: string
+  /**
+   * For a contract call, what it does in words — resolved from the contract
+   * rather than the operation type.
+   *
+   * Carried on the step because `describePlan` sees only steps, and a step
+   * that knows only "invokeHostFunction" cannot tell a Soroswap swap from a
+   * Blend supply. Absent for classic operations, whose type is enough.
+   */
+  label?: string
+}
+
+/**
+ * The contract and function an `invokeHostFunction` operation calls.
+ *
+ * Read back out of the encoded XDR rather than taken from whatever built it,
+ * which is the same discipline the rest of this file applies: the inputs are
+ * already believed correct, and what matters is what the bytes about to be
+ * signed actually say.
+ *
+ * Anything that is not a contract invocation — uploading Wasm, creating a
+ * contract — returns nothing and is refused by the caller. Neither is something
+ * a trading plan does.
+ */
+function readContractCall(op: Operation): { contractId?: string; functionName?: string } {
+  // A decoded operation carries the host function already converted out of the
+  // raw union: `type` is a plain string and `invokeContract` a plain property,
+  // not the accessor methods the XDR classes expose. Verified against a decoded
+  // envelope rather than assumed from the type definitions.
+  const hostFunction = (op as unknown as { func?: { type?: string; invokeContract?: unknown } })
+    .func
+  if (hostFunction === undefined) return {}
+
+  // Uploading Wasm or creating a contract are host functions too, and neither
+  // is something a trading plan does. Both fall through to a refusal.
+  if (hostFunction.type !== 'hostFunctionTypeInvokeContract') return {}
+
+  const invocation = hostFunction.invokeContract as
+    | { contractAddress?: xdr.ScAddress; functionName?: unknown }
+    | undefined
+  if (invocation === undefined) return {}
+
+  const result: { contractId?: string; functionName?: string } = {}
+
+  try {
+    if (invocation.contractAddress !== undefined) {
+      result.contractId = Address.fromScAddress(invocation.contractAddress).toString()
+    }
+  } catch {
+    // Left undefined; the caller refuses a call whose contract cannot be read.
+  }
+
+  // The function name decodes to an `XdrString`, not a plain string and not a
+  // byte array. Its `toString()` yields the symbol; `Buffer.from()` on it
+  // silently yields the right number of *zero* bytes, which would match nothing
+  // in the registry and refuse every call for an unrelated reason. Verified
+  // against a decoded envelope rather than inferred from the types.
+  const name = invocation.functionName
+  if (typeof name === 'string') {
+    result.functionName = name
+  } else if (name !== undefined && name !== null) {
+    const text = String(name)
+    if (text.length > 0) result.functionName = text
+  }
+
+  return result
 }
 
 /**
@@ -139,6 +215,23 @@ export function assertSelfPlan(xdr: string, account: string): PlanStep[] {
       }
     }
 
+    // A contract call is the one operation whose type says nothing about what
+    // it does. Every other entry in the allowlist is self-describing;
+    // `invokeHostFunction` could be a swap, a supply, a borrow, or a transfer
+    // of the whole balance to somebody else's contract.
+    if (type === 'invokeHostFunction') {
+      const { contractId, functionName } = readContractCall(op)
+      const resolved = labelForCall(contractId, functionName)
+      if (!resolved.ok) {
+        throw new Error(
+          `refusing to sign step ${index + 1}: ${resolved.reason}. ` +
+            'A plan may only call contracts this app integrates.'
+        )
+      }
+      steps.push({ index, type, label: resolved.label })
+      return
+    }
+
     steps.push({ index, type })
   })
 
@@ -154,8 +247,11 @@ const STEP_LABELS: Record<string, string> = {
   createPassiveSellOffer: 'Place order',
   liquidityPoolDeposit: 'Add liquidity',
   liquidityPoolWithdraw: 'Withdraw liquidity',
-  invokeHostFunction: 'Swap via router',
   changeTrust: 'Allow asset',
+  // Deliberately absent: `invokeHostFunction`. There is no honest label for a
+  // contract call that does not name the contract, and the previous entry
+  // ("Swap via router") described a Blend supply as a swap. A step of this type
+  // always carries its own label, resolved from the registry.
 }
 
 /**
@@ -166,5 +262,8 @@ const STEP_LABELS: Record<string, string> = {
  * operations, not more.
  */
 export function describePlan(steps: PlanStep[]): string[] {
-  return steps.map((s, i) => `${i + 1}. ${STEP_LABELS[s.type] ?? s.type}`)
+  // The step's own label wins where it has one: only the step knows which
+  // contract a call went to, and that is the difference between "Supply to
+  // Blend" and "Swap via Soroswap".
+  return steps.map((s, i) => `${i + 1}. ${s.label ?? STEP_LABELS[s.type] ?? s.type}`)
 }

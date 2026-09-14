@@ -1,7 +1,17 @@
-import { Asset, BASE_FEE, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
+import {
+  Address,
+  Asset,
+  BASE_FEE,
+  Contract,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  nativeToScVal,
+} from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { assertSelfPlan } from '../swap/plan-validator'
+import { BLEND_POOL, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import { assertSelfPlan, describePlan } from '../swap/plan-validator'
 
 /**
  * Validating a transaction that does several things at once.
@@ -57,6 +67,28 @@ const restingOffer = () =>
   })
 
 const trustline = () => Operation.changeTrust({ asset: USDC })
+
+/** A contract this app does not integrate. Well-formed, and not on the list. */
+const UNKNOWN_CONTRACT = 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA'
+
+const routerSwap = (contractId = SOROSWAP_ROUTER) =>
+  new Contract(contractId).call(
+    'swap_exact_tokens_for_tokens',
+    nativeToScVal(BigInt(10), { type: 'i128' }),
+    nativeToScVal(BigInt(1), { type: 'i128' }),
+    nativeToScVal([]),
+    new Address(ME).toScVal(),
+    nativeToScVal(BigInt(9_999_999_999), { type: 'u64' })
+  )
+
+const blendSupply = (fn = 'submit') =>
+  new Contract(BLEND_POOL).call(
+    fn,
+    new Address(ME).toScVal(),
+    new Address(ME).toScVal(),
+    new Address(ME).toScVal(),
+    nativeToScVal([])
+  )
 
 describe('a plan may do several things', () => {
   it('accepts a swap followed by a resting order', () => {
@@ -148,6 +180,47 @@ describe('every operation is checked, not just the first', () => {
       source: STRANGER,
     })
     expect(() => assertSelfPlan(envelope([foreign]), ME)).toThrow()
+  })
+})
+
+describe('a contract call is checked by contract, not by operation type', () => {
+  it('accepts a call to a contract the app integrates', () => {
+    expect(() => assertSelfPlan(envelope([routerSwap()]), ME)).not.toThrow()
+  })
+
+  it('refuses a call to a contract the app does not integrate', () => {
+    // The gap this closes. Before, *any* contract on the network passed here,
+    // because only the operation type was checked. A user reviewing the plan
+    // would have read "Swap via router" over a call to a stranger's contract.
+    expect(() => assertSelfPlan(envelope([routerSwap(UNKNOWN_CONTRACT)]), ME)).toThrow(
+      /not a contract this app calls/
+    )
+  })
+
+  it('refuses a function the contract is not integrated for', () => {
+    // Allowing the contract but not the function matters because a lending
+    // pool that supplies also borrows. "Supply to Blend" over a `borrow` call
+    // would be the safety mechanism itself telling the lie.
+    expect(() => assertSelfPlan(envelope([blendSupply('borrow')]), ME)).toThrow(
+      /does not accept borrow/
+    )
+  })
+
+  it('refuses an unknown contract hidden behind a legitimate one', () => {
+    // Position must not matter here either.
+    expect(() =>
+      assertSelfPlan(envelope([routerSwap(), routerSwap(UNKNOWN_CONTRACT)]), ME)
+    ).toThrow(/step 2/)
+  })
+
+  it('names the contract in review rather than the operation type', () => {
+    const steps = assertSelfPlan(envelope([routerSwap(), blendSupply()]), ME)
+    expect(describePlan(steps)).toEqual(['1. Swap via Soroswap', '2. Supply to Blend'])
+  })
+
+  it('still describes classic operations by type', () => {
+    const steps = assertSelfPlan(envelope([trustline(), selfSwap()]), ME)
+    expect(describePlan(steps)).toEqual(['1. Allow asset', '2. Swap'])
   })
 })
 
