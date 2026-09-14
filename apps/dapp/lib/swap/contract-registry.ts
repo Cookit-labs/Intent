@@ -44,6 +44,18 @@ export const SOROSWAP_ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264
 /** Blend's testnet lending pool, verified against `get_reserve_list`. */
 export const BLEND_POOL = 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF'
 
+/**
+ * Where to see a Blend position, as opposed to the transaction that made it.
+ *
+ * A block explorer proves the supply happened; it does not show the position,
+ * the balance, or the rate it is earning. Those live in Blend's own interface,
+ * and someone who has just lent wants to see the position rather than the
+ * receipt.
+ */
+export function blendPositionUrl(poolId: string = BLEND_POOL): string {
+  return `https://testnet.blend.capital/dashboard/?poolId=${poolId}`
+}
+
 const ENTRIES: ContractEntry[] = [
   {
     id: SOROSWAP_ROUTER,

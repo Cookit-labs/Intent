@@ -135,7 +135,7 @@ function StepList({
   steps,
   current,
 }: {
-  steps: { label: string; hash?: string; explorerUrl?: string }[]
+  steps: { label: string; hash?: string; explorerUrl?: string; positionUrl?: string }[]
   current: number
 }): JSX.Element {
   return (
@@ -158,7 +158,20 @@ function StepList({
                   rel="noreferrer"
                   className="text-muted-foreground hover:text-foreground ml-2 inline-flex items-center gap-1 text-xs underline underline-offset-2"
                 >
-                  View
+                  Transaction
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : null}
+              {/* The position, not the receipt. A supply's explorer link
+                  proves it happened and shows nothing about what it earns. */}
+              {step.positionUrl !== undefined ? (
+                <a
+                  href={step.positionUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground ml-2 inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                >
+                  View position on Blend
                   <ExternalLink className="h-3 w-3" />
                 </a>
               ) : null}

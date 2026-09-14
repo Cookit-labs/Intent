@@ -198,6 +198,37 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedId, settledHash, pendingInput])
 
+  // A sequence settles through its own hook, so the effect above never sees it
+  // and the trade was missing from history entirely — it happened on-chain and
+  // left no record in the app.
+  //
+  // Recorded on the *first* step's hash rather than the last. That step is a
+  // real swap that really settled, and it stays true whether or not the user
+  // goes on to supply: someone who stops after step one still made a trade,
+  // and history should show it.
+  const sequenceHash = sequence.steps[0]?.hash
+  useEffect(() => {
+    if (sequenceHash === undefined || parsed === null) return
+
+    if (turnId !== null) {
+      updateTurn(turnId, { txHash: sequenceHash })
+      setTurns(loadTurns(slug))
+    }
+
+    createIntent.mutate(
+      { ...parsed.input, chain: slug },
+      {
+        onSuccess: (created) => {
+          setPlacedId(created.id)
+          settleIntent.mutate({ id: created.id, txHash: sequenceHash })
+        },
+      }
+    )
+    // Narrow for the same reason as above: widening this re-records the hash
+    // on every render of the mutation objects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sequenceHash])
+
   // Declining in the wallet returns the swap to `review`, but the clicked
   // agent stayed marked as executing — its button spun forever and the others
   // could not be chosen. Releasing it lets the user pick again, including a
