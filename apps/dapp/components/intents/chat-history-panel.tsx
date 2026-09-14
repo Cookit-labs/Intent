@@ -110,7 +110,16 @@ export function ChatHistoryPanel({
                           executed by {turn.proposals[turn.executedBy]?.name ?? turn.executedBy}
                         </span>
                       ) : null}
-                      {turn.txHash !== undefined ? (
+                      {/* A bundle is several transactions fulfilling one
+                          instruction. Labelling it "swap" would describe only
+                          its first part, so it is named for what it is and
+                          every step gets its own links. */}
+                      {turn.bundle !== undefined && turn.bundle.length > 0 ? (
+                        <span className="border-border rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                          Bundled · {turn.bundle.length} steps
+                        </span>
+                      ) : null}
+                      {turn.bundle === undefined && turn.txHash !== undefined ? (
                         <a
                           href={`${stellarTestnet.blockExplorerUrl}/tx/${turn.txHash}`}
                           target="_blank"
@@ -123,6 +132,49 @@ export function ChatHistoryPanel({
                         </a>
                       ) : null}
                     </div>
+
+                    {/* Each step, with a link to the transaction and, where the
+                        step left something behind in another protocol, a link
+                        to that too — an explorer proves a supply happened and
+                        shows nothing about the position it created. */}
+                    {turn.bundle !== undefined && turn.bundle.length > 0 ? (
+                      <ol className="border-border text-muted-foreground mt-2 flex flex-col gap-1 border-l pl-3 text-xs">
+                        {turn.bundle.map((step, i) => (
+                          <li
+                            key={`${step.hash ?? 'step'}-${i}`}
+                            className="flex flex-wrap items-center gap-x-2"
+                          >
+                            <span>
+                              {i + 1}. {step.label}
+                            </span>
+                            {step.explorerUrl !== undefined ? (
+                              <a
+                                href={step.explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-foreground inline-flex items-center gap-1 underline underline-offset-2"
+                              >
+                                transaction
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : null}
+                            {step.positionUrl !== undefined ? (
+                              <a
+                                href={step.positionUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:text-foreground inline-flex items-center gap-1 underline underline-offset-2"
+                              >
+                                on {step.venue ?? 'the protocol'}
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
                   </button>
                 </li>
               )

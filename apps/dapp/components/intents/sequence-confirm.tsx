@@ -95,8 +95,9 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
         {/* Stated rather than implied. A user who has signed multi-step plans
             here would otherwise reasonably expect one signature. */}
         <span className="text-muted-foreground text-xs">
-          These cannot share a signature, so you will be asked once per step. Stopping in between
-          leaves you holding whatever the earlier step produced.
+          These cannot share a signature, so your wallet asks once per step. Approving here starts
+          the run and the next prompt follows on its own. Declining any prompt stops it, leaving you
+          with whatever the earlier steps produced.
         </span>
       </div>
 
@@ -113,6 +114,8 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {phase === 'signing' ? 'Waiting for your wallet…' : 'Submitting…'}
             </span>
+          ) : current === 0 ? (
+            `Approve and sign ${steps.length} steps`
           ) : (
             `Sign step ${current + 1} of ${steps.length}`
           )}

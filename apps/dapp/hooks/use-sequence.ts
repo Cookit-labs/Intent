@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
@@ -29,6 +29,13 @@ import { FAILURE_MESSAGES } from '../lib/swap/submit'
  * The compensation for losing atomicity is real: step two is priced against
  * what step one *actually delivered*, rather than against an estimate an atomic
  * version would have had to guess in advance.
+ *
+ * **Steps advance on their own.** Approving the sequence approves all of it, so
+ * once the first signature is given the next wallet prompt follows without
+ * another button. That is a UX choice, not a safety one: the whole plan is
+ * still shown before the first signature, which is where consent actually
+ * happens. Declining any prompt stops the run, and the wallet remains the last
+ * word on every individual transaction.
  */
 
 export type SequencePhase =
@@ -68,6 +75,13 @@ export interface SequenceState {
   /** The envelope awaiting signature, when there is one. */
   xdr?: string
   error?: string
+  /**
+   * Set when the next step should sign itself without another click.
+   *
+   * True only for steps after the first: the opening signature is always
+   * deliberate, because that is the moment the whole plan was approved.
+   */
+  autoAdvance?: boolean
 }
 
 /** A swap, then a supply of whatever it delivered. */
@@ -201,7 +215,10 @@ export function useSequence(): Sequence {
       // Assigned by spread rather than named, because strict optional
       // properties reject an explicit `undefined` where the key is optional.
       const envelope = built.xdr
-      setState((s) => ({ ...s, phase: 'review', current: 1, xdr: envelope }))
+      // Marked ready rather than awaiting a click. The effect below picks this
+      // up and raises the next wallet prompt, so the user signs twice instead
+      // of clicking twice and signing twice.
+      setState((s) => ({ ...s, phase: 'review', current: 1, xdr: envelope, autoAdvance: true }))
     },
     []
   )
@@ -214,7 +231,13 @@ export function useSequence(): Sequence {
     const stepIndex = state.current
 
     async function run(): Promise<void> {
-      setState((s) => ({ ...s, phase: 'signing' }))
+      setState((s) => {
+        const next: SequenceState = { ...s, phase: 'signing' }
+        // Consumed here, so a re-render cannot raise a second prompt for the
+        // same step.
+        delete next.autoAdvance
+        return next
+      })
 
       const signed = await adapter.signTransaction?.({ xdr: envelope as string, address: signer })
       if (signed === undefined) {
@@ -306,6 +329,19 @@ export function useSequence(): Sequence {
       setState((s) => ({ ...s, phase: 'failed', error: 'Something went wrong signing this step.' }))
     })
   }, [state.xdr, state.current, address, adapter, request, buildLend])
+
+  // Raises the next wallet prompt once a later step is built and ready.
+  //
+  // Guarded by a ref rather than by the phase alone: React may render the same
+  // state twice, and a duplicate prompt for the same envelope would ask the
+  // user to sign a transaction they have already seen.
+  const advancedFor = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (state.autoAdvance !== true || state.phase !== 'review' || state.xdr === undefined) return
+    if (advancedFor.current === state.xdr) return
+    advancedFor.current = state.xdr
+    confirm()
+  }, [state.autoAdvance, state.phase, state.xdr, confirm])
 
   return { ...state, prepare, confirm, stop, reset }
 }
