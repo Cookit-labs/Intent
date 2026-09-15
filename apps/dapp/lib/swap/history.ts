@@ -1,5 +1,6 @@
 import { stellarTestnet } from '@intent/config'
 
+import { BLEND_POOL, blendPositionUrl } from './contract-registry'
 import { OFFER_MEMO } from './build-offer'
 import { PLAN_MEMO } from './build-plan'
 import { POOL_MEMO } from './build-pool'
@@ -75,7 +76,27 @@ export interface SwapRecord {
    * apply", and filtering on it discards trades this app really did make.
    */
   stampable?: boolean
+  /**
+   * The transactions this one was bundled with, when the ledger shows it was.
+   *
+   * A swap followed moments later by a supply of what it delivered is one
+   * instruction, but the chain does not say so: a Soroban call carries no memo
+   * and the two transactions are unrelated on-chain. The pairing is inferred
+   * here from amount and timing, which is the only evidence that survives a
+   * cleared browser.
+   */
+  bundledWith?: LedgerBundleStep[]
   explorerUrl: string
+}
+
+/** One transaction inside a bundle reconstructed from the ledger. */
+export interface LedgerBundleStep {
+  label: string
+  hash: string
+  explorerUrl: string
+  /** Where the position lives, for a step that left value in a protocol. */
+  positionUrl?: string
+  venue?: string
 }
 
 interface HorizonOperation {
@@ -230,6 +251,12 @@ export async function fetchSwapHistory(
   // lists were each already in.
   const swaps = [...pathPayments, ...routed].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
 
+  // A supply is a contract call that only sends, so `routerSwapOf` discards it
+  // — correctly, since it is not a swap. But it is half of a bundled intent,
+  // and pairing it back to the swap that fed it is the only way a bundle
+  // survives a cleared browser.
+  attachBundles(swaps, supplies(records, account))
+
   if (!onlyThisApp) return swaps
 
   // A Soroban transaction carries no text memo, so a router swap can never be
@@ -293,5 +320,109 @@ function routerSwapOf(
     // filterable by one either way.
     stampable: false,
     explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+  }
+}
+
+/** A one-way transfer into a protocol: the supply half of a bundled intent. */
+interface LedgerSupply {
+  txHash: string
+  settledAt: string
+  amount: string
+  asset: string
+  /** The contract it went to. */
+  to: string
+}
+
+/**
+ * Transfers that left the account for a contract and brought nothing back.
+ *
+ * Deliberately not treated as swaps. Only supplies to a protocol this app
+ * integrates are collected, because a transfer to an unknown contract could be
+ * anything and naming it would be a guess dressed as a fact.
+ */
+function supplies(records: HorizonOperation[], account: string): LedgerSupply[] {
+  const found: LedgerSupply[] = []
+
+  for (const op of records) {
+    if (op.type !== 'invoke_host_function') continue
+    const changes = op.asset_balance_changes ?? []
+
+    const out = changes.find((c) => c.from === account && c.amount !== undefined)
+    const back = changes.find((c) => c.to === account && c.amount !== undefined)
+    // Both legs means a swap, which is handled elsewhere.
+    if (out === undefined || back !== undefined) continue
+    if (out.to !== BLEND_POOL) continue
+
+    found.push({
+      txHash: op.transaction_hash,
+      settledAt: op.created_at,
+      amount: out.amount ?? '0',
+      asset: assetName(out.asset_type, out.asset_code),
+      to: out.to,
+    })
+  }
+
+  return found
+}
+
+/**
+ * How long after a swap a supply may arrive and still belong to it.
+ *
+ * A sequence signs its second step as soon as the first confirms, so the gap is
+ * seconds. Generous enough for a slow wallet prompt, tight enough that an
+ * unrelated supply an hour later is not swept in.
+ */
+const BUNDLE_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * The fee makes the supplied amount slightly smaller than the swap's output,
+ * so the match is proportional rather than exact. Real pairs differ by
+ * thousandths of a percent; anything looser would pair coincidences.
+ */
+const BUNDLE_AMOUNT_TOLERANCE = 0.005
+
+/**
+ * Marks each swap that was followed by a supply of what it delivered.
+ *
+ * Matched on three things together — the same asset, a supply shortly after,
+ * and an amount within a fee of the swap's output. One alone would pair
+ * coincidences; all three together are what a sequence actually looks like.
+ *
+ * Mutates the rows in place, because the caller has already sorted and filtered
+ * them and rebuilding the list would discard that work.
+ */
+function attachBundles(swaps: SwapRecord[], supplied: LedgerSupply[]): void {
+  for (const supply of supplied) {
+    const suppliedAt = new Date(supply.settledAt).getTime()
+    const amount = Number(supply.amount)
+    if (!Number.isFinite(amount) || amount <= 0) continue
+
+    const match = swaps.find((swap) => {
+      if (swap.receivedAsset !== supply.asset) return false
+      const gap = suppliedAt - new Date(swap.settledAt).getTime()
+      if (gap < 0 || gap > BUNDLE_WINDOW_MS) return false
+
+      const delivered = Number(swap.receivedAmount)
+      if (!Number.isFinite(delivered) || delivered <= 0) return false
+      return Math.abs(delivered - amount) / delivered <= BUNDLE_AMOUNT_TOLERANCE
+    })
+
+    if (match === undefined) continue
+
+    match.bundledWith = [
+      {
+        label: 'Swap',
+        hash: match.txHash,
+        explorerUrl: match.explorerUrl,
+      },
+      {
+        label: `Supply ${supply.amount} ${supply.asset} to Blend`,
+        hash: supply.txHash,
+        explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${supply.txHash}`,
+        positionUrl: blendPositionUrl(supply.to),
+        venue: 'Blend',
+      },
+    ]
+    match.kind = 'bundle'
   }
 }
