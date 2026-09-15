@@ -32,6 +32,7 @@ import {
   updateTurn,
   type ChatTurn,
 } from '../../lib/chat-history'
+import { backfillFromLedger } from '../../lib/swap/backfill'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
@@ -107,13 +108,33 @@ export function IntentChat(): JSX.Element {
   // empty list.
   useEffect(() => {
     let cancelled = false
-    void syncTurns(slug)
-      .then((fromServer) => {
-        if (!cancelled) setTurns(fromServer)
-      })
-      .catch(() => {
-        // `syncTurns` already falls back to the cache and warns.
-      })
+
+    async function load(): Promise<void> {
+      // The server first, so anything already recorded is in hand before the
+      // ledger is consulted and a recorded turn is never mistaken for missing.
+      const fromServer = await syncTurns(slug)
+      if (cancelled) return
+      setTurns(fromServer)
+
+      // Then the chain. A trade made before this sync existed, on another
+      // device, or during a session whose sign-in failed, is on Stellar and
+      // nowhere else — and an account with real swaps should not show an empty
+      // history. Writes go through `saveTurn`, so each one reaches the
+      // database like any other.
+      if (address === undefined) return
+      const result = await backfillFromLedger(address, slug)
+      if (cancelled || result.written === 0) return
+
+      // Re-read rather than appending: `saveTurn` has already merged each row
+      // into the store, and reading back keeps one ordering rather than two.
+      setTurns(loadTurns(slug))
+    }
+
+    void load().catch(() => {
+      // Both halves already degrade on their own; a failure here must not
+      // empty a history panel that has perfectly good cached rows.
+    })
+
     return () => {
       cancelled = true
     }
