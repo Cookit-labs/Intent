@@ -112,6 +112,13 @@ interface HorizonOperation {
   source_asset_type?: string
   source_asset_code?: string
   path?: { asset_type: string; asset_code?: string }[]
+  /** Offer fields. Present only on manage_sell_offer / manage_buy_offer. */
+  price?: string
+  offer_id?: string
+  selling_asset_type?: string
+  selling_asset_code?: string
+  buying_asset_type?: string
+  buying_asset_code?: string
   /**
    * The transfers a contract call performed.
    *
@@ -242,6 +249,33 @@ export async function fetchSwapHistory(
       explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
 
+  // A resting order is neither a path payment nor a contract call, so the
+  // reader saw none of them: an account could place a limit order through this
+  // app and find no trace of it in its own history. It is a different kind of
+  // thing from a swap — nothing has been exchanged yet — but it is an
+  // instruction the user gave and it belongs in the record.
+  const offers: SwapRecord[] = records
+    .filter((op) => op.type === 'manage_sell_offer' || op.type === 'manage_buy_offer')
+    // A zero amount withdraws an order rather than placing one. Stellar has no
+    // delete operation, so this is what a cancellation looks like on the
+    // ledger, and listing it as a new order would invert its meaning.
+    .filter((op) => Number(op.amount ?? '0') > 0)
+    .map((op) => ({
+      txHash: op.transaction_hash,
+      settledAt: op.created_at,
+      // What the order offers, and what it asks for. Not a settlement: an
+      // order rests until the market reaches it, and may never fill.
+      sentAmount: op.amount ?? '0',
+      sentAsset: assetName(op.selling_asset_type, op.selling_asset_code),
+      receivedAmount: op.price ?? '0',
+      receivedAsset: assetName(op.buying_asset_type, op.buying_asset_code),
+      hops: 0,
+      kind: 'limit' as const,
+      fromThisApp: KNOWN_MEMOS.has(memoByHash.get(op.transaction_hash) ?? ''),
+      stampable: true,
+      explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+    }))
+
   const routed = records
     .filter((op) => op.type === 'invoke_host_function')
     .map((op) => routerSwapOf(op, account, memoByHash))
@@ -249,7 +283,9 @@ export async function fetchSwapHistory(
 
   // Newest first, matching the order Horizon returned and the order the two
   // lists were each already in.
-  const swaps = [...pathPayments, ...routed].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
+  const swaps = [...pathPayments, ...offers, ...routed].sort((a, b) =>
+    b.settledAt.localeCompare(a.settledAt)
+  )
 
   // A supply is a contract call that only sends, so `routerSwapOf` discards it
   // — correctly, since it is not a swap. But it is half of a bundled intent,
