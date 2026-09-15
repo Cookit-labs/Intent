@@ -112,16 +112,29 @@ export function SwapHistory(): JSX.Element | null {
     return <Card className="text-muted-foreground p-6 text-sm">No swaps yet for this account.</Card>
   }
 
-  // Joined here rather than in the reader, which deliberately knows nothing the
-  // app stores: a trade made on another device still belongs in history, and
-  // the ledger is the only source that has all of them.
+  // Two sources, and the order between them matters.
+  //
+  // The app's own record is richer: it knows which agent won and what it
+  // reasoned, none of which is on-chain. So it wins where it exists.
+  //
+  // The ledger is the fallback, and it is the one that survives. A cleared
+  // browser loses the record but not the chain, and the reader can still see
+  // that a swap was followed moments later by a supply of what it delivered —
+  // which is what a bundled intent looks like from the outside.
   const bundles = bundlesByTxHash(slug)
   const swaps: HistoryRow[] = ledger.map((row) => {
-    const found = bundles.get(row.txHash)
-    if (found === undefined) return row
-    // A bundle is what the person asked for, so it names the row even though
-    // the ledger saw only a swap.
-    return { ...row, kind: 'bundle' as const, bundleSteps: found.steps }
+    const recorded = bundles.get(row.txHash)
+    if (recorded !== undefined) {
+      // A bundle is what the person asked for, so it names the row even though
+      // the ledger saw only a swap.
+      return { ...row, kind: 'bundle' as const, bundleSteps: recorded.steps }
+    }
+
+    if (row.bundledWith !== undefined && row.bundledWith.length > 1) {
+      return { ...row, bundleSteps: row.bundledWith }
+    }
+
+    return row
   })
 
   return (
