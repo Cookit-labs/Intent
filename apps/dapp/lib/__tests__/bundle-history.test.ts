@@ -219,3 +219,30 @@ describe('a ledger row can find the bundle it belonged to', () => {
     expect(bundlesByTxHash('arc').get('aaa111')).toBeUndefined()
   })
 })
+
+describe('only a genuine multi-step intent is a bundle', () => {
+  it('ignores a turn carrying a single step', () => {
+    // A backfilled swap once arrived with a one-step bundle, and the history
+    // panel renamed every such row "Bundled swap" — a name that promises a
+    // second transaction and a position link neither of which exists.
+    saveTurn(turn('single'))
+    updateTurn('single', {
+      txHash: 'solo111',
+      bundle: [
+        { label: 'Swap', hash: 'solo111', explorerUrl: 'https://stellar.expert/tx/solo111' },
+      ],
+    })
+
+    expect(bundlesByTxHash(CHAIN).get('solo111')).toBeUndefined()
+  })
+
+  it('still recognises a real two-step bundle', () => {
+    // The case the label exists for: a swap and the supply that followed it.
+    saveTurn(turn('real'))
+    updateTurn('real', { bundle: STEPS })
+
+    const found = bundlesByTxHash(CHAIN).get('aaa111')
+    expect(found?.steps).toHaveLength(2)
+    expect(found?.steps.some((s) => s.positionUrl !== undefined)).toBe(true)
+  })
+})

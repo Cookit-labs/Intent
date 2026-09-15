@@ -59,11 +59,22 @@ describe('trades the ledger has and the database does not', () => {
     expect(h.written[0]?.txHash).toBe('tx111')
   })
 
-  it('keeps the transaction link so the row is checkable', async () => {
+  it('does not label a single transaction as a bundle', async () => {
+    // Every backfilled row used to carry a one-step bundle, which made the
+    // history panel name all of them "Bundled swap" — promising a second
+    // transaction and a position link that do not exist. One transaction is a
+    // swap; the ledger row carries its own explorer link.
     const h = harness([record()])
     await backfillFromLedger(ME, 'stellar', h.options)
 
-    expect(h.written[0]?.bundle?.[0]?.explorerUrl).toContain('tx111')
+    expect(h.written[0]?.bundle).toBeUndefined()
+  })
+
+  it('still identifies the transaction it recovered', async () => {
+    const h = harness([record()])
+    await backfillFromLedger(ME, 'stellar', h.options)
+
+    expect(h.written[0]?.txHash).toBe('tx111')
   })
 
   it('dates the row when the trade settled, not when it was backfilled', async () => {
