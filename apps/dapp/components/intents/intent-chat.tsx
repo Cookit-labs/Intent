@@ -58,6 +58,7 @@ import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
+import { PriceTicker } from './price-ticker'
 
 function TrafficLights(): JSX.Element {
   return (
@@ -760,6 +761,14 @@ export function IntentChat(): JSX.Element {
       {/* Window chrome */}
       <div className="border-border relative flex shrink-0 items-center border-b px-4 py-3">
         <TrafficLights />
+        {/* The rate every dollar amount on this page is sized against.
+            "$20 worth of XLM" becomes a token count using this number, so
+            showing it lets the user see the conversion before writing the
+            sentence rather than after signing it. Hidden on narrow screens,
+            where the centred label and the actions already compete. */}
+        <span className="ml-3 hidden sm:inline-flex">
+          <PriceTicker prices={swap.priceDetail} />
+        </span>
         <span className="text-muted-foreground absolute left-1/2 -translate-x-1/2 text-xs">
           Live settlement
         </span>
@@ -866,7 +875,16 @@ export function IntentChat(): JSX.Element {
             overlays position against the panel rather than against content
             that moves under them. */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {!parsed || !message ? (
+          {/* Gated on the message, not on a parsed *trade*.
+              `parsed` answers "was a trade read", and three submit paths
+              deliberately leave it null: a standing rule, and a supply of
+              something already held. Gating the thread on it meant those
+              intents set their state correctly, started their work, and
+              rendered nothing at all — the empty "say what you want" prompt
+              stayed on screen while a supply was built and waiting to sign.
+              Even the error message lived in this dead branch, so a failure
+              was as invisible as a success. */}
+          {!message ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
               <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
                 <Sparkles className="h-5 w-5" />
