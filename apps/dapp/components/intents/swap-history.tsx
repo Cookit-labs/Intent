@@ -49,6 +49,10 @@ export function SwapHistory(): JSX.Element | null {
     enabled: supported && isConnected && address !== undefined,
     // Settled trades do not change, so this only needs to catch new ones.
     staleTime: 30_000,
+    // A trade made moments ago in the Compose tab must be here when the user
+    // switches to History. Without this the cached list is served untouched and
+    // the newest trade appears to be missing.
+    refetchOnMount: 'always',
   })
 
   if (!supported) {

@@ -192,3 +192,56 @@ describe('a router swap is a swap too', () => {
     expect(rows[0]?.fromThisApp).toBe(false)
   })
 })
+
+describe('a router swap is never filtered out by a memo it cannot carry', () => {
+  /** Operations first, then the memo lookup — the order the reader calls them. */
+  function respondPair(ops: unknown[], txs: unknown[]): typeof fetch {
+    let call = 0
+    return (() => {
+      call += 1
+      const body = call === 1 ? { _embedded: { records: ops } } : { _embedded: { records: txs } }
+      return Promise.resolve(new Response(JSON.stringify(body)))
+    }) as unknown as typeof fetch
+  }
+
+  const STAMP = {
+    hash: '1ec2b80f110f86e98493ac3b04b656e91238c37c36ce476e9ab99ab87ed8484c',
+    memo: 'intent:swap:v1',
+    memo_type: 'text',
+  }
+
+  it('survives alongside a stamped classic swap', () => {
+    // The regression. A Soroban transaction cannot carry a text memo, and the
+    // unstamped fallback only fires when *zero* swaps are stamped — so any
+    // account with one classic trade silently discarded every router trade.
+    return fetchSwapHistory(ME, {
+      fetchImpl: respondPair([swapOp(), routerOp()], [STAMP]),
+    }).then((rows) => {
+      expect(rows.map((r) => r.txHash)).toContain(routerOp().transaction_hash)
+    })
+  })
+
+  it('keeps the stamped classic swap too', async () => {
+    const rows = await fetchSwapHistory(ME, {
+      fetchImpl: respondPair([swapOp(), routerOp()], [STAMP]),
+    })
+    expect(rows).toHaveLength(2)
+  })
+
+  it('still hides a stamped-era classic swap from another wallet', async () => {
+    // Widening for router swaps must not have widened for classic ones: an
+    // unstamped path payment alongside a stamped one is still someone else's.
+    const foreign = swapOp({ transaction_hash: 'foreign', created_at: '2026-09-08T00:00:00Z' })
+    const rows = await fetchSwapHistory(ME, {
+      fetchImpl: respondPair([swapOp(), foreign], [STAMP]),
+    })
+    expect(rows.map((r) => r.txHash)).not.toContain('foreign')
+  })
+
+  it('orders the merged list newest first', async () => {
+    const rows = await fetchSwapHistory(ME, {
+      fetchImpl: respondPair([swapOp(), routerOp()], [STAMP]),
+    })
+    expect(rows[0]?.txHash).toBe(routerOp().transaction_hash)
+  })
+})
