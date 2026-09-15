@@ -136,11 +136,74 @@ function splitClauses(text: string): [string, string] | undefined {
   return [before, after]
 }
 
-/** Which venue the clause names, if any. */
+/**
+ * Words that are never a venue, however much they resemble one.
+ *
+ * "lend" is one character from "blend", so without this the fuzzy match below
+ * would read the lending *verb* as the venue and supply somewhere the user
+ * never named — from a sentence that names no venue at all.
+ */
+const NEVER_A_VENUE = new Set([
+  'lend',
+  'lends',
+  'lending',
+  'supply',
+  'supplies',
+  'supplied',
+  'supplying',
+  'deposit',
+  'deposits',
+  'deposited',
+  'depositing',
+  'stake',
+  'staked',
+  'staking',
+  'earn',
+  'yield',
+  'protocol',
+  'pool',
+])
+
+/** Edit distance, for recognising a venue somebody typed slightly wrong. */
+function editDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  )
+
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const substitute = (rows[i - 1]?.[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1)
+      rows[i]![j] = Math.min((rows[i - 1]?.[j] ?? 0) + 1, (rows[i]?.[j - 1] ?? 0) + 1, substitute)
+    }
+  }
+
+  return rows[a.length]?.[b.length] ?? Math.max(a.length, b.length)
+}
+
+/**
+ * Which venue the clause names, if any.
+ *
+ * Exact first, then near-misses. "Supply $20 worth of XLM to Blende protocol"
+ * named Blend unmistakably to any reader, and an exact-match rule declined it —
+ * so the sentence fell through to the trade parser and was executed as a swap,
+ * which is a different instruction entirely.
+ *
+ * Two characters of tolerance, and only on words long enough for that to mean
+ * something. Loose enough for a typo, tight enough that "Aave" is still refused
+ * rather than silently redirected to a protocol the user did not choose.
+ */
 function detectVenue(clause: string): string | undefined {
   for (const [pattern, venue] of VENUE_PHRASING) {
     if (pattern.test(clause)) return venue
   }
+
+  for (const word of clause.toLowerCase().match(/[a-z]+/g) ?? []) {
+    if (word.length < 4 || NEVER_A_VENUE.has(word)) continue
+    for (const [, venue] of VENUE_PHRASING) {
+      if (editDistance(word, venue) <= 2) return venue
+    }
+  }
+
   return undefined
 }
 

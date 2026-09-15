@@ -63,6 +63,12 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     understood: true,
+    // What the user wants done. 'supply' means an asset already held goes into
+    // a lending pool with no trade — the reading the schema could not express
+    // before, so "supply my XLM to Blend" was reported as a swap and executed
+    // as one.
+    action: read.action,
+    amountIsUsd: read.amountIsUsd,
     tokenIn: read.tokenIn,
     tokenOut: read.tokenOut,
     amountUsd: read.amountUsd,

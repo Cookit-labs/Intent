@@ -459,11 +459,45 @@ export function IntentChat(): JSX.Element {
         })
         const body = (await res.json()) as {
           understood?: boolean
+          action?: 'swap' | 'supply'
           tokenIn?: string
           tokenOut?: string
           amountUsd?: number
           amountStated?: boolean
+          amountIsUsd?: boolean
           followOn?: FollowOnAction | null
+        }
+
+        // A supply is not a trade, and the trade path below would read it as
+        // one — buying the asset the user already holds. The model is asked
+        // this question directly because the regex fallback cannot answer it
+        // for every phrasing: "Blende" defeated an exact venue match, and the
+        // sentence was executed as a swap.
+        if (
+          body.understood === true &&
+          body.action === 'supply' &&
+          body.tokenIn !== undefined &&
+          slug === 'stellar'
+        ) {
+          const symbol = body.tokenIn
+          const price = swap.usdPrices?.[symbol]
+          const stated = body.amountStated === true
+
+          if (stated && body.amountIsUsd === true && (price === undefined || price <= 0)) {
+            setAffordError(`No live price for ${symbol}, so a dollar amount cannot be sized.`)
+            return
+          }
+
+          const units = !stated
+            ? (balances?.xlm ?? '0')
+            : body.amountIsUsd === true
+              ? ((body.amountUsd ?? 0) / (price as number)).toFixed(7)
+              : String(body.amountUsd ?? 0)
+
+          setParsed(null)
+          setFollowOn(null)
+          supply.prepare({ assetId: BLEND_XLM, symbol, amount: toBaseUnits(units) })
+          return
         }
         if (body.understood === true && body.tokenIn !== undefined && body.tokenOut !== undefined) {
           read = {

@@ -57,17 +57,30 @@ const READ_INTENT_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        action: {
+          type: 'string',
+          enum: ['swap', 'supply'],
+          description:
+            "What the user wants done. 'swap' trades one asset for another. 'supply' puts an asset the account ALREADY HOLDS into a lending pool, with no trade at all — as in \"supply my XLM to Blend\". Use 'supply' whenever no trade is asked for.",
+        },
         tokenIn: {
           type: 'string',
-          description: 'Ticker of the asset leaving the account, e.g. USDC.',
+          description:
+            "Ticker of the asset leaving the account, e.g. USDC. On a 'supply', this is the asset being supplied.",
         },
         tokenOut: {
           type: 'string',
-          description: 'Ticker of the asset arriving, e.g. XLM.',
+          description:
+            "Ticker of the asset arriving, e.g. XLM. On a 'supply' nothing arrives, so repeat the supplied asset here.",
         },
         amountUsd: {
           type: 'number',
           description: 'Size in US dollars. Use 0 when the user named no size.',
+        },
+        amountIsUsd: {
+          type: 'boolean',
+          description:
+            'True when the size was given in dollars ("$20 worth of XLM"). False when it counts the asset itself ("20 XLM"). These are different amounts and confusing them moves the wrong sum.',
         },
         amountStated: {
           type: 'boolean',
@@ -87,7 +100,16 @@ const READ_INTENT_TOOL = {
       // Every property required, matching the discipline the proposal schema
       // already uses: an omitted field is indistinguishable from a deliberate
       // "none", and strict tool schemas admit no optional properties.
-      required: ['tokenIn', 'tokenOut', 'amountUsd', 'amountStated', 'followOn', 'followOnVenue'],
+      required: [
+        'action',
+        'tokenIn',
+        'tokenOut',
+        'amountUsd',
+        'amountIsUsd',
+        'amountStated',
+        'followOn',
+        'followOnVenue',
+      ],
     },
   },
 }
@@ -101,7 +123,12 @@ const READ_INTENT_TOOL = {
  * right rather than guessing from the conjunction.
  */
 const SYSTEM_PROMPT = [
-  "Read the user's trading instruction. Call read_intent exactly once.",
+  "Read the user's instruction. Call read_intent exactly once.",
+  "action is 'supply' when the user wants an asset they ALREADY HOLD put into a lending",
+  'pool and asks for no trade at all: "supply my XLM to Blend", "lend 500 XLM".',
+  "action is 'swap' whenever a trade is asked for, including a trade whose proceeds are",
+  'then supplied — those use followOn instead.',
+  'Venue names are often misspelled. "Blende", "blnd" and "blend protocol" all mean Blend.',
   "followOn is 'lend' ONLY when the user asks for the proceeds to be supplied, lent,",
   'deposited, staked, or put to work in a lending pool.',
   'Joining two ASSETS with "and" is NOT a follow-on: "buy XLM and USDC" is one purchase',
@@ -111,11 +138,27 @@ const SYSTEM_PROMPT = [
 ].join(' ')
 
 export interface LlmReadIntent {
+  /**
+   * What the user wants done.
+   *
+   * 'supply' means an asset the account already holds goes into a lending
+   * pool, with no trade at all. Without this field the model had no way to
+   * express that, so "supply my XLM to Blend" could only be reported as a
+   * swap — and was executed as one.
+   */
+  action: 'swap' | 'supply'
   tokenIn: string
   tokenOut: string
   /** Zero when the user named no size; check `amountStated` before using it. */
   amountUsd: number
   amountStated: boolean
+  /**
+   * Whether the size counts dollars or the asset itself.
+   *
+   * "$20 worth of XLM" and "20 XLM" differ by roughly a hundredfold at
+   * today's price, so the unit has to travel with the number.
+   */
+  amountIsUsd: boolean
   followOn: FollowOnAction | null
 }
 
@@ -132,6 +175,8 @@ export interface ReadIntentOptions {
 }
 
 interface ToolArguments {
+  action?: unknown
+  amountIsUsd?: unknown
   tokenIn?: unknown
   tokenOut?: unknown
   amountUsd?: unknown
@@ -211,9 +256,14 @@ function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent 
   const args = toolArgumentsOf(payload)
   if (args === null) return null
 
+  const action = args.action === 'supply' ? 'supply' : 'swap'
+
   const tokenIn = symbolOf(args.tokenIn, options.allowedSymbols)
   const tokenOut = symbolOf(args.tokenOut, options.allowedSymbols)
-  if (tokenIn === undefined || tokenOut === undefined || tokenIn === tokenOut) return null
+  if (tokenIn === undefined || tokenOut === undefined) return null
+  // A swap of an asset for itself is meaningless. A *supply* names one asset
+  // twice by design, so the check applies only to trades.
+  if (action === 'swap' && tokenIn === tokenOut) return null
 
   const amountStated = args.amountStated === true
   const amountUsd =
@@ -223,10 +273,12 @@ function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent 
   if (amountStated && amountUsd <= 0) return null
 
   return {
+    action,
     tokenIn,
     tokenOut,
     amountUsd: amountStated ? amountUsd : 0,
     amountStated,
+    amountIsUsd: args.amountIsUsd === true,
     followOn: followOnOf(args, options.allowedVenues),
   }
 }
