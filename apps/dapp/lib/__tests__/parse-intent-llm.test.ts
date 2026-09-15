@@ -227,3 +227,78 @@ describe('knowing whether a parse can be attempted', () => {
     expect(isLlmParseConfigured(KEY)).toBe(true)
   })
 })
+
+describe('the model can say "supply what I already hold"', () => {
+  const SUPPLY = {
+    action: 'supply',
+    tokenIn: 'XLM',
+    tokenOut: 'XLM',
+    amountUsd: 20,
+    amountIsUsd: true,
+    amountStated: true,
+    followOn: 'none',
+    followOnVenue: '',
+  }
+
+  it('reads a supply as a supply, not a trade', async () => {
+    // The gap this closes. Every field in the schema presumed a trade, so the
+    // model had no way to report "supply my XLM" however well it read the
+    // sentence — and the app executed it as a swap of USDC for XLM.
+    const got = await readIntentWithLlm('Supply $20 worth of XLM to Blende protocol', {
+      ...KEY,
+      fetchImpl: reply(SUPPLY),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.action).toBe('supply')
+    expect(got?.tokenIn).toBe('XLM')
+  })
+
+  it('allows a supply to name one asset twice', async () => {
+    // A swap of an asset for itself is meaningless and still refused. A supply
+    // names the same asset on both sides by design, so the check must not
+    // apply to it — it did, and every supply was discarded.
+    const got = await readIntentWithLlm('Supply my XLM to Blend', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, amountUsd: 0, amountIsUsd: false, amountStated: false }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got).not.toBeNull()
+    expect(got?.action).toBe('supply')
+  })
+
+  it('still refuses a swap of an asset for itself', async () => {
+    const got = await readIntentWithLlm('swap XLM for XLM', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, action: 'swap' }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got).toBeNull()
+  })
+
+  it('carries whether the size was dollars or units', async () => {
+    // "$20 worth of XLM" is roughly 125 XLM. Losing the unit moves about a
+    // sixth of what was asked.
+    const got = await readIntentWithLlm('Supply $20 worth of XLM to Blend', {
+      ...KEY,
+      fetchImpl: reply(SUPPLY),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.amountIsUsd).toBe(true)
+    expect(got?.amountUsd).toBe(20)
+  })
+
+  it('defaults to a swap when the action is missing or unknown', async () => {
+    // An older model, or a malformed reply, must not silently become a supply.
+    const got = await readIntentWithLlm('buy XLM', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, action: undefined, tokenIn: 'USDC', tokenOut: 'XLM' }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.action).toBe('swap')
+  })
+})
