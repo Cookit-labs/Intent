@@ -173,7 +173,7 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
       >
         {/* Leading mark, so an on-chain swap row is scannable the same way an
             intent row is — the type is readable before the numbers are. */}
-        <SwapCircleIcon className="h-7 w-7 shrink-0 text-black" />
+        <SwapCircleIcon className="text-foreground h-7 w-7 shrink-0" />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
