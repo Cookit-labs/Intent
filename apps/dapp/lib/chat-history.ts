@@ -236,7 +236,10 @@ export function bundlesByTxHash(chain: string): Map<string, BundleLookup> {
 
   for (const turn of loadTurns(chain)) {
     const steps = turn.bundle
-    if (steps === undefined || steps.length === 0) continue
+    // More than one step, not merely some. A single-transaction turn is an
+    // ordinary swap however it was recorded, and promoting it to a bundle
+    // renames it in history and promises links it does not have.
+    if (steps === undefined || steps.length < 2) continue
 
     for (const step of steps) {
       if (step.hash === undefined) continue

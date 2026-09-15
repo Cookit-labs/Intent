@@ -53,13 +53,14 @@ function toTurn(record: SwapRecord, chain: string): ChatTurn {
     proposals: {},
     winner: BACKFILL_WINNER,
     txHash: record.txHash,
-    bundle: [
-      {
-        label: record.kind === 'limit' ? 'Place order' : 'Swap',
-        hash: record.txHash,
-        explorerUrl: record.explorerUrl,
-      },
-    ],
+    // Deliberately no `bundle`. One transaction is not a bundle, and giving
+    // every backfilled row a one-step array made the history panel label all of
+    // them "Bundled swap" — a name that promises a second transaction and a
+    // position link neither of which exists.
+    //
+    // The ledger row carries its own explorer link, so nothing is lost by
+    // leaving this absent. A bundle is recorded only by the sequence that
+    // actually produced several transactions.
   }
 }
 
