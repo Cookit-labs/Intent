@@ -42,6 +42,31 @@ import { BLEND_POOL } from '../swap/contract-registry'
  */
 const REQUEST_TYPE_SUPPLY = 0
 
+/**
+ * Withdraw, in Blend's request enum.
+ *
+ * The counterpart to Supply and the exact inverse: type 1 takes back what type
+ * 0 put in. Type 3 is `WithdrawCollateral`, which this app never needs because
+ * it never supplies as collateral — a position opened here is always type 0, so
+ * it always comes out as type 1.
+ *
+ * Verified against the live pool before being written: simulating a type-1
+ * submit for 1 XLM, for 500 XLM, and for the whole position all succeeded, the
+ * last leaving `supply: {}` behind.
+ */
+const REQUEST_TYPE_WITHDRAW = 1
+
+/**
+ * Asking for more than the position holds withdraws all of it.
+ *
+ * The pool clamps a withdrawal to the balance rather than reverting, which is
+ * the only way to empty a position exactly. Interest accrues every ledger, so a
+ * figure read a moment ago is already short by the time it is signed — asking
+ * for an exact "everything" would reliably leave dust behind. `i128::MAX` is
+ * how Blend's own interface expresses this.
+ */
+const WITHDRAW_EVERYTHING = '170141183460469231731687303715884105727'
+
 const TIMEOUT_SECONDS = 180
 
 export interface BuildSupplyOptions {
@@ -76,12 +101,12 @@ export interface BuiltSupply {
  * cannot read, and the failure would surface as an opaque simulation error
  * rather than anything naming field order.
  */
-function supplyRequest(asset: string, amount: string): xdr.ScVal {
+function poolRequest(asset: string, amount: string, requestType: number): xdr.ScVal {
   return nativeToScVal(
     {
       address: new Address(asset),
       amount: BigInt(amount),
-      request_type: REQUEST_TYPE_SUPPLY,
+      request_type: requestType,
     },
     {
       type: {
@@ -91,6 +116,10 @@ function supplyRequest(asset: string, amount: string): xdr.ScVal {
       },
     }
   )
+}
+
+function supplyRequest(asset: string, amount: string): xdr.ScVal {
+  return poolRequest(asset, amount, REQUEST_TYPE_SUPPLY)
 }
 
 async function loadSequence(
@@ -174,6 +203,33 @@ export async function buildBlendSupply(options: BuildSupplyOptions): Promise<Bui
  * a transaction correct in every other respect can still hand the deposit away.
  */
 export function assertSelfSupply(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'supply')
+}
+
+/**
+ * The same check for a withdrawal.
+ *
+ * Every rule that makes a supply safe applies unchanged here, because it is the
+ * same `submit` call with the same three addresses — and `to` still decides who
+ * receives the money. A withdrawal naming somebody else as `to` would take the
+ * user's position and pay it to a stranger, which is the recipient-substitution
+ * risk in its most direct form: on the way *out* the funds leave the pool
+ * entirely rather than merely landing in the wrong position.
+ */
+export function assertSelfWithdraw(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'withdrawal')
+}
+
+/**
+ * Re-reads a built pool call and refuses anything that is not a lone `submit`
+ * acting entirely on behalf of this account.
+ *
+ * `noun` only shapes the wording. The checks are identical for a supply and a
+ * withdrawal by design: they are the same contract function with the same
+ * argument shape, so a second implementation could only drift away from this
+ * one.
+ */
+function assertSelfPoolCall(built: string, account: string, noun: 'supply' | 'withdrawal'): void {
   const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
@@ -210,30 +266,196 @@ export function assertSelfSupply(built: string, account: string): void {
   // array. `Buffer.from()` on it silently yields zero bytes.
   if (String(invocation.functionName) !== 'submit') {
     throw new Error(
-      `refusing to sign: ${String(invocation.functionName)} is not a supply. ` +
+      `refusing to sign: ${String(invocation.functionName)} is not a ${noun}. ` +
         'Only submit may be built here.'
     )
   }
 
   const args = invocation.args ?? []
   if (args.length !== 4) {
-    throw new Error(`refusing to sign: a supply takes four arguments, found ${args.length}`)
+    throw new Error(`refusing to sign: a ${noun} takes four arguments, found ${args.length}`)
   }
 
   const NAMES = ['from', 'spender', 'to']
   NAMES.forEach((name, index) => {
     const arg = args[index]
     if (arg === undefined) {
-      throw new Error(`refusing to sign: the supply has no ${name} address`)
+      throw new Error(`refusing to sign: the ${noun} has no ${name} address`)
     }
     const address = Address.fromScVal(arg).toString()
     if (address !== account) {
       throw new Error(
-        `refusing to sign: the supply names ${address} as ${name}, not the signing account. ` +
-          'A supply must credit the account that funds it.'
+        `refusing to sign: the ${noun} names ${address} as ${name}, not the signing account. ` +
+          `A ${noun} must credit the account that funds it.`
       )
     }
   })
+}
+
+export interface BuildWithdrawOptions {
+  /** The account withdrawing, and the only account that may be paid. */
+  account: string
+  /** The reserve's asset, as a contract id. Read from the pool, never derived. */
+  asset: string
+  /**
+   * Base units to withdraw, or omitted to take the whole position.
+   *
+   * Omitting it is not the same as passing the balance read a moment ago:
+   * interest accrues every ledger, so an exact figure is stale by the time it
+   * is signed and would leave dust behind. See `WITHDRAW_EVERYTHING`.
+   */
+  amount?: string
+  poolId?: string
+  horizonUrl?: string
+  rpcUrl?: string
+  fetchImpl?: typeof fetch
+}
+
+export interface BuiltWithdraw {
+  xdr: string
+  /** Echoed back and asserted: the account the funds are paid to. */
+  recipient: string
+  asset: string
+  /** What was asked for, including the sentinel when taking everything. */
+  amount: string
+  /** True when this empties the position rather than taking a named amount. */
+  everything: boolean
+  networkPassphrase: string
+}
+
+/**
+ * Builds an unsigned withdrawal.
+ *
+ * The exact inverse of `buildBlendSupply` and deliberately built the same way,
+ * down to the one-operation envelope: Soroban permits exactly one operation per
+ * transaction, so this cannot be bundled with anything either.
+ *
+ * Unlike a supply there is no cap or trustline to trip over on the way out, but
+ * there is a liquidity constraint the pool enforces: a withdrawal fails if it
+ * would push utilisation past `max_util` (95% here). The simulation catches
+ * that before the user is asked to sign.
+ */
+export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise<BuiltWithdraw> {
+  const { account, asset } = options
+  const poolId = options.poolId ?? BLEND_POOL
+  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const fetchImpl = options.fetchImpl ?? fetch
+
+  const everything = options.amount === undefined
+  const amount = everything ? WITHDRAW_EVERYTHING : (options.amount as string)
+
+  if (!everything && BigInt(amount) <= BigInt(0)) {
+    throw new Error('a withdrawal needs a positive amount')
+  }
+
+  const sequence = await loadSequence(account, horizonUrl, fetchImpl)
+
+  // The same three addresses as a supply, and the same reason they are not
+  // parameters: `to` decides who is paid, and the pool will pay anyone.
+  const recipient = account
+
+  const operation = new Contract(poolId).call(
+    'submit',
+    new Address(account).toScVal(),
+    new Address(account).toScVal(),
+    new Address(recipient).toScVal(),
+    xdr.ScVal.scvVec([poolRequest(asset, amount, REQUEST_TYPE_WITHDRAW)])
+  )
+
+  const tx = new TransactionBuilder(new Account(account, sequence), {
+    fee: BASE_FEE,
+    networkPassphrase: stellarTestnet.networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(TIMEOUT_SECONDS)
+    .build()
+
+  const built = tx.toXDR()
+  assertSelfWithdraw(built, account)
+
+  return {
+    xdr: built,
+    recipient,
+    asset,
+    amount,
+    everything,
+    networkPassphrase: stellarTestnet.networkPassphrase,
+  }
+}
+
+/**
+ * What the position still holds after the withdrawal, from the simulation.
+ *
+ * **Not the amount withdrawn**, which is the trap this function exists to avoid
+ * falling into. `submit` returns the account's positions *after* the call, so
+ * reading `supply` here gives the remainder — reporting it as the sum taken out
+ * would be exactly wrong, and most wrong on a full withdrawal, where the
+ * remainder is zero and the amount taken is everything.
+ */
+function readRemainingTokens(sim: rpc.Api.SimulateTransactionSuccessResponse): string | undefined {
+  try {
+    const positions = scValToNative(sim.result?.retval as xdr.ScVal) as
+      | { supply?: Record<string, unknown> }
+      | undefined
+
+    const supply = positions?.supply
+    if (supply === undefined) return undefined
+
+    // An emptied position returns no supply entry at all rather than a zero,
+    // so an absent reserve here means nothing left.
+    const first = Object.values(supply)[0]
+    return first === undefined ? '0' : String(first)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Simulates the withdrawal, which Soroban requires before submission.
+ *
+ * The feasibility check matters as much here as for a supply, for a different
+ * reason: withdrawals revert once they would push the reserve past `max_util`.
+ * That is live rather than theoretical — this pool sits around 90% against a
+ * 95% ceiling — so a large withdrawal can genuinely be refused by the pool
+ * while the position is perfectly real.
+ */
+export async function prepareBlendWithdraw(
+  built: string,
+  rpcUrl: string = stellarTestnet.sorobanRpcUrl
+): Promise<{ ok: true; xdr: string; remaining?: string } | { ok: false; reason: string }> {
+  const server = new rpc.Server(rpcUrl)
+
+  let tx
+  try {
+    tx = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  } catch {
+    return { ok: false, reason: 'The transaction could not be read.' }
+  }
+  if (tx instanceof FeeBumpTransaction) {
+    return { ok: false, reason: 'Fee-bump transactions are not supported.' }
+  }
+
+  try {
+    const sim = await server.simulateTransaction(tx)
+    if (rpc.Api.isSimulationError(sim)) {
+      // The pool's own revert reason. It distinguishes "not enough liquidity"
+      // from "nothing to withdraw", which a generic failure would not.
+      return { ok: false, reason: sim.error }
+    }
+
+    const prepared = rpc.assembleTransaction(tx, sim).build()
+    const result: { ok: true; xdr: string; remaining?: string } = {
+      ok: true,
+      xdr: prepared.toXDR(),
+    }
+
+    const remaining = readRemainingTokens(sim)
+    if (remaining !== undefined) result.remaining = remaining
+
+    return result
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : 'Simulation failed.' }
+  }
 }
 
 /**

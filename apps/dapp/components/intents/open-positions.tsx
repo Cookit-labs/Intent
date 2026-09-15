@@ -1,14 +1,17 @@
 'use client'
 
-import { Card } from '@intent/ui'
-import { useQuery } from '@tanstack/react-query'
+import { Button, Card } from '@intent/ui'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { ArrowRight, ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { useBlendPosition } from '../../hooks/use-blend-position'
+import { useWithdraw } from '../../hooks/use-withdraw'
 import type { OpenOffer } from '../../lib/swap/offers'
 import { blendPositionUrl } from '../../lib/swap/contract-registry'
 import { TokenIcon } from '../ui/token-icon'
+import { WithdrawConfirm } from './withdraw-confirm'
 
 /**
  * Everything still live, above everything already finished.
@@ -40,6 +43,8 @@ function amount(raw: string): string {
 export function OpenPositions(): JSX.Element | null {
   const { address, isConnected } = useWallet()
   const { position } = useBlendPosition()
+  const withdraw = useWithdraw()
+  const queryClient = useQueryClient()
 
   const { data: offers } = useQuery({
     queryKey: ['open-offers', address],
@@ -47,6 +52,15 @@ export function OpenPositions(): JSX.Element | null {
     enabled: isConnected && address !== undefined,
     refetchInterval: 15_000,
   })
+
+  // A settled withdrawal has moved the money, so the balance above it is now
+  // describing a position that no longer exists in that size. Re-read rather
+  // than waiting for the next poll: a row still showing the old figure right
+  // after a successful withdrawal reads as the withdrawal having failed.
+  useEffect(() => {
+    if (withdraw.phase !== 'settled') return
+    void queryClient.invalidateQueries({ queryKey: ['blend-position', address] })
+  }, [withdraw.phase, queryClient, address])
 
   const resting = offers ?? []
   const count = resting.length + (position != null ? 1 : 0)
@@ -78,17 +92,37 @@ export function OpenPositions(): JSX.Element | null {
             </div>
           </div>
 
-          <a
-            href={blendPositionUrl()}
-            target="_blank"
-            rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
-          >
-            Manage
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          <div className="flex shrink-0 items-center gap-3">
+            {/* The reason this section exists. Blend's own dashboard does not
+                offer a withdrawal for a plain (non-collateral) supply, which is
+                how a real position became visible here and retrievable
+                nowhere. */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                withdraw.prepare({ assetId: position.assetId, symbol: position.symbol })
+              }
+              disabled={withdraw.phase !== 'idle'}
+            >
+              Withdraw
+            </Button>
+            <a
+              href={blendPositionUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+            >
+              Manage
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
         </Card>
       ) : null}
+
+      {/* Sits directly under the position it acts on, so the amount being
+          withdrawn and the amount held are readable together. */}
+      <WithdrawConfirm withdraw={withdraw} />
 
       {resting.map((offer) => (
         <Card key={offer.id} className="flex items-center gap-4 p-4">
