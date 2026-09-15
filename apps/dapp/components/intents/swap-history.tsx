@@ -9,7 +9,7 @@ import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
 import type { SwapKind, SwapRecord } from '../../lib/swap/history'
-import { bundlesByTxHash, type BundleStep } from '../../lib/chat-history'
+import { bundlesByTxHash, syncTurns, type BundleStep } from '../../lib/chat-history'
 import { TokenIcon } from '../ui/token-icon'
 import { SwapCircleIcon } from './intent-type-icon'
 
@@ -64,6 +64,16 @@ export function SwapHistory(): JSX.Element | null {
   // would show Stellar trades under an Arc wallet, which is exactly the
   // cross-chain bleed the chain segment exists to prevent.
   const supported = slug === 'stellar'
+
+  // The bundle labels come from the app's own record, which lives on the
+  // server. Pulled before the ledger rows are rendered so a cleared browser
+  // still names a bundled intent as one rather than as a bare swap.
+  useQuery({
+    queryKey: ['turn-sync', slug, address],
+    queryFn: () => syncTurns(slug),
+    enabled: supported && isConnected && address !== undefined,
+    staleTime: 30_000,
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ['swap-history', slug, address],

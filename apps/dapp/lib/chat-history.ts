@@ -1,15 +1,31 @@
 import type { AgentProposalView } from './mock-competition'
 
+import {
+  clearTurnsRemote,
+  listTurns,
+  saveTurnRemote,
+  updateTurnRemote,
+} from './api/conversation-client'
+
 /**
- * Past conversations, kept across reloads.
+ * Past conversations, kept across reloads — and across devices.
  *
- * The chat held everything in component state, so a refresh erased what the
- * agents had said and submitting a second intent overwrote the first. The
- * reasoning is the substance of a competition — why one agent won, what the
- * runner-up would have paid — and it was being discarded the moment the trade
- * settled.
+ * **The database is the record; this cache is a convenience.** Turns used to
+ * live only in `localStorage`, which meant a trade's history — which agent won,
+ * what it reasoned, which transactions a bundled intent produced — existed only
+ * in the browser that made it. Clearing site data destroyed it and a second
+ * device never had it. A transaction that really happened must not be
+ * recoverable only from the machine that submitted it.
  *
- * Stored per chain, because an intent belongs to the network it was placed on.
+ * Every write now goes to the server. The local copy is kept because the call
+ * sites are synchronous and a history panel should not blank while a request is
+ * in flight, but it is a read-through cache, refilled from the server whenever
+ * `syncTurns` runs. Nothing depends on it surviving.
+ *
+ * Writes are fire-and-forget by design. A failed sync must not block a trade
+ * that already settled on-chain, so the local copy is written first and the
+ * server is told after; a failure is logged rather than thrown, and the next
+ * `syncTurns` reconciles.
  */
 
 export interface ChatTurn {
@@ -66,8 +82,9 @@ export interface BundleStep {
 const STORAGE_KEY = 'intent.chat.v1'
 
 /**
- * Enough to look back over a session's work without letting the store grow
- * without bound. Old turns are dropped oldest-first.
+ * Enough to look back over a session's work without letting the cache grow
+ * without bound. Matches the server's own cap, so switching between them does
+ * not change how far back a list reaches.
  */
 const MAX_TURNS = 50
 
@@ -79,8 +96,8 @@ function read(): ChatTurn[] {
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? (parsed as ChatTurn[]) : []
   } catch {
-    // Private-mode browsers throw on access. The session still works, it just
-    // will not remember across reloads.
+    // Private-mode browsers throw on access. The server still has everything;
+    // only the instant read is lost.
     return []
   }
 }
@@ -94,22 +111,59 @@ function write(turns: ChatTurn[]): void {
   }
 }
 
+/**
+ * Reports a failed sync without breaking the caller.
+ *
+ * A trade that settled on-chain must not be reported as failed because its
+ * record did not reach the server. The local copy already holds it and the next
+ * `syncTurns` reconciles, so this is a warning rather than an error.
+ */
+function reportSyncFailure(what: string, e: unknown): void {
+  // eslint-disable-next-line no-console
+  console.warn(`[history] ${what} was not saved to the server:`, e)
+}
+
+/**
+ * Replaces the local cache with what the server holds.
+ *
+ * Called when a history view opens, so a fresh browser — or a cleared one —
+ * shows the trades this wallet actually made rather than an empty list.
+ * Returns what it loaded, so a caller can render without a second read.
+ */
+export async function syncTurns(chain: string): Promise<ChatTurn[]> {
+  let remote: ChatTurn[]
+  try {
+    remote = await listTurns(chain)
+  } catch (e) {
+    reportSyncFailure('history', e)
+    return loadTurns(chain)
+  }
+
+  // Merged rather than replaced. A turn recorded moments ago may not have
+  // reached the server yet, and dropping it here would make it vanish from the
+  // panel it was just added to.
+  const byId = new Map(remote.map((t) => [t.id, t]))
+  for (const local of read()) {
+    if (!byId.has(local.id)) byId.set(local.id, local)
+  }
+
+  const merged = [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  write(merged)
+  return merged.filter((t) => t.chain === chain)
+}
+
 export function loadTurns(chain: string): ChatTurn[] {
   return read().filter((t) => t.chain === chain)
 }
 
-/** Records a conversation, newest first. */
+/** Records a conversation, newest first, locally and on the server. */
 export function saveTurn(turn: ChatTurn): void {
   const existing = read().filter((t) => t.id !== turn.id)
   write([turn, ...existing])
+
+  void saveTurnRemote(turn).catch((e) => reportSyncFailure('a conversation', e))
 }
 
-/**
- * Attaches an outcome to a conversation already recorded.
- *
- * Separate from `saveTurn` because the competition finishes long before the
- * signature does, and the turn should be readable in between.
- */
 /**
  * Patches a turn, or creates one when the patch carries enough to stand alone.
  *
@@ -132,26 +186,31 @@ export function updateTurn(
 
   if (found === undefined) {
     if (fallback === undefined) return
-    write([
-      {
-        id,
-        chain: fallback.chain,
-        text: fallback.text,
-        createdAt: new Date().toISOString(),
-        proposals: {},
-        winner: null,
-        ...patch,
-      },
-      ...all,
-    ])
+
+    // Created rather than patched, so the server has a row to hold the outcome.
+    // A PATCH against an id the server has never seen returns not-found and the
+    // trade's record would be lost exactly as it was before.
+    const created: ChatTurn = {
+      id,
+      chain: fallback.chain,
+      text: fallback.text,
+      createdAt: new Date().toISOString(),
+      proposals: {},
+      winner: null,
+      ...patch,
+    }
+    write([created, ...all])
+    void saveTurnRemote(created).catch((e) => reportSyncFailure('a settled trade', e))
     return
   }
 
   write(all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  void updateTurnRemote(id, patch).catch((e) => reportSyncFailure('a trade outcome', e))
 }
 
 export function clearTurns(chain: string): void {
   write(read().filter((t) => t.chain !== chain))
+  void clearTurnsRemote(chain).catch((e) => reportSyncFailure('a history clear', e))
 }
 
 /**
@@ -160,7 +219,8 @@ export function clearTurns(chain: string): void {
  * The ledger cannot answer this. A Soroban router swap carries no memo, and the
  * supply that follows it is a separate transaction the chain does not associate
  * with the first — so "these two transactions were one instruction" exists only
- * in the app's own record of the conversation.
+ * in the app's record of the conversation, which is why that record has to
+ * outlive the browser.
  *
  * Keyed by every step's hash rather than the first, so opening history and
  * finding the *supply* row also identifies the bundle it belonged to.
