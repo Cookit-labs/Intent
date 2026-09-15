@@ -127,32 +127,33 @@ function useStellarWallet(): ChainWallet {
         // Step 1: the user picks a wallet from the kit's modal.
         const { address: picked } = await StellarWalletsKit.authModal()
 
-        // Step 2: prove control of it. Without this the "connection" is just a
-        // public key read, which is not authentication.
-        const signed = await StellarWalletsKit.signMessage(buildLoginMessage(picked), {
-          address: picked,
-          networkPassphrase: stellarTestnet.networkPassphrase,
-        })
-
-        if (signed.signedMessage === null || signed.signedMessage === undefined) {
-          setError('Signature declined. Connect again to continue.')
-          await StellarWalletsKit.disconnect().catch(() => undefined)
-          return
-        }
-
-        setAddress(picked)
-        writeSession({ address: picked, verified: true })
-
-        // Trade the signature for a backend session. Previously the wallet
-        // signed a login message and the signature was discarded, so "signed
-        // in" meant only that this browser said so — the server had no way to
-        // tell one caller from another and scoped data by an address the
-        // caller simply asserted.
+        // Step 2: prove control of it, once.
         //
-        // Failure here is not fatal: swapping and placing orders are on-chain
-        // and need no server. Only saved history does, and it degrades to the
-        // local store rather than blocking the wallet connection.
-        void ensureSession(picked).catch(() => undefined)
+        // This used to sign a locally-built message, discard the signature, and
+        // then have `ensureSession` prompt a *second* time for the server's
+        // challenge — two wallet popups per connect, the first proving nothing
+        // to anyone. The server's challenge is the only signature that
+        // establishes anything, so it is the only one asked for.
+        //
+        // Failure is not fatal: swapping and placing orders are on-chain and
+        // need no server. Only saved history does, so a declined or unreachable
+        // sign-in still leaves a usable wallet rather than blocking the
+        // connection.
+        setAddress(picked)
+
+        try {
+          await ensureSession(picked)
+          // Marked verified only once a signature actually succeeded. This flag
+          // is what lets a reload restore the session without prompting again,
+          // so setting it on an unsigned connection would restore a session
+          // nobody proved.
+          writeSession({ address: picked, verified: true })
+        } catch {
+          // The wallet is connected and usable; the backend simply has no
+          // session for it. Recorded as unverified so a reload asks again
+          // rather than silently restoring an unproven address.
+          writeSession({ address: picked, verified: false })
+        }
 
         const net = await StellarWalletsKit.getNetwork()
         setNetwork(net.networkPassphrase)
