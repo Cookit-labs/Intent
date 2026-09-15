@@ -41,6 +41,14 @@ export interface SwapRecord {
   hops: number
   /** True when the transaction carries this app's memo. */
   fromThisApp: boolean
+  /**
+   * Whether this kind of transaction could carry a memo at all.
+   *
+   * False for a Soroban router swap. Without this, `fromThisApp: false` reads
+   * as "some other app made this" when it actually means "the question does not
+   * apply", and filtering on it discards trades this app really did make.
+   */
+  stampable?: boolean
   explorerUrl: string
 }
 
@@ -149,7 +157,7 @@ export async function fetchSwapHistory(
 
   const records = ops?._embedded?.records ?? []
 
-  const classic = records
+  const pathPayments: SwapRecord[] = records
     .filter((op) => op.type.startsWith('path_payment'))
     // Self-payment is what makes it a swap rather than a transfer.
     .filter((op) => op.from !== undefined && op.from === op.to)
@@ -162,6 +170,9 @@ export async function fetchSwapHistory(
       receivedAsset: assetName(op.asset_type, op.asset_code),
       hops: op.path?.length ?? 0,
       fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
+      // A classic transaction can carry a text memo, so the stamp is a question
+      // worth asking of it.
+      stampable: true,
       explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
 
@@ -172,17 +183,28 @@ export async function fetchSwapHistory(
 
   // Newest first, matching the order Horizon returned and the order the two
   // lists were each already in.
-  const swaps = [...classic, ...routed].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
+  const swaps = [...pathPayments, ...routed].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
 
   if (!onlyThisApp) return swaps
 
-  const stamped = swaps.filter((s) => s.fromThisApp)
+  // A Soroban transaction carries no text memo, so a router swap can never be
+  // stamped — not because it came from elsewhere, but because the stamp has
+  // nowhere to live. Filtering it against a memo asks a question it is
+  // structurally unable to answer, so it is kept regardless.
+  //
+  // This was a real regression rather than a theoretical one: the fallback
+  // below only fires when *zero* swaps are stamped, so an account with any
+  // classic trade at all silently discarded every router trade it ever made.
+  const routerSwaps = swaps.filter((s) => s.stampable === false)
+  const stamped = swaps.filter((s) => s.stampable !== false && s.fromThisApp)
 
-  // Swaps made before the memo existed carry no stamp, so filtering strictly
-  // would hide trades this app really did make. Falling back to the unfiltered
-  // list is the lesser wrong: showing a few extra swaps beats telling a user
-  // their trade never happened.
-  return stamped.length > 0 ? stamped : swaps
+  // Classic swaps made before the memo existed carry no stamp either, so
+  // filtering strictly would hide trades this app really did make. Falling back
+  // to the unfiltered list is the lesser wrong: showing a few extra swaps beats
+  // telling a user their trade never happened.
+  const keptClassic = stamped.length > 0 ? stamped : swaps.filter((s) => s.stampable !== false)
+
+  return [...keptClassic, ...routerSwaps].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
 }
 
 /**
@@ -221,6 +243,9 @@ function routerSwapOf(
     // transfers. Zero states "not known" rather than asserting a direct route.
     hops: 0,
     fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
+    // Soroban transactions cannot carry a text memo, so this trade is not
+    // filterable by one either way.
+    stampable: false,
     explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
   }
 }
