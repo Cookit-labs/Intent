@@ -26,12 +26,21 @@ import type { ParsedIntent } from './parse-intent'
 /**
  * Words that mark a second action following the first.
  *
- * `then` and `after that` are unambiguous. `and then` is included as one
- * phrase, because bare `and` is not a sequence marker — "buy XLM and USDC" is a
- * single purchase of two things, and reading it as a sequence would invent a
- * second trade.
+ * Bare `and` is included, and that needs justifying. It was deliberately left
+ * out at first because "buy XLM and USDC" is a single purchase of two things,
+ * and reading it as a sequence would invent a trade nobody asked for.
+ *
+ * But that reasoning only holds when `and` joins two *assets*. "Swap USDC to
+ * XLM **and** supply it to Blend" is as plainly a sequence as the same sentence
+ * with "then", and declining it told the user the app had not understood a
+ * perfectly clear instruction — while the near-identical wording worked.
+ *
+ * What keeps the ambiguity safe is not this pattern but the check immediately
+ * after the split: the second clause must name a lending action. "USDC" does
+ * not, so the single-purchase reading survives; "supply it to Blend" does. A
+ * marker alone never creates a sequence here.
  */
-const SEQUENCE_MARKERS = /\b(?:and\s+then|then|after\s+that|afterwards|followed\s+by)\b/i
+const SEQUENCE_MARKERS = /\b(?:and\s+then|then|after\s+that|afterwards|followed\s+by|and)\b/i
 
 /**
  * What the follow-on action does.

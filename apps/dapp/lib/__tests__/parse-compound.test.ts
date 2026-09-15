@@ -63,6 +63,11 @@ describe('a sequence is read as two ordered actions', () => {
       'Buy $50 of XLM and then supply it to Blend',
       'Buy $50 of XLM, after that supply it to Blend',
       'Buy $50 of XLM, followed by supplying it to Blend',
+      // Bare "and" joining a trade to a lending verb. Declining this told the
+      // user the app had not understood an instruction whose near-identical
+      // "then" wording worked.
+      'Buy $50 of XLM and supply it to Blend',
+      'Swap $500 worth of USDC to XLM and supply it to Blend',
     ]) {
       expect(parseCompoundIntent(phrase, PRICES), phrase).not.toBeNull()
     }
@@ -86,10 +91,13 @@ describe('declining is the common answer', () => {
     expect(parseCompoundIntent('Buy $50 of XLM with USDC', PRICES)).toBeNull()
   })
 
-  it('does not read "and" as a sequence', () => {
-    // "Buy XLM and USDC" is one purchase of two things. Reading it as a
-    // sequence would invent a second trade the user never asked for.
+  it('does not read "and" joining two assets as a sequence', () => {
+    // "Buy XLM and USDC" is one purchase of two things. What keeps this safe
+    // is not the marker but the clause after it: "USDC" names no lending
+    // action, so the single-purchase reading survives.
     expect(parseCompoundIntent('Buy $50 of XLM and USDC', PRICES)).toBeNull()
+    expect(parseCompoundIntent('Buy $50 of XLM and WBTC', PRICES)).toBeNull()
+    expect(parseCompoundIntent('Buy $50 of XLM and USDT and WBTC', PRICES)).toBeNull()
   })
 
   it('declines a second clause that is not an action it can perform', () => {
