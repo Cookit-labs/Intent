@@ -1,5 +1,8 @@
 import { stellarTestnet } from '@intent/config'
 
+import { OFFER_MEMO } from './build-offer'
+import { PLAN_MEMO } from './build-plan'
+import { POOL_MEMO } from './build-pool'
 import { INTENT_MEMO } from './build-tx'
 
 /**
@@ -29,6 +32,15 @@ import { INTENT_MEMO } from './build-tx'
  * the record because of how it was routed.
  */
 
+/**
+ * What a settled transaction was, in the user's terms.
+ *
+ * 'bundle' is not readable from the ledger: a Soroban router swap carries no
+ * memo, and the supply that follows it is a separate transaction the chain does
+ * not associate with it. The caller joins that in from the app's own record.
+ */
+export type SwapKind = 'swap' | 'limit' | 'bundle' | 'pool'
+
 export interface SwapRecord {
   txHash: string
   /** ISO timestamp from the ledger. */
@@ -39,6 +51,20 @@ export interface SwapRecord {
   receivedAsset: string
   /** Intermediate hops. Zero for a direct swap. */
   hops: number
+  /**
+   * What kind of thing this transaction was.
+   *
+   * Read from the memo, which already distinguishes them — the app stamps a
+   * different one for a swap, a resting order, a plan and a pool operation.
+   * The reader used to collapse all of that into a single boolean, so a limit
+   * order appeared in history labelled "Swap", which is a different trade with
+   * different behaviour.
+   *
+   * 'swap' is the fallback for an unstamped or unrecognised transaction, since
+   * a path payment between the same account's assets is a swap whoever built
+   * it.
+   */
+  kind: SwapKind
   /** True when the transaction carries this app's memo. */
   fromThisApp: boolean
   /**
@@ -92,6 +118,24 @@ interface HorizonTransaction {
 
 function assetName(type: string | undefined, code: string | undefined): string {
   return type === 'native' || type === undefined ? 'XLM' : (code ?? '?')
+}
+
+/**
+ * The memo, read as a kind.
+ *
+ * Unrecognised and absent both fall back to 'swap'. A path payment moving one
+ * asset to another within the same account is a swap regardless of which app
+ * built it, so that is the honest default rather than a guess.
+ */
+const KNOWN_MEMOS = new Set([INTENT_MEMO, OFFER_MEMO, PLAN_MEMO, POOL_MEMO])
+
+function kindOfMemo(memo: string | undefined): SwapKind {
+  if (memo === OFFER_MEMO) return 'limit'
+  if (memo === POOL_MEMO) return 'pool'
+  // A plan is several operations under one signature. Shown as a bundle
+  // because that is what it is to the person who signed it.
+  if (memo === PLAN_MEMO) return 'bundle'
+  return 'swap'
 }
 
 export interface HistoryOptions {
@@ -169,7 +213,8 @@ export async function fetchSwapHistory(
       receivedAmount: op.amount ?? '0',
       receivedAsset: assetName(op.asset_type, op.asset_code),
       hops: op.path?.length ?? 0,
-      fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
+      kind: kindOfMemo(memoByHash.get(op.transaction_hash)),
+      fromThisApp: KNOWN_MEMOS.has(memoByHash.get(op.transaction_hash) ?? ''),
       // A classic transaction can carry a text memo, so the stamp is a question
       // worth asking of it.
       stampable: true,
@@ -242,7 +287,8 @@ function routerSwapOf(
     // A router reports no path, and the hop count is not recoverable from the
     // transfers. Zero states "not known" rather than asserting a direct route.
     hops: 0,
-    fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
+    kind: 'swap',
+    fromThisApp: KNOWN_MEMOS.has(memoByHash.get(op.transaction_hash) ?? ''),
     // Soroban transactions cannot carry a text memo, so this trade is not
     // filterable by one either way.
     stampable: false,

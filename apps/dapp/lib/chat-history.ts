@@ -153,3 +153,36 @@ export function updateTurn(
 export function clearTurns(chain: string): void {
   write(read().filter((t) => t.chain !== chain))
 }
+
+/**
+ * What a bundled intent did, keyed by each transaction it produced.
+ *
+ * The ledger cannot answer this. A Soroban router swap carries no memo, and the
+ * supply that follows it is a separate transaction the chain does not associate
+ * with the first — so "these two transactions were one instruction" exists only
+ * in the app's own record of the conversation.
+ *
+ * Keyed by every step's hash rather than the first, so opening history and
+ * finding the *supply* row also identifies the bundle it belonged to.
+ */
+export interface BundleLookup {
+  steps: BundleStep[]
+  /** The instruction as typed, so a row can show what was actually asked for. */
+  text: string
+}
+
+export function bundlesByTxHash(chain: string): Map<string, BundleLookup> {
+  const byHash = new Map<string, BundleLookup>()
+
+  for (const turn of loadTurns(chain)) {
+    const steps = turn.bundle
+    if (steps === undefined || steps.length === 0) continue
+
+    for (const step of steps) {
+      if (step.hash === undefined) continue
+      byHash.set(step.hash, { steps, text: turn.text })
+    }
+  }
+
+  return byHash
+}
