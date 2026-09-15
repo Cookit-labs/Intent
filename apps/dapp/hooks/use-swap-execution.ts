@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import { fromBaseUnits } from '../lib/swap/assets'
-import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
+import { fetchMarketPrices, toPriceTable, type MarketPrice } from '../lib/swap/prices'
 import type { SwapQuote } from '../lib/swap/quote'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 import type { SwapPhase } from './use-swap'
@@ -28,6 +28,14 @@ export interface SwapExecutionState {
   error?: string
   /** Real market prices, so the card can show what the amounts are worth. */
   usdPrices?: Record<string, number>
+  /**
+   * The same prices with their source and timestamp.
+   *
+   * Anything *displaying* a price needs this rather than the flat table: a
+   * figure from the live order book and the hardcoded fallback look identical
+   * once flattened to a number, and only one of them is a quote.
+   */
+  priceDetail?: Record<string, MarketPrice>
 }
 
 export interface SwapExecution extends SwapExecutionState {
@@ -40,6 +48,12 @@ export function useSwapExecution(route: unknown): SwapExecution {
   const { address, isConnected } = useWallet()
   const [state, setState] = useState<SwapExecutionState>({ phase: 'idle' })
   const [usdPrices, setUsdPrices] = useState<Record<string, number> | undefined>(undefined)
+  // The same prices with their provenance intact. `toPriceTable` flattens a
+  // reading to a bare number, which is all the parsers need but leaves nothing
+  // able to say whether a figure came from the live book or the hardcoded
+  // fallback. Showing a price without that distinction is how a stale $0.58 XLM
+  // went unnoticed once already.
+  const [priceDetail, setPriceDetail] = useState<Record<string, MarketPrice> | undefined>(undefined)
 
   // Fetched once per mount rather than per render: prices move slowly, and the
   // figure here is context for a decision, not the number being signed.
@@ -47,7 +61,9 @@ export function useSwapExecution(route: unknown): SwapExecution {
     let cancelled = false
     void fetchMarketPrices()
       .then((p) => {
-        if (!cancelled) setUsdPrices(toPriceTable(p))
+        if (cancelled) return
+        setUsdPrices(toPriceTable(p))
+        setPriceDetail(p)
       })
       .catch(() => undefined)
     return () => {
@@ -176,5 +192,11 @@ export function useSwapExecution(route: unknown): SwapExecution {
     void run()
   }, [state.quote, address, isConnected, adapter])
 
-  return { ...state, ...(usdPrices !== undefined ? { usdPrices } : {}), confirm, reset }
+  return {
+    ...state,
+    ...(usdPrices !== undefined ? { usdPrices } : {}),
+    ...(priceDetail !== undefined ? { priceDetail } : {}),
+    confirm,
+    reset,
+  }
 }

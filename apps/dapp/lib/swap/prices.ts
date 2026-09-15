@@ -1,4 +1,4 @@
-import { STELLAR_USDC } from '@intent/config'
+import { STELLAR_USDC, stellarTestnet } from '@intent/config'
 
 /**
  * Real market prices, taken from Stellar's own mainnet order book.
@@ -30,7 +30,7 @@ export interface MarketPrice {
   symbol: string
   usd: number
   /** Where the figure came from, so a stale or missing price is attributable. */
-  source: 'stellar-mainnet' | 'fallback'
+  source: 'stellar-mainnet' | 'stellar-testnet' | 'fallback'
   asOf: string
 }
 
@@ -57,16 +57,20 @@ interface OrderBookResponse {
  * The mid rather than the last trade: a thin book's last trade can sit far from
  * where either side is actually willing to deal.
  */
-async function fetchXlmUsd(fetchImpl: typeof fetch): Promise<number | undefined> {
+async function fetchXlmUsd(
+  fetchImpl: typeof fetch,
+  horizon: string = MAINNET_HORIZON,
+  issuer: string = MAINNET_USDC_ISSUER
+): Promise<number | undefined> {
   const params = new URLSearchParams({
     selling_asset_type: 'native',
     buying_asset_type: 'credit_alphanum4',
     buying_asset_code: 'USDC',
-    buying_asset_issuer: MAINNET_USDC_ISSUER,
+    buying_asset_issuer: issuer,
     limit: '1',
   })
 
-  const res = await fetchImpl(`${MAINNET_HORIZON}/order_book?${params.toString()}`, {
+  const res = await fetchImpl(`${horizon}/order_book?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) return undefined
@@ -119,6 +123,46 @@ export async function fetchMarketPrices(
       source: 'stellar-mainnet',
       asOf,
     },
+  }
+}
+
+/**
+ * What XLM trades for **on testnet**, from testnet's own order book.
+ *
+ * A different number from the mainnet one and deliberately so. Testnet
+ * liquidity is synthetic, so this says what a swap signed here will actually
+ * fill near — which is the rate that describes this app's own trades, whatever
+ * the real market is doing elsewhere.
+ *
+ * Kept apart from `fetchMarketPrices` rather than replacing it: agents reason
+ * about whether a price is *good*, which needs the real market, while someone
+ * watching their own fills needs the venue they are filling on. Both are true
+ * at once and neither substitutes for the other.
+ *
+ * Returns undefined when the book cannot be read or has no offers — a common
+ * state on testnet, where a pair can genuinely have an empty book. Undefined
+ * rather than a fallback constant: inventing a testnet price would defeat the
+ * point of asking testnet.
+ */
+export async function fetchTestnetXlmUsd(
+  options: PriceOptions = {}
+): Promise<MarketPrice | undefined> {
+  const fetchImpl = options.fetchImpl ?? fetch
+
+  let usd: number | undefined
+  try {
+    usd = await fetchXlmUsd(fetchImpl, stellarTestnet.horizonUrl, STELLAR_USDC.issuer)
+  } catch {
+    usd = undefined
+  }
+
+  if (usd === undefined) return undefined
+
+  return {
+    symbol: 'XLM',
+    usd,
+    source: 'stellar-testnet',
+    asOf: new Date().toISOString(),
   }
 }
 
