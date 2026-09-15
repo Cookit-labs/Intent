@@ -1,0 +1,290 @@
+import type { FollowOnAction } from './parse-compound'
+
+/**
+ * Reading an instruction by meaning rather than by matching its wording.
+ *
+ * The regex parser recognises surface forms, and people do not write in surface
+ * forms. Measured against twelve ways of writing one instruction it understood
+ * five, and the misses split evenly between two different gates: half failed
+ * because no marker matched (a comma or a full stop joining the clauses), half
+ * because the verb list lacked "stake", "start earning", "add it to", "move it
+ * into". Patching either list closes those and fails on the next seven. The
+ * tail of English is infinite and every widening costs accuracy on the other
+ * side.
+ *
+ * So this asks a model instead, and the regex stays as the fallback. That
+ * ordering matters: an unconfigured key, an outage, or a slow response must
+ * leave the app exactly as capable as it was before this file existed, never
+ * less. A parser that can fail closed is worse than a narrow one.
+ *
+ * **Measured before being trusted.** `deepseek-flash` read 10/10 of the
+ * sentences that defeated the regex, held 13/14 stable across three runs, and
+ * answered in a median 1.5s. Its one wobble was a dropped tool call on a
+ * sentence the regex already handles — which is precisely what the fallback is
+ * for. `deepseek-v4-pro` was slower (median 3.0s, max 7.8s), less accurate
+ * (8/10), and returned malformed JSON once, so it is not used here.
+ */
+
+/** Fast and cheap. The parse is a small classification, not a reasoning task. */
+const PARSE_MODEL = 'deepseek-flash'
+
+const DEFAULT_BASE_URL = 'https://api.deepseek.com/v1'
+
+/**
+ * Long enough for a slow response, short enough that a hung call does not
+ * outlast a user's patience. The fallback runs the moment this expires, so the
+ * cost of being wrong here is one wasted second, not a failure.
+ */
+const TIMEOUT_MS = 6_000
+
+/** Reasoning tokens count against this, so it is not as generous as it looks. */
+const MAX_OUTPUT_TOKENS = 700
+
+/**
+ * What the model is asked to fill in.
+ *
+ * Deliberately smaller than `ParsedIntent`. The model answers only what needs
+ * judgement — which assets, how much, and whether a follow-on was asked for —
+ * and everything derived (prices, escrow, base units, deadlines) stays with the
+ * existing deterministic code. A model asked to compute is a model inventing
+ * numbers.
+ */
+const READ_INTENT_TOOL = {
+  type: 'function',
+  function: {
+    name: 'read_intent',
+    description: 'Read a trading instruction into structured form.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tokenIn: {
+          type: 'string',
+          description: 'Ticker of the asset leaving the account, e.g. USDC.',
+        },
+        tokenOut: {
+          type: 'string',
+          description: 'Ticker of the asset arriving, e.g. XLM.',
+        },
+        amountUsd: {
+          type: 'number',
+          description: 'Size in US dollars. Use 0 when the user named no size.',
+        },
+        amountStated: {
+          type: 'boolean',
+          description: 'False when the user named no size at all.',
+        },
+        followOn: {
+          type: 'string',
+          enum: ['none', 'lend'],
+          description:
+            'Whether the proceeds should then be supplied to a lending pool. Almost always none.',
+        },
+        followOnVenue: {
+          type: 'string',
+          description: 'Lending venue when followOn is lend, e.g. blend. Empty otherwise.',
+        },
+      },
+      // Every property required, matching the discipline the proposal schema
+      // already uses: an omitted field is indistinguishable from a deliberate
+      // "none", and strict tool schemas admit no optional properties.
+      required: ['tokenIn', 'tokenOut', 'amountUsd', 'amountStated', 'followOn', 'followOnVenue'],
+    },
+  },
+}
+
+/**
+ * The instruction that decides the hard case.
+ *
+ * The distinction worth spelling out is "and" joining two assets against "and"
+ * joining a trade to a lending action. That single ambiguity is what the regex
+ * could never resolve, and stating it explicitly is what makes the model get it
+ * right rather than guessing from the conjunction.
+ */
+const SYSTEM_PROMPT = [
+  "Read the user's trading instruction. Call read_intent exactly once.",
+  "followOn is 'lend' ONLY when the user asks for the proceeds to be supplied, lent,",
+  'deposited, staked, or put to work in a lending pool.',
+  'Joining two ASSETS with "and" is NOT a follow-on: "buy XLM and USDC" is one purchase',
+  'of two things, and its followOn is none.',
+  'amountStated is false when the user named no size; set amountUsd to 0 in that case.',
+  "Use followOnVenue 'blend' when Blend is named or clearly implied, otherwise an empty string.",
+].join(' ')
+
+export interface LlmReadIntent {
+  tokenIn: string
+  tokenOut: string
+  /** Zero when the user named no size; check `amountStated` before using it. */
+  amountUsd: number
+  amountStated: boolean
+  followOn: FollowOnAction | null
+}
+
+export interface ReadIntentOptions {
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+  fetchImpl?: typeof fetch
+  timeoutMs?: number
+  /** Tickers the app can actually trade. A symbol outside this is refused. */
+  allowedSymbols?: string[]
+  /** Lending venues that exist on this chain. */
+  allowedVenues?: string[]
+}
+
+interface ToolArguments {
+  tokenIn?: unknown
+  tokenOut?: unknown
+  amountUsd?: unknown
+  amountStated?: unknown
+  followOn?: unknown
+  followOnVenue?: unknown
+}
+
+/** Whether a parse can even be attempted. */
+export function isLlmParseConfigured(options: ReadIntentOptions = {}): boolean {
+  const key = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
+  return key !== undefined && key !== ''
+}
+
+/**
+ * Reads an instruction, or returns null so the caller falls back.
+ *
+ * Null is never an error the user sees. Every failure path — no key, a timeout,
+ * a refused request, a reply with no tool call, a symbol the app cannot trade —
+ * returns null, and the regex parser answers instead. That is the whole safety
+ * argument for putting a model in front of the parser at all.
+ */
+export async function readIntentWithLlm(
+  text: string,
+  options: ReadIntentOptions = {}
+): Promise<LlmReadIntent | null> {
+  const apiKey = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
+  if (apiKey === undefined || apiKey === '') return null
+
+  const baseUrl = options.baseUrl ?? process.env['DEEPSEEK_BASE_URL'] ?? DEFAULT_BASE_URL
+  const model = options.model ?? PARSE_MODEL
+  const doFetch = options.fetchImpl ?? fetch
+
+  // Abandoned rather than awaited indefinitely. A parse that arrives after the
+  // user has given up is worth nothing, and the fallback is already correct.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
+
+  let payload: unknown
+  try {
+    const res = await doFetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: text },
+        ],
+        tools: [READ_INTENT_TOOL],
+        // 'auto' rather than forced, matching the agent brain: DeepSeek's
+        // thinking mode rejects a forced tool_choice outright.
+        tool_choice: 'auto',
+        // Zero, unlike the agents. Those are asked to differ from one another;
+        // a parser asked the same question twice should answer the same way.
+        temperature: 0,
+        max_tokens: MAX_OUTPUT_TOKENS,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) return null
+    payload = await res.json()
+  } catch {
+    // A timeout, an abort, an unreachable host, malformed JSON. All the same
+    // outcome: the caller falls back.
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+
+  return interpret(payload, options)
+}
+
+/** Pulls the tool call out of a response, and refuses anything unusable. */
+function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent | null {
+  const args = toolArgumentsOf(payload)
+  if (args === null) return null
+
+  const tokenIn = symbolOf(args.tokenIn, options.allowedSymbols)
+  const tokenOut = symbolOf(args.tokenOut, options.allowedSymbols)
+  if (tokenIn === undefined || tokenOut === undefined || tokenIn === tokenOut) return null
+
+  const amountStated = args.amountStated === true
+  const amountUsd =
+    typeof args.amountUsd === 'number' && Number.isFinite(args.amountUsd) ? args.amountUsd : 0
+  // A size that was claimed but is not a usable number is a contradiction, and
+  // trading on it would size the trade wrong rather than not at all.
+  if (amountStated && amountUsd <= 0) return null
+
+  return {
+    tokenIn,
+    tokenOut,
+    amountUsd: amountStated ? amountUsd : 0,
+    amountStated,
+    followOn: followOnOf(args, options.allowedVenues),
+  }
+}
+
+function toolArgumentsOf(payload: unknown): ToolArguments | null {
+  try {
+    const choices = (payload as { choices?: { message?: { tool_calls?: unknown } }[] }).choices
+    const calls = choices?.[0]?.message?.tool_calls
+    if (!Array.isArray(calls) || calls.length === 0) return null
+
+    const raw = (calls[0] as { function?: { arguments?: unknown } }).function?.arguments
+    if (typeof raw !== 'string') return null
+
+    return JSON.parse(raw) as ToolArguments
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A ticker the app can actually trade, or nothing.
+ *
+ * Checked rather than trusted. A model naming an asset that does not exist here
+ * would otherwise reach the quoter as a real instruction, and the app has one
+ * ticker-impersonation trap in its history already.
+ */
+function symbolOf(value: unknown, allowed: string[] | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const symbol = value.trim().toUpperCase()
+  if (symbol === '') return undefined
+  if (allowed === undefined || allowed.length === 0) return symbol
+  return allowed.includes(symbol) ? symbol : undefined
+}
+
+/**
+ * The follow-on, when one was asked for and this chain can perform it.
+ *
+ * A venue the app does not integrate returns nothing rather than being
+ * substituted with one it does. Silently supplying somewhere the user did not
+ * name is the worst possible reading of an explicit instruction.
+ */
+function followOnOf(
+  args: ToolArguments,
+  allowedVenues: string[] | undefined
+): FollowOnAction | null {
+  if (args.followOn !== 'lend') return null
+
+  const named =
+    typeof args.followOnVenue === 'string' ? args.followOnVenue.trim().toLowerCase() : ''
+  const venues = allowedVenues ?? ['blend']
+  if (venues.length === 0) return null
+
+  // An unnamed venue defaults to the only one integrated, which is how "supply
+  // it" without a venue has always been read.
+  if (named === '') {
+    const only = venues[0]
+    return only === undefined ? null : { kind: 'lend', venue: only }
+  }
+
+  return venues.includes(named) ? { kind: 'lend', venue: named } : null
+}

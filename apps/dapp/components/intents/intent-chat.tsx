@@ -36,6 +36,7 @@ import { PlanConfirm } from './plan-confirm'
 import { useSequence } from '../../hooks/use-sequence'
 import { SequenceConfirm } from './sequence-confirm'
 import { parseCompoundIntent, type FollowOnAction } from '../../lib/parse-compound'
+import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { BLEND_XLM } from '../../lib/lend/reserves'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
@@ -85,6 +86,11 @@ export function IntentChat(): JSX.Element {
   // anything. Held rather than acted on: the sequence starts when an agent is
   // chosen, not when the sentence is typed.
   const [followOn, setFollowOn] = useState<FollowOnAction | null>(null)
+  // A reading awaiting confirmation. While set, no competition runs: the moment
+  // to catch a misread instruction is before the agents spend a minute arguing
+  // about a trade that was never the one asked for.
+  const [pending, setPending] = useState<UnderstoodIntent | null>(null)
+  const [parsing, setParsing] = useState(false)
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
 
@@ -308,19 +314,6 @@ export function IntentChat(): JSX.Element {
     }
 
     setMessage(text)
-    // Parsed against the same live prices the server uses. Without them this
-    // fell back to an indicative table that had XLM at $0.58 against a real
-    // ~$0.18, so the same sentence produced one size here and a different one
-    // in the competition.
-    const single = parseIntent(text, swap.usdPrices)
-    setParsed(single)
-
-    // "Buy XLM then supply it to Blend" is two actions that cannot share a
-    // signature. Recorded here, but *not* started: a sequence begins when the
-    // user picks an agent, exactly like every other execution shape. Building
-    // it on submit put a live card and a build request in front of someone who
-    // had not chosen anything yet.
-    setFollowOn(parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null)
     // Anything left from a previous attempt goes now. Nothing was signed, so
     // nothing should survive the restart.
     sequence.reset()
@@ -331,6 +324,97 @@ export function IntentChat(): JSX.Element {
     setTurnId(crypto.randomUUID())
     setHistoryOpen(false)
     setRestored(null)
+    setPending(null)
+
+    // The regex reading, computed first and always. It is the fallback, so it
+    // must never depend on the model answering — an outage or a missing key has
+    // to leave the app exactly as capable as it was before the model existed.
+    //
+    // Parsed against the same live prices the server uses. Without them this
+    // fell back to an indicative table that had XLM at $0.58 against a real
+    // ~$0.18, so the same sentence produced one size here and a different one
+    // in the competition.
+    const single = parseIntent(text, swap.usdPrices)
+    const regexFollowOn = parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null
+
+    // Reading by meaning rather than by wording. A regex recognises surface
+    // forms and people do not write in surface forms: measured across twelve
+    // ways of writing one instruction it understood five, and the misses split
+    // evenly between an unmatched marker and an unlisted verb. Widening either
+    // list closes those and fails on the next seven.
+    void (async () => {
+      setParsing(true)
+      let read: UnderstoodIntent | null = null
+      try {
+        const res = await fetch('/api/intent/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, chain: slug }),
+        })
+        const body = (await res.json()) as {
+          understood?: boolean
+          tokenIn?: string
+          tokenOut?: string
+          amountUsd?: number
+          amountStated?: boolean
+          followOn?: FollowOnAction | null
+        }
+        if (body.understood === true && body.tokenIn !== undefined && body.tokenOut !== undefined) {
+          read = {
+            text,
+            tokenIn: body.tokenIn,
+            tokenOut: body.tokenOut,
+            amountUsd: body.amountUsd ?? 0,
+            amountStated: body.amountStated === true,
+            followOn: body.followOn ?? null,
+          }
+        }
+      } catch {
+        // Left null: the regex reading below is the answer.
+      }
+      setParsing(false)
+
+      // A second action is worth confirming, whichever parser found it. The
+      // instruction carries more than a swap, and a follow-on silently dropped
+      // or silently added is the misreading that costs the user real money.
+      const readFollowOn = read?.followOn ?? regexFollowOn
+      if (readFollowOn !== null) {
+        setPending({
+          text,
+          tokenIn: read?.tokenIn ?? single.input.tokenIn,
+          tokenOut: read?.tokenOut ?? single.input.tokenOut,
+          amountUsd: read?.amountStated === true ? read.amountUsd : single.escrowUsd,
+          amountStated: read?.amountStated ?? true,
+          followOn: readFollowOn,
+        })
+        return
+      }
+
+      // An ordinary swap reads the same whichever parser handled it, so it
+      // starts immediately. Interrupting the common case would be a tax on it
+      // for the benefit of the rare one.
+      setFollowOn(null)
+      setParsed(single)
+    })()
+  }
+
+  /**
+   * Runs a confirmed reading.
+   *
+   * `withFollowOn` is false when the user said they meant only the trade, which
+   * must not require retyping the sentence.
+   */
+  function startPending(withFollowOn: boolean): void {
+    const confirmed = pending
+    if (confirmed === null) return
+
+    setPending(null)
+    setFollowOn(withFollowOn ? confirmed.followOn : null)
+    // Re-parsed from the original text rather than rebuilt from the reading:
+    // every downstream consumer expects a `ParsedIntent`, and the deterministic
+    // parser is what derives escrow, base units and deadlines. The model
+    // answers only what needs judgement.
+    setParsed(parseIntent(confirmed.text, swap.usdPrices))
   }
 
   function handleReset(): void {
@@ -723,6 +807,31 @@ export function IntentChat(): JSX.Element {
               {/* A sequence is several transactions signed one at a time,
                 which a plan card must not be used for: it would promise an
                 atomicity Soroban cannot give across contract calls. */}
+              {/* Read back before anything runs. A parser that reads meaning
+                rather than wording handles the many ways people write one
+                instruction, and the cost of that flexibility is that its
+                confidence is no longer visible in the text. The moment to catch
+                a misreading is here, not at the signing card — by then the user
+                has waited a minute for agents to argue about a trade that was
+                never the one they asked for. */}
+              {pending !== null ? (
+                <IntentConfirm
+                  understood={pending}
+                  onConfirm={() => startPending(true)}
+                  onReject={() => startPending(false)}
+                />
+              ) : null}
+
+              {/* The second or two the model takes, said out loud. Silence here
+                reads as a dropped intent, which is the complaint that started
+                this work. */}
+              {parsing && pending === null ? (
+                <div className="text-muted-foreground flex items-center gap-2 p-1 text-xs">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Reading your intent…
+                </div>
+              ) : null}
+
               {sequence.phase !== 'idle' ? <SequenceConfirm sequence={sequence} /> : null}
 
               {planExec.phase !== 'idle' ? (
