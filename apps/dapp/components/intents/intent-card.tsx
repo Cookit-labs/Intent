@@ -102,7 +102,7 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
             Literal black rather than a token because that is what was asked
             for. Safe while the app is `forcedTheme="light"`; if dark mode is
             ever enabled this needs a token, or the icon disappears. */}
-        <IntentTypeIcon type={intent.type} className="mt-0.5 h-7 w-7 shrink-0 text-black" />
+        <IntentTypeIcon type={intent.type} className="text-foreground mt-0.5 h-7 w-7 shrink-0" />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
