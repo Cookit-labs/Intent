@@ -44,16 +44,23 @@ export default function IntentsPage(): JSX.Element {
         ))}
       </div>
 
-      {tab === 'compose' ? (
+      {/* Hidden rather than unmounted. A competition takes 25-65 seconds and
+          lives in component state, so switching tabs mid-race destroyed it —
+          the user came back to an empty composer and assumed their intent had
+          been thrown away, which it had. Keeping it mounted costs a hidden
+          subtree and preserves the run. */}
+      <div hidden={tab !== 'compose'}>
         <IntentChat />
-      ) : (
+      </div>
+
+      {tab !== 'compose' ? (
         <div className="flex flex-col gap-8">
           {/* On-chain swaps first: they are the trades that actually happened,
               as opposed to intents the app is tracking locally. */}
           <SwapHistory />
           <IntentActivity onCompose={() => setTab('compose')} />
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

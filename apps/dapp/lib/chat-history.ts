@@ -110,10 +110,43 @@ export function saveTurn(turn: ChatTurn): void {
  * Separate from `saveTurn` because the competition finishes long before the
  * signature does, and the turn should be readable in between.
  */
-export function updateTurn(id: string, patch: Partial<ChatTurn>): void {
+/**
+ * Patches a turn, or creates one when the patch carries enough to stand alone.
+ *
+ * Returning silently for an unknown id was losing real outcomes. A turn is
+ * written when its competition is decided, but a settled trade can arrive
+ * before that — or after a tab switch that never wrote one — and the hash was
+ * then discarded with no error anywhere. A transaction that happened on-chain
+ * must not vanish because the conversation around it was not saved first.
+ *
+ * `fallback` supplies the fields a turn cannot be reconstructed without. Given
+ * one, an unknown id becomes a new row rather than a no-op.
+ */
+export function updateTurn(
+  id: string,
+  patch: Partial<ChatTurn>,
+  fallback?: Pick<ChatTurn, 'chain' | 'text'>
+): void {
   const all = read()
   const found = all.find((t) => t.id === id)
-  if (found === undefined) return
+
+  if (found === undefined) {
+    if (fallback === undefined) return
+    write([
+      {
+        id,
+        chain: fallback.chain,
+        text: fallback.text,
+        createdAt: new Date().toISOString(),
+        proposals: {},
+        winner: null,
+        ...patch,
+      },
+      ...all,
+    ])
+    return
+  }
+
   write(all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
 }
 
