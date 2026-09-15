@@ -43,9 +43,16 @@ import { usePlanExecution } from '../../hooks/use-plan-execution'
 import { PlanConfirm } from './plan-confirm'
 import { useSequence } from '../../hooks/use-sequence'
 import { SequenceConfirm } from './sequence-confirm'
-import { parseCompoundIntent, type FollowOnAction } from '../../lib/parse-compound'
-import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
+import {
+  parseCompoundIntent,
+  parseSupplyOnlyIntent,
+  type FollowOnAction,
+} from '../../lib/parse-compound'
+import { useSupply } from '../../hooks/use-supply'
+import { SupplyConfirm } from './supply-confirm'
+import { tradeableSymbols } from '../../lib/swap/asset-registry'
 import { BLEND_XLM } from '../../lib/lend/reserves'
+import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
@@ -201,6 +208,9 @@ export function IntentChat(): JSX.Element {
   // different thing to approve: an ordered list rather than one number.
   const planExec = usePlanExecution()
   const sequence = useSequence()
+  // Supplying an asset already held. A separate shape from a sequence: there is
+  // no earlier step whose output has to be carried.
+  const supply = useSupply()
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -382,6 +392,45 @@ export function IntentChat(): JSX.Element {
     setHistoryOpen(false)
     setRestored(null)
     setPending(null)
+
+    // "Supply my XLM to Blend" is not a trade at all, and the trade parser
+    // reads it as a market *buy* of XLM — spending USDC the user never
+    // offered. Checked before anything else, because every parser below
+    // assumes an intent is a trade.
+    const supplyOnly = parseSupplyOnlyIntent(text, tradeableSymbols())
+    if (supplyOnly !== null && slug === 'stellar') {
+      setParsed(null)
+      setFollowOn(null)
+      // Three conversions, and getting any of them wrong moves the wrong
+      // amount of money.
+      //
+      // A dollar figure is not a token count: "$20 worth of XLM" is about 125
+      // XLM, and supplying 20 would be a sixth of what was asked. An absent
+      // amount means the whole balance. And the route takes stroops, so a
+      // display figure passed straight through supplies a millionth of it.
+      const price = swap.usdPrices?.[supplyOnly.asset]
+      if (supplyOnly.amountIsUsd === true && (price === undefined || price <= 0)) {
+        // Better to say nothing can be priced than to guess a rate and supply
+        // an amount the user never chose.
+        setAffordError(`No live price for ${supplyOnly.asset}, so a dollar amount cannot be sized.`)
+        return
+      }
+
+      const units =
+        supplyOnly.amount === undefined
+          ? (balances?.xlm ?? '0')
+          : supplyOnly.amountIsUsd === true
+            ? (Number(supplyOnly.amount) / (price as number)).toFixed(7)
+            : supplyOnly.amount
+
+      supply.prepare({
+        assetId: BLEND_XLM,
+        symbol: supplyOnly.asset,
+        amount: toBaseUnits(units),
+      })
+      return
+    }
+    supply.reset()
 
     // The regex reading, computed first and always. It is the fallback, so it
     // must never depend on the model answering — an outage or a missing key has
@@ -888,6 +937,10 @@ export function IntentChat(): JSX.Element {
                   Reading your intent…
                 </div>
               ) : null}
+
+              {/* Supplying what the account already holds. One transaction,
+                one signature — no sequence to explain. */}
+              {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
 
               {sequence.phase !== 'idle' ? <SequenceConfirm sequence={sequence} /> : null}
 
