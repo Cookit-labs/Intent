@@ -24,7 +24,14 @@ import { ChatHistoryPanel } from './chat-history-panel'
 import { StandingRulesPanel } from './standing-rules-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { parseStandingIntent } from '../../lib/parse-standing'
-import { clearTurns, loadTurns, saveTurn, updateTurn, type ChatTurn } from '../../lib/chat-history'
+import {
+  clearTurns,
+  loadTurns,
+  saveTurn,
+  syncTurns,
+  updateTurn,
+  type ChatTurn,
+} from '../../lib/chat-history'
 import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
@@ -91,8 +98,26 @@ export function IntentChat(): JSX.Element {
   // about a trade that was never the one asked for.
   const [pending, setPending] = useState<UnderstoodIntent | null>(null)
   const [parsing, setParsing] = useState(false)
+
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
+  // History lives on the server; the local copy is a cache. Refilled whenever
+  // the wallet or chain changes, so clearing site data — or opening the app on
+  // another device — shows the trades that actually happened rather than an
+  // empty list.
+  useEffect(() => {
+    let cancelled = false
+    void syncTurns(slug)
+      .then((fromServer) => {
+        if (!cancelled) setTurns(fromServer)
+      })
+      .catch(() => {
+        // `syncTurns` already falls back to the cache and warns.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug, address])
 
   // Balances, so an order can be checked against what the account actually
   // holds before it is placed rather than after it fails.
