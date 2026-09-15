@@ -4,6 +4,7 @@ import { cn } from '@intent/ui'
 import { useState } from 'react'
 
 import { IntentActivity } from '../../../components/intents/intent-activity'
+import { OpenPositions } from '../../../components/intents/open-positions'
 import { SwapHistory } from '../../../components/intents/swap-history'
 import { IntentChat } from '../../../components/intents/intent-chat'
 
@@ -55,6 +56,11 @@ export default function IntentsPage(): JSX.Element {
 
       {tab !== 'compose' ? (
         <div className="flex flex-col gap-8">
+          {/* Anything still live comes first. A settled swap is a record and
+              needs no decision; a resting order or a lending position is money
+              still committed. Ordering both by timestamp in one list buried the
+              second kind among the first. */}
+          <OpenPositions />
           {/* On-chain swaps first: they are the trades that actually happened,
               as opposed to intents the app is tracking locally. */}
           <SwapHistory />
