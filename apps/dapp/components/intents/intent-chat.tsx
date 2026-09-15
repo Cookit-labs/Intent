@@ -216,18 +216,26 @@ export function IntentChat(): JSX.Element {
     if (sequenceHash === undefined || parsed === null) return
 
     if (turnId !== null) {
-      updateTurn(turnId, {
-        txHash: sequenceHash,
-        // Recorded as a bundle, not a swap. One instruction became several
-        // transactions, and naming it after the first would hide the rest.
-        bundle: (JSON.parse(sequenceSteps) as typeof sequence.steps).map((step) => ({
-          label: step.label,
-          ...(step.hash !== undefined ? { hash: step.hash } : {}),
-          ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
-          ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
-          ...(step.positionUrl !== undefined ? { venue: 'Blend' } : {}),
-        })),
-      })
+      updateTurn(
+        turnId,
+        {
+          txHash: sequenceHash,
+          // Recorded as a bundle, not a swap. One instruction became several
+          // transactions, and naming it after the first would hide the rest.
+          bundle: (JSON.parse(sequenceSteps) as typeof sequence.steps).map((step) => ({
+            label: step.label,
+            ...(step.hash !== undefined ? { hash: step.hash } : {}),
+            ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
+            ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
+            ...(step.positionUrl !== undefined ? { venue: 'Blend' } : {}),
+          })),
+        },
+        // A turn is only written once its competition is decided, and a
+        // sequence can settle before that or after a tab switch that wrote
+        // none. Without this the trade happened on-chain and history kept no
+        // record of it at all.
+        { chain: slug, text: message ?? parsed.outcome }
+      )
       setTurns(loadTurns(slug))
     }
 

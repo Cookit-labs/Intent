@@ -117,3 +117,51 @@ describe('a bundled intent keeps every step', () => {
     expect(stored?.txHash).toBe('ccc333')
   })
 })
+
+describe('a settled trade is never lost for want of a turn', () => {
+  it('creates the row when the conversation was never saved', () => {
+    // The bug this covers. A turn is only written once its competition is
+    // decided, and a sequence can settle before that — or after a tab switch
+    // that wrote none. `updateTurn` used to return silently for an unknown id,
+    // so a trade that really happened on-chain left no record anywhere.
+    updateTurn(
+      'never-saved',
+      { txHash: 'ddd444', bundle: STEPS },
+      { chain: CHAIN, text: 'Buy $20 of XLM with USDC, then supply it to Blend' }
+    )
+
+    const stored = loadTurns(CHAIN).find((t) => t.id === 'never-saved')
+    expect(stored).toBeDefined()
+    expect(stored?.txHash).toBe('ddd444')
+    expect(stored?.bundle).toHaveLength(2)
+  })
+
+  it('keeps the text so the row is readable rather than blank', () => {
+    updateTurn(
+      'never-saved-2',
+      { txHash: 'eee555' },
+      { chain: CHAIN, text: 'Buy $20 of XLM with USDC, then supply it to Blend' }
+    )
+
+    const stored = loadTurns(CHAIN).find((t) => t.id === 'never-saved-2')
+    expect(stored?.text).toContain('Buy $20 of XLM')
+  })
+
+  it('still does nothing for an unknown id with no fallback', () => {
+    // Without enough to reconstruct a turn, inventing one would put a row with
+    // no text and no proposals in front of the user.
+    updateTurn('unknown', { txHash: 'fff666' })
+    expect(loadTurns(CHAIN).find((t) => t.id === 'unknown')).toBeUndefined()
+  })
+
+  it('patches an existing turn rather than duplicating it', () => {
+    saveTurn(turn('t7'))
+    updateTurn('t7', { txHash: 'ggg777' }, { chain: CHAIN, text: 'ignored' })
+
+    const matches = loadTurns(CHAIN).filter((t) => t.id === 't7')
+    expect(matches).toHaveLength(1)
+    // The fallback must not overwrite what the saved turn already said.
+    expect(matches[0]?.text).toContain('Buy $20 of XLM')
+    expect(matches[0]?.txHash).toBe('ggg777')
+  })
+})
