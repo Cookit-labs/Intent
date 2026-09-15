@@ -252,6 +252,17 @@ export function IntentChat(): JSX.Element {
           setPlacedId(created.id)
           settleIntent.mutate({ id: created.id, txHash: sequenceHash })
         },
+        // Recording to the backend needs a session, and without one this
+        // rejects. Swallowing that was how a settled bundle came to be missing
+        // from the activity list with nothing anywhere saying why — the trade
+        // was real, the record simply never reached the server.
+        //
+        // The local chat-turn record above is already written, so the trade is
+        // not lost; this only reports the half that did not persist.
+        onError: (e) => {
+          // eslint-disable-next-line no-console
+          console.warn('[intent] settled bundle was not recorded on the server:', e)
+        },
       }
     )
     // Narrow for the same reason as above: widening this re-records the hash
