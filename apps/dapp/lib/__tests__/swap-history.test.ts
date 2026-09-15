@@ -245,3 +245,65 @@ describe('a router swap is never filtered out by a memo it cannot carry', () => 
     expect(rows[0]?.txHash).toBe(routerOp().transaction_hash)
   })
 })
+
+describe('a row is named for what it actually was', () => {
+  /** Operations first, then the memo lookup — the order the reader calls them. */
+  function withMemo(ops: unknown[], memo: string): typeof fetch {
+    let call = 0
+    return (() => {
+      call += 1
+      const body =
+        call === 1
+          ? { _embedded: { records: ops } }
+          : {
+              _embedded: {
+                records: [{ hash: swapOp().transaction_hash, memo, memo_type: 'text' }],
+              },
+            }
+      return Promise.resolve(new Response(JSON.stringify(body)))
+    }) as unknown as typeof fetch
+  }
+
+  it('calls a resting order a limit order, not a swap', async () => {
+    // Half the reported bug. The memo already distinguished these; the reader
+    // collapsed every kind into one boolean and threw the distinction away, so
+    // a limit order appeared in history labelled "Swap".
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'intent:limit:v1') })
+    expect(rows[0]?.kind).toBe('limit')
+  })
+
+  it('calls a plan a bundle', async () => {
+    // Several operations under one signature is a bundle to whoever signed it.
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'intent:plan:v1') })
+    expect(rows[0]?.kind).toBe('bundle')
+  })
+
+  it('calls a pool operation liquidity', async () => {
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'intent:pool:v1') })
+    expect(rows[0]?.kind).toBe('pool')
+  })
+
+  it('calls an ordinary stamped trade a swap', async () => {
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'intent:swap:v1') })
+    expect(rows[0]?.kind).toBe('swap')
+  })
+
+  it('falls back to swap for an unstamped path payment', async () => {
+    // A path payment between one account's own assets is a swap whoever built
+    // it, so that is the honest default rather than a guess.
+    const rows = await fetchSwapHistory(ME, { fetchImpl: respond([swapOp()]) })
+    expect(rows[0]?.kind).toBe('swap')
+  })
+
+  it('falls back to swap for a memo it does not recognise', async () => {
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'something:else') })
+    expect(rows[0]?.kind).toBe('swap')
+  })
+
+  it('counts every app memo as this app’s work, not just the swap one', async () => {
+    // Before, only the swap memo marked a trade as ours, so a limit order this
+    // app placed was treated as a stranger’s and filtered out.
+    const rows = await fetchSwapHistory(ME, { fetchImpl: withMemo([swapOp()], 'intent:limit:v1') })
+    expect(rows[0]?.fromThisApp).toBe(true)
+  })
+})

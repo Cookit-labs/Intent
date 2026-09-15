@@ -8,7 +8,8 @@ import { useState } from 'react'
 import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
-import type { SwapRecord } from '../../lib/swap/history'
+import type { SwapKind, SwapRecord } from '../../lib/swap/history'
+import { bundlesByTxHash, type BundleStep } from '../../lib/chat-history'
 import { TokenIcon } from '../ui/token-icon'
 import { SwapCircleIcon } from './intent-type-icon'
 
@@ -19,6 +20,27 @@ import { SwapCircleIcon } from './intent-type-icon'
  * device, in another browser, or before this feature existed still belongs in
  * a user's history, and the network already has all of them.
  */
+
+/**
+ * A ledger row, plus what only the app can know about it.
+ *
+ * The chain records transactions, not instructions. It cannot say that a router
+ * swap and a Blend supply were one request, because a Soroban transaction
+ * carries no memo and the two are unrelated on-chain. That association lives in
+ * the app's record of the conversation and is joined on here.
+ */
+interface HistoryRow extends SwapRecord {
+  /** The other transactions this one was bundled with, when it was. */
+  bundleSteps?: BundleStep[]
+}
+
+/** What each kind is called, in the user's terms. */
+const KIND_LABELS: Record<SwapKind, string> = {
+  swap: 'Swap',
+  limit: 'Limit order',
+  bundle: 'Bundled swap',
+  pool: 'Liquidity',
+}
 
 function amount(value: string): string {
   const n = Number(value)
@@ -75,10 +97,22 @@ export function SwapHistory(): JSX.Element | null {
     return <Card className="bg-muted/40 h-20 animate-pulse" />
   }
 
-  const swaps = data ?? []
-  if (swaps.length === 0) {
+  const ledger = data ?? []
+  if (ledger.length === 0) {
     return <Card className="text-muted-foreground p-6 text-sm">No swaps yet for this account.</Card>
   }
+
+  // Joined here rather than in the reader, which deliberately knows nothing the
+  // app stores: a trade made on another device still belongs in history, and
+  // the ledger is the only source that has all of them.
+  const bundles = bundlesByTxHash(slug)
+  const swaps: HistoryRow[] = ledger.map((row) => {
+    const found = bundles.get(row.txHash)
+    if (found === undefined) return row
+    // A bundle is what the person asked for, so it names the row even though
+    // the ledger saw only a swap.
+    return { ...row, kind: 'bundle' as const, bundleSteps: found.steps }
+  })
 
   return (
     <div className="flex flex-col gap-3">
@@ -103,7 +137,7 @@ export function SwapHistory(): JSX.Element | null {
  * detail — route, timing, the explorer link — opens under the row rather than
  * on a page of its own.
  */
-function SwapRow({ swap }: { swap: SwapRecord }): JSX.Element {
+function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -122,7 +156,7 @@ function SwapRow({ swap }: { swap: SwapRecord }): JSX.Element {
           <div className="flex items-center justify-between gap-3">
             {/* Named, like the intent rows. Without a title these read as a
                 different kind of thing entirely from the list beneath. */}
-            <span className="text-sm font-semibold">Swap</span>
+            <span className="text-sm font-semibold">{KIND_LABELS[swap.kind]}</span>
             <span className="text-muted-foreground text-xs">{when(swap.settledAt)}</span>
           </div>
 
@@ -188,15 +222,62 @@ function SwapRow({ swap }: { swap: SwapRecord }): JSX.Element {
 
           {/* Every row is checkable: the ledger is the record, and this is the
               link to it. */}
-          <a
-            href={swap.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
-          >
-            View on Stellar Expert
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={swap.explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
+            >
+              View on Stellar Expert
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+
+            {/* Where the position lives, as opposed to proof the transaction
+                happened. An explorer shows a supply reached the ledger and
+                nothing about the balance it created or the rate it earns. */}
+            {(swap.bundleSteps ?? [])
+              .filter((step) => step.positionUrl !== undefined)
+              .map((step) => (
+                <a
+                  key={step.positionUrl}
+                  href={step.positionUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
+                >
+                  View position on {step.venue ?? 'the protocol'}
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              ))}
+          </div>
+
+          {/* Every transaction in the bundle, so the supply is reachable from
+              the swap's row rather than only from the conversation. */}
+          {swap.bundleSteps !== undefined && swap.bundleSteps.length > 1 ? (
+            <ol className="border-border text-muted-foreground flex flex-col gap-1 border-l pl-3 text-xs">
+              {swap.bundleSteps.map((step, i) => (
+                <li
+                  key={`${step.hash ?? 'step'}-${i}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span>
+                    {i + 1}. {step.label}
+                  </span>
+                  {step.explorerUrl !== undefined && step.hash !== swap.txHash ? (
+                    <a
+                      href={step.explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:text-foreground underline underline-offset-2"
+                    >
+                      transaction
+                    </a>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          ) : null}
         </div>
       ) : null}
     </Card>

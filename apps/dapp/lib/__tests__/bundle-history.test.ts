@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { loadTurns, saveTurn, updateTurn, type BundleStep } from '../chat-history'
+import { bundlesByTxHash, loadTurns, saveTurn, updateTurn, type BundleStep } from '../chat-history'
 
 /**
  * Recording a bundled intent in history.
@@ -163,5 +163,59 @@ describe('a settled trade is never lost for want of a turn', () => {
     // The fallback must not overwrite what the saved turn already said.
     expect(matches[0]?.text).toContain('Buy $20 of XLM')
     expect(matches[0]?.txHash).toBe('ggg777')
+  })
+})
+
+describe('a ledger row can find the bundle it belonged to', () => {
+  it('is reachable by the swap hash', () => {
+    // The join the History tab needs. The chain records transactions, not
+    // instructions: a Soroban router swap carries no memo and the supply that
+    // follows is unrelated on-chain, so only the app knows they were one ask.
+    saveTurn(turn('b1'))
+    updateTurn('b1', { bundle: STEPS })
+
+    const found = bundlesByTxHash(CHAIN).get('aaa111')
+    expect(found?.steps).toHaveLength(2)
+  })
+
+  it('is reachable by the supply hash too', () => {
+    // Opening history and landing on the supply row must identify the same
+    // bundle, not leave that row orphaned.
+    saveTurn(turn('b2'))
+    updateTurn('b2', { bundle: STEPS })
+
+    expect(bundlesByTxHash(CHAIN).get('bbb222')?.steps).toHaveLength(2)
+  })
+
+  it('carries the instruction as typed', () => {
+    saveTurn(turn('b3'))
+    updateTurn('b3', { bundle: STEPS })
+
+    expect(bundlesByTxHash(CHAIN).get('aaa111')?.text).toContain('Buy $20 of XLM')
+  })
+
+  it('keeps the position link with the step that created one', () => {
+    saveTurn(turn('b4'))
+    updateTurn('b4', { bundle: STEPS })
+
+    const steps = bundlesByTxHash(CHAIN).get('aaa111')?.steps ?? []
+    expect(steps.find((s) => s.positionUrl !== undefined)?.venue).toBe('Blend')
+  })
+
+  it('ignores an ordinary turn with no bundle', () => {
+    // Most turns are a single swap. Treating those as bundles would rename
+    // every row in history.
+    saveTurn(turn('b5'))
+    updateTurn('b5', { txHash: 'solo999' })
+
+    expect(bundlesByTxHash(CHAIN).get('solo999')).toBeUndefined()
+  })
+
+  it('does not reach across chains', () => {
+    // An intent belongs to the network it was placed on.
+    saveTurn(turn('b6'))
+    updateTurn('b6', { bundle: STEPS })
+
+    expect(bundlesByTxHash('arc').get('aaa111')).toBeUndefined()
   })
 })
