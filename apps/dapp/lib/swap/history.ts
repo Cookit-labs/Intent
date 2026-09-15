@@ -19,6 +19,14 @@ import { INTENT_MEMO } from './build-tx'
  * other Stellar apps entirely. Transactions this app builds carry a memo
  * (`intent:swap:v1`), which is what separates "trades made here" from "every
  * path payment this key has ever signed".
+ *
+ * **Two shapes of swap, not one.** A classic swap is a path payment and states
+ * its amounts directly. A Soroban router swap is an `invoke_host_function`, and
+ * its amounts appear only in `asset_balance_changes` as a pair of transfers —
+ * one leaving the account, one arriving. Reading path payments alone made every
+ * Soroswap trade invisible here, which is exactly the route the agents pick
+ * when it quotes better. A trade that really happened must not be missing from
+ * the record because of how it was routed.
  */
 
 export interface SwapRecord {
@@ -49,6 +57,23 @@ interface HorizonOperation {
   source_asset_type?: string
   source_asset_code?: string
   path?: { asset_type: string; asset_code?: string }[]
+  /**
+   * The transfers a contract call performed.
+   *
+   * Only present on `invoke_host_function`. A router swap moves value through
+   * token contracts rather than through a path payment, so this is the only
+   * place Horizon reports what was actually sent and received.
+   */
+  asset_balance_changes?: HorizonBalanceChange[]
+}
+
+interface HorizonBalanceChange {
+  type?: string
+  asset_type?: string
+  asset_code?: string
+  amount?: string
+  from?: string
+  to?: string
 }
 
 interface HorizonTransaction {
@@ -122,7 +147,9 @@ export async function fetchSwapHistory(
     if (t.memo_type === 'text' && t.memo !== undefined) memoByHash.set(t.hash, t.memo)
   }
 
-  const swaps = (ops?._embedded?.records ?? [])
+  const records = ops?._embedded?.records ?? []
+
+  const classic = records
     .filter((op) => op.type.startsWith('path_payment'))
     // Self-payment is what makes it a swap rather than a transfer.
     .filter((op) => op.from !== undefined && op.from === op.to)
@@ -138,6 +165,15 @@ export async function fetchSwapHistory(
       explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
 
+  const routed = records
+    .filter((op) => op.type === 'invoke_host_function')
+    .map((op) => routerSwapOf(op, account, memoByHash))
+    .filter((row): row is SwapRecord => row !== undefined)
+
+  // Newest first, matching the order Horizon returned and the order the two
+  // lists were each already in.
+  const swaps = [...classic, ...routed].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
+
   if (!onlyThisApp) return swaps
 
   const stamped = swaps.filter((s) => s.fromThisApp)
@@ -147,4 +183,44 @@ export async function fetchSwapHistory(
   // list is the lesser wrong: showing a few extra swaps beats telling a user
   // their trade never happened.
   return stamped.length > 0 ? stamped : swaps
+}
+
+/**
+ * A router swap, read from the transfers a contract call performed.
+ *
+ * Returns nothing unless the account both sent and received something. A
+ * contract call that only moves value one way is a deposit, a supply or a
+ * transfer — real activity, but not a swap, and listing it as one would
+ * misdescribe it.
+ *
+ * `fromThisApp` is false for every one of these: a Soroban transaction carries
+ * no text memo, so the stamp that separates this app's classic trades from any
+ * other wallet's cannot exist here. The caller's fallback handles that — it
+ * shows the unstamped list rather than claiming the trade never happened.
+ */
+function routerSwapOf(
+  op: HorizonOperation,
+  account: string,
+  memoByHash: Map<string, string>
+): SwapRecord | undefined {
+  const changes = op.asset_balance_changes ?? []
+  if (changes.length === 0) return undefined
+
+  const sent = changes.find((c) => c.from === account && c.amount !== undefined)
+  const received = changes.find((c) => c.to === account && c.amount !== undefined)
+  if (sent === undefined || received === undefined) return undefined
+
+  return {
+    txHash: op.transaction_hash,
+    settledAt: op.created_at,
+    sentAmount: sent.amount ?? '0',
+    sentAsset: assetName(sent.asset_type, sent.asset_code),
+    receivedAmount: received.amount ?? '0',
+    receivedAsset: assetName(received.asset_type, received.asset_code),
+    // A router reports no path, and the hop count is not recoverable from the
+    // transfers. Zero states "not known" rather than asserting a direct route.
+    hops: 0,
+    fromThisApp: memoByHash.get(op.transaction_hash) === INTENT_MEMO,
+    explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+  }
 }
