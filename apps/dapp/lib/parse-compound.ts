@@ -52,6 +52,31 @@ const SEQUENCE_MARKERS = /\b(?:and\s+then|then|after\s+that|afterwards|followed\
 export type FollowOnKind = 'lend'
 
 /**
+ * An instruction to supply an asset already held, with no trade first.
+ *
+ * "Supply my XLM to Blend" parsed as a market buy of XLM — it would have
+ * *bought* XLM rather than supplying what the account already holds, which is
+ * worse than refusing it. The single-action parser assumes every intent is a
+ * trade, and nothing in its vocabulary expresses "use what I have".
+ */
+export interface SupplyOnlyIntent {
+  kind: 'supply-only'
+  /** Ticker of the asset to supply. */
+  asset: string
+  /**
+   * The size the user named. Absent means the whole balance.
+   *
+   * Read with `amountIsUsd`: "20 XLM" and "$20 of XLM" are different amounts of
+   * the same asset, and supplying one where the other was meant moves roughly a
+   * hundred times too much or too little.
+   */
+  amount?: string
+  /** True when `amount` is dollars rather than units of the asset. */
+  amountIsUsd?: boolean
+  venue: string
+}
+
+/**
  * Words that name supplying to a lending pool.
  *
  * Inflected forms are matched explicitly rather than by stemming. "Followed by
@@ -162,4 +187,73 @@ export function parseCompoundIntent(
   }
 
   return { head, followOn, clauses: [first, second] }
+}
+
+/**
+ * Words naming an amount of an asset the account already holds.
+ *
+ * "my XLM" and "all my XLM" mean the whole balance; "500 XLM" names a figure.
+ * The distinction matters because supplying everything and supplying a stated
+ * amount are different instructions, and guessing between them moves funds the
+ * user did not mean to move.
+ */
+const SUPPLY_TARGET =
+  /(?:\b(all\s+(?:of\s+)?my|my)\s+([A-Za-z]{2,12})\b|\$\s*([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?([A-Za-z]{2,12})\b|\b([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?([A-Za-z]{2,12})\b)/i
+
+/**
+ * Reads "supply what I already hold" out of free text, or returns null.
+ *
+ * Deliberately narrow. It fires only when the sentence names a lending action
+ * and *no* trade: anything mentioning a swap, a buy or a sell is a trade whose
+ * proceeds may then be supplied, which `parseCompoundIntent` already handles.
+ * Reading one as the other would either skip a trade the user asked for or
+ * invent one they did not.
+ */
+export function parseSupplyOnlyIntent(
+  raw: string,
+  allowedSymbols: string[] = []
+): SupplyOnlyIntent | null {
+  const text = raw.trim()
+
+  if (!LEND_PHRASING.test(text)) return null
+  // A trade verb means the proceeds of something are being supplied, not an
+  // existing balance.
+  if (/\b(?:swap|buy|purchase|sell|convert|trade|exchange)\b/i.test(text)) return null
+
+  const venue = detectVenue(text)
+  // A venue this app does not integrate is refused rather than substituted.
+  if (venue === undefined && /\b(?:on|to|into)\s+([a-z]+)/i.test(text)) {
+    const named = /\b(?:on|to|into)\s+([a-z]+)/i.exec(text)?.[1]?.toLowerCase()
+    const NOT_VENUES = new Set(['it', 'that', 'the', 'a', 'an', 'my', 'this', 'them', 'work'])
+    if (named !== undefined && !NOT_VENUES.has(named)) return null
+  }
+
+  const match = SUPPLY_TARGET.exec(text)
+  if (match === null) return null
+
+  // Three shapes, in the order the pattern lists them: the whole balance, a
+  // dollar figure, or a count of the asset itself.
+  const wholeBalance = match[1] !== undefined
+  const usdAmount = match[3]
+  const symbol = (wholeBalance ? match[2] : (match[4] ?? match[6]))?.toUpperCase()
+  if (symbol === undefined) return null
+
+  // Checked against what the app can actually trade, so a typo becomes a
+  // refusal rather than an instruction naming an asset that does not exist.
+  // This also catches the filler words: without the allowlist, "supply $20
+  // worth of XLM" once read as twenty units of an asset called "worth".
+  if (allowedSymbols.length > 0 && !allowedSymbols.includes(symbol)) return null
+
+  const rawAmount = wholeBalance ? undefined : (usdAmount ?? match[5])
+  const amount = rawAmount?.replace(/,/g, '')
+
+  return {
+    kind: 'supply-only',
+    asset: symbol,
+    ...(amount !== undefined ? { amount } : {}),
+    // A dollar figure has to be converted at the live price before anything is
+    // supplied. Saying which unit this is beats the caller guessing.
+    ...(amount !== undefined && usdAmount !== undefined ? { amountIsUsd: true } : {}),
+    venue: venue ?? 'blend',
+  }
 }
