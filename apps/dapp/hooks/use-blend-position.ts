@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 
-import type { BlendPosition } from '../lib/lend/position'
+import type { BlendPosition, BlendPositions } from '../lib/lend/position'
 import { useWallet } from './use-wallet'
 
 /**
@@ -17,15 +17,23 @@ import { useWallet } from './use-wallet'
  * while loading and from an error. A caller that conflates them either shows an
  * empty position as a failure, or a failure as an empty position.
  */
-async function loadPosition(account: string): Promise<BlendPosition | null> {
+interface PositionResponse {
+  position: BlendPosition | null
+  positions: BlendPositions | null
+}
+
+async function loadPosition(account: string): Promise<PositionResponse> {
   const res = await fetch(`/api/lend/position?account=${encodeURIComponent(account)}`)
   if (!res.ok) throw new Error('could not read your Blend position')
-  const body = (await res.json()) as { position?: BlendPosition | null }
-  return body.position ?? null
+  const body = (await res.json()) as Partial<PositionResponse>
+  return { position: body.position ?? null, positions: body.positions ?? null }
 }
 
 export function useBlendPosition(): {
+  /** The plain XLM supply, for callers that predate collateral. */
   position: BlendPosition | null | undefined
+  /** Supply, collateral, debt and health together. */
+  positions: BlendPositions | null | undefined
   loading: boolean
   error: boolean
 } {
@@ -41,5 +49,10 @@ export function useBlendPosition(): {
     staleTime: 30_000,
   })
 
-  return { position: data, loading: isLoading, error: isError }
+  return {
+    position: data?.position,
+    positions: data?.positions,
+    loading: isLoading,
+    error: isError,
+  }
 }

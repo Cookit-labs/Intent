@@ -24,6 +24,11 @@ const LIVE_CONFIG: ReserveConfig = {
   enabled: true,
   util: 0.5,
   maxUtil: 0.95,
+  // Both 0.90 for XLM on the live pool. They matter to the health factor
+  // rather than to the rate maths this file tests, but the shape has to be
+  // complete for the fixture to stand in for a real reserve.
+  cFactor: 0.9,
+  lFactor: 0.9,
   rBase: BigInt(5000),
   rOne: BigInt(300000),
   rTwo: BigInt(2000000),

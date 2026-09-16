@@ -102,6 +102,23 @@ export interface ReserveConfig {
   util: number
   /** Utilisation above which new borrows are refused, as a fraction. */
   maxUtil: number
+  /**
+   * How much of this asset's value counts as collateral, as a fraction.
+   *
+   * 0.90 for XLM here: $100 of it backs $90 of borrowing. Read rather than
+   * assumed, because it differs per reserve — USDC is 0.95, wETH 0.85 — and a
+   * health factor computed with the wrong one is wrong in the direction of
+   * looking safer than it is.
+   */
+  cFactor: number
+  /**
+   * How much a liability in this asset counts against the position.
+   *
+   * Applied as a *division*, so a factor below one makes a debt weigh more
+   * than its face value. The asymmetry with `cFactor` is the pool's margin of
+   * safety and must survive into anything that recomputes health.
+   */
+  lFactor: number
   rBase: bigint
   rOne: bigint
   rTwo: bigint
@@ -334,6 +351,8 @@ export async function readReserve(
     enabled: raw.config['enabled'] !== false,
     util: asNumber(raw.config['util']) / Number(SCALAR_7),
     maxUtil: asNumber(raw.config['max_util']) / Number(SCALAR_7),
+    cFactor: asNumber(raw.config['c_factor']) / Number(SCALAR_7),
+    lFactor: asNumber(raw.config['l_factor']) / Number(SCALAR_7),
     rBase: asBigInt(raw.config['r_base']),
     rOne: asBigInt(raw.config['r_one']),
     rTwo: asBigInt(raw.config['r_two']),

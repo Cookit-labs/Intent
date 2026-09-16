@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { readBlendPosition } from '../../../../lib/lend/position'
+import { readBlendPosition, readBlendPositions } from '../../../../lib/lend/position'
 
 /**
  * What an account currently holds in the Blend pool.
@@ -22,10 +22,16 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   try {
+    const positions = await readBlendPositions(account)
     const position = await readBlendPosition(account)
-    // Null is a real answer — an account with nothing supplied — and must not
-    // read as a failure, or an empty position would show as an error.
-    return NextResponse.json({ position })
+
+    // `position` is the plain XLM supply, kept for callers written before
+    // collateral existed. `positions` is the whole picture — supply,
+    // collateral, debt and health — which is what anything showing risk needs.
+    //
+    // Null is a real answer for the former, meaning nothing supplied, and must
+    // not read as a failure.
+    return NextResponse.json({ position, positions })
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'could not read position' },
