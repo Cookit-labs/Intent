@@ -2,7 +2,7 @@
 
 import { Button, Card } from '@intent/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRight, ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
@@ -10,6 +10,7 @@ import { useBlendPosition } from '../../hooks/use-blend-position'
 import { useWithdraw } from '../../hooks/use-withdraw'
 import type { OpenOffer } from '../../lib/swap/offers'
 import { blendPositionUrl } from '../../lib/swap/contract-registry'
+import { toBaseUnits } from '../../lib/swap/assets'
 import { TokenIcon } from '../ui/token-icon'
 import { WithdrawConfirm } from './withdraw-confirm'
 
@@ -40,11 +41,45 @@ function amount(raw: string): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 4 })
 }
 
+/**
+ * A typed amount as base units, or undefined when it is not one yet.
+ *
+ * `toBaseUnits` throws on anything that is not a positive decimal of at most
+ * seven places, and a throw inside a click handler is silent -- the button
+ * would simply do nothing, which is the exact failure shape that took an
+ * afternoon to find once already. So the conversion is attempted here, and a
+ * value that cannot convert disables the button instead of breaking it.
+ *
+ * An amount larger than the position is refused rather than clamped. The pool
+ * would clamp it, but accepting "9999" against a balance of 5,656 and quietly
+ * withdrawing a different number is worse than saying no -- and "All" already
+ * expresses "everything" precisely.
+ */
+function typedBaseUnits(draft: string, heldBase: string): string | undefined {
+  const trimmed = draft.trim()
+  if (trimmed === '') return undefined
+
+  let base: string
+  try {
+    base = toBaseUnits(trimmed)
+  } catch {
+    return undefined
+  }
+
+  const value = BigInt(base)
+  if (value <= BigInt(0)) return undefined
+  if (value > BigInt(heldBase)) return undefined
+  return base
+}
+
 export function OpenPositions(): JSX.Element | null {
   const { address, isConnected } = useWallet()
   const { position } = useBlendPosition()
   const withdraw = useWithdraw()
   const queryClient = useQueryClient()
+  // What the user has typed, held as text rather than a number: a half-written
+  // "5." is a valid thing to be typing and not a valid number.
+  const [draft, setDraft] = useState('')
 
   const { data: offers } = useQuery({
     queryKey: ['open-offers', address],
@@ -64,6 +99,9 @@ export function OpenPositions(): JSX.Element | null {
 
   const resting = offers ?? []
   const count = resting.length + (position != null ? 1 : 0)
+
+  const busy = withdraw.phase !== 'idle'
+  const typed = position == null ? undefined : typedBaseUnits(draft, position.amount)
 
   // Nothing open is a perfectly good state and says so once, rather than
   // rendering an empty titled section that reads as something failing to load.
@@ -92,20 +130,47 @@ export function OpenPositions(): JSX.Element | null {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2">
             {/* The reason this section exists. Blend's own dashboard does not
                 offer a withdrawal for a plain (non-collateral) supply, which is
                 how a real position became visible here and retrievable
                 nowhere. */}
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              inputMode="decimal"
+              placeholder="Amount"
+              aria-label={`Amount of ${position.symbol} to withdraw`}
+              disabled={busy}
+              className="border-border bg-background focus:border-foreground/40 w-24 rounded-md border px-2 py-1.5 text-sm tabular-nums outline-none transition-colors disabled:opacity-50"
+            />
             <Button
               size="sm"
               variant="outline"
+              onClick={() => {
+                if (typed === undefined) return
+                withdraw.prepare({
+                  assetId: position.assetId,
+                  symbol: position.symbol,
+                  amount: typed,
+                })
+              }}
+              disabled={busy || typed === undefined}
+            >
+              Withdraw
+            </Button>
+            {/* Distinct from typing the balance shown. That figure is stale the
+                moment it renders -- the position earns every ledger -- so only
+                this path can actually empty it. */}
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() =>
                 withdraw.prepare({ assetId: position.assetId, symbol: position.symbol })
               }
-              disabled={withdraw.phase !== 'idle'}
+              disabled={busy}
             >
-              Withdraw
+              All
             </Button>
             <a
               href={blendPositionUrl()}
