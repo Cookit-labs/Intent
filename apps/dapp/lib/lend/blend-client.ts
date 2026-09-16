@@ -27,10 +27,15 @@ import { BLEND_POOL } from '../swap/contract-registry'
  * clothes, so all three are pinned to the signer and read back out of the
  * encoded bytes rather than trusted from the arguments.
  *
- * Borrowing is deliberately absent. A supply-only position cannot be
- * liquidated — the pool never checks health on a supply, and it panics outright
- * when asked to open a liquidation auction against an account with no
- * liabilities. That guarantee holds only while nothing here can open one.
+ * **A plain supply still cannot be liquidated, and collateral can.** The pool
+ * never checks health on a type-0 supply, and it panics outright when asked to
+ * open a liquidation auction against an account with no liabilities — so an
+ * account that only ever supplies is safe by construction, not by convention.
+ * Posting collateral (type 2) is what spends that guarantee, and borrowing is
+ * what makes spending it consequential. Anything describing a position to a
+ * user has to keep the two apart: saying "your supply could be liquidated"
+ * about a type-0 balance would be false, and saying the reverse about
+ * collateral would be dangerous.
  */
 
 /**
@@ -46,9 +51,10 @@ const REQUEST_TYPE_SUPPLY = 0
  * Withdraw, in Blend's request enum.
  *
  * The counterpart to Supply and the exact inverse: type 1 takes back what type
- * 0 put in. Type 3 is `WithdrawCollateral`, which this app never needs because
- * it never supplies as collateral — a position opened here is always type 0, so
- * it always comes out as type 1.
+ * 0 put in. Collateral is a separate pair — types 2 and 3 below — and the two
+ * do not cross: a plain supply cannot be reclaimed with type 3, and collateral
+ * cannot be reclaimed with type 1. The pool tracks them in different maps and
+ * answers the wrong one with `InvalidBTokenBurnAmount`.
  *
  * Verified against the live pool before being written: simulating a type-1
  * submit for 1 XLM, for 500 XLM, and for the whole position all succeeded, the
@@ -71,6 +77,35 @@ const REQUEST_TYPE_WITHDRAW = 1
  */
 const REQUEST_TYPE_SUPPLY_COLLATERAL = 2
 const REQUEST_TYPE_WITHDRAW_COLLATERAL = 3
+
+/**
+ * Borrow and Repay, types 4 and 5.
+ *
+ * The first operations here that can cost a user money while they are not
+ * looking. Everything else this app builds either settles at once or rests
+ * harmlessly; a liability accrues interest and can be liquidated.
+ *
+ * They ship together and must stay together. A borrow that cannot be repaid
+ * from this app would leave a growing debt reachable only elsewhere — the same
+ * trap as a position that could be supplied but not withdrawn, except this one
+ * gets worse with time rather than staying still.
+ *
+ * Both verified against the live pool: collateral, borrow, and repay in a
+ * single `submit` was accepted end to end.
+ */
+const REQUEST_TYPE_BORROW = 4
+const REQUEST_TYPE_REPAY = 5
+
+/**
+ * Repaying more than is owed repays exactly what is owed.
+ *
+ * The same clamping the withdrawal sentinel relies on, and needed for the same
+ * reason in the opposite direction: interest accrues every ledger, so a debt
+ * figure read a moment ago is already *short*. Repaying it exactly would leave
+ * a few stroops outstanding — and unlike leftover supply dust, a leftover
+ * liability keeps growing and keeps the position liquidatable.
+ */
+const REPAY_EVERYTHING = '170141183460469231731687303715884105727'
 
 /**
  * Asking for more than the position holds withdraws all of it.
@@ -253,6 +288,28 @@ export function assertSelfCollateralWithdraw(built: string, account: string): vo
 }
 
 /**
+ * The same check for a borrow, where `to` matters most of all.
+ *
+ * On a supply, a substituted `to` misdirects the user's own money into someone
+ * else's position. On a borrow it is worse in kind: the borrowed asset goes to
+ * the substituted address while **the debt and the liquidation risk stay with
+ * the signer**. They would be left owing for money they never received.
+ */
+export function assertSelfBorrow(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'borrow')
+}
+
+/**
+ * And for a repayment, where the risk runs the other way.
+ *
+ * A substituted `to` here would spend the signer's balance clearing somebody
+ * else's debt, leaving their own liability untouched and still accruing.
+ */
+export function assertSelfRepay(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'repayment')
+}
+
+/**
  * Re-reads a built pool call and refuses anything that is not a lone `submit`
  * acting entirely on behalf of this account.
  *
@@ -261,7 +318,13 @@ export function assertSelfCollateralWithdraw(built: string, account: string): vo
  * argument shape, so a second implementation could only drift away from this
  * one.
  */
-type PoolCallNoun = 'supply' | 'withdrawal' | 'collateral supply' | 'collateral withdrawal'
+type PoolCallNoun =
+  | 'supply'
+  | 'withdrawal'
+  | 'collateral supply'
+  | 'collateral withdrawal'
+  | 'borrow'
+  | 'repayment'
 
 function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun): void {
   const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
@@ -549,6 +612,42 @@ export async function buildBlendCollateralWithdraw(
     'collateral withdrawal',
     WITHDRAW_EVERYTHING
   )
+}
+
+/**
+ * Borrows an asset against collateral already posted.
+ *
+ * No `everything` sentinel, deliberately. "Withdraw all" and "repay all" are
+ * well defined — a balance the pool can clamp to — but "borrow all" is not: the
+ * limit depends on collateral value, oracle prices and the reserve's spare
+ * liquidity, all of which move. A caller must name a figure, and
+ * `maxBorrow` in `./health` is how the UI arrives at one.
+ *
+ * **Two independent limits apply and only one is visible from a position.**
+ * Collateral bounds the borrow through the health factor, which this app can
+ * compute. The reserve's utilisation ceiling bounds it too, and that cannot be
+ * derived from the borrower at all — wBTC sat at 94.3% against a 95% cap while
+ * this was written, so a well-collateralised borrow is refused for reasons that
+ * have nothing to do with the borrower. Only the simulation knows.
+ */
+export async function buildBlendBorrow(options: BuildCollateralOptions): Promise<BuiltCollateral> {
+  if (options.amount === undefined) {
+    throw new Error('a borrow needs an amount')
+  }
+  return buildSinglePoolCall(options, REQUEST_TYPE_BORROW, 'borrow', undefined)
+}
+
+/**
+ * Repays a liability, in whole or in part.
+ *
+ * Omitting the amount repays everything, and that is the path worth taking:
+ * a debt read a moment ago is already larger, so repaying an exact figure
+ * leaves a remainder that keeps accruing and keeps the position liquidatable.
+ * The pool clamps an over-large repayment to what is actually owed, so the
+ * sentinel costs nothing and closes the liability exactly.
+ */
+export async function buildBlendRepay(options: BuildCollateralOptions): Promise<BuiltCollateral> {
+  return buildSinglePoolCall(options, REQUEST_TYPE_REPAY, 'repayment', REPAY_EVERYTHING)
 }
 
 /**

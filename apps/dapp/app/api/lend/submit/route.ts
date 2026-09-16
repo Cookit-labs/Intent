@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 
-import { assertSelfSupply, assertSelfWithdraw } from '../../../../lib/lend/blend-client'
+import {
+  assertSelfBorrow,
+  assertSelfCollateralSupply,
+  assertSelfCollateralWithdraw,
+  assertSelfRepay,
+  assertSelfSupply,
+  assertSelfWithdraw,
+} from '../../../../lib/lend/blend-client'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 
 /**
@@ -20,7 +27,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   // `kind` only selects which noun a refusal is phrased with. Both assertions
   // enforce the same rules, so an absent or unrecognised value is safe rather
   // than a hole — it falls through to the supply wording.
-  let body: { signedXdr?: unknown; account?: unknown; kind?: 'supply' | 'withdraw' }
+  let body: {
+    signedXdr?: unknown
+    account?: unknown
+    kind?: 'supply' | 'withdraw' | 'collateral' | 'reclaim' | 'borrow' | 'repay'
+  }
   try {
     body = (await request.json()) as typeof body
   } catch {
@@ -44,11 +55,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     // three addresses — so this would pass either way. It is named explicitly
     // so a refusal says which kind of call was refused, rather than telling
     // someone withdrawing that their supply was rejected.
-    if (body.kind === 'withdraw') {
-      assertSelfWithdraw(body.signedXdr, body.account)
-    } else {
-      assertSelfSupply(body.signedXdr, body.account)
-    }
+    // All six enforce identical rules — same `submit`, same three addresses —
+    // so the choice only shapes the wording of a refusal. Which still matters:
+    // telling someone their supply was rejected when they were repaying a loan
+    // sends them looking in the wrong place.
+    const ASSERTIONS = {
+      supply: assertSelfSupply,
+      withdraw: assertSelfWithdraw,
+      collateral: assertSelfCollateralSupply,
+      reclaim: assertSelfCollateralWithdraw,
+      borrow: assertSelfBorrow,
+      repay: assertSelfRepay,
+    } as const
+
+    const assertSelf = ASSERTIONS[body.kind ?? 'supply'] ?? assertSelfSupply
+    assertSelf(body.signedXdr, body.account)
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'refusing to submit' },
