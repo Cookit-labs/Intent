@@ -8,6 +8,18 @@ import { useChain } from '../../providers/chain-provider'
 import { venues } from '../../lib/venues'
 import { VenueCard } from './venue-card'
 
+/** Integrated first, then quoted, then merely listed. */
+function rank(venue: { integration?: string }): number {
+  switch (venue.integration) {
+    case 'executes':
+      return 2
+    case 'quotes':
+      return 1
+    default:
+      return 0
+  }
+}
+
 export function VenueGrid(): JSX.Element {
   const [query, setQuery] = useState('')
   const { descriptor } = useChain()
@@ -16,10 +28,20 @@ export function VenueGrid(): JSX.Element {
     // Only venues that exist on the active chain's family: a Stellar user has
     // no way to trade on Uniswap, so listing it would be noise.
     const onChain = venues.filter((v) => v.family === descriptor.family)
+
+    // Venues the app can actually use come first. Alphabetical order put
+    // Aquarius — which intents have never touched — above Soroswap, which they
+    // route through, so the most useful thing the page knows was buried.
+    const ranked = [...onChain].sort((a, b) => rank(b) - rank(a))
+
     const q = query.trim().toLowerCase()
-    if (!q) return onChain
-    return onChain.filter((v) =>
-      [v.name, v.category, v.bestFor].some((field) => field.toLowerCase().includes(q))
+    if (!q) return ranked
+    return ranked.filter((v) =>
+      // Capability is searchable too: someone looking for "treasuries" or
+      // "lending" is describing what they want done, not naming a venue.
+      [v.name, v.category, v.bestFor, v.capability ?? ''].some((field) =>
+        field.toLowerCase().includes(q)
+      )
     )
   }, [query, descriptor.family])
 

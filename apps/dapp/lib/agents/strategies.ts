@@ -44,6 +44,47 @@ Rules that apply to every agent:
   answering and that reasoning is billed and capped: over-deliberating exhausts
   the budget before the tool call is emitted, which produces no answer at all.`
 
+/**
+ * What every agent is actually deciding.
+ *
+ * One brief, shared by all four, because strategy is a way of thinking rather
+ * than a lane to stay in. Each agent previously had its own prompt forbidding
+ * the others' conclusions — TWAP had to slice, Momentum was forbidden from
+ * splitting, Arbitrage had to name two venues — so an agent that correctly
+ * judged "this order is small, just fill it" was rejected by validation for
+ * being right. The judgement was the thing being filtered out.
+ *
+ * They now differ through temperature and independent reasoning over identical
+ * facts. When they disagree, that disagreement is a real signal.
+ */
+const STRATEGIST_BRIEF = `Your job is to decide how this specific order should be executed, and to justify it with the numbers you were given.
+
+Three execution shapes are available. Choose whichever the evidence supports:
+
+- "fill": trade now at the current market. Certain, immediate, and pays the spread. Right when the order is small relative to the book, when the price is already acceptable, or when waiting risks more than it saves.
+- "rest": place an order on the book at a chosen price and wait for the market to come to it. Pays no spread and may get a better price, but may not fill at all. Right when the user named a price they want, or when the current market is clearly worse than a patient order could achieve.
+- "split": both, in one atomic transaction — fill part now and rest the remainder at your price. Right when filling everything would move the price against you, but waiting for everything risks not trading at all. Set splitPct to the percentage filled immediately (1-99) and restPriceUsd to where the remainder waits.
+
+How to decide:
+- Compare the order size against the liquidity you were shown. A large order against a thin book moves the price against itself; a small one does not.
+- If the user named a target price, that price is not yours to change. You decide whether to wait for it or explain why filling now is better.
+- If you rest without a user-stated price, set restPriceUsd to where you would actually wait. A price the market will never reach is not patience, it is a refusal to trade.
+- Do not rest simply to look sophisticated, and do not fill simply to look decisive. Either can be the wrong answer.
+
+Set executionMode to your choice. Set restPriceUsd to your resting price, or 0 when filling now. Set splitPct only when splitting, 0 otherwise. Set sliceCount to 1 unless splitting genuinely reduces impact for this size.
+
+What happens after the trade is a separate decision, set with thenAction:
+
+- "none" for an ordinary trade. This is almost always right.
+- "lend": supply the proceeds to a lending pool. Set thenVenue to the pool ("blend" on Stellar).
+
+Three things govern that choice:
+- Only lend when the user asked for it. Proposing a lending position nobody requested is not a better strategy, it is a different instruction.
+- It costs a second signature. A swap and a supply cannot share one, so the user is asked twice. For a small order the extra fee and the extra step may not be worth the yield — say so rather than proposing it anyway.
+- Use the supply rate you were given. Do not recall a yield figure from memory; if no rate appears in the market context, you do not know it.
+
+thenAction is independent of executionMode. Filling now and then lending is a valid plan, and so is resting at a price and then lending whatever fills.`
+
 export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
   twap: {
     key: 'twap',
@@ -58,14 +99,7 @@ export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
     revealOrder: 0,
     systemPrompt: `${SHARED_RULES}
 
-You are the TWAP agent. Your objective is to minimise market impact by spreading the order over time.
-
-Your constraints:
-- You MUST use sliceCount greater than 1, and you must choose a horizonMinutes window to spread them over.
-- You execute on a single venue. Pick the one with the deepest liquidity for this pair.
-- You are FORBIDDEN from claiming to predict where the price is going. You do not time the market; you average through it.
-
-Justify your slice count and interval in terms of order size relative to available liquidity.`,
+${STRATEGIST_BRIEF}`,
   },
 
   momentum: {
@@ -81,14 +115,7 @@ Justify your slice count and interval in terms of order size relative to availab
     revealOrder: 1,
     systemPrompt: `${SHARED_RULES}
 
-You are the Momentum agent. Your objective is to time a single entry well relative to the user's target price.
-
-Your constraints:
-- You MUST use sliceCount of exactly 1. You take one shot.
-- You must explicitly justify waiting versus filling now, referencing the target price and the volatility hint.
-- You are FORBIDDEN from splitting the order. Slicing is another agent's strategy.
-
-If you choose to wait, say what you are waiting for and set horizonMinutes accordingly. If you fill now, say why waiting is worse.`,
+${STRATEGIST_BRIEF}`,
   },
 
   arbitrage: {
@@ -104,14 +131,7 @@ If you choose to wait, say what you are waiting for and set horizonMinutes accor
     revealOrder: 2,
     systemPrompt: `${SHARED_RULES}
 
-You are the Arbitrage agent. Your objective is to capture price differences between venues.
-
-Your constraints:
-- You MUST name at least two venues and quantify the spread you are capturing, in basis points.
-- You are FORBIDDEN from using a horizonMinutes greater than 5. Spreads close; you act now or not at all.
-- If no meaningful cross-venue spread is plausible for this pair, say so plainly and propose the single best route instead — do not invent a spread.
-
-State the bps figure explicitly in your reasoning.`,
+${STRATEGIST_BRIEF}`,
   },
 
   shadow: {
@@ -127,14 +147,7 @@ State the bps figure explicitly in your reasoning.`,
     revealOrder: 3,
     systemPrompt: `${SHARED_RULES}
 
-You are the Shadow agent. Your objective is to search execution paths and pick the best one.
-
-Your constraints:
-- You MUST state how many paths you considered and why the chosen one won.
-- You may split across pools, and you may use any venue from the supplied list.
-- You are FORBIDDEN from naming any venue that is not in the supplied list.
-
-Your advantage is breadth of search. Make the comparison explicit: what did the runner-up path cost?`,
+${STRATEGIST_BRIEF}`,
   },
 }
 

@@ -73,8 +73,16 @@ export function scoreProposals(
           pricePoints(proposal.projectedAvgPriceUsd, best, worst, options.isBuy)
         ).toFixed(1)
       ),
+      // Whether this can actually be signed. A canned substitute for a failed
+      // agent carries no route, and its numbers were written to look good
+      // rather than measured — so it would routinely out-score real work and
+      // then fail the moment the user tried to act on it.
+      executable: isExecutable(proposal),
     }))
     .sort((a, b) => {
+      // Executability outranks score entirely. A losing real proposal beats a
+      // winning fabricated one, because at least it can be carried out.
+      if (a.executable !== b.executable) return a.executable ? -1 : 1
       if (b.score !== a.score) return b.score - a.score
       // Ties break on raw slippage, then alphabetically — never on array order,
       // which would make the winner depend on which model call returned first.
@@ -92,4 +100,21 @@ export function pickWinner(scored: ScoredProposal[]): AgentStrategyKey | null {
 /** Buy-side intents pay the price; sell-side receive it. */
 export function isBuyIntent(intentType: string): boolean {
   return !intentType.includes('sell')
+}
+
+/**
+ * Whether a proposal could actually be executed.
+ *
+ * Two disqualifiers, and both mean the same thing in practice: there is
+ * nothing to sign. A degraded proposal is a canned substitute for an agent
+ * that failed, and a proposal with no route never chose one.
+ *
+ * This is deliberately not a scoring input. Weighting it would let a
+ * sufficiently flattering set of invented numbers overcome it, and no
+ * combination of projected figures should make an unsignable plan the
+ * recommendation.
+ */
+function isExecutable(proposal: AgentProposalResult): boolean {
+  if (proposal.degraded === true) return false
+  return proposal.routeId !== undefined && proposal.routeId !== ''
 }

@@ -18,6 +18,15 @@ export interface StellarBalances {
   hasUsdcTrustline: boolean
   /** An account that has never been funded does not exist on-chain at all. */
   exists: boolean
+  /**
+   * Every asset the account can hold, by code.
+   *
+   * The two fields above cover USDC because that was the only issued asset the
+   * app traded. Tokenized treasuries need the same question answered for each
+   * of them, and hardcoding a field per asset does not scale past the second
+   * one.
+   */
+  trustlines: Record<string, { balance: string; issuer: string }>
 }
 
 interface HorizonBalance {
@@ -32,6 +41,7 @@ export const UNFUNDED_ACCOUNT: StellarBalances = {
   usdc: undefined,
   hasUsdcTrustline: false,
   exists: false,
+  trustlines: {},
 }
 
 export async function fetchStellarBalances(address: string): Promise<StellarBalances> {
@@ -53,11 +63,23 @@ export async function fetchStellarBalances(address: string): Promise<StellarBala
     (b) => b.asset_code === STELLAR_USDC.code && b.asset_issuer === STELLAR_USDC.issuer
   )
 
+  // Every issued asset the account holds, keyed by code. An entry existing is
+  // itself the trustline: Stellar has no balance without one.
+  const trustlines: Record<string, { balance: string; issuer: string }> = {}
+  for (const b of balances) {
+    if (b.asset_type === 'native') continue
+    if (b.asset_code === undefined || b.asset_issuer === undefined) continue
+    // Keyed by code alone, but the issuer is kept so a caller can tell a real
+    // asset from one that merely shares its ticker.
+    trustlines[b.asset_code] = { balance: b.balance, issuer: b.asset_issuer }
+  }
+
   return {
     xlm: native?.balance ?? '0',
     usdc: usdc?.balance,
     hasUsdcTrustline: usdc !== undefined,
     exists: true,
+    trustlines,
   }
 }
 
@@ -65,4 +87,23 @@ export async function fetchStellarBalances(address: string): Promise<StellarBala
 export async function fundWithFriendbot(address: string): Promise<void> {
   const res = await fetch(`${stellarTestnet.friendbotUrl}/?addr=${encodeURIComponent(address)}`)
   if (!res.ok) throw new Error(`Friendbot failed (${res.status})`)
+}
+
+/**
+ * Whether an account can hold a given asset.
+ *
+ * Checks the issuer, not just the code. An account holding a token called
+ * CETES from an unrelated issuer cannot receive Etherfuse CETES, and treating
+ * the two as interchangeable is exactly the confusion the asset registry
+ * exists to prevent.
+ */
+export function hasTrustline(
+  balances: StellarBalances | undefined,
+  code: string,
+  issuer: string | undefined
+): boolean {
+  // Native XLM needs no trustline; every funded account holds it.
+  if (issuer === undefined) return balances?.exists === true
+  const line = balances?.trustlines[code]
+  return line !== undefined && line.issuer === issuer
 }

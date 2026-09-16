@@ -39,6 +39,80 @@ export interface MarketContext {
   venues: { id: string; name: string; category: string }[]
   volatilityHint: 'low' | 'normal' | 'elevated'
   gasHint: 'cheap' | 'normal' | 'expensive'
+  /**
+   * Assets the agent may name, and what each one actually is.
+   *
+   * Supplied rather than assumed for the same reason prices are: a model asked
+   * to recall which tokens exist will confidently invent one. It also means an
+   * agent can propose buying tokenized treasuries at all — it cannot suggest an
+   * asset class it was never told about.
+   *
+   * Only assets with a live market appear here. Etherfuse issues four bonds on
+   * testnet and one of them trades; offering the rest would invite a confident
+   * plan that fails at quote time.
+   */
+  assets?: { code: string; what: string; trust: string }[]
+  /**
+   * Live lending rates, when the chain has a lending integration.
+   *
+   * Supplied rather than recalled, for the same reason prices are: a model
+   * asked to remember a yield will confidently invent one, and a fabricated
+   * APY beside a real trade is worse than no figure at all. Absent on chains
+   * with no lending, which is how an agent learns the option does not exist
+   * rather than being told not to use it.
+   */
+  lending?: { venue: string; asset: string; supplyApy: number; utilisation: number }[]
+  /**
+   * Executable routes, already priced against real liquidity.
+   *
+   * The agents choose between these; they never invent one. A model is good at
+   * judging which route suits an intent and bad at recalling what anything
+   * costs, so the quoting happens first and deterministically, and the result
+   * is handed over as fact — the same discipline already applied to `prices`.
+   *
+   * Empty when the pair has no route or the chain cannot execute, in which case
+   * agents reason about the intent without proposing execution.
+   */
+  routes?: QuotedRoute[]
+}
+
+/**
+ * A route as an agent sees it: enough to choose between options, plus the
+ * opaque handle needed to execute the one that wins.
+ */
+export interface QuotedRoute {
+  /** Stable id the agent names when picking. Not a venue label — a specific quote. */
+  id: string
+  source: string
+  /** Human-scale figures, so the model is not asked to divide by 10^7. */
+  sendAmount: string
+  receiveAmount: string
+  hops: number
+  /**
+   * The assets this route passes through, or 'direct'.
+   *
+   * Several routes for one pair are otherwise indistinguishable in the prompt:
+   * "2 hops" twice says nothing an agent can choose on, while "via EURC"
+   * against "direct" is a real difference.
+   */
+  via?: string
+  /**
+   * Caveat about what this route actually delivers, when it differs from the
+   * others. Two venues quoting "USDC" may mean two different assets.
+   */
+  note?: string
+  /**
+   * False when the route can be priced but not yet signed.
+   *
+   * A venue can be worth comparing before it is worth executing: Soroswap's
+   * quote is real liquidity and belongs in the comparison, but building it
+   * needs a Soroban invocation this app does not do yet. Showing it while
+   * marking it unexecutable is more honest than hiding it and claiming
+   * Horizon was the only price available.
+   */
+  executable: boolean
+  /** The quote itself, passed through untouched for execution. */
+  quote: unknown
 }
 
 export interface ProposalRequest {
@@ -58,6 +132,14 @@ export interface ProposalRequest {
  */
 export interface AgentProposalResult {
   strategy: AgentStrategyKey
+  /**
+   * The route this agent would execute, when one was offered and chosen.
+   *
+   * Optional: the mock brain and any chain without execution leave it unset,
+   * and a proposal without a route is still a valid opinion — it just cannot
+   * be signed.
+   */
+  routeId?: string
   /** One or two sentences, shown in the competition panel. */
   reasoning: string
   projectedAvgPriceUsd: number
@@ -69,6 +151,50 @@ export interface AgentProposalResult {
   /** Self-reported, 0-1. Advisory only — it does not feed scoring. */
   confidence: number
   horizonMinutes: number
+  /**
+   * What this plan actually does.
+   *
+   * The agents used to differ only in prose: every proposal reached the same
+   * builder and produced the same transaction, so choosing between them
+   * changed nothing the user could see. This is the field that makes a
+   * proposal a plan.
+   */
+  /**
+   * True when this is a canned substitute for an agent that failed.
+   *
+   * Carried on the proposal rather than only on the transport frame, because
+   * scoring has to see it: a substitute has no route, cannot be signed, and
+   * must never be recommended over real work.
+   */
+  degraded?: boolean
+  executionMode: 'fill' | 'rest' | 'split'
+  /**
+   * What happens to the proceeds after the trade.
+   *
+   * Separate from `executionMode` because how a trade executes and what
+   * follows it are independent choices: an agent may fill now and then supply,
+   * or rest at a price and then supply. Absent means an ordinary trade, which
+   * is almost all of them.
+   */
+  thenAction?: 'lend'
+  /** Where the follow-on supplies, when there is one. */
+  thenVenue?: string
+  /**
+   * On a split, the percentage filled immediately; the remainder rests.
+   *
+   * Absent on any other mode. A split is the first proposal shape that becomes
+   * more than one operation, which is what lets four agents produce genuinely
+   * different transactions rather than four descriptions of the same one.
+   */
+  splitPct?: number
+  /**
+   * The price to rest at, when resting.
+   *
+   * Absent for an immediate fill. Bounded by `resolveExecutionPlan` rather
+   * than trusted: an agent naming this number is deciding whether the order
+   * ever fills.
+   */
+  restPriceUsd?: number
 }
 
 export type BrainErrorCode =

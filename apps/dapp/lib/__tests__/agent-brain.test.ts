@@ -53,12 +53,25 @@ describe('mockBrain', () => {
     expect(new Set(reasonings).size).toBe(ALL_STRATEGIES.length)
   })
 
-  it('slices for TWAP and does not for momentum', async () => {
+  it('plans from the intent rather than from which agent is asking', async () => {
+    // The offline brain used to branch on strategy identity — twap always got
+    // six slices, momentum always one — which is the same lane problem the
+    // live prompts had. Every agent seeing the same intent should now reach
+    // the same shape, because the intent is what the decision is about.
     const twap = await mockBrain.propose(request('twap'))
     const momentum = await mockBrain.propose(request('momentum'))
     if (!twap.ok || !momentum.ok) throw new Error('expected both to succeed')
-    expect(twap.proposal.sliceCount).toBeGreaterThan(1)
-    expect(momentum.proposal.sliceCount).toBe(1)
+
+    expect(twap.proposal.executionMode).toBe(momentum.proposal.executionMode)
+    expect(twap.proposal.sliceCount).toBe(momentum.proposal.sliceCount)
+  })
+
+  it('states an execution mode on every proposal', async () => {
+    for (const strategy of ALL_STRATEGIES) {
+      const outcome = await mockBrain.propose(request(strategy))
+      if (!outcome.ok) continue
+      expect(['fill', 'rest']).toContain(outcome.proposal.executionMode)
+    }
   })
 
   it('only names venues that were offered', async () => {
@@ -78,18 +91,41 @@ describe('strategy definitions', () => {
     expect(new Set(STRATEGY_ORDER).size).toBe(ALL_STRATEGIES.length)
   })
 
-  it('gives each strategy a distinct prompt and identity', () => {
+  it('gives every agent the same brief', () => {
+    // Deliberately identical, and the inverse of what this asserted before.
+    // Four prompts each forbidding the others' conclusions meant an agent that
+    // correctly judged "this order is small, just fill it" was rejected for
+    // being right. They differ by temperature and independent reasoning now,
+    // not by assigned method.
     const prompts = Object.values(STRATEGIES).map((s) => s.systemPrompt)
-    expect(new Set(prompts).size).toBe(prompts.length)
-    const gradients = Object.values(STRATEGIES).map((s) => s.gradient)
-    expect(new Set(gradients).size).toBe(gradients.length)
+    expect(new Set(prompts).size).toBe(1)
   })
 
-  it('states a forbidden move in every prompt', () => {
-    // Structural differentiation is what stops four prompts producing four
-    // paraphrases of the same answer.
+  it('keeps a distinct visual identity per agent', () => {
+    // Identity survives; only the constrained thinking went away.
+    const gradients = Object.values(STRATEGIES).map((s) => s.gradient)
+    expect(new Set(gradients).size).toBe(gradients.length)
+    const names = Object.values(STRATEGIES).map((s) => s.name)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('spreads temperature so four runs can disagree', () => {
+    // With one shared brief, temperature is what stops four identical prompts
+    // producing four identical answers.
+    const temps = Object.values(STRATEGIES).map((s) => s.temperature)
+    expect(Math.max(...temps) - Math.min(...temps)).toBeGreaterThan(0.2)
+  })
+
+  it('offers both execution shapes to every agent', () => {
     for (const s of Object.values(STRATEGIES)) {
-      expect(s.systemPrompt).toMatch(/FORBIDDEN/)
+      expect(s.systemPrompt).toMatch(/"fill"/)
+      expect(s.systemPrompt).toMatch(/"rest"/)
+    }
+  })
+
+  it('tells every agent a user-stated price is not theirs to change', () => {
+    for (const s of Object.values(STRATEGIES)) {
+      expect(s.systemPrompt).toMatch(/not yours to change/)
     }
   })
 

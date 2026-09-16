@@ -1,8 +1,8 @@
 'use client'
 
-import type { Venue, VenueCategory } from '@intent/types'
+import type { Venue, VenueCategory, VenueIntegration } from '@intent/types'
 import { Badge, Card } from '@intent/ui'
-import { ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight, Check } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
 
@@ -12,6 +12,22 @@ const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
   aggregator: 'Aggregator',
   orderbook: 'Order book',
+  lending: 'Lending',
+  rwa: 'Real-world assets',
+  pool: 'Liquidity pool',
+}
+
+/**
+ * How far a venue is wired in, said plainly.
+ *
+ * The page used to list every venue identically, so a user could not tell that
+ * intents route through Soroswap and merely mention Phoenix. That is the most
+ * useful thing this page can say, and it was the one thing missing.
+ */
+const integrationLabel: Record<VenueIntegration, string> = {
+  executes: 'Integrated',
+  quotes: 'Quoting only',
+  listed: '',
 }
 
 function chainSlug(chain: string): string {
@@ -31,7 +47,7 @@ function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
 
   if (failed) {
     return (
-      <span className="bg-muted text-muted-foreground flex h-10 w-10 shrink-0 items-center justify-center rounded-md font-display text-base font-semibold">
+      <span className="bg-muted text-muted-foreground font-display flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-base font-semibold">
         {venue.name.charAt(0)}
       </span>
     )
@@ -50,6 +66,10 @@ function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
 }
 
 export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
+  // Absent means listed. A venue nobody wired in is exactly that, and
+  // defaulting the other way would claim integrations that do not exist.
+  const integration = venue.integration ?? 'listed'
+
   return (
     <a href={venue.url} target="_blank" rel="noopener noreferrer" className="block">
       <Card className="hover:border-foreground/40 flex h-full flex-col gap-4 p-5 transition-colors">
@@ -58,9 +78,21 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
             <VenueLogo venue={venue} />
             <div>
               <p className="font-display text-base font-semibold leading-tight">{venue.name}</p>
-              <Badge variant="outline" className="mt-1">
-                {categoryLabel[venue.category]}
-              </Badge>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <Badge variant="outline">{categoryLabel[venue.category]}</Badge>
+                {/* Filled for a venue the app actually uses, outlined for one it
+                    only prices. A venue it merely links to gets no badge at
+                    all — absence is the honest signal, and a third label would
+                    imply a relationship that does not exist. */}
+                {integration === 'executes' ? (
+                  <Badge className="gap-1">
+                    <Check className="h-3 w-3" />
+                    {integrationLabel.executes}
+                  </Badge>
+                ) : integration === 'quotes' ? (
+                  <Badge variant="secondary">{integrationLabel.quotes}</Badge>
+                ) : null}
+              </div>
             </div>
           </div>
           <ArrowUpRight className="text-muted-foreground h-4 w-4 shrink-0" />
@@ -68,16 +100,21 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
 
         <p className="text-muted-foreground text-sm">{venue.bestFor}</p>
 
+        {/* What the app can actually do here. Shown only when there is
+            something to say: a badge without this is decoration. */}
+        {venue.capability !== undefined ? (
+          <p className="border-border text-muted-foreground border-l-2 pl-3 text-xs leading-relaxed">
+            {venue.capability}
+          </p>
+        ) : null}
+
         <div className="mt-auto flex items-center -space-x-1.5">
           {venue.chains.map((chain) =>
             // Stellar has no bitmap in /images/chains, and shipping one for a
             // 20px badge is not worth it — the inline mark scales better and
             // matches the switcher exactly.
             chainSlug(chain) === 'stellar' ? (
-              <StellarMark
-                key={chain}
-                className="ring-background h-5 w-5 rounded-full ring-2"
-              />
+              <StellarMark key={chain} className="ring-background h-5 w-5 rounded-full ring-2" />
             ) : (
               <Image
                 key={chain}

@@ -26,6 +26,56 @@
     --surface-card: 60 20% 95.7%;
     --radius: 0.4rem;
   }
+
+  /*
+   * Dark: black, grey and ash.
+   *
+   * Built as a neutral ladder rather than an inverted light theme. The
+   * background is near-black and each surface above it is a step lighter, so
+   * depth comes from value alone and nothing has to be tinted to read as
+   * raised.
+   *
+   * The brand purple is deliberately unchanged. It is the only saturated
+   * colour in either theme, which is what makes a button unmistakably a
+   * button — recolouring it per theme would cost that.
+   *
+   * Only tokens are redefined here. Every component reads these, so a
+   * component that hardcodes a colour is a bug this file cannot fix.
+   */
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 93%;
+
+    /* One step above the page, so a card reads as raised without a border. */
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 93%;
+
+    /* Low contrast against the card: a visible edge, not a drawn line. */
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 32%;
+
+    /* Unchanged from light. The one colour that carries meaning. */
+    --brand: 239 84% 67%;
+    --brand-foreground: 0 0% 98%;
+    --accent: 189 94% 43%;
+    --accent-foreground: 0 0% 98%;
+
+    --muted: 0 0% 14%;
+    /* Ash. Around 4.5:1 on the page background — readable as secondary text
+       rather than as something disabled. */
+    --muted-foreground: 0 0% 64%;
+
+    /* Lighter than the light-theme red, which is too dark to read here. */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 69% 45%;
+    --warning: 38 92% 55%;
+
+    --surface-base: 0 0% 6%;
+    --surface-elevated: 0 0% 11%;
+    --surface-card: 0 0% 9%;
+  }
 }
 
 @layer base {

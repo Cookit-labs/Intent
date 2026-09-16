@@ -19,12 +19,24 @@ const nav = [
   { href: '/settings', label: 'Settings', icon: Settings, soon: true },
 ] as const
 
-export function Sidebar(): JSX.Element {
+export function Sidebar({
+  onNavigate,
+  className,
+}: {
+  /** Called when a link is followed, so a mobile drawer can close itself. */
+  onNavigate?: () => void
+  className?: string
+} = {}): JSX.Element {
   const pathname = usePathname()
   const { slug, descriptor } = useChain()
 
   return (
-    <aside className="border-border bg-surface-elevated flex h-full w-60 shrink-0 flex-col border-r">
+    <aside
+      className={cn(
+        'border-border bg-surface-elevated flex h-full w-60 shrink-0 flex-col border-r',
+        className
+      )}
+    >
       <div className="flex h-16 items-center px-6">
         <span className="font-display text-lg font-semibold tracking-tight">Intent</span>
       </div>
@@ -39,6 +51,9 @@ export function Sidebar(): JSX.Element {
             <Link
               key={href}
               href={href}
+              // Closes the drawer on mobile. Without it the menu stays open
+              // over the page the user just asked for.
+              onClick={() => onNavigate?.()}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 active

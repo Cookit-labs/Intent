@@ -7,7 +7,11 @@ dist
 out
 .next
 .turbo
-build
+# Anchored to the repo root. A bare `build` matches any directory of that name
+# at any depth, which silently excluded every transaction-building API route
+# under app/api/*/build — a clone had no swap, offer, plan or lend builder at
+# all, and nothing failed loudly enough to notice.
+/build
 
 # Environment
 .env

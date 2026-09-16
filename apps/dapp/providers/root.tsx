@@ -31,7 +31,12 @@ export function RootProviders({ children }: { children: React.ReactNode }) {
             fontStack: 'system',
           })}
         >
-          <ThemeProvider attribute="class" defaultTheme="light" forcedTheme="light">
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="light"
+            enableSystem={false}
+            disableTransitionOnChange
+          >
             {children}
           </ThemeProvider>
         </RainbowKitProvider>

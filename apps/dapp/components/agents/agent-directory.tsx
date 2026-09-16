@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 import { AGENT_PROFILES, formatVolumeUsd, type AgentProfile } from '../../lib/agent-roster'
 import { AgentAvatar } from './agent-avatar'
+import { useChainHref } from '../../providers/chain-provider'
 
 function Stat({ label, value }: { label: string; value: string }): JSX.Element {
   return (
@@ -16,9 +17,10 @@ function Stat({ label, value }: { label: string; value: string }): JSX.Element {
 }
 
 function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
+  const chainHref = useChainHref()
   return (
     <Link
-      href={`/agents/${agent.key}`}
+      href={chainHref(`/agents/${agent.key}`)}
       className="border-border hover:border-foreground/40 flex flex-col gap-4 rounded-xl border p-5 transition-colors"
     >
       <div className="flex items-center gap-3">
@@ -43,7 +45,7 @@ function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
 
       <p className="text-muted-foreground text-sm leading-relaxed">{agent.blurb}</p>
 
-      <div className="border-border grid grid-cols-3 gap-4 border-t pt-4">
+      <div className="border-border grid grid-cols-3 gap-2 border-t pt-4 sm:gap-4">
         <Stat label="Reputation" value={String(agent.reputation)} />
         <Stat label="Win rate" value={`${Math.round(agent.winRate * 100)}%`} />
         <Stat label="Volume" value={formatVolumeUsd(agent.volumeUsd)} />
