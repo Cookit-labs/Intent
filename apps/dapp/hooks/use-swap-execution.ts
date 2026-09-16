@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import { fromBaseUnits } from '../lib/swap/assets'
-import { fetchMarketPrices, toPriceTable, type MarketPrice } from '../lib/swap/prices'
+import { toPriceTable, type MarketPrice } from '../lib/swap/price-types'
+import { fetchMarketPricesFromRoute } from '../lib/swap/prices-client'
 import type { SwapQuote } from '../lib/swap/quote'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 import type { SwapPhase } from './use-swap'
@@ -59,7 +60,7 @@ export function useSwapExecution(route: unknown): SwapExecution {
   // figure here is context for a decision, not the number being signed.
   useEffect(() => {
     let cancelled = false
-    void fetchMarketPrices()
+    void fetchMarketPricesFromRoute()
       .then((p) => {
         if (cancelled) return
         setUsdPrices(toPriceTable(p))

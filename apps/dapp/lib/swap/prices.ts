@@ -1,5 +1,8 @@
 import { STELLAR_USDC, stellarTestnet } from '@intent/config'
 
+import { fetchReflectorPrices } from '../prices/reflector'
+import type { MarketPrice } from './price-types'
+
 /**
  * Real market prices, taken from Stellar's own mainnet order book.
  *
@@ -26,13 +29,39 @@ const MAINNET_HORIZON = 'https://horizon.stellar.org'
 /** Circle's *mainnet* USDC issuer, which differs from the testnet one. */
 const MAINNET_USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
 
-export interface MarketPrice {
-  symbol: string
-  usd: number
-  /** Where the figure came from, so a stale or missing price is attributable. */
-  source: 'stellar-mainnet' | 'stellar-testnet' | 'fallback'
-  asOf: string
-}
+/**
+ * THE PRICE HIERARCHY
+ *
+ * This app holds five XLM prices, and each is right about something. The
+ * mistake to avoid is not "using the wrong one" so much as assuming one of
+ * them should win everywhere. They answer different questions:
+ *
+ *   What is this worth?          Reflector → mainnet book → hardcoded fallback
+ *     — agent reasoning, sizing "$20 of XLM", the ticker's worth figure.
+ *       Reflector aggregates CEX and DEX venues; the mainnet book is one
+ *       venue; the fallback is a guess and is labelled as one.
+ *
+ *   What will this swap fill at? Testnet liquidity — Horizon, Soroswap,
+ *     Aquarius, whichever the trade routes through.
+ *     — quotes, the minReceive floor, the ticker's "fills near" figure.
+ *       Only the pool being traded against determines the fill. An oracle
+ *       cannot fill a trade, however accurate it is.
+ *
+ *   When would Blend liquidate me? Blend's own oracle, read from the pool's
+ *     get_config(). See lib/lend/oracle.ts and lib/lend/position.ts.
+ *     — health factor, liquidation price. The pool seizes collateral against
+ *       ITS feed whatever Reflector says. Substituting a better price there
+ *       would make the liquidation figure confidently wrong, which is worse
+ *       than the present inconsistency. This module is never consulted for
+ *       it, and a test pins that.
+ *
+ * The gap between testnet's book (~$0.11) and Reflector (~$0.18) is a
+ * property of testnet's synthetic liquidity, not staleness. Both are shown
+ * where both are relevant, because averaging them would describe no market.
+ */
+
+export type { MarketPrice, PriceSource } from './price-types'
+export { toPriceTable } from './price-types'
 
 /**
  * Last-resort values, used only when the order book cannot be read.
@@ -87,6 +116,9 @@ async function fetchXlmUsd(
 
 export interface PriceOptions {
   fetchImpl?: typeof fetch
+  /** Set false to skip the oracle, so the book-only path stays testable. */
+  reflector?: boolean
+  reflectorOptions?: Parameters<typeof fetchReflectorPrices>[1]
 }
 
 /**
@@ -101,15 +133,26 @@ export async function fetchMarketPrices(
   const fetchImpl = options.fetchImpl ?? fetch
   const asOf = new Date().toISOString()
 
+  // Reflector first: an oracle aggregating many venues is a better answer to
+  // "what is this worth" than any single order book. It is asked and then
+  // fallen through, never awaited on pain of failure — a reset testnet or an
+  // unreachable RPC leaves the answer to the sources below, exactly as before
+  // this source existed.
+  const reflector =
+    options.reflector === false ? {} : await fetchReflectorPrices(['XLM'], options.reflectorOptions)
+  const fromReflector = reflector['XLM']
+
   let xlm: number | undefined
-  try {
-    xlm = await fetchXlmUsd(fetchImpl)
-  } catch {
-    xlm = undefined
+  if (fromReflector === undefined) {
+    try {
+      xlm = await fetchXlmUsd(fetchImpl)
+    } catch {
+      xlm = undefined
+    }
   }
 
   return {
-    XLM: {
+    XLM: fromReflector ?? {
       symbol: 'XLM',
       usd: xlm ?? (FALLBACK_USD['XLM'] as number),
       source: xlm !== undefined ? 'stellar-mainnet' : 'fallback',
@@ -164,9 +207,4 @@ export async function fetchTestnetXlmUsd(
     source: 'stellar-testnet',
     asOf: new Date().toISOString(),
   }
-}
-
-/** Flattens to the `symbol -> usd` shape `MarketContext.prices` expects. */
-export function toPriceTable(prices: Record<string, MarketPrice>): Record<string, number> {
-  return Object.fromEntries(Object.entries(prices).map(([sym, p]) => [sym, p.usd]))
 }
