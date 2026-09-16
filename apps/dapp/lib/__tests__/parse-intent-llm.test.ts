@@ -291,6 +291,57 @@ describe('the model can say "supply what I already hold"', () => {
     expect(got?.amountUsd).toBe(20)
   })
 
+  it('reads a borrow as a borrow', async () => {
+    const got = await readIntentWithLlm('borrow wBTC against my Blend position', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, action: 'borrow', tokenIn: 'WBTC', tokenOut: 'WBTC' }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.action).toBe('borrow')
+  })
+
+  it('reads a repay as a repay', async () => {
+    const got = await readIntentWithLlm('repay my wBTC loan', {
+      ...KEY,
+      fetchImpl: reply({
+        ...SUPPLY,
+        action: 'repay',
+        tokenIn: 'WBTC',
+        tokenOut: 'WBTC',
+        amountStated: false,
+        amountUsd: 0,
+      }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.action).toBe('repay')
+  })
+
+  it('lets a borrow name one asset twice', async () => {
+    // Like a supply, and unlike a swap: there is no second asset involved.
+    const got = await readIntentWithLlm('borrow 0.01 wBTC', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, action: 'borrow', tokenIn: 'WBTC', tokenOut: 'WBTC' }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got).not.toBeNull()
+  })
+
+  it('never turns an unrecognised action into a lending one', async () => {
+    // The direction of this fallback matters. A malformed reply becoming a
+    // swap is a misread; becoming a borrow would open a liability nobody
+    // asked for.
+    const got = await readIntentWithLlm('do something', {
+      ...KEY,
+      fetchImpl: reply({ ...SUPPLY, action: 'liquidate', tokenIn: 'USDC', tokenOut: 'XLM' }),
+      allowedSymbols: SYMBOLS,
+    })
+
+    expect(got?.action).toBe('swap')
+  })
+
   it('defaults to a swap when the action is missing or unknown', async () => {
     // An older model, or a malformed reply, must not silently become a supply.
     const got = await readIntentWithLlm('buy XLM', {

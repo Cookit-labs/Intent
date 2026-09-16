@@ -59,9 +59,9 @@ const READ_INTENT_TOOL = {
       properties: {
         action: {
           type: 'string',
-          enum: ['swap', 'supply'],
+          enum: ['swap', 'supply', 'borrow', 'repay'],
           description:
-            "What the user wants done. 'swap' trades one asset for another. 'supply' puts an asset the account ALREADY HOLDS into a lending pool, with no trade at all — as in \"supply my XLM to Blend\". Use 'supply' whenever no trade is asked for.",
+            "What the user wants done. 'swap' trades one asset for another. 'supply' puts an asset the account ALREADY HOLDS into a lending pool, with no trade at all — as in \"supply my XLM to Blend\". 'borrow' takes an asset OUT of a lending pool as a loan against collateral already posted — as in \"borrow wBTC against my position\". 'repay' pays a loan back. Use 'supply' whenever no trade is asked for.",
         },
         tokenIn: {
           type: 'string',
@@ -124,6 +124,8 @@ const READ_INTENT_TOOL = {
  */
 const SYSTEM_PROMPT = [
   "Read the user's instruction. Call read_intent exactly once.",
+  "action is 'borrow' when the user asks to take a loan against collateral, and 'repay'",
+  'when they ask to pay one back. Both name the asset borrowed or repaid in tokenIn.',
   "action is 'supply' when the user wants an asset they ALREADY HOLD put into a lending",
   'pool and asks for no trade at all: "supply my XLM to Blend", "lend 500 XLM".',
   "action is 'swap' whenever a trade is asked for, including a trade whose proceeds are",
@@ -146,7 +148,14 @@ export interface LlmReadIntent {
    * express that, so "supply my XLM to Blend" could only be reported as a
    * swap — and was executed as one.
    */
-  action: 'swap' | 'supply'
+  /**
+   * What the user wants done.
+   *
+   * 'borrow' and 'repay' arrived last, deliberately: nothing should be able to
+   * *say* borrow until the machinery underneath could do it safely. They are
+   * the only two that can cost the user money after the transaction settles.
+   */
+  action: 'swap' | 'supply' | 'borrow' | 'repay'
   tokenIn: string
   tokenOut: string
   /** Zero when the user named no size; check `amountStated` before using it. */
@@ -256,13 +265,18 @@ function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent 
   const args = toolArgumentsOf(payload)
   if (args === null) return null
 
-  const action = args.action === 'supply' ? 'supply' : 'swap'
+  // Anything unrecognised falls back to a swap rather than to a lending
+  // action. A malformed reply must not silently open a liability.
+  const ACTIONS = ['swap', 'supply', 'borrow', 'repay'] as const
+  const action = ACTIONS.find((known) => known === args.action) ?? 'swap'
 
   const tokenIn = symbolOf(args.tokenIn, options.allowedSymbols)
   const tokenOut = symbolOf(args.tokenOut, options.allowedSymbols)
   if (tokenIn === undefined || tokenOut === undefined) return null
   // A swap of an asset for itself is meaningless. A *supply* names one asset
   // twice by design, so the check applies only to trades.
+  // A swap of an asset for itself is meaningless. Supply, borrow and repay all
+  // name one asset twice by design.
   if (action === 'swap' && tokenIn === tokenOut) return null
 
   const amountStated = args.amountStated === true

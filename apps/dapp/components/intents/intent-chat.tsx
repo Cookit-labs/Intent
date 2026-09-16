@@ -460,7 +460,7 @@ export function IntentChat(): JSX.Element {
         })
         const body = (await res.json()) as {
           understood?: boolean
-          action?: 'swap' | 'supply'
+          action?: 'swap' | 'supply' | 'borrow' | 'repay'
           tokenIn?: string
           tokenOut?: string
           amountUsd?: number
@@ -474,6 +474,26 @@ export function IntentChat(): JSX.Element {
         // this question directly because the regex fallback cannot answer it
         // for every phrasing: "Blende" defeated an exact venue match, and the
         // sentence was executed as a swap.
+        // Borrowing and repaying are read correctly and deliberately not
+        // executed from here. Both only make sense against a specific
+        // collateral position, and the decision needs a health factor and a
+        // liquidation price beside it — none of which belong in a chat reply.
+        // Pointing at the place that has them is more honest than running a
+        // competition on an intent no agent can fill.
+        if (
+          body.understood === true &&
+          (body.action === 'borrow' || body.action === 'repay') &&
+          slug === 'stellar'
+        ) {
+          const verb = body.action === 'borrow' ? 'Borrowing' : 'Repaying'
+          setParsed(null)
+          setFollowOn(null)
+          setAffordError(
+            `${verb} happens on your position rather than through an intent, because it depends on the collateral behind it. Open the History tab to see your Blend position, what it can support, and the price at which it would be liquidated.`
+          )
+          return
+        }
+
         if (
           body.understood === true &&
           body.action === 'supply' &&

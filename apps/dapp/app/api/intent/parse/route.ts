@@ -24,6 +24,23 @@ const LENDING_VENUES: Record<string, string[]> = {
   arc: [],
 }
 
+/**
+ * Assets that can be borrowed but not traded here.
+ *
+ * The two vocabularies genuinely differ. `tradeableSymbols()` answers "what can
+ * this app swap" — XLM, USDC and CETES — while Blend's pool lends four
+ * reserves including wBTC and wETH, which have no route in this app's registry.
+ *
+ * Without these the model reads "borrow wBTC" perfectly and the reading is then
+ * thrown away for naming an unknown ticker, which looks exactly like a parse
+ * failure. Confirmed by reading each reserve contract's own `symbol` rather
+ * than assuming, since Blend's USDC is a different issuer from Circle's.
+ */
+const LENDABLE_ONLY: Record<string, string[]> = {
+  stellar: ['WBTC', 'WETH'],
+  arc: [],
+}
+
 interface ParseBody {
   text?: string
   chain?: string
@@ -53,12 +70,25 @@ export async function POST(request: Request): Promise<NextResponse> {
     // The model may only name assets this app can actually trade. Checked here
     // rather than trusted, because a hallucinated ticker reaching the quoter as
     // a real instruction is a trap this codebase has hit once already.
-    allowedSymbols: tradeableSymbols(),
+    allowedSymbols: [...tradeableSymbols(), ...(LENDABLE_ONLY[chain] ?? [])],
     allowedVenues: LENDING_VENUES[chain] ?? [],
   })
 
   if (read === null) {
     return NextResponse.json({ understood: false, reason: 'unreadable' })
+  }
+
+  // Widening the allowlist above let the model *name* wBTC; it must not let a
+  // borrow-only asset through as a trade. Nothing in this app can route one, so
+  // a swap naming one would reach the quoter as a real instruction — the
+  // ticker-impersonation trap this codebase has hit once already.
+  const lendableOnly = LENDABLE_ONLY[chain] ?? []
+  const isTrade = read.action === 'swap'
+  const namesLendableOnly =
+    lendableOnly.includes(read.tokenIn) || lendableOnly.includes(read.tokenOut)
+
+  if (isTrade && namesLendableOnly) {
+    return NextResponse.json({ understood: false, reason: 'not_tradeable' })
   }
 
   return NextResponse.json({
