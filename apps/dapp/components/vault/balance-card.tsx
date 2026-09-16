@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchStellarBalances } from '../../lib/stellar-account'
 import { useChain } from '../../providers/chain-provider'
 import { useWallet } from '../../hooks/use-wallet'
+import { TokenIcon } from '../ui/token-icon'
 
 /**
  * Live wallet balances for the active chain.
@@ -53,7 +54,8 @@ export function BalanceCard(): JSX.Element {
       {balance === undefined ? (
         <Skeleton className="h-8 w-40" />
       ) : (
-        <span className="font-mono text-2xl">
+        <span className="flex items-center gap-2 font-mono text-2xl">
+          <TokenIcon symbol={balanceSymbol} size={26} />
           {Number(balance).toLocaleString(undefined, { maximumFractionDigits: 4 })}{' '}
           <span className="text-muted-foreground text-base">{balanceSymbol}</span>
         </span>
@@ -116,7 +118,10 @@ function StellarUsdcRow({ address }: { address: string }): JSX.Element {
 
   return (
     <div className="border-border flex items-center justify-between border-t pt-3">
-      <span className="text-muted-foreground text-xs">USDC</span>
+      <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+        <TokenIcon symbol="USDC" size={16} />
+        USDC
+      </span>
       <span className="font-mono text-sm">
         {Number(data.usdc ?? '0').toLocaleString(undefined, { maximumFractionDigits: 2 })}
       </span>

@@ -24,31 +24,29 @@ function proposal(
     sliceCount: 1,
     confidence: 0.8,
     horizonMinutes: 5,
+    executionMode: 'fill' as const,
   }
 }
 
 describe('scoreProposals', () => {
   it('ranks the lowest slippage first when prices match', () => {
-    const scored = scoreProposals(
-      [proposal('twap', 3200, 0.5), proposal('shadow', 3200, 0.1)],
-      { isBuy: true }
-    )
+    const scored = scoreProposals([proposal('twap', 3200, 0.5), proposal('shadow', 3200, 0.1)], {
+      isBuy: true,
+    })
     expect(scored[0]?.strategy).toBe('shadow')
   })
 
   it('prefers the cheaper fill when buying', () => {
-    const scored = scoreProposals(
-      [proposal('twap', 3300, 0.2), proposal('arbitrage', 3100, 0.2)],
-      { isBuy: true }
-    )
+    const scored = scoreProposals([proposal('twap', 3300, 0.2), proposal('arbitrage', 3100, 0.2)], {
+      isBuy: true,
+    })
     expect(scored[0]?.strategy).toBe('arbitrage')
   })
 
   it('prefers the higher fill when selling', () => {
-    const scored = scoreProposals(
-      [proposal('twap', 3300, 0.2), proposal('arbitrage', 3100, 0.2)],
-      { isBuy: false }
-    )
+    const scored = scoreProposals([proposal('twap', 3300, 0.2), proposal('arbitrage', 3100, 0.2)], {
+      isBuy: false,
+    })
     expect(scored[0]?.strategy).toBe('twap')
   })
 
@@ -70,10 +68,9 @@ describe('scoreProposals', () => {
 
   it('awards every proposal full price weight when all prices are equal', () => {
     // Guards the divide-by-zero path when best === worst.
-    const scored = scoreProposals(
-      [proposal('twap', 3200, 0), proposal('shadow', 3200, 0)],
-      { isBuy: true }
-    )
+    const scored = scoreProposals([proposal('twap', 3200, 0), proposal('shadow', 3200, 0)], {
+      isBuy: true,
+    })
     expect(scored[0]?.score).toBe(100)
     expect(scored[1]?.score).toBe(100)
   })
@@ -106,5 +103,87 @@ describe('isBuyIntent', () => {
 
   it.each(['market_sell', 'limit_sell'])('treats %s as sell', (t) => {
     expect(isBuyIntent(t)).toBe(false)
+  })
+})
+
+/**
+ * A proposal that cannot be executed must never be recommended.
+ *
+ * When an agent fails, the server substitutes a canned mock so the panel shows
+ * four cards rather than three and a gap. That mock carries no route, so it
+ * cannot be built or signed — but scoring knew nothing about it and ranked it
+ * alongside real work.
+ *
+ * The result was the worst possible outcome: a fabricated strategy winning on
+ * invented numbers, presented as the recommendation, and failing only when the
+ * user tried to act on it. A losing real proposal is better than a winning
+ * fake one, because at least it can be executed.
+ */
+describe('unexecutable proposals cannot win', () => {
+  const real = (over: Partial<AgentProposalResult> = {}): AgentProposalResult => ({
+    strategy: 'shadow',
+    routeId: 'horizon-1',
+    reasoning: 'Real proposal.',
+    projectedAvgPriceUsd: 0.18,
+    projectedSlippagePct: 0.5,
+    venues: ['stellar-dex'],
+    sliceCount: 1,
+    confidence: 0.8,
+    horizonMinutes: 0,
+    executionMode: 'fill' as const,
+    ...over,
+  })
+
+  it('ranks a real proposal above a degraded one that scores better', () => {
+    // The mock claims lower slippage than anything real, because its numbers
+    // were written to look good rather than measured.
+    const scored = scoreProposals(
+      [
+        real({ strategy: 'twap', projectedSlippagePct: 0.8 }),
+        real({ strategy: 'momentum', projectedSlippagePct: 0.01, degraded: true }),
+      ],
+      { isBuy: true }
+    )
+
+    expect(pickWinner(scored)).toBe('twap')
+  })
+
+  it('ranks a real proposal above one with no route', () => {
+    // No route means nothing to sign, whatever the numbers say.
+    const scored = scoreProposals(
+      [
+        real({ strategy: 'twap', projectedSlippagePct: 0.9 }),
+        // No route at all: the field is omitted, not set to undefined.
+        (() => {
+          const { routeId: _drop, ...noRoute } = real({
+            strategy: 'shadow',
+            projectedSlippagePct: 0.01,
+          })
+          return noRoute as AgentProposalResult
+        })(),
+      ],
+      { isBuy: true }
+    )
+
+    expect(pickWinner(scored)).toBe('twap')
+  })
+
+  it('still picks the best among several real proposals', () => {
+    const scored = scoreProposals(
+      [
+        real({ strategy: 'twap', projectedSlippagePct: 0.9 }),
+        real({ strategy: 'shadow', projectedSlippagePct: 0.1 }),
+      ],
+      { isBuy: true }
+    )
+    expect(pickWinner(scored)).toBe('shadow')
+  })
+
+  it('falls back to a degraded proposal only when nothing real exists', () => {
+    // Every agent failing is a real state, and reporting no winner at all
+    // would be less useful than naming the only thing on offer — provided the
+    // UI marks it, which it does.
+    const scored = scoreProposals([real({ strategy: 'twap', degraded: true })], { isBuy: true })
+    expect(pickWinner(scored)).toBe('twap')
   })
 })

@@ -26,6 +26,22 @@ export interface AgentProposalView {
    * exactly as before.
    */
   reasoning?: string
+  /**
+   * How this agent proposes to execute, when a real one said.
+   *
+   * This is where the agents actually differ. Without it every proposal
+   * reached the same builder and produced the same transaction, so choosing a
+   * different agent changed nothing visible and looked hardcoded to the
+   * recommendation.
+   */
+  sliceCount?: number
+  horizonMinutes?: number
+  /** Whether this plan trades now or waits on the book. */
+  executionMode?: 'fill' | 'rest' | 'split'
+  /** On a split, the percentage filled now. */
+  splitPct?: number
+  /** The price this agent would wait at, when it proposes waiting. */
+  restPriceUsd?: number
   /** True when this came from the offline fallback rather than a live agent. */
   degraded?: boolean
 }
@@ -101,6 +117,11 @@ export function buildProposals(parsed: ParsedIntent): Record<string, AgentPropos
       avgPriceUsd: base * a.priceRatio,
       slippagePct: a.slippagePct,
       score: Number((100 - a.slippagePct * 20).toFixed(1)),
+      // The offline race is simulated by definition, and saying so is the
+      // only signal that the live agents are not running. Without it a stale
+      // client build silently showed canned proposals — which carry no route,
+      // so nothing could be signed and the cause was invisible.
+      degraded: true,
     },
   ])
   return Object.fromEntries(entries)

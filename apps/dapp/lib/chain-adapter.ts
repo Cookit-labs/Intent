@@ -42,6 +42,29 @@ export interface WalletActions {
 
 export type ChainWallet = WalletSnapshot & WalletActions
 
+/**
+ * Signing a prepared transaction.
+ *
+ * Optional on the adapter: Arc has no deployed contracts to call yet, so it
+ * simply does not implement this and callers check before offering the action.
+ * The comment above about signing being deliberately absent no longer holds for
+ * Stellar — this is that extension, made in one place as intended.
+ *
+ * Takes an already-built envelope rather than the parts of a transaction. The
+ * caller is responsible for having validated what it contains; for swaps that
+ * is `assertSelfSwap`, which refuses anything paying a third party.
+ */
+export interface SignRequest {
+  /** Base64 transaction envelope (XDR on Stellar). */
+  xdr: string
+  /** The account expected to sign. */
+  address: string
+}
+
+export type SignOutcome =
+  | { ok: true; signedXdr: string }
+  | { ok: false; reason: 'rejected' | 'not_supported' | 'wallet_error'; detail?: string }
+
 export interface ChainAdapter {
   descriptor: ChainDescriptor
   /**
@@ -54,6 +77,11 @@ export interface ChainAdapter {
   accountUrl: (address: string) => string
   /** Where a user gets test funds, if the network has a faucet. */
   faucetUrl?: string
+  /**
+   * Prompts the user's wallet to sign. Absent on chains that cannot yet
+   * execute, so callers must check rather than assume.
+   */
+  signTransaction?: (req: SignRequest) => Promise<SignOutcome>
 }
 
 export const EMPTY_WALLET: ChainWallet = {

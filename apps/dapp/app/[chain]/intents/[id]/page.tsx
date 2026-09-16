@@ -7,8 +7,9 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 
 import { IntentStatusBadge } from '../../../../components/intents/intent-status-badge'
-import { useIntent } from '../../../../hooks/use-intent'
+import { useCancelIntent, useIntent } from '../../../../hooks/use-intent'
 import { intentTypeLabel } from '../../../../lib/intent-format'
+import { useChain } from '../../../../providers/chain-provider'
 
 const STEPS: { status: IntentStatus; label: string }[] = [
   { status: 'pending', label: 'Escrowed' },
@@ -26,10 +27,12 @@ export default function IntentDetailPage(): JSX.Element {
   const params = useParams<{ id: string; chain: string }>()
   const chain = params.chain
   const { data: intent, isLoading, isError, error } = useIntent(params.id)
+  const { descriptor } = useChain()
+  const cancelIntent = useCancelIntent()
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
         <Card className="bg-muted/40 h-64 animate-pulse" />
       </div>
     )
@@ -37,7 +40,7 @@ export default function IntentDetailPage(): JSX.Element {
 
   if (isError || !intent) {
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
         <Card className="text-foreground p-6 text-sm">
           {(error as Error)?.message ?? 'Intent not found.'}
         </Card>
@@ -50,7 +53,7 @@ export default function IntentDetailPage(): JSX.Element {
   const settled = intent.status === 'settled'
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
+    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="font-display text-2xl font-semibold tracking-tight">
@@ -122,9 +125,45 @@ export default function IntentDetailPage(): JSX.Element {
         </Card>
       )}
 
+      {/* An open limit order is a standing offer. It fills when the market
+          reaches the price, and until then the user must be able to withdraw
+          it — an order that cannot be taken back is a commitment. */}
+      {intent.status === 'pending' && intent.limitPriceUsd !== undefined ? (
+        <Card className="mb-4 flex flex-col gap-3 p-6">
+          <div>
+            <p className="text-foreground text-sm font-medium">
+              Waiting for {intent.tokenOut} to reach $
+              {intent.limitPriceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}
+            </p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              This order stays open until the price is met or the deadline passes. Nothing has been
+              spent.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="w-fit"
+            disabled={cancelIntent.isPending}
+            onClick={() => cancelIntent.mutate(intent.id)}
+          >
+            {cancelIntent.isPending ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Cancelling…
+              </>
+            ) : (
+              'Cancel order'
+            )}
+          </Button>
+          {cancelIntent.isError ? (
+            <p className="text-foreground text-xs">{(cancelIntent.error as Error).message}</p>
+          ) : null}
+        </Card>
+      ) : null}
+
       {/* Details */}
       <Card className="p-6">
-        <div className="grid grid-cols-2 gap-4 font-mono text-sm">
+        <div className="grid grid-cols-1 gap-3 font-mono text-sm sm:grid-cols-2 sm:gap-4">
           <div>
             <p className="text-muted-foreground text-xs">You pay</p>
             <p className="text-foreground">
@@ -137,14 +176,26 @@ export default function IntentDetailPage(): JSX.Element {
               {intent.minAmountOut} {intent.tokenOut}
             </p>
           </div>
+          {intent.limitPriceUsd !== undefined ? (
+            <div>
+              <p className="text-muted-foreground text-xs">Limit price</p>
+              <p className="text-foreground">
+                ${intent.limitPriceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })}
+              </p>
+            </div>
+          ) : null}
           <div>
             <p className="text-muted-foreground text-xs">Deadline</p>
             <p className="text-foreground">{new Date(intent.deadline).toLocaleString()}</p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">Settlement</p>
+            {/* Read from the active chain rather than hardcoded: this said
+                "USDC on Arc" on every intent, including Stellar ones signed
+                with a Stellar wallet. */}
             <p className="text-foreground flex items-center gap-1">
-              USDC on Arc <Badge variant="outline">testnet</Badge>
+              {intent.tokenIn} on {descriptor.name}{' '}
+              <Badge variant="outline">{descriptor.networkLabel}</Badge>
             </p>
           </div>
         </div>

@@ -17,7 +17,7 @@ export default function AgentsPage(): JSX.Element {
   const [tab, setTab] = useState<Tab>('directory')
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6">
         <h1 className="font-display text-3xl font-semibold tracking-tight">Agents</h1>
         <p className="text-muted-foreground mt-1 text-sm">
