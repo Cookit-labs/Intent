@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { buildBlendSupply, prepareBlendSupply } from '../../../../lib/lend/blend-client'
+import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 
 /**
@@ -67,7 +68,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // rather than optional.
     const prepared = await prepareBlendSupply(built.xdr)
     if (!prepared.ok) {
-      return NextResponse.json({ error: prepared.reason }, { status: 400 })
+      return NextResponse.json({ error: explainPoolError(prepared.reason) }, { status: 400 })
     }
 
     return NextResponse.json({

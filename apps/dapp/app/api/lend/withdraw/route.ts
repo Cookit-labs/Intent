@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { buildBlendWithdraw, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
+import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 
 /**
@@ -75,7 +76,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const prepared = await prepareBlendWithdraw(built.xdr)
     if (!prepared.ok) {
-      return NextResponse.json({ error: prepared.reason }, { status: 400 })
+      return NextResponse.json({ error: explainPoolError(prepared.reason) }, { status: 400 })
     }
 
     return NextResponse.json({

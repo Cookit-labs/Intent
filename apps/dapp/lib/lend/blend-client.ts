@@ -57,6 +57,22 @@ const REQUEST_TYPE_SUPPLY = 0
 const REQUEST_TYPE_WITHDRAW = 1
 
 /**
+ * SupplyCollateral and WithdrawCollateral, types 2 and 3.
+ *
+ * The difference from types 0 and 1 is the whole of what makes borrowing
+ * possible, and the whole of what makes a position risky. Collateral earns the
+ * same yield as a plain supply and additionally backs liabilities — which means
+ * it can be seized, where a plain supply cannot. The pool tracks the two in
+ * separate maps (`collateral` and `supply`) and only the former counts toward a
+ * health factor.
+ *
+ * Both verified against the live pool before being written: type 2 accepted,
+ * and type 3 accepted returning the collateral to a plain balance.
+ */
+const REQUEST_TYPE_SUPPLY_COLLATERAL = 2
+const REQUEST_TYPE_WITHDRAW_COLLATERAL = 3
+
+/**
  * Asking for more than the position holds withdraws all of it.
  *
  * The pool clamps a withdrawal to the balance rather than reverting, which is
@@ -221,6 +237,22 @@ export function assertSelfWithdraw(built: string, account: string): void {
 }
 
 /**
+ * The same check again for the collateral forms.
+ *
+ * Unchanged rules, because it is the same `submit` with the same arguments —
+ * only the request type inside the vector differs, and that is not something a
+ * third party could exploit by substitution. What they could substitute is
+ * `to`, which is exactly what all four of these assert.
+ */
+export function assertSelfCollateralSupply(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'collateral supply')
+}
+
+export function assertSelfCollateralWithdraw(built: string, account: string): void {
+  assertSelfPoolCall(built, account, 'collateral withdrawal')
+}
+
+/**
  * Re-reads a built pool call and refuses anything that is not a lone `submit`
  * acting entirely on behalf of this account.
  *
@@ -229,7 +261,9 @@ export function assertSelfWithdraw(built: string, account: string): void {
  * argument shape, so a second implementation could only drift away from this
  * one.
  */
-function assertSelfPoolCall(built: string, account: string, noun: 'supply' | 'withdrawal'): void {
+type PoolCallNoun = 'supply' | 'withdrawal' | 'collateral supply' | 'collateral withdrawal'
+
+function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun): void {
   const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
@@ -381,6 +415,140 @@ export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise
     everything,
     networkPassphrase: stellarTestnet.networkPassphrase,
   }
+}
+
+export interface BuildCollateralOptions {
+  /** The account posting or reclaiming collateral, and the only beneficiary. */
+  account: string
+  /** The reserve's asset, as a contract id. Read from the pool, never derived. */
+  asset: string
+  /**
+   * Base units.
+   *
+   * Required when posting collateral. When reclaiming it, omitting it takes
+   * the whole collateral balance — the same sentinel reasoning as a plain
+   * withdrawal, since collateral accrues interest too.
+   */
+  amount?: string
+  poolId?: string
+  horizonUrl?: string
+  rpcUrl?: string
+  fetchImpl?: typeof fetch
+}
+
+export interface BuiltCollateral {
+  xdr: string
+  recipient: string
+  asset: string
+  amount: string
+  /** True when reclaiming the whole collateral balance. */
+  everything: boolean
+  networkPassphrase: string
+}
+
+/**
+ * One `submit` carrying a single request, built and self-asserted.
+ *
+ * Shared by the collateral pair rather than copied from the supply and
+ * withdrawal builders above. Those two are left alone deliberately: they are
+ * committed, tested, and have moved real money, so restructuring them to share
+ * this core would risk working code for tidiness. New shapes route through here
+ * instead, which keeps the duplication at two functions rather than four.
+ */
+async function buildSinglePoolCall(
+  options: BuildCollateralOptions,
+  requestType: number,
+  noun: PoolCallNoun,
+  everythingSentinel: string | undefined
+): Promise<BuiltCollateral> {
+  const { account, asset } = options
+  const poolId = options.poolId ?? BLEND_POOL
+  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const fetchImpl = options.fetchImpl ?? fetch
+
+  const everything = options.amount === undefined && everythingSentinel !== undefined
+  if (options.amount === undefined && everythingSentinel === undefined) {
+    throw new Error(`a ${noun} needs an amount`)
+  }
+  const amount = everything ? (everythingSentinel as string) : (options.amount as string)
+
+  if (!everything && BigInt(amount) <= BigInt(0)) {
+    throw new Error(`a ${noun} needs a positive amount`)
+  }
+
+  const sequence = await loadSequence(account, horizonUrl, fetchImpl)
+
+  // `to` decides who is credited or paid, and the pool will name anyone.
+  const recipient = account
+
+  const operation = new Contract(poolId).call(
+    'submit',
+    new Address(account).toScVal(),
+    new Address(account).toScVal(),
+    new Address(recipient).toScVal(),
+    xdr.ScVal.scvVec([poolRequest(asset, amount, requestType)])
+  )
+
+  const tx = new TransactionBuilder(new Account(account, sequence), {
+    fee: BASE_FEE,
+    networkPassphrase: stellarTestnet.networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(TIMEOUT_SECONDS)
+    .build()
+
+  const built = tx.toXDR()
+  assertSelfPoolCall(built, account, noun)
+
+  return {
+    xdr: built,
+    recipient,
+    asset,
+    amount,
+    everything,
+    networkPassphrase: stellarTestnet.networkPassphrase,
+  }
+}
+
+/**
+ * Posts collateral: a supply that can back a loan, and can be seized.
+ *
+ * Deliberately a separate call from `buildBlendSupply` rather than a flag on
+ * it. The two differ in the only way that matters to the person signing —
+ * whether the asset can be taken from them — and a boolean parameter is a poor
+ * place for that distinction to live.
+ */
+export async function buildBlendCollateralSupply(
+  options: BuildCollateralOptions
+): Promise<BuiltCollateral> {
+  if (options.amount === undefined) {
+    throw new Error('posting collateral needs an amount')
+  }
+  return buildSinglePoolCall(
+    options,
+    REQUEST_TYPE_SUPPLY_COLLATERAL,
+    'collateral supply',
+    undefined
+  )
+}
+
+/**
+ * Reclaims collateral, making it an ordinary supply balance again.
+ *
+ * The pool refuses this if it would leave outstanding liabilities
+ * under-collateralised, which is the protection that matters here: the check
+ * happens in the contract, and the simulation surfaces its refusal before a
+ * signature rather than after one.
+ */
+export async function buildBlendCollateralWithdraw(
+  options: BuildCollateralOptions
+): Promise<BuiltCollateral> {
+  return buildSinglePoolCall(
+    options,
+    REQUEST_TYPE_WITHDRAW_COLLATERAL,
+    'collateral withdrawal',
+    WITHDRAW_EVERYTHING
+  )
 }
 
 /**
