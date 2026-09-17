@@ -81,12 +81,7 @@ function estimateCost(model: string, inTokens: number, outTokens: number): numbe
   return (inTokens / 1_000_000) * rate.input + (outTokens / 1_000_000) * rate.output
 }
 
-function meta(
-  model: string,
-  latencyMs: number,
-  usage: ChatCompletionResponse['usage'],
-  degraded: boolean
-): BrainMeta {
+function meta(model: string, latencyMs: number, usage: ChatCompletionResponse['usage']): BrainMeta {
   const promptTokens = usage?.prompt_tokens ?? 0
   const completionTokens = usage?.completion_tokens ?? 0
   return {
@@ -97,7 +92,6 @@ function meta(
     completionTokens,
     cachedTokens: usage?.prompt_cache_hit_tokens ?? 0,
     costUsd: estimateCost(model, promptTokens, completionTokens),
-    degraded,
   }
 }
 
@@ -168,7 +162,14 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
  * against is a model quoting a better number than the market offered.
  */
 function routeLines(req: ProposalRequest): string[] {
-  const routes = req.market.routes ?? []
+  // Each agent sees the same routes in a different order. Four agents given
+  // the same list in the same order tend to anchor on whichever comes first,
+  // which is not four opinions. A rotation by the agent's position is
+  // deterministic — the same agent always sees the same order — and changes
+  // nothing about the facts, only which one is read first.
+  const offered = req.market.routes ?? []
+  const shift = STRATEGIES[req.strategy].revealOrder % Math.max(1, offered.length)
+  const routes = [...offered.slice(shift), ...offered.slice(0, shift)]
   if (routes.length === 0) {
     return [
       '',
@@ -281,7 +282,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
       const startedAt = Date.now()
 
       if (apiKey === undefined || apiKey === '') {
-        return { ok: false, error: 'no_api_key', meta: meta(model, 0, undefined, true) }
+        return { ok: false, error: 'no_api_key', meta: meta(model, 0, undefined) }
       }
 
       const tool = strictTools
@@ -321,7 +322,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: aborted ? 'timeout' : 'upstream_error',
-          meta: meta(model, Date.now() - startedAt, undefined, true),
+          meta: meta(model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -329,7 +330,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: classifyStatus(res.status),
-          meta: meta(model, Date.now() - startedAt, undefined, true),
+          meta: meta(model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -340,7 +341,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, undefined, true),
+          meta: meta(model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -359,7 +360,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage, true),
+          meta: meta(model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -370,7 +371,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage, true),
+          meta: meta(model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -398,8 +399,8 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
           : {}),
         // Which lending venues this chain can actually reach. An agent naming
         // one that is absent has its follow-on downgraded rather than its
-        // whole proposal rejected — rejection substitutes a canned mock, which
-        // is worse than a sound trade without its optional second step.
+        // whole proposal rejected: the trade is still sound, and the second
+        // step was optional.
         lendingVenueIds: lendingVenuesFor(req),
       })
 
@@ -409,7 +410,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage, true),
+          meta: meta(model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -446,7 +447,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
             ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
             : {}),
         },
-        meta: meta(model, Date.now() - startedAt, body.usage, false),
+        meta: meta(model, Date.now() - startedAt, body.usage),
       }
     },
   }

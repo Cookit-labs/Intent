@@ -14,7 +14,8 @@ import type { AgentProposalResult, AgentStrategyKey, BrainErrorCode } from './br
 export interface CompetitionStartedFrame {
   type: 'competition:started'
   competitionId: string
-  agents: { key: AgentStrategyKey; name: string; tag: string; gradient: string }[]
+  /** Identity only. What each agent proposes is not known until it answers. */
+  agents: { key: AgentStrategyKey; name: string; gradient: string }[]
   windowSeconds: number
 }
 
@@ -30,8 +31,6 @@ export interface CompetitionProposalFrame {
    * winner's meant clicking any other agent signed the winner's trade.
    */
   route?: unknown
-  /** True when the offline fallback produced this rather than a live agent. */
-  degraded: boolean
 }
 
 export interface CompetitionFailedFrame {
@@ -57,8 +56,18 @@ export interface CompetitionWinnerFrame {
   route?: unknown
 }
 
+/**
+ * The competition could not run, or produced nothing.
+ *
+ * Distinct from `competition:failed`, which is one agent not answering while
+ * the others may. This ends the race: no agents were live, the chain has no
+ * execution, or every agent failed. Said plainly rather than filled in with
+ * placeholders — a canned proposal here once read as a strategy somebody had
+ * chosen, venues from another chain and all.
+ */
 export interface CompetitionErrorFrame {
   type: 'competition:error'
+  code: 'agents_offline' | 'chain_unsupported' | 'no_agent_answered'
   message: string
 }
 

@@ -83,7 +83,6 @@ describe('deepseek brain', () => {
     if (!outcome.ok) return
     expect(outcome.proposal.strategy).toBe('twap')
     expect(outcome.proposal.sliceCount).toBe(6)
-    expect(outcome.meta.degraded).toBe(false)
     expect(outcome.meta.costUsd).toBeGreaterThan(0)
   })
 
@@ -217,19 +216,34 @@ describe('deepseek brain', () => {
 describe('validateProposal', () => {
   const ctx = { referencePriceUsd: 3500, allowedVenueIds: ['uniswap', 'curve'] }
 
-  it('drops venues that were not offered rather than failing', () => {
+  it('rejects a venue that was not offered, even beside one that was', () => {
+    // The venue list is the only fact an agent has about which chain it is
+    // on. Naming one from elsewhere is not a label slip to tidy up — the
+    // agent has reasoned about the wrong chain, and its route and numbers
+    // are suspect too. This used to drop the stray venue and keep the rest.
     const result = validateProposal(
       JSON.parse(goodArguments({ venues: ['uniswap', 'sushi'] })),
       ctx
     )
-    expect(result.ok).toBe(true)
-    if (result.ok) expect(result.value.venues).toEqual(['uniswap'])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/sushi.*does not exist on this chain/)
   })
 
-  it('substitutes a venue when none of them were valid', () => {
+  it('rejects a proposal whose only venue is unknown rather than substituting one', () => {
+    // Substituting the first allowed venue used to keep the proposal in the
+    // race with a venue the agent never named. That is the app inventing part
+    // of the plan, which is the thing this whole layer exists to avoid.
     const result = validateProposal(JSON.parse(goodArguments({ venues: ['nope'] })), ctx)
+    expect(result.ok).toBe(false)
+  })
+
+  it('keeps venues that were offered, unchanged', () => {
+    const result = validateProposal(
+      JSON.parse(goodArguments({ venues: ['curve', 'uniswap'] })),
+      ctx
+    )
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.value.venues).toEqual(['uniswap'])
+    if (result.ok) expect(result.value.venues).toEqual(['curve', 'uniswap'])
   })
 
   it('truncates an over-long reasoning to fit the bubble', () => {

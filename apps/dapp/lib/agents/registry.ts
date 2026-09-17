@@ -1,63 +1,28 @@
-import type { AgentBrain, BrainProvider } from './brain'
-import { mockBrain } from './brains/mock-brain'
+import type { AgentBrain } from './brain'
+import { deepseekBrain } from './brains/deepseek-brain'
 
 /**
- * Picks which brain answers a competition.
+ * Which brain answers a competition, if any.
  *
- * Server-side only. The DeepSeek implementation reads the API key, so it must
- * be reachable from route handlers and nothing else — see the lint rule
- * forbidding `lib/agents/brains/*` from components and hooks.
+ * Server-side only: the DeepSeek implementation reads the API key, so this
+ * must be reachable from route handlers and nothing else.
  *
- * Selection fails safe: anything other than an explicitly configured provider
- * returns the mock, so a missing key degrades to simulated agents rather than
- * a broken screen.
+ * Returns `undefined` rather than a fallback when no live brain is available.
+ * A mock used to stand in here, so a missing key produced four agents
+ * reciting canned text — proposals that carried no route, could not be
+ * signed, and looked exactly like decisions somebody had made. The route now
+ * tells the user the agents are not online, which is what is true.
+ *
+ * Imported statically. The provider client used to be loaded lazily so that a
+ * mock-only deployment never pulled it in; there is no such deployment now,
+ * and a lazy `require` was also the reason the registry could not be tested
+ * against a fresh environment.
  */
-
-let deepseekBrain: AgentBrain | undefined
-let deepseekLoadFailed = false
-
-/**
- * Loaded lazily so that a mock-only deployment never pulls in the `openai`
- * client or touches provider configuration at import time.
- */
-function loadDeepSeek(): AgentBrain | undefined {
-  if (deepseekBrain !== undefined || deepseekLoadFailed) return deepseekBrain
-  try {
-    // eslint-disable-next-line
-    const mod = require('./brains/deepseek-brain') as { deepseekBrain: AgentBrain }
-    deepseekBrain = mod.deepseekBrain
-  } catch (e) {
-    // The module may not exist yet, or its dependency may be missing. Either
-    // way the mock covers it — but silently, which once hid a misconfigured
-    // provider behind four agents reciting canned mock text. Say why.
+export function getAgentBrain(): AgentBrain | undefined {
+  if (!deepseekBrain.isConfigured()) {
     // eslint-disable-next-line no-console
-    console.warn(
-      `[agents] deepseek brain unavailable, falling back to mock: ${e instanceof Error ? e.message : String(e)}`
-    )
-    deepseekLoadFailed = true
+    console.warn('[agents] deepseek brain not configured (missing DEEPSEEK_API_KEY)')
+    return undefined
   }
   return deepseekBrain
-}
-
-export function getAgentBrain(): AgentBrain {
-  const configured = (process.env['AGENT_BRAIN'] ?? 'mock') as BrainProvider
-
-  if (configured === 'deepseek') {
-    const brain = loadDeepSeek()
-    if (brain !== undefined && brain.isConfigured()) return brain
-    // Loaded but unconfigured means the key is missing: a different fault from
-    // the module failing to load, and equally invisible before.
-    if (brain !== undefined) {
-      // eslint-disable-next-line no-console
-      console.warn('[agents] deepseek brain loaded but not configured (missing API key?)')
-    }
-  }
-
-  return mockBrain
-}
-
-/** Exposed so a route can report which brain actually served a competition. */
-export function describeBrain(): { provider: BrainProvider; degraded: boolean } {
-  const brain = getAgentBrain()
-  return { provider: brain.id, degraded: brain.id === 'mock' }
 }

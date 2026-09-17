@@ -33,7 +33,6 @@ import {
   type ChatTurn,
 } from '../../lib/chat-history'
 import { backfillFromLedger } from '../../lib/swap/backfill'
-import { useMockCompetition } from '../../hooks/use-mock-competition'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
 import { SwapConfirm } from './swap-confirm'
@@ -157,18 +156,13 @@ export function IntentChat(): JSX.Element {
     staleTime: 15_000,
   })
 
-  // Agents run through the route only when explicitly enabled. The offline race
-  // stays the default so a checkout with no configuration behaves as before.
-  // Opt *out* of live agents, not in. This value is inlined at build time, so
-  // a bundle compiled before the variable existed baked in `false` and the
-  // browser silently ran the offline race while the server's agents worked
-  // perfectly — every check passed and the UI still showed canned proposals.
-  // Defaulting to live means a stale or missing build value degrades to a
-  // visible failure from the route, not to a mock that cannot be executed.
-  const useAgents = process.env['NEXT_PUBLIC_USE_AI'] !== 'false'
-  const live = useCompetition(useAgents && restored === null ? parsed : null, slug)
-  const offline = useMockCompetition(useAgents || restored !== null ? null : parsed)
-  const liveCompetition = useAgents ? live : offline
+  // Live agents, always. There is no offline race any more: when the agents
+  // are not online the route says so and the panel shows it. A build-time
+  // toggle used to select a mock competition here, and a stale bundle once
+  // ran it silently while the server's agents worked — every check passed and
+  // the screen showed canned proposals nobody could execute.
+  const live = useCompetition(restored === null ? parsed : null, slug)
+  const liveCompetition = live
 
   // A restored turn is already decided: every agent revealed, a winner picked.
   const competition =
@@ -196,9 +190,9 @@ export function IntentChat(): JSX.Element {
   const routesByAgent = restored?.routesByAgent ?? live.routesByAgent
   const winnerRoute = restored !== null ? undefined : live.route
   const chosenRoute = useMemo(() => {
-    if (!useAgents || executingKey === null) return undefined
+    if (executingKey === null) return undefined
     return routesByAgent[executingKey] ?? winnerRoute
-  }, [useAgents, executingKey, routesByAgent, winnerRoute])
+  }, [executingKey, routesByAgent, winnerRoute])
 
   const swap = useSwapExecution(chosenRoute)
 
@@ -532,8 +526,13 @@ export function IntentChat(): JSX.Element {
         }
       } catch {
         // Left null: the regex reading below is the answer.
+      } finally {
+        // In a finally, because the branches above return early for a supply,
+        // a borrow and a repay. Placed after the try, this was skipped on
+        // every one of those paths and "Reading your intent…" stayed lit
+        // under a message that had already been answered.
+        setParsing(false)
       }
-      setParsing(false)
 
       // A second action is worth confirming, whichever parser found it. The
       // instruction carries more than a swap, and a follow-on silently dropped
