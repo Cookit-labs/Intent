@@ -197,3 +197,45 @@ describe('swap direction sets buy or sell', () => {
     expect(parseIntent('Sell 100 XLM at $0.25 or better', live).input.type).toBe('limit_sell')
   })
 })
+
+/**
+ * A quantity attached to the input token is a quantity of the input token.
+ *
+ * "Buy 500 USDC worth of XLM" was sized at $92: the 500 was found next to
+ * USDC, then the buy-side branch assumed any bare quantity named the token
+ * being *bought* and priced 500 as XLM. The competition re-parses raw text
+ * with this parser, so the chat could show $500 while the race ran on $92.
+ */
+describe('a quantity keeps the token it was written next to', () => {
+  const prices = { XLM: 0.1855, USDC: 1 }
+
+  it('sizes "N USDC worth of XLM" as N dollars', () => {
+    const p = parseIntent('Buy 500 USDC worth of XLM at $0.14', prices)
+    expect(p.escrowUsd).toBe(500)
+    expect(p.input.tokenIn).toBe('USDC')
+    expect(p.input.amountIn).toBe('500')
+    expect(p.limitPriceUsd).toBe(0.14)
+  })
+
+  it('sizes "buy XLM with N USDC" as N dollars', () => {
+    // The same slip in different words: this escrowed $9.
+    const p = parseIntent('Buy XLM with 50 USDC', prices)
+    expect(p.escrowUsd).toBe(50)
+    expect(p.input.amountIn).toBe('50')
+  })
+
+  it('still reads a bare quantity of the bought token as that token', () => {
+    // 200 XLM at $0.1855 is $37 of USDC sent. Unchanged.
+    const p = parseIntent('Buy 200 XLM', prices)
+    expect(p.escrowUsd).toBe(37)
+    expect(Number(p.input.amountIn)).toBeCloseTo(37.1, 1)
+  })
+
+  it('values a sell by the token sold, not by the token received', () => {
+    // 100 XLM is about $19, not $100. The old branch multiplied the XLM
+    // quantity by USDC's price because USDC was the output.
+    const p = parseIntent('Sell 100 XLM at $0.25', prices)
+    expect(p.input.amountIn).toBe('100')
+    expect(p.escrowUsd).toBe(19)
+  })
+})
