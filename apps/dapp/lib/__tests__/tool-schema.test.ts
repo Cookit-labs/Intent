@@ -116,6 +116,60 @@ describe('price validation across two bases', () => {
 })
 
 /**
+ * A venue from another chain fails the proposal.
+ *
+ * Unknown venues used to be dropped quietly, as a harmless label slip. But the
+ * venue list is the only fact an agent has about which chain it is on: one
+ * that names Uniswap on Stellar has reasoned about the wrong chain, and its
+ * route and its numbers are suspect too. That is the exact shape that once
+ * put "Routing across Curve and Uniswap" on a Stellar intent.
+ */
+describe('venues must exist on this chain', () => {
+  const ctx = {
+    referencePriceUsd: 0.18,
+    allowedVenueIds: ['soroswap', 'aquarius', 'stellarx'],
+  }
+
+  const proposal = (venues: string[]): unknown => ({
+    routeId: '',
+    reasoning: 'test',
+    projectedAvgPriceUsd: 0.18,
+    projectedSlippagePct: 0.2,
+    venues,
+    sliceCount: 1,
+    confidence: 0.8,
+    horizonMinutes: 10,
+    executionMode: 'fill',
+    restPriceUsd: 0,
+    splitPct: 0,
+    thenAction: 'none',
+    thenVenue: '',
+  })
+
+  it('accepts venues on the chain', () => {
+    expect(validateProposal(proposal(['soroswap']), ctx).ok).toBe(true)
+  })
+
+  it('rejects a venue from another chain outright', () => {
+    const out = validateProposal(proposal(['uniswap']), ctx)
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.reason).toMatch(/uniswap.*does not exist on this chain/)
+  })
+
+  it('rejects a mix rather than keeping the valid part', () => {
+    // One valid venue beside an off-chain one is not a slip to tidy up: the
+    // agent is reasoning about a chain that is not this one.
+    const out = validateProposal(proposal(['soroswap', 'curve']), ctx)
+    expect(out.ok).toBe(false)
+  })
+
+  it('names every offending venue in the reason', () => {
+    const out = validateProposal(proposal(['uniswap', 'curve']), ctx)
+    if (!out.ok) expect(out.reason).toMatch(/uniswap, curve/)
+  })
+})
+
+/**
  * A rate has a direction; "average fill price" does not carry one.
  *
  * Buying XLM with USDC, agents quote ~1.72 USDC per XLM while both references

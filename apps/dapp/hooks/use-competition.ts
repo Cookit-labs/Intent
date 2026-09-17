@@ -2,9 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import type { CompetitionPhase, CompetitionState } from './use-mock-competition'
-import type { AgentProposalView } from '../lib/mock-competition'
-import { DECIDE_AT, RACE_DURATION, REVEAL_DELAYS, WINDOW_SECONDS } from '../lib/mock-competition'
+import type {
+  AgentProposalView,
+  CompetitionError,
+  CompetitionPhase,
+  CompetitionState,
+} from '../lib/agents/competition'
+import { DECIDE_AT, RACE_DURATION, REVEAL_DELAYS, WINDOW_SECONDS } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
 import { planDecision, planReveal } from '../lib/agents/pacing'
 import { STRATEGIES, STRATEGY_ORDER } from '../lib/agents/strategies'
@@ -14,26 +18,23 @@ import type { ParsedIntent } from '../lib/parse-intent'
  * How long to wait before giving up on the stream entirely.
  *
  * Comfortably past the route's 60s-per-agent ceiling: this catches a
- * connection that has stopped delivering without failing, which would
- * otherwise leave the competition panel waiting on agents forever.
+ * connection that has stopped delivering without failing. Past this point the
+ * agents that have not answered are marked as not having answered — not
+ * filled in, not left thinking.
  */
 const STREAM_TIMEOUT_MS = 120_000
 
 /**
- * Runs a competition against the agent route, returning the same shape as the
- * offline hook so the panel does not care which one is driving it.
+ * Runs a competition against the agent route.
  *
- * Cards reveal on a floor rather than a fixed timer — see `lib/agents/pacing.ts`
- * for why.
+ * There is no offline mode. When the route reports that no agent is live, or
+ * the chain cannot be executed on, or nobody answered, the state carries an
+ * `error` and the panel shows it. A placeholder race used to run here instead,
+ * with canned proposals that named venues from another chain — it read as
+ * agents having decided something, and nothing about it could be executed.
  */
 export interface CompetitionWithRoute extends CompetitionState {
-  /**
-   * The winning agent's chosen route, when it chose one.
-   *
-   * Carried through from the winner frame so the confirm step offers the exact
-   * quote the competition was decided on, rather than re-pricing and showing
-   * the user a different number than the agents compared.
-   */
+  /** The winning agent's chosen route, when it chose one. */
   route?: unknown
   /**
    * Each agent's own route, keyed by strategy.
@@ -50,8 +51,11 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
   const [secondsLeft, setSecondsLeft] = useState(WINDOW_SECONDS)
   const [winner, setWinner] = useState<string | null>(null)
+  const [unanimous, setUnanimous] = useState(false)
+  const [error, setError] = useState<CompetitionError | undefined>(undefined)
   const [route, setRoute] = useState<unknown>(undefined)
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
+  const [models, setModels] = useState<Record<string, string>>({})
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -61,8 +65,11 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setPhase('idle')
       setSecondsLeft(WINDOW_SECONDS)
       setWinner(null)
+      setUnanimous(false)
+      setError(undefined)
       setRoute(undefined)
       setRoutesByAgent({})
+      setModels({})
       return
     }
 
@@ -80,15 +87,60 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       )
     }
 
+    /** An agent that produced nothing gets a card saying so, never a placeholder. */
+    const markFailed = (key: string, reason: AgentProposalView['failed']): void => {
+      setProposals((prev) =>
+        prev[key] !== undefined && prev[key]?.failed === undefined
+          ? prev
+          : {
+              ...prev,
+              [key]: {
+                key,
+                name: STRATEGIES[key as keyof typeof STRATEGIES]?.name ?? key,
+                avgPriceUsd: 0,
+                vsOraclePct: 0,
+                score: 0,
+                failed: reason ?? 'timeout',
+              },
+            }
+      )
+      setRevealed((prev) => ({ ...prev, [key]: true }))
+    }
+
+    /** Ends the race: everything unanswered is marked, and the panel settles. */
+    const settle = (): void => {
+      for (const key of STRATEGY_ORDER) {
+        setProposals((prev) => {
+          if (prev[key] !== undefined) return prev
+          return {
+            ...prev,
+            [key]: {
+              key,
+              name: STRATEGIES[key].name,
+              avgPriceUsd: 0,
+              vsOraclePct: 0,
+              score: 0,
+              failed: 'timeout',
+            },
+          }
+        })
+        setRevealed((prev) => ({ ...prev, [key]: true }))
+      }
+      setPhase('decided')
+    }
+
     setProposals({})
     setRevealed({})
     setPhase('competing')
     setSecondsLeft(WINDOW_SECONDS)
     setWinner(null)
+    setUnanimous(false)
+    setError(undefined)
     // Stale routes from the previous intent would otherwise still be
     // executable, signing a trade the user is no longer looking at.
     setRoute(undefined)
     setRoutesByAgent({})
+    setModels({})
 
     // A stream that stalls without erroring would leave the panel waiting on
     // agents that will never answer. Past this point it is not slowness but a
@@ -97,10 +149,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setTimeout(() => {
         if (cancelled) return
         abort.abort()
-        for (const key of STRATEGY_ORDER) {
-          setRevealed((prev) => ({ ...prev, [key]: true }))
-        }
-        setPhase('decided')
+        settle()
       }, STREAM_TIMEOUT_MS)
     )
 
@@ -147,6 +196,33 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
             const frame = decodeFrame(line)
             if (frame === undefined) continue
 
+            if (frame.type === 'competition:error') {
+              // The race is over before it began, or produced nothing. Said
+              // as such: no cards, no placeholders, one message.
+              setError({ code: frame.code, message: frame.message })
+              setPhase('decided')
+              abort.abort()
+              return
+            }
+
+            if (frame.type === 'competition:started') {
+              // Named while the cards still say "thinking", so the line-up is
+              // visible before any of it has answered.
+              setModels(
+                Object.fromEntries(
+                  frame.agents
+                    .filter((a): a is typeof a & { model: string } => a.model !== undefined)
+                    .map((a) => [a.key, a.model])
+                )
+              )
+              continue
+            }
+
+            if (frame.type === 'competition:failed') {
+              markFailed(frame.strategy, frame.error)
+              continue
+            }
+
             if (frame.type === 'competition:proposal') {
               const key = frame.proposal.strategy
               const order = STRATEGIES[key].revealOrder
@@ -157,21 +233,22 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               if (frame.route !== undefined) {
                 setRoutesByAgent((prev) => ({ ...prev, [key]: frame.route }))
               }
+              const source = (frame.route as { source?: unknown } | undefined)?.source
 
               setProposals((prev) => ({
                 ...prev,
                 [key]: {
                   key,
                   name: STRATEGIES[key].name,
+                  // Measured by the server from the route, not claimed by the
+                  // agent. See lib/agents/measure.ts.
                   avgPriceUsd: frame.proposal.projectedAvgPriceUsd,
-                  slippagePct: frame.proposal.projectedSlippagePct,
+                  vsOraclePct: frame.proposal.projectedSlippagePct,
                   score: 0,
                   reasoning: frame.proposal.reasoning,
+                  ...(typeof source === 'string' ? { source } : {}),
                   sliceCount: frame.proposal.sliceCount,
                   horizonMinutes: frame.proposal.horizonMinutes,
-                  // The plan, not just the prose. Picking an agent has to
-                  // select what it proposed to do, not only which route it
-                  // named.
                   executionMode: frame.proposal.executionMode,
                   ...(frame.proposal.restPriceUsd !== undefined
                     ? { restPriceUsd: frame.proposal.restPriceUsd }
@@ -179,7 +256,12 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
                   ...(frame.proposal.splitPct !== undefined
                     ? { splitPct: frame.proposal.splitPct }
                     : {}),
-                  degraded: frame.degraded,
+                  ...(frame.proposal.thenAction !== undefined
+                    ? { thenAction: frame.proposal.thenAction }
+                    : {}),
+                  ...(frame.proposal.thenVenue !== undefined
+                    ? { thenVenue: frame.proposal.thenVenue }
+                    : {}),
                 },
               }))
               schedule(() => setRevealed((prev) => ({ ...prev, [key]: true })), delayMs)
@@ -188,6 +270,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
             if (frame.type === 'competition:winner') {
               const winnerKey = frame.winner
               const scores = frame.scores
+              setUnanimous(frame.unanimous === true)
               if (frame.route !== undefined) setRoute(frame.route)
               setProposals((prev) => {
                 const next = { ...prev }
@@ -200,7 +283,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               schedule(
                 () => {
                   setWinner(winnerKey)
-                  setPhase('decided')
+                  settle()
                 },
                 Math.max(
                   0,
@@ -210,14 +293,15 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
             }
           }
         }
+
+        // The stream ended without a winner or an error frame — every agent
+        // failed and the server said nothing further, or the connection was
+        // cut. Either way, whatever has not answered is marked and the race
+        // ends rather than waiting on nothing.
+        if (!cancelled) settle()
       } catch {
-        // A dead route should not leave the UI stuck mid-race. Reveal whatever
-        // arrived and let the panel settle.
         if (cancelled) return
-        for (const key of STRATEGY_ORDER) {
-          setRevealed((prev) => ({ ...prev, [key]: true }))
-        }
-        setPhase('decided')
+        settle()
       }
     }
 
@@ -234,10 +318,13 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   return {
     proposals,
     revealed,
+    models,
     phase,
     secondsLeft,
     winner,
+    unanimous,
     routesByAgent,
+    ...(error !== undefined ? { error } : {}),
     ...(route !== undefined ? { route } : {}),
   }
 }

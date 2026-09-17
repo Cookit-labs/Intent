@@ -21,7 +21,18 @@ export type AgentStrategyKey = Extract<
   'twap' | 'momentum' | 'shadow' | 'arbitrage'
 >
 
-export type BrainProvider = 'deepseek' | 'mock'
+/**
+ * Which model service answered.
+ *
+ * More than one because four calls to a single model are four samples of one
+ * mind, and they converge: on a testnet where one route is better by a wide
+ * margin, all four agree, and a race whose outcome is decided by a tie-break
+ * hash is not really a race. Different models disagree for real reasons, which
+ * is the disagreement this competition exists to surface.
+ *
+ * See `brains/providers.ts` for each one's endpoint, limits and cost.
+ */
+export type BrainProvider = 'deepseek' | 'groq' | 'ollama'
 
 /**
  * Market facts handed to the model.
@@ -142,7 +153,15 @@ export interface AgentProposalResult {
   routeId?: string
   /** One or two sentences, shown in the competition panel. */
   reasoning: string
+  /**
+   * Set by the agent, then **overwritten by the server** from the route it
+   * chose whenever one was chosen. The agent's figures are accepted only as a
+   * plausibility check at validation; what the user sees and what scoring
+   * ranks are measured from the quote and the oracle price. A number the
+   * agent reported about itself is not evidence of anything.
+   */
   projectedAvgPriceUsd: number
+  /** Distance from the oracle's fair value, in percent. Positive is worse. Measured, see above. */
   projectedSlippagePct: number
   /** Venue ids, validated against the ones offered in `MarketContext`. */
   venues: string[]
@@ -159,14 +178,6 @@ export interface AgentProposalResult {
    * changed nothing the user could see. This is the field that makes a
    * proposal a plan.
    */
-  /**
-   * True when this is a canned substitute for an agent that failed.
-   *
-   * Carried on the proposal rather than only on the transport frame, because
-   * scoring has to see it: a substitute has no route, cannot be signed, and
-   * must never be recommended over real work.
-   */
-  degraded?: boolean
   executionMode: 'fill' | 'rest' | 'split'
   /**
    * What happens to the proceeds after the trade.
@@ -213,8 +224,6 @@ export interface BrainMeta {
   completionTokens: number
   cachedTokens: number
   costUsd: number
-  /** True when this came from a fallback rather than the configured provider. */
-  degraded: boolean
 }
 
 /**
@@ -230,6 +239,15 @@ export type ProposalOutcome =
 export interface AgentBrain {
   id: BrainProvider
   displayName: string
+  /**
+   * The model this brain calls, shown beside the agent's name.
+   *
+   * Surfaced deliberately. When four agents run on three models, the user
+   * asking "why does the same one always win" can see that they are not four
+   * copies of one mind — and when they all do run on one model, that is
+   * visible too rather than implied.
+   */
+  model: string
   /** False when required configuration is missing, so callers can pick a fallback. */
   isConfigured: () => boolean
   /**

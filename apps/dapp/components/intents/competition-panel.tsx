@@ -2,10 +2,10 @@
 
 import { cn } from '@intent/ui'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bot, TriangleAlert, Loader2, Radio } from 'lucide-react'
+import { Bot, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
-import type { CompetitionState } from '../../hooks/use-mock-competition'
-import { AGENTS } from '../../lib/mock-competition'
+import type { CompetitionState } from '../../lib/agents/competition'
+import { AGENTS, describePlan } from '../../lib/agents/competition'
 
 /**
  * Three dots that keep moving while an agent reasons.
@@ -30,7 +30,51 @@ function ThinkingDots(): JSX.Element {
 }
 
 function money(n: number): string {
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+}
+
+/**
+ * The fill's distance from fair value, in words a person can read.
+ *
+ * Negative is better than the oracle — common on testnet, where synthetic
+ * liquidity is often mispriced against the real feed — and it is said as
+ * "better", not shown as a minus sign that reads like an error.
+ */
+function vsOracle(pct: number | undefined): string {
+  if (pct === undefined || !Number.isFinite(pct)) return ''
+  const abs = Math.abs(pct)
+  if (abs < 0.05) return 'at oracle'
+  return pct < 0 ? `${abs.toFixed(1)}% better than oracle` : `${abs.toFixed(1)}% worse than oracle`
+}
+
+/**
+ * The model id, short enough to sit beside a name.
+ *
+ * Providers publish these in three shapes — `qwen/qwen3.8-27b`,
+ * `qwen3.5:latest`, `deepseek-v4-flash` — and only the last part identifies
+ * the model. The vendor prefix and the `:latest` tag say nothing a reader
+ * needs.
+ */
+function shortModel(model: string | undefined): string {
+  if (model === undefined || model === '') return ''
+  const withoutVendor = model.includes('/') ? (model.split('/').pop() ?? model) : model
+  return withoutVendor.replace(/:latest$/, '')
+}
+
+function failureText(code: string): string {
+  switch (code) {
+    case 'timeout':
+      return 'This agent did not answer in time.'
+    case 'rate_limited':
+      return 'The model rate-limited this agent.'
+    case 'invalid_schema':
+    case 'refused':
+      return 'This agent gave an answer that could not be used.'
+    case 'no_api_key':
+      return 'This agent is not configured.'
+    default:
+      return 'This agent could not be reached.'
+  }
 }
 
 export function CompetitionPanel({
@@ -49,16 +93,39 @@ export function CompetitionPanel({
    * disabling the buttons on the first pick made it one.
    */
   locked?: boolean
-}): JSX.Element {
-  const { proposals, revealed, phase, winner } = state
+}): JSX.Element | null {
+  const { proposals, revealed, models, phase, winner, error } = state
+  const unanimous = state.unanimous === true
+
+  // Nothing to show until something is running. The panel used to paint
+  // "Broadcasting…" and four "thinking…" placeholders whenever the phase was
+  // anything but decided — including idle — so any message that opened the
+  // thread without a trade (a supply, a borrow, a standing rule) sat above a
+  // race that was not happening and never ended.
+  if (phase === 'idle') return null
+
+  if (error !== undefined) {
+    return (
+      <div className="border-border flex items-start gap-3 rounded-2xl border border-dashed p-4">
+        <WifiOff className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="text-sm font-medium">
+            {error.code === 'chain_unsupported'
+              ? 'Agents cannot execute here'
+              : error.code === 'no_agent_answered'
+                ? 'No agent answered'
+                : 'Agents are not online'}
+          </p>
+          <p className="text-muted-foreground mt-1 text-sm">{error.message}</p>
+        </div>
+      </div>
+    )
+  }
+
   const decided = phase === 'decided'
   const revealedAgents = AGENTS.filter((a) => revealed[a.key])
-  // Agents answer independently and slowly — tens of seconds each. The panel
-  // used to show a "broadcasting" line only while *nothing* had arrived, so as
-  // soon as the first agent replied every sign of activity vanished and the
-  // screen sat motionless while the rest were still working. That reads as a
-  // crash, not as progress.
   const pendingAgents = decided ? [] : AGENTS.filter((a) => !revealed[a.key])
+  const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
   return (
     <div className="flex flex-col gap-3">
@@ -72,15 +139,20 @@ export function CompetitionPanel({
       <AnimatePresence initial={false}>
         {revealedAgents.map((agent) => {
           const proposal = proposals[agent.key]
-          const isWinner = decided && winner === agent.key
+          const failed = proposal?.failed !== undefined
+          // No crown on a draw. When the agents agree, none of them "won" —
+          // marking one as recommended over identical proposals is the thing
+          // that makes the same name look favoured race after race.
+          const isWinner = decided && !unanimous && winner === agent.key
           const isExecuting = executingKey === agent.key
-          // A picked card is never dimmed: it is the one being acted on.
-          const dimmed = decided && !isWinner && !isExecuting
+          const dimmed = decided && !unanimous && !isWinner && !isExecuting
+          const tag = proposal !== undefined ? describePlan(proposal) : ''
+
           return (
             <motion.div
               key={agent.key}
               initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: dimmed ? 0.55 : 1, y: 0 }}
+              animate={{ opacity: dimmed || failed ? 0.55 : 1, y: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex items-start gap-3"
             >
@@ -92,29 +164,34 @@ export function CompetitionPanel({
               <div
                 className={cn(
                   'flex-1 rounded-2xl rounded-tl-sm border p-4 transition-colors',
-                  // The agent the user picked takes the strongest mark, and it
-                  // outranks the recommendation: once a choice is made, which
-                  // card is about to be signed matters more than which one was
-                  // suggested. Recommended keeps the brand colour, so the two
-                  // states stay distinguishable when they are different cards.
-                  isExecuting
-                    ? 'border-foreground ring-foreground/20 ring-1'
-                    : isWinner
-                      ? 'border-brand'
-                      : 'border-border'
+                  failed
+                    ? 'border-border border-dashed'
+                    : isExecuting
+                      ? 'border-foreground ring-foreground/20 ring-1'
+                      : isWinner
+                        ? 'border-brand'
+                        : 'border-border'
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-semibold">{agent.name}</span>
-                    <span className="text-muted-foreground text-xs">{agent.tag}</span>
+                    {/* Which model actually answered. Shown because four
+                        agents reaching the same conclusion means something
+                        different when they are one model than when they are
+                        three, and the user cannot tell those apart otherwise. */}
+                    {shortModel(models[agent.key]) !== '' ? (
+                      <span className="text-muted-foreground/70 font-mono text-[11px]">
+                        {shortModel(models[agent.key])}
+                      </span>
+                    ) : null}
+                    {/* What this agent proposed, not what it "is". The tag is
+                        derived from the proposal, so it cannot contradict it. */}
+                    {tag !== '' ? (
+                      <span className="text-muted-foreground text-xs">{tag}</span>
+                    ) : null}
                   </div>
-                  {/* Marked on the card itself, not in a footnote after the
-                      race ends. A canned substitute for a failed agent reads
-                      exactly like real reasoning otherwise — which is how
-                      strategies citing Curve and Uniswap appeared on a Stellar
-                      intent and looked like something an agent had decided. */}
-                  {proposal?.degraded === true ? (
+                  {failed ? (
                     <span className="border-border text-muted-foreground flex shrink-0 items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px]">
                       <TriangleAlert className="h-3 w-3" />
                       Did not respond
@@ -127,94 +204,58 @@ export function CompetitionPanel({
                   ) : null}
                 </div>
 
-                <p
-                  className={cn(
-                    'mt-2 text-sm',
-                    // Dimmed and italic: this is placeholder text, and it
-                    // should not read with the same authority as a real plan.
-                    proposal?.degraded === true ? 'text-muted-foreground italic' : 'text-foreground'
-                  )}
-                >
-                  {proposal?.reasoning ?? agent.reasoning}
-                </p>
-
-                {proposal?.degraded === true ? (
-                  <p className="text-muted-foreground mt-1 text-[11px]">
-                    This agent timed out, so a placeholder is shown. It cannot be executed.
+                {failed ? (
+                  <p className="text-muted-foreground mt-2 text-sm">
+                    {failureText(proposal?.failed ?? 'upstream_error')} Nothing was proposed, so
+                    there is nothing to review.
                   </p>
-                ) : null}
+                ) : (
+                  <>
+                    <p className="text-foreground mt-2 text-sm">{proposal?.reasoning}</p>
 
-                {/* What this agent would actually do, before the user picks.
-                    The agents differ in their plan, not only their prose, and
-                    a difference invisible until after signing is no better
-                    than no difference at all. */}
-                <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-                  {proposal?.executionMode === 'rest' ? (
-                    <span className="text-foreground">
-                      rests at {money(proposal.restPriceUsd ?? 0)}
-                    </span>
-                  ) : proposal?.executionMode === 'fill' ? (
-                    <span className="text-foreground">fills now</span>
-                  ) : null}
-                  {proposal !== undefined &&
-                  proposal.sliceCount !== undefined &&
-                  proposal.sliceCount > 1 ? (
-                    <span>{proposal.sliceCount} slices</span>
-                  ) : null}
-                  {proposal?.executionMode === 'rest' &&
-                  proposal.horizonMinutes !== undefined &&
-                  proposal.horizonMinutes > 0 ? (
-                    <span>over {proposal.horizonMinutes}m</span>
-                  ) : null}
-                </div>
+                    <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
+                      {proposal?.executionMode === 'rest' &&
+                      proposal.horizonMinutes !== undefined &&
+                      proposal.horizonMinutes > 0 ? (
+                        <span>over {proposal.horizonMinutes}m</span>
+                      ) : null}
+                    </div>
 
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-                  <span className="bg-muted text-foreground rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">
-                    {money(proposal?.avgPriceUsd ?? 0)} avg ·{' '}
-                    {(proposal?.slippagePct ?? agent.slippagePct).toFixed(2)}% slip
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onExecute(agent.key)}
-                    // Disabled only while a signature is actually in flight.
-                    // Keying this to selection instead made the first pick
-                    // final — every other card went dead before anything had
-                    // been confirmed.
-                    // A placeholder has no route, so there is nothing to
-                    // review. Leaving it clickable would send the user to a
-                    // confirm screen that cannot build a transaction.
-                    disabled={locked || proposal?.degraded === true}
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
-                      // Filled for the card in play — the picked one, or the
-                      // recommendation before a pick is made.
-                      isExecuting || isWinner
-                        ? 'bg-foreground text-background hover:bg-foreground/90'
-                        : 'border-border text-foreground hover:border-foreground/40 border'
-                    )}
-                  >
-                    {/* The spinner belongs to work in progress, not to a
-                        selection — it ran on the picked card while nothing was
-                        happening, which read as a stuck request.
-
-                        Named for what it does: "Execute" implied the trade
-                        went through on this click, when it opens a confirm
-                        step where the wallet is actually asked to sign. */}
-                    {locked && isExecuting ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
-                    {isExecuting ? 'Selected' : 'Review'}
-                  </button>
-                </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+                      {/* Measured from the route, not reported by the agent:
+                          what a unit cost, and how that compares with the
+                          oracle's fair value. */}
+                      <span className="bg-muted text-foreground rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">
+                        {money(proposal?.avgPriceUsd ?? 0)} avg
+                        {vsOracle(proposal?.vsOraclePct) !== ''
+                          ? ` · ${vsOracle(proposal?.vsOraclePct)}`
+                          : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onExecute(agent.key)}
+                        disabled={locked}
+                        className={cn(
+                          'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
+                          isExecuting || isWinner
+                            ? 'bg-foreground text-background hover:bg-foreground/90'
+                            : 'border-border text-foreground hover:border-foreground/40 border'
+                        )}
+                      >
+                        {locked && isExecuting ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : null}
+                        {isExecuting ? 'Selected' : 'Review'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.div>
           )
         })}
       </AnimatePresence>
 
-      {/* One placeholder per agent still thinking, named so the wait is
-          legible: the user can see who is outstanding rather than wondering
-          whether anything is still happening. */}
       {pendingAgents.map((agent) => (
         <div key={`pending-${agent.key}`} className="flex items-start gap-3">
           <span
@@ -223,10 +264,12 @@ export function CompetitionPanel({
             aria-hidden
           />
           <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm font-semibold">{agent.name}</span>
-              <span className="text-muted-foreground text-xs">{agent.tag}</span>
-            </div>
+            <span className="text-sm font-semibold">{agent.name}</span>
+            {shortModel(models[agent.key]) !== '' ? (
+              <span className="text-muted-foreground/70 ml-2 font-mono text-[11px]">
+                {shortModel(models[agent.key])}
+              </span>
+            ) : null}
             <div
               className="mt-2 flex items-center gap-1.5"
               role="status"
@@ -239,13 +282,7 @@ export function CompetitionPanel({
         </div>
       ))}
 
-      {decided && Object.values(proposals).some((p) => p.degraded) ? (
-        <p className="text-muted-foreground mt-1 text-center text-[11px]">
-          Simulated proposals — live agents unavailable, so these cannot be executed.
-        </p>
-      ) : null}
-
-      {decided && winner ? (
+      {decided && winner !== null && anyAnswered ? (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -254,8 +291,14 @@ export function CompetitionPanel({
           <span className="bg-muted text-muted-foreground flex h-5 w-5 items-center justify-center rounded-full">
             <Bot className="h-3 w-3" />
           </span>
+          {/* Recommended on the measured fill, which is the only thing scored.
+              "Strongest strategy" implied a judgement of the reasoning; there
+              is none — the route's real output decides, and a tie is broken
+              by a draw the agents cannot influence. */}
           <span className="text-muted-foreground text-xs">
-            System recommends {proposals[winner]?.name} — strongest strategy. You pick who executes.
+            {unanimous
+              ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree — ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+              : `Recommended: ${proposals[winner]?.name} — best measured fill. You pick who executes.`}
           </span>
         </motion.div>
       ) : null}
