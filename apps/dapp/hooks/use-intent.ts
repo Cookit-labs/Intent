@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
 
 import { getIntentClient } from '../lib/sdk'
-import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
+import { toPriceTable } from '../lib/swap/price-types'
+import { fetchMarketPricesFromRoute } from '../lib/swap/prices-client'
 import { useIntentStore } from '../stores/intent.store'
 
 /**
@@ -45,7 +46,7 @@ function isLive(intent?: Intent): boolean {
 function useMarketPrices() {
   return useQuery({
     queryKey: intentKeys.prices,
-    queryFn: async () => toPriceTable(await fetchMarketPrices()),
+    queryFn: async () => toPriceTable(await fetchMarketPricesFromRoute()),
     // Prices move, and a limit order's status moves with them.
     refetchInterval: 30_000,
     staleTime: 15_000,

@@ -22,7 +22,17 @@ import type { SwapQuote } from './quote'
  * doing real work.
  */
 
-export type VenueKind = 'classic' | 'soroban'
+/**
+ * Which builder a quote belongs to.
+ *
+ * `soroban` is Soroswap's router and `aquarius` is Aquarius's, kept apart
+ * rather than folded into one "contract call" kind because each builder
+ * asserts a different argument layout — the recipient sits in the fourth
+ * argument on one and the first on the other, and only one takes a pool
+ * index. A shared kind would mean a shared assertion, and a shared assertion
+ * proves less than either alone.
+ */
+export type VenueKind = 'classic' | 'soroban' | 'aquarius'
 
 /**
  * Which builder a quote must go to.
@@ -47,6 +57,8 @@ export function builderFor(quote: SwapQuote): VenueKind {
       return 'classic'
     case 'soroswap':
       return 'soroban'
+    case 'aquarius':
+      return 'aquarius'
     default:
       throw new Error(`no builder for quotes from ${String(quote.source)}`)
   }

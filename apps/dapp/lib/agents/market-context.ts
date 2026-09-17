@@ -4,6 +4,7 @@ import type { MarketContext, QuotedRoute } from './brain'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
 import { collectQuotes } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
+import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
@@ -68,12 +69,23 @@ export async function quoteRoutes(
   // one, which is why they kept reaching the same answer. They were not
   // failing to think; there was nothing to choose between.
   const horizon = createHorizonQuoter()
-  const [horizonAll, others] = await Promise.all([
+  const aquarius = createAquariusQuoter()
+  // Aquarius is asked for every pool, like Horizon for every path: it keeps
+  // three XLM/USDC pools with different depth, and "the venue's price" is
+  // three prices an agent can choose between. Collapsing them would hand the
+  // agents one Aquarius route when there are three, which is the same list-of-
+  // one problem the Horizon comment above describes.
+  const [horizonAll, aquariusAll, others] = await Promise.all([
     horizon.quoteAll?.(req, signal),
+    aquarius.quoteAll?.(req, signal),
     collectQuotes([createSoroswapQuoter()], req, signal),
   ])
 
-  const quotes = [...(horizonAll?.ok === true ? horizonAll.quotes : []), ...others.quotes]
+  const quotes = [
+    ...(horizonAll?.ok === true ? horizonAll.quotes : []),
+    ...(aquariusAll?.ok === true ? aquariusAll.quotes : []),
+    ...others.quotes,
+  ]
 
   // A limit that the market cannot meet returns nothing, so the competition
   // reports "no route" rather than offering a fill the user did not ask for.
@@ -167,7 +179,15 @@ async function fetchLendingRates(): Promise<
 }
 
 export function buildMarketContext(chain: string): MarketContext {
-  const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : 'evm'
+  // An unrecognised slug used to fall through to 'evm', which quietly handed
+  // the agents Curve and Uniswap on a Stellar competition — venues that do not
+  // exist here and cannot be executed against. A stale client bundle sending
+  // an empty slug was enough to trigger it, and the proposals that came back
+  // read as plausible nonsense rather than as an error.
+  //
+  // No chain means no venues. An agent with nothing to choose from is a
+  // visible failure; an agent choosing Uniswap on Stellar is an invisible one.
+  const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : undefined
 
   return {
     asOf: new Date().toISOString(),
@@ -188,7 +208,7 @@ export function buildMarketContext(chain: string): MarketContext {
     // failure for a model, so the list it may choose from is filtered here
     // rather than validated after the fact.
     venues: venues
-      .filter((v) => v.family === family)
+      .filter((v) => family !== undefined && v.family === family)
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.

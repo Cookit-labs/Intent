@@ -14,7 +14,8 @@ import {
   saveRule,
   type StoredRule,
 } from '../lib/standing-store'
-import { fetchMarketPrices, toPriceTable } from '../lib/swap/prices'
+import { toPriceTable } from '../lib/swap/price-types'
+import { fetchMarketPricesFromRoute } from '../lib/swap/prices-client'
 
 /**
  * Watching standing rules against live prices.
@@ -65,7 +66,7 @@ export function useStandingRules(): StandingRules {
   // against the number the rest of the app shows.
   const { data: prices } = useQuery({
     queryKey: ['market-prices'],
-    queryFn: async () => toPriceTable(await fetchMarketPrices()),
+    queryFn: async () => toPriceTable(await fetchMarketPricesFromRoute()),
     refetchInterval: CHECK_INTERVAL_MS,
     staleTime: 30_000,
   })

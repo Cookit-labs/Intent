@@ -51,14 +51,24 @@ const TOKEN_ALIASES: Record<string, string> = {
  * and the projected fills would stop matching the parsed intent.
  */
 export const REFERENCE_PRICES_USD: Record<string, number> = {
-  // Indicative only. Anything executable is priced against live liquidity in
-  // `quoteRoutes`; this table exists so the model has a scale to reason at.
-  XLM: 0.58,
+  // Indicative only, and the last resort. Anything executable is priced
+  // against live liquidity in `quoteRoutes`, and "what is it worth" comes from
+  // Reflector and then the mainnet order book — this table is reached only
+  // when all of those are unreachable.
+  //
+  // It is still worth keeping honest. XLM sat at 0.58 here long after the
+  // market was near 0.18, and while a wrong figure never reaches an executable
+  // route, it does reach the agents' prompt and the offline proposals shown
+  // when every agent times out. Those read as confident nonsense rather than
+  // as a failure, which is harder to notice than an error.
+  //
+  // Figures below are from September 2026.
+  XLM: 0.18,
   USDC: 1,
   USDT: 1,
-  WETH: 3500,
+  WETH: 4000,
   ARB: 1.25,
-  WBTC: 95000,
+  WBTC: 100000,
   // Tokenized sovereign debt, priced per unit rather than per bond. Indicative
   // like the rest of this table: anything executable is priced against live
   // liquidity. Without an entry these fell through to the WETH default and
@@ -250,6 +260,12 @@ export function parseIntent(
   const tokenIn = swap?.from ?? (tokenOut === 'USDC' ? 'USDT' : 'USDC')
   const priceOf = (symbol: string): number | undefined =>
     livePrices?.[symbol] ?? REFERENCE_PRICES_USD[symbol]
+  // An asset in neither the live table nor the reference one. The value is
+  // WETH-shaped and therefore wrong for almost anything else — on Stellar it
+  // would size a trade some 20,000x out — but every path that reaches
+  // execution re-prices against live liquidity, and the allowlist refuses an
+  // unknown asset before a route is built. It survives as a last-resort
+  // divisor rather than as a claim about any real price.
   const referencePriceUsd = priceOf(tokenOut) ?? 3500
 
   // Prefer the quantity written next to the input token. A limit order names
