@@ -13,9 +13,14 @@ import type { AgentStrategyKey } from './brain'
  * "Cross-venue", "Path search") described a method the agent was never
  * actually held to, and read as one when its proposal said otherwise.
  *
- * What makes four agents differ is temperature and independent sampling over
- * identical facts. When they disagree, that disagreement is the signal; when
- * they agree, that is one too.
+ * What makes four agents differ is independent sampling over identical facts,
+ * plus each reading the routes in a different order. Measured rather than
+ * assumed: the model reasons before answering, and in that mode it is
+ * stochastic at every temperature — three identical prompts at 0.0 gave three
+ * different answers — while the temperature value itself changes nothing the
+ * provider documents. So the spread below is kept for the day it matters and
+ * is not what makes them differ today. When they disagree, that disagreement
+ * is the signal; when they agree, that is one too.
  */
 
 export interface StrategyDefinition {
@@ -23,7 +28,14 @@ export interface StrategyDefinition {
   name: string
   gradient: string
   systemPrompt: string
-  /** Sampling temperature. Spread across the four so they do not converge. */
+  /**
+   * Sampling temperature, passed through to the provider.
+   *
+   * Not honoured in thinking mode — see the note above. Kept spread across the
+   * four so that a provider or model which does honour it gets four settings
+   * rather than one, and so `revealOrder` is not the only thing telling them
+   * apart in the config.
+   */
   temperature: number
   /** Order in which cards appear, independent of which model call returns first. */
   revealOrder: number

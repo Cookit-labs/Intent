@@ -81,6 +81,7 @@ export function CompetitionPanel({
   locked?: boolean
 }): JSX.Element | null {
   const { proposals, revealed, phase, winner, error } = state
+  const unanimous = state.unanimous === true
 
   // Nothing to show until something is running. The panel used to paint
   // "Broadcasting…" and four "thinking…" placeholders whenever the phase was
@@ -125,9 +126,12 @@ export function CompetitionPanel({
         {revealedAgents.map((agent) => {
           const proposal = proposals[agent.key]
           const failed = proposal?.failed !== undefined
-          const isWinner = decided && winner === agent.key
+          // No crown on a draw. When the agents agree, none of them "won" —
+          // marking one as recommended over identical proposals is the thing
+          // that makes the same name look favoured race after race.
+          const isWinner = decided && !unanimous && winner === agent.key
           const isExecuting = executingKey === agent.key
-          const dimmed = decided && !isWinner && !isExecuting
+          const dimmed = decided && !unanimous && !isWinner && !isExecuting
           const tag = proposal !== undefined ? describePlan(proposal) : ''
 
           return (
@@ -264,7 +268,9 @@ export function CompetitionPanel({
               is none — the route's real output decides, and a tie is broken
               by a draw the agents cannot influence. */}
           <span className="text-muted-foreground text-xs">
-            Recommended: {proposals[winner]?.name} — best measured fill. You pick who executes.
+            {unanimous
+              ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree — ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+              : `Recommended: ${proposals[winner]?.name} — best measured fill. You pick who executes.`}
           </span>
         </motion.div>
       ) : null}

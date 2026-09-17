@@ -60,6 +60,12 @@ export interface CompetitionState {
   phase: CompetitionPhase
   secondsLeft: number
   winner: string | null
+  /**
+   * True when the agents that answered all proposed the same thing, so
+   * `winner` is a draw among equals rather than a judgement between them.
+   * The panel shows agreement instead of a crown.
+   */
+  unanimous?: boolean
   /** Present when the competition could not run, in place of proposals. */
   error?: CompetitionError
 }

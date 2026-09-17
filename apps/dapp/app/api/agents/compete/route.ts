@@ -8,7 +8,7 @@ import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { measureRoute } from '../../../../lib/agents/measure'
 import { getAgentBrain } from '../../../../lib/agents/registry'
-import { pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
+import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
@@ -321,11 +321,18 @@ export async function POST(request: Request): Promise<Response> {
         const winningProposal = proposals.find((p) => p.strategy === winner)
         const chosen = (market.routes ?? []).find((r) => r.id === winningProposal?.routeId)
 
+        // Agreement, named as such. When every agent that could execute chose
+        // the same route and the same plan, the "winner" was drawn by hash
+        // among equals — and saying "Recommended: Halcyon" over that reads as
+        // a judgement nobody made.
+        const unanimous = unanimousChoice(scored)
+
         send({
           type: 'competition:winner',
           competitionId,
           winner,
           scores: Object.fromEntries(scored.map((s) => [s.strategy, s.score])),
+          unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })
       }

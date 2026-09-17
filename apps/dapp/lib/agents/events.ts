@@ -46,6 +46,17 @@ export interface CompetitionWinnerFrame {
   winner: AgentStrategyKey
   scores: Record<string, number>
   /**
+   * True when every executable proposal chose the same route and the same
+   * plan, so the winner was drawn rather than judged.
+   *
+   * Said explicitly because a draw dressed as a recommendation is the thing
+   * that looks rigged: the same name crowned twice running, for no reason
+   * anyone can see. On testnet the best route is often better by a wide
+   * margin, so four agents agreeing is the common case and the right answer
+   * — and the panel should say "they agree", not "this one wins".
+   */
+  unanimous: boolean
+  /**
    * The route the winning agent chose, when it chose one.
    *
    * Carried on the winner frame rather than fetched again by the client: the

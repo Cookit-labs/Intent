@@ -388,7 +388,17 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         // pick any of them. Passing only one made choosing the better venue
         // look like a fabrication.
         routeRates: impliedRates(req),
-        allowedVenueIds: req.market.venues.map((v) => v.id),
+        // Venues on this chain, plus the venue of every route the agent was
+        // shown and the route ids themselves. A route's source is on this
+        // chain by construction, but "horizon" is not in the venue list — so
+        // an agent picking the classic route had no correct venue to name —
+        // and agents also put a route id in this field, which is a slip in a
+        // label, not reasoning about the wrong chain. Uniswap on Stellar
+        // still fails; horizon-1 on Stellar does not.
+        allowedVenueIds: [
+          ...req.market.venues.map((v) => v.id),
+          ...(req.market.routes ?? []).flatMap((r) => [r.source, r.id]),
+        ],
         ...(req.market.routes !== undefined
           ? {
               // Only executable routes are selectable. The prompt says so too,

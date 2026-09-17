@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AgentProposalResult, AgentStrategyKey } from '../agents/brain'
-import { pickWinner, scoreProposals, tieBreak } from '../agents/scoring'
+import { pickWinner, scoreProposals, tieBreak, unanimousChoice } from '../agents/scoring'
 
 /**
  * Scoring decides who wins, so each rule gets its own test.
@@ -109,6 +109,59 @@ describe('ties have no standing favourite', () => {
     expect(tieBreak(RACE, 'twap')).toBe(tieBreak(RACE, 'twap'))
     expect(tieBreak(RACE, 'twap')).not.toBe(tieBreak(RACE, 'shadow'))
     expect(tieBreak(RACE, 'twap')).not.toBe(tieBreak('another-race', 'twap'))
+  })
+})
+
+/**
+ * A draw is a draw, and must be shown as one.
+ *
+ * When every agent chooses the same route and plan, the winner is picked by
+ * hash among equals. Crowning that one as "recommended" is what makes the
+ * same name look favoured race after race — the panel says they agree
+ * instead, and this is what tells it to.
+ */
+describe('unanimity', () => {
+  it('is true when every executable proposal has the same route, plan and score', () => {
+    const scored = scoreProposals(
+      [proposal('twap', 1), proposal('momentum', 1), proposal('shadow', 1)],
+      { competitionId: RACE }
+    )
+    expect(unanimousChoice(scored)).toBe(true)
+  })
+
+  it('is false when the routes differ', () => {
+    const scored = scoreProposals(
+      [proposal('twap', 1), proposal('momentum', 1, { routeId: 'aquarius-1' })],
+      { competitionId: RACE }
+    )
+    expect(unanimousChoice(scored)).toBe(false)
+  })
+
+  it('is false when the plans differ on the same route', () => {
+    // Same route, one fills and one rests: that is a real disagreement about
+    // how to execute, and the panel should present it as one.
+    const scored = scoreProposals(
+      [proposal('twap', 1), proposal('momentum', 1, { executionMode: 'rest', restPriceUsd: 0.16 })],
+      { competitionId: RACE }
+    )
+    expect(unanimousChoice(scored)).toBe(false)
+  })
+
+  it('ignores proposals that cannot be executed', () => {
+    // One agent failed to name a route. The two that did agree, and that
+    // agreement is what the user should hear about.
+    const { routeId: _drop, ...noRoute } = proposal('shadow', 1)
+    const scored = scoreProposals(
+      [proposal('twap', 1), proposal('momentum', 1), noRoute as AgentProposalResult],
+      { competitionId: RACE }
+    )
+    expect(unanimousChoice(scored)).toBe(true)
+  })
+
+  it('is never true for a single answer', () => {
+    // One agent agreeing with itself is not agreement.
+    const scored = scoreProposals([proposal('twap', 1)], { competitionId: RACE })
+    expect(unanimousChoice(scored)).toBe(false)
   })
 })
 

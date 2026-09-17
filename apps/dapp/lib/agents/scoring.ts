@@ -82,6 +82,27 @@ export function pickWinner(scored: ScoredProposal[]): AgentStrategyKey | null {
   return scored[0]?.strategy ?? null
 }
 
+/**
+ * Whether every executable proposal chose the same route and the same plan.
+ *
+ * When they did, `pickWinner` was a draw among equals, and the panel should
+ * say the agents agree rather than crown one. On testnet the best route is
+ * often better by a wide margin, so this is the common case — and it is the
+ * correct answer, not a failure of the competition.
+ */
+export function unanimousChoice(scored: ScoredProposal[]): boolean {
+  const executable = scored.filter((s) => s.executable)
+  const first = executable[0]
+  if (executable.length < 2 || first === undefined) return false
+
+  return executable.every(
+    (s) =>
+      s.score === first.score &&
+      s.proposal.routeId === first.proposal.routeId &&
+      s.proposal.executionMode === first.proposal.executionMode
+  )
+}
+
 /** A proposal can be executed only if it chose a route. */
 function isExecutable(proposal: AgentProposalResult): boolean {
   return proposal.routeId !== undefined && proposal.routeId !== ''

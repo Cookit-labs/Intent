@@ -51,6 +51,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
   const [secondsLeft, setSecondsLeft] = useState(WINDOW_SECONDS)
   const [winner, setWinner] = useState<string | null>(null)
+  const [unanimous, setUnanimous] = useState(false)
   const [error, setError] = useState<CompetitionError | undefined>(undefined)
   const [route, setRoute] = useState<unknown>(undefined)
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
@@ -63,6 +64,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setPhase('idle')
       setSecondsLeft(WINDOW_SECONDS)
       setWinner(null)
+      setUnanimous(false)
       setError(undefined)
       setRoute(undefined)
       setRoutesByAgent({})
@@ -130,6 +132,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     setPhase('competing')
     setSecondsLeft(WINDOW_SECONDS)
     setWinner(null)
+    setUnanimous(false)
     setError(undefined)
     // Stale routes from the previous intent would otherwise still be
     // executable, signing a trade the user is no longer looking at.
@@ -251,6 +254,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
             if (frame.type === 'competition:winner') {
               const winnerKey = frame.winner
               const scores = frame.scores
+              setUnanimous(frame.unanimous === true)
               if (frame.route !== undefined) setRoute(frame.route)
               setProposals((prev) => {
                 const next = { ...prev }
@@ -301,6 +305,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     phase,
     secondsLeft,
     winner,
+    unanimous,
     routesByAgent,
     ...(error !== undefined ? { error } : {}),
     ...(route !== undefined ? { route } : {}),
