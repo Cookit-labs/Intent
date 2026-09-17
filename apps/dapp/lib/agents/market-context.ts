@@ -179,7 +179,15 @@ async function fetchLendingRates(): Promise<
 }
 
 export function buildMarketContext(chain: string): MarketContext {
-  const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : 'evm'
+  // An unrecognised slug used to fall through to 'evm', which quietly handed
+  // the agents Curve and Uniswap on a Stellar competition — venues that do not
+  // exist here and cannot be executed against. A stale client bundle sending
+  // an empty slug was enough to trigger it, and the proposals that came back
+  // read as plausible nonsense rather than as an error.
+  //
+  // No chain means no venues. An agent with nothing to choose from is a
+  // visible failure; an agent choosing Uniswap on Stellar is an invisible one.
+  const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : undefined
 
   return {
     asOf: new Date().toISOString(),
@@ -200,7 +208,7 @@ export function buildMarketContext(chain: string): MarketContext {
     // failure for a model, so the list it may choose from is filtered here
     // rather than validated after the fact.
     venues: venues
-      .filter((v) => v.family === family)
+      .filter((v) => family !== undefined && v.family === family)
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.
