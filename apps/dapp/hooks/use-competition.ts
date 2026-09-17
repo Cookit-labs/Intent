@@ -55,6 +55,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   const [error, setError] = useState<CompetitionError | undefined>(undefined)
   const [route, setRoute] = useState<unknown>(undefined)
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
+  const [models, setModels] = useState<Record<string, string>>({})
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setError(undefined)
       setRoute(undefined)
       setRoutesByAgent({})
+      setModels({})
       return
     }
 
@@ -138,6 +140,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     // executable, signing a trade the user is no longer looking at.
     setRoute(undefined)
     setRoutesByAgent({})
+    setModels({})
 
     // A stream that stalls without erroring would leave the panel waiting on
     // agents that will never answer. Past this point it is not slowness but a
@@ -200,6 +203,19 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               setPhase('decided')
               abort.abort()
               return
+            }
+
+            if (frame.type === 'competition:started') {
+              // Named while the cards still say "thinking", so the line-up is
+              // visible before any of it has answered.
+              setModels(
+                Object.fromEntries(
+                  frame.agents
+                    .filter((a): a is typeof a & { model: string } => a.model !== undefined)
+                    .map((a) => [a.key, a.model])
+                )
+              )
+              continue
             }
 
             if (frame.type === 'competition:failed') {
@@ -302,6 +318,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   return {
     proposals,
     revealed,
+    models,
     phase,
     secondsLeft,
     winner,

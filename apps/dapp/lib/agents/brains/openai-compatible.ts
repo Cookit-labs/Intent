@@ -2,31 +2,34 @@ import type {
   AgentBrain,
   BrainErrorCode,
   BrainMeta,
+  BrainProvider,
   ProposalOutcome,
   ProposalRequest,
 } from '../brain'
 import { STRATEGIES } from '../strategies'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
+import type { ProviderConfig } from './providers'
+import { PROVIDERS, modelFor } from './providers'
 
 /**
- * DeepSeek-backed agent.
+ * One agent, on any provider that speaks OpenAI chat-completions.
  *
- * Chosen on cost — roughly an order of magnitude cheaper per token than
- * frontier models at this workload's size. It is weaker at factual recall and
- * at long agentic loops, which is why each call is short, bounded, and handed
- * every price it needs rather than being asked to remember any.
+ * DeepSeek, Groq and a local Ollama daemon all serve the identical request and
+ * response shape, so what separates them is configuration rather than code:
+ * endpoint, model, key, and whether strict tool schemas are accepted. That
+ * table lives in `providers.ts`; everything below is the same for all of them.
  *
- * The provider is reached through its OpenAI-compatible endpoint, so `fetch` is
- * used directly rather than the SDK: one chat-completions POST does not justify
- * the dependency surface, and an injectable `fetch` makes every failure path
- * testable without a network.
+ * `fetch` directly rather than an SDK: one POST does not justify the dependency
+ * surface, and an injectable `fetch` makes every failure path testable without
+ * a network. Injectable configuration is also what lets four agents run on
+ * three different models in one competition.
+ *
+ * Every model here is chosen on cost — free, or roughly an order of magnitude
+ * cheaper per token than a frontier model at this workload's size. All are
+ * weaker at factual recall than they are at judgement, which is why each call
+ * is short, bounded, and handed every price it needs rather than asked to
+ * remember one.
  */
-
-/** Rough per-token rates, used only for reporting spend back to the caller. */
-const PRICING_USD_PER_MTOK: Record<string, { input: number; output: number }> = {
-  'deepseek-v4-flash': { input: 0.22, output: 0.66 },
-  'deepseek-v4-pro': { input: 0.66, output: 1.98 },
-}
 
 /**
  * Covers the tool call plus the thinking tokens the model spends before it.
@@ -51,7 +54,9 @@ const PRICING_USD_PER_MTOK: Record<string, { input: number; output: number }> = 
 // competition look fabricated.
 const MAX_OUTPUT_TOKENS = 16_000
 
-export interface DeepSeekBrainOptions {
+export interface BrainOptions {
+  /** Which provider's defaults to start from. DeepSeek when unset. */
+  provider?: BrainProvider
   apiKey?: string
   model?: string
   baseUrl?: string
@@ -75,23 +80,34 @@ interface ChatCompletionResponse {
   }
 }
 
-function estimateCost(model: string, inTokens: number, outTokens: number): number {
-  const rate = PRICING_USD_PER_MTOK[model] ?? PRICING_USD_PER_MTOK['deepseek-v4-flash']
-  if (rate === undefined) return 0
+function estimateCost(
+  config: ProviderConfig,
+  model: string,
+  inTokens: number,
+  outTokens: number
+): number {
+  const rate = config.pricing[model] ?? config.defaultPricing
   return (inTokens / 1_000_000) * rate.input + (outTokens / 1_000_000) * rate.output
 }
 
-function meta(model: string, latencyMs: number, usage: ChatCompletionResponse['usage']): BrainMeta {
+function meta(
+  config: ProviderConfig,
+  model: string,
+  latencyMs: number,
+  usage: ChatCompletionResponse['usage']
+): BrainMeta {
   const promptTokens = usage?.prompt_tokens ?? 0
   const completionTokens = usage?.completion_tokens ?? 0
   return {
-    provider: 'deepseek',
+    provider: config.id,
     model,
     latencyMs,
     promptTokens,
     completionTokens,
+    // DeepSeek reports cache hits; the others do not, and an absent field is
+    // zero rather than a guess.
     cachedTokens: usage?.prompt_cache_hit_tokens ?? 0,
-    costUsd: estimateCost(model, promptTokens, completionTokens),
+    costUsd: estimateCost(config, model, promptTokens, completionTokens),
   }
 }
 
@@ -261,28 +277,36 @@ function classifyStatus(status: number): BrainErrorCode {
   return 'upstream_error'
 }
 
-export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBrain {
-  const apiKey = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
-  const model = options.model ?? process.env['DEEPSEEK_MODEL'] ?? 'deepseek-v4-flash'
-  const strictTools = options.strictTools ?? process.env['DEEPSEEK_STRICT_TOOLS'] !== 'false'
-  // Strict tool schemas live on the beta endpoint; without them the standard
-  // one is fine, since every response is validated application-side anyway.
+export function createBrain(options: BrainOptions = {}): AgentBrain {
+  const config = PROVIDERS[options.provider ?? 'deepseek']
+
+  // A provider that needs no key — a local daemon — is configured by being
+  // selected. Reachability is a request-time failure, not a setup one.
+  const apiKey =
+    options.apiKey ?? (config.apiKeyEnv === '' ? 'local' : process.env[config.apiKeyEnv])
+  const model = options.model ?? modelFor(config.id)
+  const strictTools =
+    options.strictTools ??
+    (config.strictTools && process.env[`${config.id.toUpperCase()}_STRICT_TOOLS`] !== 'false')
+  // DeepSeek serves strict tool schemas from its beta endpoint and the standard
+  // shape from its main one; every other provider has a single base.
   const baseUrl =
     options.baseUrl ??
-    process.env['DEEPSEEK_BASE_URL'] ??
-    (strictTools ? 'https://api.deepseek.com/beta' : 'https://api.deepseek.com')
+    process.env[`${config.id.toUpperCase()}_BASE_URL`] ??
+    (config.id === 'deepseek' && !strictTools ? 'https://api.deepseek.com' : config.baseUrl)
   const doFetch = options.fetchImpl ?? fetch
 
   return {
-    id: 'deepseek',
-    displayName: 'DeepSeek agents',
+    id: config.id,
+    displayName: `${config.displayName} (${model})`,
+    model,
     isConfigured: () => apiKey !== undefined && apiKey !== '',
 
     async propose(req: ProposalRequest): Promise<ProposalOutcome> {
       const startedAt = Date.now()
 
       if (apiKey === undefined || apiKey === '') {
-        return { ok: false, error: 'no_api_key', meta: meta(model, 0, undefined) }
+        return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
       }
 
       const tool = strictTools
@@ -304,13 +328,13 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
             model,
             messages: buildMessages(req),
             tools: [tool],
-            // 'auto', not a forced function. DeepSeek's models reason in
+            // 'auto' for every provider today. DeepSeek's models reason in
             // thinking mode, which rejects a forced tool_choice outright:
-            // "Thinking mode does not support this tool_choice". The strategy
-            // prompts already instruct the model to answer by calling the tool,
-            // and a reply that arrives as prose anyway is caught below and
-            // falls back — so forcing buys nothing and costs every request.
-            tool_choice: 'auto',
+            // "Thinking mode does not support this tool_choice"; Ollama ignores
+            // the field entirely. The strategy prompts already instruct the
+            // model to answer by calling the tool, and a reply that arrives as
+            // prose anyway is caught below — so forcing buys nothing.
+            tool_choice: config.toolChoice,
             temperature: STRATEGIES[req.strategy].temperature,
             max_tokens: MAX_OUTPUT_TOKENS,
           }),
@@ -322,7 +346,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: aborted ? 'timeout' : 'upstream_error',
-          meta: meta(model, Date.now() - startedAt, undefined),
+          meta: meta(config, model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -330,7 +354,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: classifyStatus(res.status),
-          meta: meta(model, Date.now() - startedAt, undefined),
+          meta: meta(config, model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -341,7 +365,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, undefined),
+          meta: meta(config, model, Date.now() - startedAt, undefined),
         }
       }
 
@@ -360,7 +384,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage),
+          meta: meta(config, model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -371,7 +395,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage),
+          meta: meta(config, model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -420,7 +444,7 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
         return {
           ok: false,
           error: 'invalid_schema',
-          meta: meta(model, Date.now() - startedAt, body.usage),
+          meta: meta(config, model, Date.now() - startedAt, body.usage),
         }
       }
 
@@ -457,10 +481,22 @@ export function createDeepSeekBrain(options: DeepSeekBrainOptions = {}): AgentBr
             ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
             : {}),
         },
-        meta: meta(model, Date.now() - startedAt, body.usage),
+        meta: meta(config, model, Date.now() - startedAt, body.usage),
       }
     },
   }
 }
 
-export const deepseekBrain: AgentBrain = createDeepSeekBrain()
+/**
+ * One brain per provider, built once.
+ *
+ * Built eagerly because construction is a few reads of `process.env` and
+ * nothing more — no client, no connection. Whether a provider is usable is
+ * `isConfigured()`, which the registry checks; an unconfigured brain existing
+ * costs nothing and is never handed to an agent.
+ */
+export const BRAINS: Record<BrainProvider, AgentBrain> = {
+  deepseek: createBrain({ provider: 'deepseek' }),
+  groq: createBrain({ provider: 'groq' }),
+  ollama: createBrain({ provider: 'ollama' }),
+}

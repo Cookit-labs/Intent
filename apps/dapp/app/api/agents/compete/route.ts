@@ -7,7 +7,7 @@ import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { measureRoute } from '../../../../lib/agents/measure'
-import { getAgentBrain } from '../../../../lib/agents/registry'
+import { getAgentBrains } from '../../../../lib/agents/registry'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { isLimitType } from '../../../../lib/intent-kind'
@@ -177,8 +177,8 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  const brain = getAgentBrain()
-  if (brain === undefined) {
+  const brains = getAgentBrains()
+  if (brains === undefined) {
     return errorStream(
       'agents_offline',
       'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
@@ -246,10 +246,14 @@ export async function POST(request: Request): Promise<Response> {
       send({
         type: 'competition:started',
         competitionId,
+        // The model is named up front, while the card still says "thinking".
+        // Four agents on three models is the answer to "why does the same one
+        // always win", and it only answers it if the user can see it.
         agents: STRATEGY_ORDER.map((key) => ({
           key,
           name: STRATEGIES[key].name,
           gradient: STRATEGIES[key].gradient,
+          model: brains[key].model,
         })),
         windowSeconds: WINDOW_SECONDS,
       })
@@ -262,7 +266,7 @@ export async function POST(request: Request): Promise<Response> {
           const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
           try {
-            const outcome = await brain.propose({
+            const outcome = await brains[strategy].propose({
               intent,
               strategy,
               market,

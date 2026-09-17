@@ -47,6 +47,20 @@ function vsOracle(pct: number | undefined): string {
   return pct < 0 ? `${abs.toFixed(1)}% better than oracle` : `${abs.toFixed(1)}% worse than oracle`
 }
 
+/**
+ * The model id, short enough to sit beside a name.
+ *
+ * Providers publish these in three shapes — `qwen/qwen3.8-27b`,
+ * `qwen3.5:latest`, `deepseek-v4-flash` — and only the last part identifies
+ * the model. The vendor prefix and the `:latest` tag say nothing a reader
+ * needs.
+ */
+function shortModel(model: string | undefined): string {
+  if (model === undefined || model === '') return ''
+  const withoutVendor = model.includes('/') ? (model.split('/').pop() ?? model) : model
+  return withoutVendor.replace(/:latest$/, '')
+}
+
 function failureText(code: string): string {
   switch (code) {
     case 'timeout':
@@ -80,7 +94,7 @@ export function CompetitionPanel({
    */
   locked?: boolean
 }): JSX.Element | null {
-  const { proposals, revealed, phase, winner, error } = state
+  const { proposals, revealed, models, phase, winner, error } = state
   const unanimous = state.unanimous === true
 
   // Nothing to show until something is running. The panel used to paint
@@ -160,8 +174,17 @@ export function CompetitionPanel({
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-semibold">{agent.name}</span>
+                    {/* Which model actually answered. Shown because four
+                        agents reaching the same conclusion means something
+                        different when they are one model than when they are
+                        three, and the user cannot tell those apart otherwise. */}
+                    {shortModel(models[agent.key]) !== '' ? (
+                      <span className="text-muted-foreground/70 font-mono text-[11px]">
+                        {shortModel(models[agent.key])}
+                      </span>
+                    ) : null}
                     {/* What this agent proposed, not what it "is". The tag is
                         derived from the proposal, so it cannot contradict it. */}
                     {tag !== '' ? (
@@ -242,6 +265,11 @@ export function CompetitionPanel({
           />
           <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
             <span className="text-sm font-semibold">{agent.name}</span>
+            {shortModel(models[agent.key]) !== '' ? (
+              <span className="text-muted-foreground/70 ml-2 font-mono text-[11px]">
+                {shortModel(models[agent.key])}
+              </span>
+            ) : null}
             <div
               className="mt-2 flex items-center gap-1.5"
               role="status"

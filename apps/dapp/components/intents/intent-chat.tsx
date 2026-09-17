@@ -170,6 +170,10 @@ export function IntentChat(): JSX.Element {
       ? {
           proposals: restored.proposals,
           revealed: Object.fromEntries(Object.keys(restored.proposals).map((k) => [k, true])),
+          // Empty, not guessed. A turn recorded before the model was tracked
+          // does not know which one answered, and naming today's line-up for
+          // yesterday's race would be inventing a fact about a signed trade.
+          models: {},
           phase: 'decided' as const,
           secondsLeft: 0,
           winner: restored.winner,

@@ -21,7 +21,18 @@ export type AgentStrategyKey = Extract<
   'twap' | 'momentum' | 'shadow' | 'arbitrage'
 >
 
-export type BrainProvider = 'deepseek'
+/**
+ * Which model service answered.
+ *
+ * More than one because four calls to a single model are four samples of one
+ * mind, and they converge: on a testnet where one route is better by a wide
+ * margin, all four agree, and a race whose outcome is decided by a tie-break
+ * hash is not really a race. Different models disagree for real reasons, which
+ * is the disagreement this competition exists to surface.
+ *
+ * See `brains/providers.ts` for each one's endpoint, limits and cost.
+ */
+export type BrainProvider = 'deepseek' | 'groq' | 'ollama'
 
 /**
  * Market facts handed to the model.
@@ -228,6 +239,15 @@ export type ProposalOutcome =
 export interface AgentBrain {
   id: BrainProvider
   displayName: string
+  /**
+   * The model this brain calls, shown beside the agent's name.
+   *
+   * Surfaced deliberately. When four agents run on three models, the user
+   * asking "why does the same one always win" can see that they are not four
+   * copies of one mind — and when they all do run on one model, that is
+   * visible too rather than implied.
+   */
+  model: string
   /** False when required configuration is missing, so callers can pick a fallback. */
   isConfigured: () => boolean
   /**

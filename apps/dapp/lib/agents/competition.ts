@@ -57,6 +57,15 @@ export interface AgentProposalView {
 export interface CompetitionState {
   proposals: Record<string, AgentProposalView>
   revealed: Record<string, boolean>
+  /**
+   * The model behind each agent, keyed by strategy.
+   *
+   * Shown on the card so the line-up is visible rather than asserted. Four
+   * agents on one model converge, and when they do the user deserves to see
+   * why; four on three models disagree, and that is worth seeing too. Empty
+   * until the opening frame arrives.
+   */
+  models: Record<string, string>
   phase: CompetitionPhase
   secondsLeft: number
   winner: string | null

@@ -14,8 +14,14 @@ import type { AgentProposalResult, AgentStrategyKey, BrainErrorCode } from './br
 export interface CompetitionStartedFrame {
   type: 'competition:started'
   competitionId: string
-  /** Identity only. What each agent proposes is not known until it answers. */
-  agents: { key: AgentStrategyKey; name: string; gradient: string }[]
+  /**
+   * Identity only. What each agent proposes is not known until it answers.
+   *
+   * `model` names the service behind that agent, sent with the opening frame
+   * so it is on the card while it is still thinking. Optional because a client
+   * built against the single-provider frames must keep working.
+   */
+  agents: { key: AgentStrategyKey; name: string; gradient: string; model?: string }[]
   windowSeconds: number
 }
 
