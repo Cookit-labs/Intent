@@ -78,12 +78,18 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
   /**
    * Groq's free plan. No payment method, no card on file.
    *
-   * The binding limit is tokens per minute, not requests: 8,000 TPM against
-   * 30 RPM. Four agents racing at once on a prompt of any size can exceed it,
-   * which arrives as a 429 and is reported as `rate_limited` rather than
-   * retried — a retried agent answers after the race it was in has ended.
-   * Running one agent here and the rest elsewhere keeps the whole competition
-   * clear of the ceiling.
+   * **One agent, not four.** The binding limit is tokens per minute rather
+   * than requests: the API reports 8,000 TPM against 1,000 requests a day, and
+   * one competition prompt costs about 2,300 tokens. Four concurrent agents
+   * therefore ask for ~9,200 and exceed it — measured, not predicted: running
+   * all four here returned one proposal and three 429s inside 600ms. Two fit;
+   * one is comfortable.
+   *
+   * A 429 is reported as `rate_limited` and not retried, because an agent that
+   * answers on a second attempt answers after the race it was in has ended.
+   *
+   * Fast when it does run: 1.6-1.8s to a validated proposal, against 3.5-4.6s
+   * for DeepSeek on the same prompt.
    */
   groq: {
     id: 'groq',
@@ -107,6 +113,11 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
    * Needs no key. `isConfigured` is therefore true whenever the provider is
    * selected, and a dead daemon surfaces as a connection failure on the first
    * request rather than as a configuration problem.
+   *
+   * Slow enough to shape the whole competition: 45s to a proposal against
+   * Groq's 1.7s for a model of the same family, and the agents are awaited
+   * together, so one local agent sets the wall clock for all four. Useful
+   * when no hosted key is available; not the default when one is.
    */
   ollama: {
     id: 'ollama',
