@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
 import { readAnchorToml } from '../offramp/toml'
+import { readWithdrawInfo } from '../offramp/sep24'
 
 /**
  * Both anchors, against the real network.
@@ -20,6 +21,15 @@ describe.skipIf(SKIP)('the live anchors', () => {
       expect(toml.signingKey).toBe(ANCHORS[id].signingKey)
       expect(toml.transferServerSep24).toMatch(/^https:\/\//)
       expect(toml.webAuthEndpoint).toMatch(/^https:\/\//)
+    }, 20_000)
+  }
+
+  for (const id of ALL_ANCHORS) {
+    it(`${id} withdraws USDC`, async () => {
+      const toml = await readAnchorToml(ANCHORS[id])
+      const limits = await readWithdrawInfo(toml, 'USDC')
+      expect(limits?.enabled).toBe(true)
+      expect(limits?.minAmount).toBe(1)
     }, 20_000)
   }
 })
