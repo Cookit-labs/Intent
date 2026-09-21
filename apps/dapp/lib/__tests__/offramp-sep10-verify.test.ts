@@ -34,9 +34,12 @@ interface Tweak {
   firstOpSource?: string
   firstOpName?: string
   webAuthDomain?: string
+  webAuthDomainSource?: string
+  omitWebAuthDomain?: boolean
   extraOp?: boolean
   signer?: Keypair
   unsigned?: boolean
+  forgeSignature?: boolean
 }
 
 function challenge(t: Tweak = {}): string {
@@ -47,21 +50,22 @@ function challenge(t: Tweak = {}): string {
       networkPassphrase: Networks.TESTNET,
       timebounds: { minTime: t.minTime ?? NOW - 10, maxTime: t.maxTime ?? NOW + 900 },
     }
+  ).addOperation(
+    Operation.manageData({
+      name: t.firstOpName ?? `${HOME} auth`,
+      value: Buffer.alloc(48, 3).toString('base64'),
+      source: t.firstOpSource ?? client.publicKey(),
+    })
   )
-    .addOperation(
-      Operation.manageData({
-        name: t.firstOpName ?? `${HOME} auth`,
-        value: Buffer.alloc(48, 3).toString('base64'),
-        source: t.firstOpSource ?? client.publicKey(),
-      })
-    )
-    .addOperation(
+  if (t.omitWebAuthDomain !== true) {
+    builder.addOperation(
       Operation.manageData({
         name: 'web_auth_domain',
         value: t.webAuthDomain ?? HOME,
-        source: server.publicKey(),
+        source: t.webAuthDomainSource ?? server.publicKey(),
       })
     )
+  }
   if (t.extraOp === true) {
     builder.addOperation(
       Operation.payment({ destination: server.publicKey(), asset: Asset.native(), amount: '1' })
@@ -69,6 +73,10 @@ function challenge(t: Tweak = {}): string {
   }
   const tx = builder.build()
   if (t.unsigned !== true) tx.sign(t.signer ?? server)
+  if (t.forgeSignature === true && tx.signatures.length > 0) {
+    const sig = tx.signatures[0] as unknown as { signature: { value: Uint8Array } }
+    sig.signature.value[0] = sig.signature.value[0]! ^ 0xff
+  }
   return tx.toXDR()
 }
 
@@ -153,5 +161,26 @@ describe('verifyChallenge', () => {
     expect(() =>
       verifyChallenge(challenge(), { ...EXPECT, networkPassphrase: Networks.PUBLIC })
     ).toThrow(/refusing challenge: signature/)
+  })
+
+  it('refuses a signature that carries the anchor hint but does not verify', () => {
+    // The case a hint-only check would let through: right 4-byte hint,
+    // wrong 64-byte signature. Only a real verify() against the hash
+    // rejects it.
+    expect(() => verifyChallenge(challenge({ forgeSignature: true }), EXPECT)).toThrow(
+      /refusing challenge: signature/
+    )
+  })
+
+  it('refuses a web_auth_domain that is absent', () => {
+    expect(() => verifyChallenge(challenge({ omitWebAuthDomain: true }), EXPECT)).toThrow(
+      /refusing challenge: web_auth_domain/
+    )
+  })
+
+  it('refuses a web_auth_domain sourced by someone other than the anchor', () => {
+    expect(() =>
+      verifyChallenge(challenge({ webAuthDomainSource: Keypair.random().publicKey() }), EXPECT)
+    ).toThrow(/refusing challenge: web_auth_domain/)
   })
 })
