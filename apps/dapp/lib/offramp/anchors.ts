@@ -27,6 +27,17 @@ export interface AnchorEntry {
   assets: string[]
   /** One line for the review card about what the fiat side looks like. */
   what: string
+  /**
+   * Whether the anchor's SEP-10 challenge requires a `client_domain`.
+   *
+   * MoneyGram's does: the wallet must be reachable at a domain that serves
+   * its own stellar.toml with a SIGNING_KEY, and the wallet's server must
+   * co-sign every challenge with that key. Measured live on 2026-09-21 —
+   * `/auth` answers `client_domain is required` before issuing a challenge.
+   * This deployment has no such domain, so an anchor flagged here is refused
+   * with that reason rather than attempted.
+   */
+  requiresClientDomain: boolean
 }
 
 export const ANCHORS: Record<AnchorId, AnchorEntry> = {
@@ -37,6 +48,7 @@ export const ANCHORS: Record<AnchorId, AnchorEntry> = {
     signingKey: 'GCHLHDBOKG2JWMJQBTLSL5XG6NO7ESXI2TAQKZXCXWXB5WI2X6W233PR',
     assets: ['USDC'],
     what: 'A reference anchor with a fake bank. Nothing real is paid out.',
+    requiresClientDomain: false,
   },
   moneygram: {
     id: 'moneygram',
@@ -45,6 +57,7 @@ export const ANCHORS: Record<AnchorId, AnchorEntry> = {
     signingKey: 'GCSESAP5ILVM6CWIEGK2SDOCQU7PHVFYYT7JNKRDAQNVQWKD5YEE5ZJ4',
     assets: ['USDC'],
     what: 'Cash pickup at MoneyGram locations. This is the test deployment.',
+    requiresClientDomain: true,
   },
 }
 
