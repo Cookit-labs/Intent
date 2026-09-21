@@ -35,7 +35,12 @@ export function saveSession(
   account: string,
   session: StoredSession
 ): void {
-  store.setItem(sessionKey(anchorId, account), JSON.stringify(session))
+  try {
+    store.setItem(sessionKey(anchorId, account), JSON.stringify(session))
+  } catch {
+    // Quota exceeded, or storage denied (private mode). The session still
+    // works for this page load; it just will not survive a reload.
+  }
 }
 
 export function loadSession(
