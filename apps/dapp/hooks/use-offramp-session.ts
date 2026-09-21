@@ -14,7 +14,6 @@ import {
   startWithdraw,
 } from '../lib/offramp/sep24'
 import { clearSession, loadSession, saveSession } from '../lib/offramp/session-store'
-import type { AnchorToml } from '../lib/offramp/toml'
 import { USDC } from '../lib/swap/assets'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
@@ -53,6 +52,8 @@ export interface OfframpSessionState {
   token?: string
   transactionId?: string
   interactiveUrl?: string
+  /** Whether the automatic popup attempt actually produced a window. */
+  popupOpen: boolean
   status?: Sep24Status
   moreInfoUrl?: string
   error?: string
@@ -67,17 +68,35 @@ export interface OfframpSession extends OfframpSessionState {
 }
 
 const POLL_MS = 3_000
-const EMPTY: OfframpSessionState = { phase: 'idle' }
+/** 10 misses at 3s each: 30s of a dead endpoint before giving up. */
+const MAX_POLL_FAILURES = 10
+const EMPTY: OfframpSessionState = { phase: 'idle', popupOpen: false }
+
+/** Phases in which a withdrawal is already running; `begin` refuses to start a second one over them. */
+const IN_PROGRESS_PHASES = new Set<OfframpPhase>([
+  'authenticating',
+  'starting',
+  'interactive',
+  'ready',
+])
 
 interface AnchorInfo {
   anchor: { id: AnchorId; name: string; homeDomain: string; what: string }
-  toml: AnchorToml
+  toml: import('../lib/offramp/toml').AnchorToml
   limits: WithdrawLimits | null
 }
 
+/**
+ * Best-effort: this only actually opens a window when called synchronously
+ * from a user gesture (a click handler), which `begin`'s internal call is
+ * not — it runs after an anchor-info fetch, a wallet signing prompt, and a
+ * start-withdrawal call, so most browsers block it and this returns `null`.
+ * The state's `popupOpen` field reports whether it worked; the card's own
+ * "open" button, which *is* a click, is the reliable path.
+ */
 function openAnchorPage(url: string): Window | null {
   // No `noopener`: it would sever the handle the anchor uses to postMessage
-  // back. Opened from a click, or the browser blocks it.
+  // back.
   return window.open(url, 'intent-anchor', 'popup,width=520,height=760')
 }
 
@@ -85,9 +104,17 @@ export function useOfframpSession(): OfframpSession {
   const { adapter } = useChain()
   const { address, isConnected } = useWallet()
   const [state, setState] = useState<OfframpSessionState>(EMPTY)
-  const tomlRef = useRef<AnchorToml | undefined>(undefined)
   const popupRef = useRef<Window | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
+  // Mirrors `state.phase` for the re-entrancy guard in `begin`, which reads
+  // it from inside a `useCallback` closure that must not go stale — and must
+  // not depend on `state.phase` directly, or `begin` would be recreated on
+  // every phase change.
+  const phaseRef = useRef<OfframpPhase>(state.phase)
+
+  useEffect(() => {
+    phaseRef.current = state.phase
+  }, [state.phase])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== undefined) clearInterval(pollRef.current)
@@ -96,20 +123,28 @@ export function useOfframpSession(): OfframpSession {
 
   const reset = useCallback(() => {
     stopPolling()
+    popupRef.current?.close()
     popupRef.current = null
-    tomlRef.current = undefined
     setState(EMPTY)
   }, [stopPolling])
 
   useEffect(() => stopPolling, [stopPolling])
 
   const poll = useCallback(
-    (toml: AnchorToml, token: string, id: string) => {
+    (
+      toml: import('../lib/offramp/toml').AnchorToml,
+      token: string,
+      id: string,
+      anchorId: string,
+      account: string
+    ) => {
       stopPolling()
+      let consecutiveFailures = 0
       pollRef.current = setInterval(() => {
         void (async () => {
           try {
             const tx = await readTransaction(toml, { authToken: token, id })
+            consecutiveFailures = 0
             setState((s) => ({
               ...s,
               status: tx.status,
@@ -127,16 +162,42 @@ export function useOfframpSession(): OfframpSession {
               }))
             }
           } catch (e) {
-            // One failed read is not a failed withdrawal; the next tick tries
-            // again. A 401 means the token died, which is reported.
+            // A 401 means the token died — reported, and the stranded session
+            // cleared so a fresh `begin` does not try to resume it.
             if (e instanceof AnchorHttpError && e.status === 401) {
               stopPolling()
+              clearSession(window.sessionStorage, anchorId, account)
               setState((s) => ({
                 ...s,
                 phase: 'failed',
                 error: 'The anchor session expired. Start the withdrawal again.',
               }))
+              return
             }
+            if (e instanceof AnchorHttpError) {
+              // One failed read is not a failed withdrawal; the next tick
+              // tries again — but not forever, or a permanently-down anchor
+              // polls indefinitely with the UI stuck on `interactive`.
+              consecutiveFailures += 1
+              if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                stopPolling()
+                setState((s) => ({
+                  ...s,
+                  phase: 'failed',
+                  error: 'The anchor has stopped answering. Nothing was sent; you can start again.',
+                }))
+              }
+              return
+            }
+            // Not an HTTP error — a shape error (an unknown status or memo
+            // type `readTransaction` refused to interpret). Retrying will not
+            // heal that; stop immediately rather than spend the full ceiling.
+            stopPolling()
+            setState((s) => ({
+              ...s,
+              phase: 'failed',
+              error: `The anchor answered in a form this app cannot use: ${e instanceof Error ? e.message : String(e)}`,
+            }))
           }
         })()
       }, POLL_MS)
@@ -146,8 +207,25 @@ export function useOfframpSession(): OfframpSession {
 
   const begin = useCallback(
     (anchorId: AnchorId, amount?: string) => {
+      // A withdrawal already running is not restarted out from under itself:
+      // two concurrent `run()`s would each call `startWithdraw`, open a
+      // second popup, and interleave `setState` calls from whichever loses.
+      if (IN_PROGRESS_PHASES.has(phaseRef.current)) return
+
+      stopPolling()
+      popupRef.current?.close()
+      popupRef.current = null
+
       if (!isConnected || address === undefined) {
         setState({ ...EMPTY, phase: 'failed', error: 'Connect a wallet to withdraw.' })
+        return
+      }
+      if (adapter.signTransaction === undefined) {
+        setState({
+          ...EMPTY,
+          phase: 'failed',
+          error: 'This wallet cannot sign the anchor sign-in on this chain.',
+        })
         return
       }
       const account = address
@@ -181,6 +259,17 @@ export function useOfframpSession(): OfframpSession {
         setState({ ...EMPTY, phase: 'authenticating', anchorId })
 
         const infoRes = await fetch(`/api/offramp/anchor?id=${anchorId}`)
+        if (!infoRes.ok) {
+          let message = `The anchor lookup failed (HTTP ${infoRes.status}).`
+          try {
+            const body = (await infoRes.json()) as { error?: string }
+            if (body.error !== undefined) message = body.error
+          } catch {
+            // The status is the message.
+          }
+          setState({ ...EMPTY, phase: 'failed', anchorId, error: message })
+          return
+        }
         const info = (await infoRes.json()) as Partial<AnchorInfo> & { error?: string }
         if (info.toml === undefined || info.anchor === undefined) {
           setState({
@@ -191,8 +280,8 @@ export function useOfframpSession(): OfframpSession {
           })
           return
         }
-        tomlRef.current = info.toml
         const anchorInfo = info.anchor
+        const toml = info.toml
         setState((s) => ({
           ...s,
           anchorName: anchorInfo.name,
@@ -206,7 +295,7 @@ export function useOfframpSession(): OfframpSession {
         if (session === undefined) {
           const auth = await authenticate({
             anchor: entry,
-            toml: info.toml,
+            toml,
             account,
             sign: async (xdr) => {
               const out = await adapter.signTransaction?.({ xdr, address: account })
@@ -224,13 +313,13 @@ export function useOfframpSession(): OfframpSession {
           session = { token: auth.token, expiresAt: auth.expiresAt }
           saveSession(window.sessionStorage, anchorId, account, session)
         }
-        setState((s) => ({ ...s, phase: 'starting', token: session?.token }))
+        setState((s) => ({ ...s, phase: 'starting', token: session.token }))
 
         // Resume a withdrawal the anchor is still holding open, else start one.
         let transactionId = session.transactionId
         let interactiveUrl = session.interactiveUrl
         if (transactionId === undefined) {
-          const started = await startWithdraw(info.toml, {
+          const started = await startWithdraw(toml, {
             authToken: session.token,
             assetCode: USDC.code,
             ...(amount !== undefined ? { amount } : {}),
@@ -244,14 +333,20 @@ export function useOfframpSession(): OfframpSession {
           })
         }
 
+        // Best-effort: see `openAnchorPage`'s comment. This call is not a
+        // user gesture by the time it runs, so it is expected to be blocked
+        // more often than not; `popupOpen` tells the UI whether it worked.
+        const popup = interactiveUrl !== undefined ? openAnchorPage(interactiveUrl) : null
+        popupRef.current = popup
+
         setState((s) => ({
           ...s,
           phase: 'interactive',
           transactionId,
+          popupOpen: popup !== null,
           ...(interactiveUrl !== undefined ? { interactiveUrl } : {}),
         }))
-        if (interactiveUrl !== undefined) popupRef.current = openAnchorPage(interactiveUrl)
-        poll(info.toml, session.token, transactionId)
+        poll(toml, session.token, transactionId, anchorId, account)
       }
 
       void run().catch((e: unknown) => {
@@ -273,16 +368,19 @@ export function useOfframpSession(): OfframpSession {
       popupRef.current.focus()
       return
     }
-    popupRef.current = openAnchorPage(url)
+    const popup = openAnchorPage(url)
+    popupRef.current = popup
+    setState((s) => ({ ...s, popupOpen: popup !== null }))
   }, [state.interactiveUrl])
 
-  // A declined or failed session is not worth resuming.
+  // A declined session is not worth resuming. A `failed` session is not
+  // cleared here: the 401 path clears it explicitly because that is the one
+  // failure that means the token itself is dead; every other failure (a
+  // transient poll error past the ceiling, a network blip on resume) may
+  // still describe a transaction the anchor is holding open, and wiping it
+  // would strand that transaction's id where nothing could find it again.
   useEffect(() => {
-    if (
-      (state.phase === 'declined' || state.phase === 'failed') &&
-      state.anchorId !== undefined &&
-      address !== undefined
-    ) {
+    if (state.phase === 'declined' && state.anchorId !== undefined && address !== undefined) {
       clearSession(window.sessionStorage, state.anchorId, address)
     }
   }, [state.phase, state.anchorId, address])

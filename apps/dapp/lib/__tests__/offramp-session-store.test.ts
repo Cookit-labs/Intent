@@ -72,4 +72,17 @@ describe('session store', () => {
     store.setItem(sessionKey('testanchor', ACCOUNT), '{not json')
     expect(loadSession(store, 'testanchor', ACCOUNT, 0)).toBeUndefined()
   })
+
+  it('does not throw when the store refuses to write', () => {
+    const store = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('quota exceeded')
+      },
+      removeItem: () => {},
+    }
+    expect(() =>
+      saveSession(store, 'testanchor', ACCOUNT, { token: 't', expiresAt: 9_999 })
+    ).not.toThrow()
+  })
 })
