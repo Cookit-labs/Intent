@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AnchorToml } from '../offramp/toml'
 import {
+  AnchorHttpError,
   isDeclined,
   isReadyToPay,
   isSettledByAnchor,
@@ -71,6 +72,16 @@ describe('readWithdrawInfo', () => {
     const seen: Seen[] = []
     await readWithdrawInfo(TOML, 'USDC', answering(INFO, seen))
     expect(seen[0]?.url).toBe('https://testanchor.stellar.org/sep24/info')
+  })
+
+  it('rejects a 503 as an AnchorHttpError with status 503', async () => {
+    try {
+      await readWithdrawInfo(TOML, 'USDC', answering({ error: 'service unavailable' }, [], 503))
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AnchorHttpError)
+      expect((err as AnchorHttpError).status).toBe(503)
+    }
   })
 })
 
@@ -178,6 +189,20 @@ describe('readTransaction', () => {
         answering({ error: 'unauthorized' }, [], 401)
       )
     ).rejects.toThrow(/401/)
+  })
+
+  it('rejects a 401 as an AnchorHttpError with status 401', async () => {
+    try {
+      await readTransaction(
+        TOML,
+        { authToken: 'stale', id: 'x' },
+        answering({ error: 'unauthorized' }, [], 401)
+      )
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AnchorHttpError)
+      expect((err as AnchorHttpError).status).toBe(401)
+    }
   })
 })
 
