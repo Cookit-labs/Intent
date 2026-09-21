@@ -183,14 +183,22 @@ export function useSequence(): Sequence {
   const [state, setState] = useState<SequenceState>(EMPTY)
   const [request, setRequest] = useState<SequenceRequest | undefined>(undefined)
   const offramp = useOfframpSession()
-  // The child hook's callbacks are `useCallback` identities and so are stable;
-  // depending on them rather than on `offramp` itself keeps the effects and
-  // callbacks below from being rebuilt on every anchor poll.
+  // `begin` and `reset` are stable identities, so depending on them rather than
+  // on `offramp` itself keeps the effects and callbacks below from being
+  // rebuilt on every anchor poll. `reopen` is not stable — it closes over
+  // `interactiveUrl` and so re-identifies once, when the anchor's page opens —
+  // but nothing here depends on it beyond the passthrough at the bottom.
   const { begin: beginOfframp, reopen: reopenOfframp, reset: resetOfframp } = offramp
+
+  // Which anchor transaction the payment has already been built for. Guards the
+  // `ready` branch below, which would otherwise re-run: `ready` is terminal, so
+  // every later render of that effect still sees it.
+  const builtFor = useRef<string | undefined>(undefined)
 
   const reset = useCallback(() => {
     setState(EMPTY)
     setRequest(undefined)
+    builtFor.current = undefined
     resetOfframp()
   }, [resetOfframp])
 
@@ -373,6 +381,10 @@ export function useSequence(): Sequence {
         phase: 'review',
         xdr,
         offramp: {
+          // Spread first so what the interactive phase learned — the anchor's
+          // page URL, and whether its popup opened — survives the build rather
+          // than being replaced by the subset the build itself returns.
+          ...s.offramp,
           anchorName: ANCHORS[anchor].name,
           destination,
           memo,
@@ -429,8 +441,9 @@ export function useSequence(): Sequence {
           ...(offrampInteractiveUrl !== undefined ? { interactiveUrl: offrampInteractiveUrl } : {}),
           ...(offrampStatus !== undefined ? { anchorStatus: offrampStatus } : {}),
           // Said so the card can offer its own button when the browser blocked
-          // the automatic window, which is the common case.
-          ...(offrampPopupOpen !== undefined ? { popupOpen: offrampPopupOpen } : {}),
+          // the automatic window, which is the common case. Always a boolean on
+          // the session hook, so it is assigned rather than spread.
+          popupOpen: offrampPopupOpen,
         },
       }))
     } else if (
@@ -438,6 +451,15 @@ export function useSequence(): Sequence {
       offrampTransactionId !== undefined &&
       offrampToken !== undefined
     ) {
+      // Built once per anchor transaction, guarded by a ref for the same reason
+      // `advancedFor` below is: React re-runs effects it has already run — in
+      // StrictMode on mount, and after any remount — and `ready` is terminal,
+      // so every one of those re-runs still sees it. Unguarded, a second
+      // `/api/offramp/build` would overwrite the envelope and the destination
+      // under a user who may already be signing, and drag `review` back to
+      // `building` mid-read.
+      if (builtFor.current === offrampTransactionId) return
+      builtFor.current = offrampTransactionId
       setState((s) => ({ ...s, phase: 'anchor-ready', current: anchorStepIndex }))
       void buildOfframp(address, request.anchor, offrampTransactionId, offrampToken)
     } else if (offrampPhase === 'declined') {
@@ -578,9 +600,12 @@ export function useSequence(): Sequence {
                 // about this transaction, where the fiat side plays out.
                 ...(isOfframpStep
                   ? {
-                      ...(state.offramp?.moreInfoUrl !== undefined
+                      // Read from the updater's own `s`, not from the closure:
+                      // this runs after a balance read, a wallet signature and
+                      // a submit, by which time a captured `state` is stale.
+                      ...(s.offramp?.moreInfoUrl !== undefined
                         ? {
-                            positionUrl: state.offramp.moreInfoUrl,
+                            positionUrl: s.offramp.moreInfoUrl,
                             positionLabel: 'Track at the anchor',
                           }
                         : {}),
@@ -644,7 +669,6 @@ export function useSequence(): Sequence {
   }, [
     state.xdr,
     state.current,
-    state.offramp,
     address,
     adapter,
     request,
