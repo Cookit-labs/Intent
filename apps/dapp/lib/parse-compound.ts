@@ -1,3 +1,4 @@
+import { DEFAULT_ANCHOR, isAnchorId } from './offramp/anchors'
 import { parseIntent } from './parse-intent'
 import type { ParsedIntent } from './parse-intent'
 
@@ -45,11 +46,12 @@ const SEQUENCE_MARKERS = /\b(?:and\s+then|then|after\s+that|afterwards|followed\
 /**
  * What the follow-on action does.
  *
- * Only lending, today. The vocabulary is deliberately narrow: a marker that
- * matched anything would turn every "then" into a second action, including the
- * many that are not one.
+ * Two kinds. The vocabulary is deliberately narrow: a marker that matched
+ * anything would turn every "then" into a second action, including the many
+ * that are not one. Offramp is checked before lending, because "put it in my
+ * bank" contains lending's "put it in" and the bank decides.
  */
-export type FollowOnKind = 'lend'
+export type FollowOnKind = 'lend' | 'offramp'
 
 /**
  * An instruction to supply an asset already held, with no trade first.
@@ -89,6 +91,47 @@ const LEND_PHRASING =
 
 /** Venues the follow-on may name. */
 const VENUE_PHRASING: [RegExp, string][] = [[/\bblend\b/i, 'blend']]
+
+/**
+ * Words that name sending the proceeds to fiat.
+ *
+ * "to my bank" is the common phrasing; "cash out" and "off-ramp" are the
+ * jargon. "send" alone is not here: "send it to my friend" is a payment, and
+ * the offramp reading needs the bank, the fiat, or the cash-out verb.
+ */
+const OFFRAMP_PHRASING =
+  /\b(?:(?:to|into|in)\s+(?:my\s+)?bank(?:\s+account)?|cash\s*out|cash\s+it\s+out|off-?ramp(?:s|ed|ing)?|to\s+fiat|to\s+dollars|to\s+usd\b|the\s+dollars\s+to)/i
+
+/** Anchors the offramp may name. Ids match `lib/offramp/anchors.ts`. */
+const ANCHOR_PHRASING: [RegExp, string][] = [
+  [/\bmoney\s*gram\b/i, 'moneygram'],
+  [/\btest\s*anchor\b/i, 'testanchor'],
+]
+
+/** Which anchor the clause names, if any; the default when none is named. */
+function detectAnchor(clause: string): string | null | undefined {
+  for (const [pattern, id] of ANCHOR_PHRASING) {
+    if (pattern.test(clause)) return id
+  }
+  // "via Coinbase", "through Wise": somewhere named that this app does not
+  // integrate. Refused rather than sent to the default.
+  const named = /\b(?:via|through|using|with|on)\s+([a-z]+)/i.exec(clause)?.[1]?.toLowerCase()
+  const NOT_ANCHORS = new Set([
+    'my',
+    'the',
+    'a',
+    'an',
+    'it',
+    'this',
+    'that',
+    'bank',
+    'fiat',
+    'usd',
+    'cash',
+  ])
+  if (named !== undefined && !NOT_ANCHORS.has(named) && !isAnchorId(named)) return null
+  return undefined
+}
 
 export interface FollowOnAction {
   kind: FollowOnKind
@@ -224,6 +267,19 @@ export function parseCompoundIntent(
 
   const [first, second] = clauses
 
+  // Offramp first: "put it in my bank" contains lending's phrasing, and the
+  // bank is what the user meant.
+  if (OFFRAMP_PHRASING.test(second)) {
+    const anchor = detectAnchor(second)
+    if (anchor === null) return null
+    const head = parseIntent(first, prices)
+    return {
+      head,
+      followOn: { kind: 'offramp', venue: anchor ?? DEFAULT_ANCHOR },
+      clauses: [first, second],
+    }
+  }
+
   // The second clause must actually name a follow-on this app can perform.
   // "Buy XLM then tell me the price" splits cleanly and is not a sequence of
   // two trades; without this it would become one.
@@ -318,5 +374,59 @@ export function parseSupplyOnlyIntent(
     // supplied. Saying which unit this is beats the caller guessing.
     ...(amount !== undefined && usdAmount !== undefined ? { amountIsUsd: true } : {}),
     venue: venue ?? 'blend',
+  }
+}
+
+/**
+ * An instruction to withdraw USDC already held, with no trade first.
+ *
+ * Mirrors `parseSupplyOnlyIntent`. Narrow: it fires only when the sentence
+ * names an offramp and no trade, and only for USDC — the one asset the
+ * integrated anchors withdraw. "Withdraw my USDC from Blend" is refused,
+ * because that is a lending withdrawal and reading it as a bank transfer
+ * would send funds off-chain the user meant to keep.
+ */
+export interface OfframpOnlyIntent {
+  kind: 'offramp-only'
+  asset: 'USDC'
+  /** Display units. Absent means the whole balance. */
+  amount?: string
+  venue: string
+}
+
+const OFFRAMP_TARGET =
+  /(?:\b(all\s+(?:of\s+)?my|my)\s+usdc\b|\$\s*([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?usdc\b|\b([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?usdc\b)/i
+
+export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
+  const text = raw.trim()
+
+  const offrampVerb = /\b(?:withdraw(?:s|ing)?|cash\s*out|off-?ramp(?:s|ed|ing)?|send)\b/i
+  if (
+    !offrampVerb.test(text) ||
+    !(OFFRAMP_PHRASING.test(text) || /\b(?:cash\s*out|off-?ramp)/i.test(text))
+  ) {
+    return null
+  }
+  if (/\b(?:swap|buy|purchase|sell|convert|trade|exchange)\b/i.test(text)) return null
+  if (/\bfrom\s+blend\b|\bblend\b/i.test(text)) return null
+
+  // Any asset but USDC is refused outright, before the amount is read.
+  if (/\b(?:xlm|lumens?|eth|btc|wbtc|weth|cetes)\b/i.test(text)) return null
+
+  const anchor = detectAnchor(text)
+  if (anchor === null) return null
+
+  const match = OFFRAMP_TARGET.exec(text)
+  if (match === null) return null
+
+  const wholeBalance = match[1] !== undefined
+  const rawAmount = wholeBalance ? undefined : (match[2] ?? match[3])
+  const amount = rawAmount?.replace(/,/g, '')
+
+  return {
+    kind: 'offramp-only',
+    asset: 'USDC',
+    ...(amount !== undefined ? { amount } : {}),
+    venue: anchor ?? DEFAULT_ANCHOR,
   }
 }
