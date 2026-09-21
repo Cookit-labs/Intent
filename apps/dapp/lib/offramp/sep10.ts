@@ -1,6 +1,10 @@
 import { FeeBumpTransaction, Keypair, TransactionBuilder } from '@stellar/stellar-sdk'
 import type { Transaction } from '@stellar/stellar-sdk'
 
+import type { AnchorEntry } from './anchors'
+import { AnchorHttpError } from './sep24'
+import type { AnchorToml } from './toml'
+
 /**
  * SEP-10: proving to an anchor that the user controls their account.
  *
@@ -110,4 +114,112 @@ export function verifyChallenge(xdr: string, expect: ChallengeExpectation): Tran
   if (!signed) refuse('signature', 'not signed by the pinned anchor key')
 
   return tx
+}
+
+/** Signs a challenge envelope and returns the signed XDR. The hook adapts Freighter. */
+export type ChallengeSigner = (xdr: string) => Promise<string>
+
+export interface AuthSession {
+  token: string
+  /** Unix seconds. */
+  expiresAt: number
+}
+
+export interface AuthenticateOptions {
+  anchor: AnchorEntry
+  toml: AnchorToml
+  account: string
+  sign: ChallengeSigner
+  fetchImpl?: typeof fetch
+  nowSeconds?: number
+}
+
+/**
+ * The anchor's own view of when the token dies, read from the payload.
+ *
+ * Not verified: this app is the bearer, not the audience, and the anchor
+ * checks the signature on every call. What matters here is knowing when to
+ * stop using it, which the payload says plainly.
+ */
+export function jwtExpiry(token: string): number | undefined {
+  const parts = token.split('.')
+  if (parts.length !== 3 || parts[1] === undefined) return undefined
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
+      exp?: unknown
+    }
+    return typeof payload.exp === 'number' ? payload.exp : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function authenticate(options: AuthenticateOptions): Promise<AuthSession> {
+  const doFetch = options.fetchImpl ?? fetch
+  const { anchor, toml, account } = options
+
+  const challengeRes = await doFetch(
+    `${toml.webAuthEndpoint}?account=${encodeURIComponent(account)}`,
+    { headers: { Accept: 'application/json' } }
+  )
+  if (!challengeRes.ok)
+    throw new AnchorHttpError(
+      challengeRes.status,
+      `anchor challenge returned ${challengeRes.status}`
+    )
+  const challenge = (await challengeRes.json()) as {
+    transaction?: string
+    network_passphrase?: string
+  }
+  if (typeof challenge.transaction !== 'string') {
+    throw new Error('anchor returned no challenge transaction')
+  }
+  // Said by the anchor and checked before decoding: a challenge for the wrong
+  // network fails signature verification anyway, but this names the cause.
+  if (
+    challenge.network_passphrase !== undefined &&
+    challenge.network_passphrase !== toml.networkPassphrase
+  ) {
+    throw new Error('anchor issued a challenge for another network')
+  }
+
+  const webAuthDomain = new URL(toml.webAuthEndpoint).host
+
+  // Every check, before the wallet is involved. A wallet prompt for a
+  // challenge that fails any of these is the attack this file exists to stop.
+  verifyChallenge(challenge.transaction, {
+    serverKey: anchor.signingKey,
+    clientAccount: account,
+    homeDomain: anchor.homeDomain,
+    webAuthDomain,
+    networkPassphrase: toml.networkPassphrase,
+    ...(options.nowSeconds !== undefined ? { nowSeconds: options.nowSeconds } : {}),
+  })
+
+  const signed = await options.sign(challenge.transaction)
+
+  const tokenRes = await doFetch(toml.webAuthEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ transaction: signed }),
+  })
+  if (!tokenRes.ok) {
+    let detail = `HTTP ${tokenRes.status}`
+    try {
+      detail = ((await tokenRes.json()) as { error?: string }).error ?? detail
+    } catch {
+      // The status is the detail.
+    }
+    throw new AnchorHttpError(tokenRes.status, `anchor rejected the signed challenge: ${detail}`)
+  }
+  const body = (await tokenRes.json()) as { token?: string }
+  if (typeof body.token !== 'string' || body.token === '') {
+    throw new Error('anchor returned no token')
+  }
+
+  const now = options.nowSeconds ?? Math.floor(Date.now() / 1000)
+  // Fifteen minutes is the spec's default when the payload says nothing.
+  const expiresAt = jwtExpiry(body.token) ?? now + 900
+
+  return { token: body.token, expiresAt }
 }

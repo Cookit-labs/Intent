@@ -1,8 +1,10 @@
+import { Keypair } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
 import { readAnchorToml } from '../offramp/toml'
 import { readWithdrawInfo } from '../offramp/sep24'
+import { verifyChallenge } from '../offramp/sep10'
 
 /**
  * Both anchors, against the real network.
@@ -30,6 +32,24 @@ describe.skipIf(SKIP)('the live anchors', () => {
       const limits = await readWithdrawInfo(toml, 'USDC')
       expect(limits?.enabled).toBe(true)
       expect(limits?.minAmount).toBe(1)
+    }, 20_000)
+  }
+
+  for (const id of ALL_ANCHORS) {
+    it(`${id} issues a challenge that passes every check`, async () => {
+      // A throwaway account: the challenge names it and nothing is signed.
+      const probe = Keypair.random().publicKey()
+      const toml = await readAnchorToml(ANCHORS[id])
+      const res = await fetch(`${toml.webAuthEndpoint}?account=${probe}`)
+      const body = (await res.json()) as { transaction: string }
+      const tx = verifyChallenge(body.transaction, {
+        serverKey: ANCHORS[id].signingKey,
+        clientAccount: probe,
+        homeDomain: ANCHORS[id].homeDomain,
+        webAuthDomain: new URL(toml.webAuthEndpoint).host,
+        networkPassphrase: toml.networkPassphrase,
+      })
+      expect(tx.sequence).toBe('0')
     }, 20_000)
   }
 })
