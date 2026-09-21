@@ -1,6 +1,22 @@
 import type { AnchorToml } from './toml'
 
 /**
+ * A non-2xx answer from the anchor, with the status carried as data.
+ *
+ * Callers branch on this: a 401 means the SEP-10 token is dead and the user
+ * must sign in again, which is a different action from retrying. Matching the
+ * message text for "401" would be brittle; the status is a field instead.
+ */
+export class AnchorHttpError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'AnchorHttpError'
+    this.status = status
+  }
+}
+
+/**
  * SEP-24 over plain fetch.
  *
  * Three calls: what the anchor withdraws and within what limits, starting a
@@ -148,7 +164,11 @@ export async function readWithdrawInfo(
   const res = await fetchImpl(`${toml.transferServerSep24}/info`, {
     headers: { Accept: 'application/json' },
   })
-  if (!res.ok) throw new Error(`anchor /info returned ${res.status}`)
+  if (!res.ok)
+    throw new AnchorHttpError(
+      res.status,
+      `anchor /info returned ${res.status}: ${await errorText(res)}`
+    )
   const info = (await res.json()) as InfoWire
 
   const entry = info.withdraw?.[assetCode]
@@ -186,7 +206,8 @@ export async function startWithdraw(
       ...(req.amount !== undefined ? { amount: req.amount } : {}),
     }),
   })
-  if (!res.ok) throw new Error(`anchor refused the withdrawal: ${await errorText(res)}`)
+  if (!res.ok)
+    throw new AnchorHttpError(res.status, `anchor refused the withdrawal: ${await errorText(res)}`)
 
   const body = (await res.json()) as { type?: string; url?: string; id?: string }
   if (body.type !== 'interactive_customer_info_needed') {
@@ -207,7 +228,11 @@ export async function readTransaction(
     `${toml.transferServerSep24}/transaction?id=${encodeURIComponent(req.id)}`,
     { headers: { Accept: 'application/json', Authorization: `Bearer ${req.authToken}` } }
   )
-  if (!res.ok) throw new Error(`anchor transaction read returned ${res.status}`)
+  if (!res.ok)
+    throw new AnchorHttpError(
+      res.status,
+      `anchor transaction read returned ${res.status}: ${await errorText(res)}`
+    )
 
   const wire = ((await res.json()) as TransactionWire).transaction
   if (wire === undefined || typeof wire.id !== 'string') {
