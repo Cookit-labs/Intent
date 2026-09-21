@@ -36,20 +36,25 @@ describe.skipIf(SKIP)('the live anchors', () => {
   }
 
   for (const id of ALL_ANCHORS) {
-    it(`${id} issues a challenge that passes every check`, async () => {
-      // A throwaway account: the challenge names it and nothing is signed.
-      const probe = Keypair.random().publicKey()
-      const toml = await readAnchorToml(ANCHORS[id])
-      const res = await fetch(`${toml.webAuthEndpoint}?account=${probe}`)
-      const body = (await res.json()) as { transaction: string }
-      const tx = verifyChallenge(body.transaction, {
-        serverKey: ANCHORS[id].signingKey,
-        clientAccount: probe,
-        homeDomain: ANCHORS[id].homeDomain,
-        webAuthDomain: new URL(toml.webAuthEndpoint).host,
-        networkPassphrase: toml.networkPassphrase,
-      })
-      expect(tx.sequence).toBe('0')
-    }, 20_000)
+    // Needs a client_domain this deployment cannot present; see AnchorEntry.requiresClientDomain.
+    it.skipIf(ANCHORS[id].requiresClientDomain)(
+      `${id} issues a challenge that passes every check`,
+      async () => {
+        // A throwaway account: the challenge names it and nothing is signed.
+        const probe = Keypair.random().publicKey()
+        const toml = await readAnchorToml(ANCHORS[id])
+        const res = await fetch(`${toml.webAuthEndpoint}?account=${probe}`)
+        const body = (await res.json()) as { transaction: string }
+        const tx = verifyChallenge(body.transaction, {
+          serverKey: ANCHORS[id].signingKey,
+          clientAccount: probe,
+          homeDomain: ANCHORS[id].homeDomain,
+          webAuthDomain: new URL(toml.webAuthEndpoint).host,
+          networkPassphrase: toml.networkPassphrase,
+        })
+        expect(tx.sequence).toBe('0')
+      },
+      20_000
+    )
   }
 })

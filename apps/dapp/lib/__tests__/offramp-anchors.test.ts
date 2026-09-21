@@ -36,4 +36,9 @@ describe('anchor registry', () => {
   it('defaults to the SDF test anchor', () => {
     expect(DEFAULT_ANCHOR).toBe('testanchor')
   })
+
+  it('knows which anchor needs a client domain this deployment lacks', () => {
+    expect(ANCHORS.testanchor.requiresClientDomain).toBe(false)
+    expect(ANCHORS.moneygram.requiresClientDomain).toBe(true)
+  })
 })
