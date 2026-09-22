@@ -15,6 +15,7 @@ const categoryLabel: Record<VenueCategory, string> = {
   lending: 'Lending',
   rwa: 'Real-world assets',
   pool: 'Liquidity pool',
+  offramp: 'Off-ramp',
 }
 
 /**

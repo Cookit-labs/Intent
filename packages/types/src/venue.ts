@@ -1,6 +1,13 @@
 import type { ChainFamily } from './chain'
 
-export type VenueCategory = 'swap' | 'aggregator' | 'orderbook' | 'lending' | 'rwa' | 'pool'
+export type VenueCategory =
+  | 'swap'
+  | 'aggregator'
+  | 'orderbook'
+  | 'lending'
+  | 'rwa'
+  | 'pool'
+  | 'offramp'
 
 /**
  * How far a venue is wired into the app.

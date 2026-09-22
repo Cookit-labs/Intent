@@ -77,6 +77,14 @@ export interface BundleStep {
   positionUrl?: string
   /** The protocol this step touched, for labelling its link. */
   venue?: string
+  /**
+   * The anchor's side of an offramp step, when this step was one.
+   *
+   * The transaction hash proves the payment; it says nothing about whether
+   * the anchor has paid out. That lives with the anchor, under this id, and
+   * is what someone tracking a withdrawal actually wants.
+   */
+  anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
 }
 
 const STORAGE_KEY = 'intent.chat.v1'
