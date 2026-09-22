@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { AgentProposalResult, AgentStrategyKey } from '../agents/brain'
+import type { AgentKey, AgentProposalResult } from '../agents/brain'
 import { pickWinner, scoreProposals, tieBreak, unanimousChoice } from '../agents/scoring'
 
 /**
@@ -16,12 +16,12 @@ import { pickWinner, scoreProposals, tieBreak, unanimousChoice } from '../agents
  */
 
 function proposal(
-  strategy: AgentStrategyKey,
+  agent: AgentKey,
   vsOraclePct: number,
   over: Partial<AgentProposalResult> = {}
 ): AgentProposalResult {
   return {
-    strategy,
+    agent,
     routeId: 'soroswap-1',
     reasoning: 'test',
     projectedAvgPriceUsd: 0.18,
@@ -44,7 +44,7 @@ describe('the measured fill decides', () => {
     const scored = scoreProposals([proposal('twap', 2.0), proposal('shadow', 0.5)], {
       competitionId: RACE,
     })
-    expect(scored[0]?.strategy).toBe('shadow')
+    expect(scored[0]?.agent).toBe('shadow')
   })
 
   it('ranks a fill better than fair value above one at fair value', () => {
@@ -52,7 +52,7 @@ describe('the measured fill decides', () => {
     const scored = scoreProposals([proposal('twap', 0), proposal('momentum', -40)], {
       competitionId: RACE,
     })
-    expect(scored[0]?.strategy).toBe('momentum')
+    expect(scored[0]?.agent).toBe('momentum')
     expect(scored[0]?.score).toBeGreaterThan(100)
   })
 
@@ -172,8 +172,8 @@ describe('unanimity', () => {
  * route beats a winning opinion.
  */
 describe('unexecutable proposals cannot win', () => {
-  const withoutRoute = (strategy: AgentStrategyKey, vsOraclePct: number): AgentProposalResult => {
-    const { routeId: _drop, ...rest } = proposal(strategy, vsOraclePct)
+  const withoutRoute = (agent: AgentKey, vsOraclePct: number): AgentProposalResult => {
+    const { routeId: _drop, ...rest } = proposal(agent, vsOraclePct)
     return rest as AgentProposalResult
   }
 

@@ -30,7 +30,8 @@ const market: MarketContext = {
 
 const request: ProposalRequest = {
   intent: parseIntent('Swap 20 USDC to XLM'),
-  strategy: 'twap',
+  agent: 'groq:qwen/qwen3.8-27b',
+  seat: 0,
   market,
   chain: 'stellar',
 }

@@ -7,7 +7,7 @@ import type {
   ProposalRequest,
 } from '../brain'
 import { ALL_ANCHORS, ANCHORS } from '../../offramp/anchors'
-import { STRATEGIES } from '../strategies'
+import { SYSTEM_PROMPT } from '../brief'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
 import type { ProviderConfig } from './providers'
 import { PROVIDERS, modelFor } from './providers'
@@ -54,6 +54,14 @@ import { PROVIDERS, modelFor } from './providers'
 // nothing and the failure it prevents is the one that makes the whole
 // competition look fabricated.
 const MAX_OUTPUT_TOKENS = 16_000
+
+/**
+ * One value for every agent. The old per-seat spread (0.2–0.7) was never
+ * honoured in thinking mode and is not what makes agents differ; the models
+ * are. Mid-range, so a provider that does honour it is neither greedy nor
+ * wild.
+ */
+const TEMPERATURE = 0.4
 
 export interface BrainOptions {
   /** Which provider's defaults to start from. DeepSeek when unset. */
@@ -122,14 +130,13 @@ function meta(
  * and still returns the right answer; it just quietly costs ~50x more.
  */
 function buildMessages(req: ProposalRequest): { role: string; content: string }[] {
-  const strategy = STRATEGIES[req.strategy]
   const venueList = req.market.venues.map((v) => `${v.id} (${v.name}, ${v.category})`).join(', ')
   const priceList = Object.entries(req.market.prices)
     .map(([sym, px]) => `${sym}=$${px}`)
     .join(', ')
 
   return [
-    { role: 'system', content: strategy.systemPrompt },
+    { role: 'system', content: SYSTEM_PROMPT },
     {
       role: 'system',
       content: [
@@ -197,7 +204,7 @@ function routeLines(req: ProposalRequest): string[] {
   // deterministic — the same agent always sees the same order — and changes
   // nothing about the facts, only which one is read first.
   const offered = req.market.routes ?? []
-  const shift = STRATEGIES[req.strategy].revealOrder % Math.max(1, offered.length)
+  const shift = req.seat % Math.max(1, offered.length)
   const routes = [...offered.slice(shift), ...offered.slice(0, shift)]
   if (routes.length === 0) {
     return [
@@ -358,11 +365,11 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
             // 'auto' for every provider today. DeepSeek's models reason in
             // thinking mode, which rejects a forced tool_choice outright:
             // "Thinking mode does not support this tool_choice"; Ollama ignores
-            // the field entirely. The strategy prompts already instruct the
+            // the field entirely. The brief already instructs the
             // model to answer by calling the tool, and a reply that arrives as
             // prose anyway is caught below — so forcing buys nothing.
             tool_choice: config.toolChoice,
-            temperature: STRATEGIES[req.strategy].temperature,
+            temperature: TEMPERATURE,
             max_tokens: MAX_OUTPUT_TOKENS,
           }),
           ...(req.signal !== undefined ? { signal: req.signal } : {}),
@@ -406,7 +413,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
         // reason is logged rather than collapsed into a bare schema failure.
         // eslint-disable-next-line no-console
         console.warn(
-          `[agents] ${req.strategy}: no tool call (finish_reason=${choice?.finish_reason ?? 'unknown'}, completion_tokens=${body.usage?.completion_tokens ?? 0})`
+          `[agents] ${req.agent}: no tool call (finish_reason=${choice?.finish_reason ?? 'unknown'}, completion_tokens=${body.usage?.completion_tokens ?? 0})`
         )
         return {
           ok: false,
@@ -471,7 +478,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
 
       if (!validated.ok) {
         // eslint-disable-next-line no-console
-        console.warn(`[agents] ${req.strategy}: rejected — ${validated.reason}`)
+        console.warn(`[agents] ${req.agent}: rejected — ${validated.reason}`)
         return {
           ok: false,
           error: 'invalid_schema',
@@ -482,7 +489,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       return {
         ok: true,
         proposal: {
-          strategy: req.strategy,
+          agent: req.agent,
           // Empty means the agent had nothing to choose from; omitted rather
           // than stored as '' so downstream code checks presence, not value.
           ...(validated.value.routeId !== '' ? { routeId: validated.value.routeId } : {}),
