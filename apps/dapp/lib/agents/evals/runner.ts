@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import type { AgentProposalResult, AgentStrategyKey, ProposalOutcome } from '../brain'
 import { ALL_STRATEGIES } from '../brain'
-import { createDeepSeekBrain } from '../brains/deepseek-brain'
+import { createBrain } from '../brains/openai-compatible'
 import { buildMarketContext } from '../market-context'
 import { parseIntent } from '../../parse-intent'
 
@@ -119,16 +119,18 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const golden = JSON.parse(
-    readFileSync(join(HERE, 'golden-set.json'), 'utf8')
-  ) as { cases: GoldenCase[] }
+  const golden = JSON.parse(readFileSync(join(HERE, 'golden-set.json'), 'utf8')) as {
+    cases: GoldenCase[]
+  }
 
-  const brain = createDeepSeekBrain({ apiKey, model })
+  const brain = createBrain({ apiKey, model })
   const market = buildMarketContext('arc')
   const allowedVenues = new Set(market.venues.map((v) => v.id))
   const results: CaseResult[] = []
 
-  console.log(`\nmodel: ${model}   cases: ${golden.cases.length}   agents: ${ALL_STRATEGIES.length}`)
+  console.log(
+    `\nmodel: ${model}   cases: ${golden.cases.length}   agents: ${ALL_STRATEGIES.length}`
+  )
   console.log(`total calls: ${golden.cases.length * ALL_STRATEGIES.length}\n`)
 
   for (const c of golden.cases) {
@@ -208,9 +210,7 @@ async function main(): Promise<void> {
     }
     if (pairs.length > 0) perCase.push(pairs.reduce((a, b) => a + b, 0) / pairs.length)
   }
-  const meanDistinct = perCase.length
-    ? perCase.reduce((a, b) => a + b, 0) / perCase.length
-    : 0
+  const meanDistinct = perCase.length ? perCase.reduce((a, b) => a + b, 0) / perCase.length : 0
 
   const answeredRate = answered.length / total
   const cleanRate = answered.length ? clean.length / answered.length : 0
@@ -218,8 +218,12 @@ async function main(): Promise<void> {
   console.log('\n' + '─'.repeat(58))
   console.log(`model                 ${model}`)
   console.log(`calls                 ${total}`)
-  console.log(`answered              ${(answeredRate * 100).toFixed(1)}%  (${answered.length}/${total})`)
-  console.log(`hard-check pass       ${(cleanRate * 100).toFixed(1)}%  (${clean.length}/${answered.length})`)
+  console.log(
+    `answered              ${(answeredRate * 100).toFixed(1)}%  (${answered.length}/${total})`
+  )
+  console.log(
+    `hard-check pass       ${(cleanRate * 100).toFixed(1)}%  (${clean.length}/${answered.length})`
+  )
   console.log(`mean distinctness     ${meanDistinct.toFixed(3)}`)
   console.log(`p95 latency           ${(p95 / 1000).toFixed(1)}s`)
   console.log(`total cost            $${cost.toFixed(4)}`)
@@ -245,8 +249,14 @@ async function main(): Promise<void> {
   // rationalised after the fact.
   const shipFlash = cleanRate >= 0.98 && meanDistinct >= 0.6
   console.log('\n' + '─'.repeat(58))
-  console.log(`verdict: hard-check >=98%? ${cleanRate >= 0.98 ? 'yes' : 'NO'}   distinctness >=0.6? ${meanDistinct >= 0.6 ? 'yes' : 'NO'}`)
-  console.log(shipFlash ? 'PASSES the ship bar.' : 'FAILS the ship bar — consider Pro, or a per-strategy split.')
+  console.log(
+    `verdict: hard-check >=98%? ${cleanRate >= 0.98 ? 'yes' : 'NO'}   distinctness >=0.6? ${meanDistinct >= 0.6 ? 'yes' : 'NO'}`
+  )
+  console.log(
+    shipFlash
+      ? 'PASSES the ship bar.'
+      : 'FAILS the ship bar — consider Pro, or a per-strategy split.'
+  )
 
   const outDir = join(HERE, 'results')
   mkdirSync(outDir, { recursive: true })

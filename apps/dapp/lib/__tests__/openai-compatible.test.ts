@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { MarketContext, ProposalRequest } from '../agents/brain'
-import { createDeepSeekBrain } from '../agents/brains/deepseek-brain'
+import { createBrain } from '../agents/brains/openai-compatible'
 import { validateProposal } from '../agents/tool-schema'
 import { parseIntent } from '../parse-intent'
 
@@ -73,7 +73,7 @@ function toolResponse(args: string): unknown {
 
 describe('deepseek brain', () => {
   it('returns a validated proposal on the happy path', async () => {
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: respondWith(toolResponse(goodArguments())),
     })
@@ -83,12 +83,11 @@ describe('deepseek brain', () => {
     if (!outcome.ok) return
     expect(outcome.proposal.strategy).toBe('twap')
     expect(outcome.proposal.sliceCount).toBe(6)
-    expect(outcome.meta.degraded).toBe(false)
     expect(outcome.meta.costUsd).toBeGreaterThan(0)
   })
 
   it('reports missing configuration rather than calling out', async () => {
-    const brain = createDeepSeekBrain({ apiKey: '', fetchImpl: respondWith({}) })
+    const brain = createBrain({ apiKey: '', fetchImpl: respondWith({}) })
     const outcome = await brain.propose(request)
     expect(outcome.ok).toBe(false)
     if (outcome.ok) return
@@ -97,7 +96,7 @@ describe('deepseek brain', () => {
   })
 
   it('fails on malformed tool arguments', async () => {
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: respondWith(toolResponse('{not json')),
     })
@@ -107,7 +106,7 @@ describe('deepseek brain', () => {
   })
 
   it('fails when the model replies with prose instead of a tool call', async () => {
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: respondWith({ choices: [{ message: { content: 'I think you should buy.' } }] }),
     })
@@ -118,7 +117,7 @@ describe('deepseek brain', () => {
 
   it('rejects a schema-valid but absurd slippage', async () => {
     // Strict mode constrains shape, not range: this is exactly what it lets through.
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: respondWith(toolResponse(goodArguments({ projectedSlippagePct: 400 }))),
     })
@@ -127,7 +126,7 @@ describe('deepseek brain', () => {
   })
 
   it('rejects a fill price far from the reference', async () => {
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: respondWith(toolResponse(goodArguments({ projectedAvgPriceUsd: 35000 }))),
     })
@@ -140,7 +139,7 @@ describe('deepseek brain', () => {
       [429, 'rate_limited'],
       [500, 'upstream_error'],
     ] as const) {
-      const brain = createDeepSeekBrain({
+      const brain = createBrain({
         apiKey: SECRET,
         fetchImpl: respondWith({ error: 'nope' }, status),
       })
@@ -151,7 +150,7 @@ describe('deepseek brain', () => {
   })
 
   it('reports an aborted request as a timeout', async () => {
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: (() => {
         const err = new Error('aborted')
@@ -171,7 +170,7 @@ describe('deepseek brain', () => {
       respondWith(toolResponse('{bad')),
     ]
     for (const fetchImpl of cases) {
-      const brain = createDeepSeekBrain({ apiKey: SECRET, fetchImpl })
+      const brain = createBrain({ apiKey: SECRET, fetchImpl })
       const outcome = await brain.propose(request)
       expect(JSON.stringify(outcome)).not.toContain(SECRET)
     }
@@ -180,7 +179,7 @@ describe('deepseek brain', () => {
   it('sends the key as a bearer header and never in the body', async () => {
     let seenBody = ''
     let seenAuth = ''
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: ((_url: string, init: RequestInit) => {
         seenBody = String(init.body)
@@ -197,7 +196,7 @@ describe('deepseek brain', () => {
 
   it('puts volatile content last so the cached prefix stays stable', async () => {
     let body = ''
-    const brain = createDeepSeekBrain({
+    const brain = createBrain({
       apiKey: SECRET,
       fetchImpl: ((_u: string, init: RequestInit) => {
         body = String(init.body)
@@ -217,19 +216,34 @@ describe('deepseek brain', () => {
 describe('validateProposal', () => {
   const ctx = { referencePriceUsd: 3500, allowedVenueIds: ['uniswap', 'curve'] }
 
-  it('drops venues that were not offered rather than failing', () => {
+  it('rejects a venue that was not offered, even beside one that was', () => {
+    // The venue list is the only fact an agent has about which chain it is
+    // on. Naming one from elsewhere is not a label slip to tidy up — the
+    // agent has reasoned about the wrong chain, and its route and numbers
+    // are suspect too. This used to drop the stray venue and keep the rest.
     const result = validateProposal(
       JSON.parse(goodArguments({ venues: ['uniswap', 'sushi'] })),
       ctx
     )
-    expect(result.ok).toBe(true)
-    if (result.ok) expect(result.value.venues).toEqual(['uniswap'])
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/sushi.*does not exist on this chain/)
   })
 
-  it('substitutes a venue when none of them were valid', () => {
+  it('rejects a proposal whose only venue is unknown rather than substituting one', () => {
+    // Substituting the first allowed venue used to keep the proposal in the
+    // race with a venue the agent never named. That is the app inventing part
+    // of the plan, which is the thing this whole layer exists to avoid.
     const result = validateProposal(JSON.parse(goodArguments({ venues: ['nope'] })), ctx)
+    expect(result.ok).toBe(false)
+  })
+
+  it('keeps venues that were offered, unchanged', () => {
+    const result = validateProposal(
+      JSON.parse(goodArguments({ venues: ['curve', 'uniswap'] })),
+      ctx
+    )
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.value.venues).toEqual(['uniswap'])
+    if (result.ok) expect(result.value.venues).toEqual(['curve', 'uniswap'])
   })
 
   it('truncates an over-long reasoning to fit the bubble', () => {

@@ -132,7 +132,7 @@ describe('a stored turn carries everything needed to reopen it', () => {
         key: 'shadow',
         name: 'Shadow',
         avgPriceUsd: 0.3881,
-        slippagePct: 0.05,
+        vsOraclePct: 0.05,
         score: 93,
         reasoning: 'Priced 2 paths.',
       },

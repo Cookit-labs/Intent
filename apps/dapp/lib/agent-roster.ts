@@ -1,10 +1,9 @@
-import { AGENTS } from './mock-competition'
+import { AGENTS } from './agents/competition'
 
 export interface AgentProfile {
   key: string
   name: string
   handle: string
-  tag: string
   gradient: string
   blurb: string
   reputation: number
@@ -15,12 +14,26 @@ export interface AgentProfile {
   status: 'active' | 'idle'
 }
 
-// Mock reputation stats per agent, keyed to the competing roster so the agent
-// you see win in chat is the same one ranked here. Swaps to the API in Slice 2.
-const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'tag' | 'gradient'>> = {
+/**
+ * Per-agent detail for the directory and leaderboard.
+ *
+ * The blurbs no longer describe a method. They used to — "path-search
+ * solver", "cross-venue router", "time-slices large orders" — and each was a
+ * strategy the agent was never actually held to. Every agent reasons from the
+ * same brief over the same live routes and may fill, rest, or split on any
+ * venue; a blurb that says otherwise is a promise the competition does not
+ * keep.
+ *
+ * The numbers below are placeholders awaiting a reputation API and are not
+ * measured from anything. They are the one piece of invented data left in the
+ * agent surface, kept only because removing them empties three pages, and
+ * they should be the next thing to go.
+ */
+const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'gradient'>> = {
   shadow: {
-    handle: '@shadow',
-    blurb: 'Path-search solver simulating dozens of routes to find the tightest fill.',
+    handle: '@halcyon',
+    blurb:
+      'Reasons over the live routes and the oracle price, then commits — fill, rest, or split.',
     reputation: 98,
     winRate: 0.71,
     fills: 4820,
@@ -29,8 +42,8 @@ const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'tag' | 'gradien
     status: 'active',
   },
   arbitrage: {
-    handle: '@arb',
-    blurb: 'Cross-venue router capturing spreads single-venue agents leave behind.',
+    handle: '@cobalt',
+    blurb: 'Compares every venue on this chain by what it actually delivers, in both directions.',
     reputation: 94,
     winRate: 0.63,
     fills: 3910,
@@ -39,8 +52,8 @@ const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'tag' | 'gradien
     status: 'active',
   },
   twap: {
-    handle: '@twap',
-    blurb: 'Time-slices large orders into even tranches to hold market impact flat.',
+    handle: '@atlas',
+    blurb: 'Weighs order size against the book before deciding whether to trade now or wait.',
     reputation: 88,
     winRate: 0.52,
     fills: 5240,
@@ -49,8 +62,8 @@ const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'tag' | 'gradien
     status: 'active',
   },
   momentum: {
-    handle: '@momentum',
-    blurb: 'Times breakouts and retests to fill the full clip in one clean shot.',
+    handle: '@meridian',
+    blurb: 'Samples more widely than the others, so it is the one most likely to disagree.',
     reputation: 81,
     winRate: 0.44,
     fills: 2670,
@@ -63,7 +76,6 @@ const STATS: Record<string, Omit<AgentProfile, 'key' | 'name' | 'tag' | 'gradien
 export const AGENT_PROFILES: AgentProfile[] = AGENTS.map((a) => ({
   key: a.key,
   name: a.name,
-  tag: a.tag,
   gradient: a.gradient,
   ...STATS[a.key]!,
 }))
@@ -80,5 +92,5 @@ export function formatVolumeUsd(n: number): string {
 }
 
 export function formatCount(n: number): string {
-  return n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n)
+  return n.toLocaleString('en-US')
 }

@@ -282,7 +282,15 @@ export function parseIntent(
   // which on "buy 300 XLM below $0.30" is the limit price. A 300-XLM order
   // became a $0.30 one, and only when a limit was present, which is what hid
   // it for so long.
-  const tokenQty = amountForToken(outcome, tokenIn) ?? amountForToken(outcome, tokenOut)
+  // Which token the number sits next to matters as much as the number.
+  // "Buy 500 USDC worth of XLM" attaches 500 to the input; "Buy 500 XLM"
+  // attaches it to the output. The buy-side branches below used to treat any
+  // bare quantity as the token being bought, so the first sentence was read
+  // as 500 XLM and sized at $92 -- and "buy XLM with 50 USDC" at $9.
+  const qtyIn = amountForToken(outcome, tokenIn)
+  const qtyOut = amountForToken(outcome, tokenOut)
+  const tokenQty = qtyIn ?? qtyOut
+  const quantityNamesInput = qtyIn !== undefined
   // The dollar amount, when the size is stated as a budget rather than a
   // quantity. Read separately so "$30 worth of XLM" does not reuse the 30 as a
   // token count.
@@ -320,7 +328,7 @@ export function parseIntent(
   // Only a bare token quantity ("buy 200 XLM") needs converting to USD.
   const escrowUsd = pricedInUsd
     ? Math.round(num)
-    : swap !== undefined
+    : swap !== undefined || quantityNamesInput
       ? Math.round(num * sendPrice)
       : num > 0 && num < 1000
         ? Math.round(num * referencePriceUsd)
@@ -338,7 +346,7 @@ export function parseIntent(
           : // A bare quantity names the token being *bought* on a buy-side
             // intent ("buy 200 XLM"), so the amount sent is its USD value in
             // the input token — not 200 of the input token.
-            swap === undefined && !isSellSide
+            swap === undefined && !isSellSide && !quantityNamesInput
             ? (num * referencePriceUsd) / sendPrice
             : num
         )

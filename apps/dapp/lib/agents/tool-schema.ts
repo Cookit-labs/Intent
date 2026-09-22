@@ -221,10 +221,13 @@ export interface ValidationContext {
 /**
  * Applies the checks the provider's schema cannot.
  *
- * Unknown venues are dropped rather than rejected: naming a venue that does not
- * exist is a small, common slip, and discarding the bad id keeps an otherwise
- * sound proposal in the race. A price far from reference is rejected outright,
- * because that number is shown to the user as a projected fill.
+ * A venue that does not exist on this chain rejects the proposal. Unknown
+ * venues used to be dropped quietly, on the theory that a stray label was a
+ * small slip — but the venue list is the only fact an agent has about which
+ * chain it is on, and an agent naming Uniswap on Stellar has not slipped, it
+ * has reasoned about the wrong chain. Its route choice and its numbers are
+ * suspect too. A price far from every reference is rejected for the same
+ * reason: that number is shown to the user as a projected fill.
  */
 export function validateProposal(
   raw: unknown,
@@ -313,15 +316,21 @@ export function validateProposal(
   }
 
   const allowed = new Set(ctx.allowedVenueIds)
-  const venues = value.venues.filter((v) => allowed.has(v))
+  const offChain = value.venues.filter((v) => !allowed.has(v))
+  if (offChain.length > 0) {
+    return {
+      ok: false,
+      reason: `venue ${offChain.join(', ')} does not exist on this chain`,
+    }
+  }
+  const venues = value.venues
 
   // A follow-on this chain cannot perform is **downgraded, not rejected**.
   //
-  // That asymmetry is deliberate and is the lesson of an earlier bug. A
-  // rejected proposal is replaced by a canned mock, so refusing an otherwise
-  // sound trade over its follow-on would swap a real agent's reasoning for
-  // fabricated text — which is exactly how every agent came to look hardcoded
-  // once already. The trade itself is still valid; only the extra step is not.
+  // The trade itself is still valid; only the extra step is not. Rejecting
+  // the whole proposal over its follow-on would discard a real route and a
+  // sound judgement about the trade for the sake of an optional second step
+  // the chain happens not to offer.
   const lendingVenues = new Set(ctx.lendingVenueIds ?? [])
   const lendIsPossible = value.thenAction === 'lend' && lendingVenues.has(value.thenVenue)
   const thenAction = lendIsPossible ? value.thenAction : 'none'

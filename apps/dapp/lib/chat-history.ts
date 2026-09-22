@@ -1,4 +1,4 @@
-import type { AgentProposalView } from './mock-competition'
+import type { AgentProposalView } from './agents/competition'
 
 import {
   clearTurnsRemote,

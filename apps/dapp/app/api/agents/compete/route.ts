@@ -6,15 +6,16 @@ import { ALL_STRATEGIES } from '../../../../lib/agents/brain'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
-import { buildMockProposal } from '../../../../lib/agents/brains/mock-brain'
-import { getAgentBrain } from '../../../../lib/agents/registry'
-import { isBuyIntent, pickWinner, scoreProposals } from '../../../../lib/agents/scoring'
+import { measureRoute } from '../../../../lib/agents/measure'
+import { getAgentBrains } from '../../../../lib/agents/registry'
+import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
 import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
 import type { OrderBookTop } from '../../../../lib/swap/limit-price'
+import type { SwapQuote } from '../../../../lib/swap/quote'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
 
@@ -24,6 +25,12 @@ import type { ParsedIntent } from '../../../../lib/parse-intent'
  * Server-side because the provider API key lives here and must never reach the
  * browser. POST rather than GET so the user's intent text stays out of URLs and
  * access logs.
+ *
+ * **There is no fallback.** A brain that is not configured, a chain that
+ * cannot execute, or a race in which nobody answers all end in a
+ * `competition:error` frame that says so. Canned proposals used to fill those
+ * gaps, and they read as strategy — venues from another chain, prices from
+ * another asset — right up until the user tried to act on one.
  *
  * Node runtime: `node:crypto` and the provider client are not edge-safe.
  */
@@ -37,13 +44,24 @@ const MAX_INTENT_CHARS = 500
  * Per-agent ceiling. Four of these run concurrently, not in sequence.
  *
  * Generous because DeepSeek reasons in thinking mode before answering, which
- * routinely takes 20-40s on a real request — measured, not guessed. A tighter
- * bound simply aborted every agent and served the offline fallback, which
- * looked like the model failing rather than the timeout being wrong.
+ * routinely takes 20-40s on a real request — measured, not guessed.
  */
 const AGENT_TIMEOUT_MS = 60_000
 
 const WINDOW_SECONDS = 30
+
+/**
+ * Chains a competition can execute on.
+ *
+ * Checked before anything runs, and by name. The chain used to default to
+ * 'arc' when the body carried none, and an unrecognised slug fell through to
+ * the EVM venue list — so a stale client could start a Stellar competition in
+ * which the agents were offered Uniswap. Now a missing or unsupported chain is
+ * an answer the user reads, not a race that quietly runs on the wrong facts.
+ */
+const EXECUTING_CHAINS: Record<string, string> = {
+  stellar: 'Stellar',
+}
 
 /**
  * Settles what an agent's proposal actually does, against the live book.
@@ -55,8 +73,7 @@ const WINDOW_SECONDS = 30
  *
  * A plan that cannot rest becomes a fill rather than a rejection. The agent
  * reasoned soundly about everything else, and dropping the whole proposal would
- * substitute a mock that carries no route and cannot be signed — the failure
- * that once made a single agent appear to win every competition.
+ * throw away a real route over a number this function can correct.
  */
 function settlePlan(
   proposal: AgentProposalResult,
@@ -86,6 +103,48 @@ function settlePlan(
   return { ...proposal, executionMode: 'rest', restPriceUsd: plan.restPriceUsd }
 }
 
+/**
+ * Replaces the agent's self-reported figures with ones measured from the
+ * route it chose.
+ *
+ * The agent's numbers survive validation as a plausibility check and no
+ * further. What the user sees and what scoring ranks is the quote's real
+ * output against the oracle's fair value — a claim of 0.1% slippage is not
+ * evidence of 0.1% slippage.
+ */
+function measured(
+  proposal: AgentProposalResult,
+  quote: SwapQuote | undefined,
+  prices: Record<string, number>
+): AgentProposalResult {
+  if (quote === undefined) return proposal
+  const m = measureRoute(quote, prices)
+  if (m === undefined) return proposal
+  return {
+    ...proposal,
+    projectedAvgPriceUsd: Number(m.avgPriceUsd.toFixed(6)),
+    projectedSlippagePct: Number(m.vsOraclePct.toFixed(2)),
+  }
+}
+
+/** One SSE stream carrying a single error frame, then closing. */
+function errorStream(code: 'agents_offline' | 'chain_unsupported', message: string): Response {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(encodeFrame({ type: 'competition:error', code, message })))
+      controller.close()
+    },
+  })
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+    },
+  })
+}
+
 export async function POST(request: Request): Promise<Response> {
   let text: string
   let chain: string
@@ -96,19 +155,41 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
-    chain = typeof body.chain === 'string' ? body.chain : 'arc'
+    chain = typeof body.chain === 'string' ? body.chain.trim() : ''
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
   }
 
+  // Chain first. Everything below — prices, venues, routes, the book — is
+  // chain-specific, and an agent reasoning about the wrong chain is not a
+  // worse answer but a wrong one.
+  if (chain === '') {
+    return errorStream(
+      'chain_unsupported',
+      'No chain was named for this intent. Reload the app and try again.'
+    )
+  }
+  if (EXECUTING_CHAINS[chain] === undefined) {
+    return errorStream(
+      'chain_unsupported',
+      `Agents can execute only on ${Object.values(EXECUTING_CHAINS).join(', ')} right now. ` +
+        `Switch the chain to run a competition.`
+    )
+  }
+
+  const brains = getAgentBrains()
+  if (brains === undefined) {
+    return errorStream(
+      'agents_offline',
+      'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+    )
+  }
+
   const competitionId = randomUUID()
   // Prices are fetched first so the parser can size "$30 of XLM" against the
-  // real market. The built-in table drifts badly — it valued XLM at $0.58
-  // against a market near $0.19 — and sizing from it spends a third of what
-  // the user asked for.
+  // real market rather than an indicative table.
   const market = await buildMarketContextAsync(chain)
   const intent = parseIntent(text, market.prices)
-  const brain = getAgentBrain()
 
   // Priced before the agents run, so they choose between real routes rather
   // than describing hypothetical ones. Failing to quote is not fatal: the
@@ -118,20 +199,12 @@ export async function POST(request: Request): Promise<Response> {
       chain,
       intent.input.tokenIn,
       intent.input.tokenOut,
-      // The parsed input quantity, which for a swap is what actually leaves
-      // the account. Deriving it from the USD figure instead would re-introduce
-      // the rounding the parser just resolved.
       toBaseUnits(intent.input.amountIn),
       undefined,
-      // A limit order states a price it will not trade through. Expressed as a
-      // minimum output so the quoter can decline: sell 100 XLM at $0.25 means
-      // at least 25 USDC must come back, and anything less is not the trade
-      // that was asked for.
-      //
-      // Keyed on `limitPriceUsd` rather than `targetPriceUsd`: the latter falls
-      // back to spot when the user named no price, so the old `> 0` test passed
-      // for every intent and floored unpriced orders at the current market —
-      // a limit derived from the market is not a limit.
+      // A limit order states a price it will not trade through, expressed as
+      // a minimum output so the quoter can decline. Keyed on `limitPriceUsd`
+      // rather than `targetPriceUsd`: the latter falls back to spot when the
+      // user named no price, and a limit derived from the market is not one.
       isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
         ? {
             minReceive: toBaseUnits(
@@ -148,21 +221,15 @@ export async function POST(request: Request): Promise<Response> {
   // One read for the whole competition: every agent's resting price is checked
   // against the same book, so four proposals are judged on identical facts.
   let book: OrderBookTop | undefined
-  if (chain === 'stellar') {
-    const from = resolveAsset(intent.input.tokenIn)
-    const to = resolveAsset(intent.input.tokenOut)
-    if (from !== undefined && to !== undefined) {
-      // Quoted in one orientation regardless of trade direction, because that
-      // is the orientation the prices are expressed in.
-      const base = from.issuer === undefined ? from : to
-      const counter = from.issuer === undefined ? to : from
-      try {
-        book = await fetchOrderBookTop(base, counter)
-      } catch {
-        // Without a book nothing can rest, and `settlePlan` turns every
-        // resting proposal into a fill rather than guessing at a price.
-        book = undefined
-      }
+  const from = resolveAsset(intent.input.tokenIn)
+  const to = resolveAsset(intent.input.tokenOut)
+  if (from !== undefined && to !== undefined) {
+    const base = from.issuer === undefined ? from : to
+    const counter = from.issuer === undefined ? to : from
+    try {
+      book = await fetchOrderBookTop(base, counter)
+    } catch {
+      book = undefined
     }
   }
 
@@ -179,11 +246,14 @@ export async function POST(request: Request): Promise<Response> {
       send({
         type: 'competition:started',
         competitionId,
+        // The model is named up front, while the card still says "thinking".
+        // Four agents on three models is the answer to "why does the same one
+        // always win", and it only answers it if the user can see it.
         agents: STRATEGY_ORDER.map((key) => ({
           key,
           name: STRATEGIES[key].name,
-          tag: STRATEGIES[key].tag,
           gradient: STRATEGIES[key].gradient,
+          model: brains[key].model,
         })),
         windowSeconds: WINDOW_SECONDS,
       })
@@ -196,7 +266,7 @@ export async function POST(request: Request): Promise<Response> {
           const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
           try {
-            const outcome = await brain.propose({
+            const outcome = await brains[strategy].propose({
               intent,
               strategy,
               market,
@@ -204,47 +274,30 @@ export async function POST(request: Request): Promise<Response> {
               signal: controllerForAgent.signal,
             })
 
-            if (outcome.ok) {
-              // Resolve this agent's own route, so executing it signs what it
-              // proposed rather than what the winner proposed.
-              const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
-
-              // Settle the plan against the live book before it reaches the
-              // client. An agent choosing to wait is judgement worth keeping;
-              // the price it waits at is bounded, because that number decides
-              // whether the order ever fills and a model produced it. A plan
-              // that would cross the spread falls back to filling now, which
-              // is what it would have done anyway — stated honestly rather
-              // than dressed as patience.
-              const proposal = settlePlan(outcome.proposal, intent, book)
-
-              send({
-                type: 'competition:proposal',
-                competitionId,
-                proposal,
-                ...(own !== undefined ? { route: own.quote } : {}),
-                degraded: outcome.meta.degraded,
-              })
-              return proposal
+            if (!outcome.ok) {
+              // Said, and left empty. No placeholder: an agent that did not
+              // answer has no proposal, and showing one would be inventing it.
+              send({ type: 'competition:failed', competitionId, strategy, error: outcome.error })
+              return undefined
             }
 
-            // A failed agent falls back to its simulated proposal rather than
-            // vanishing: three agents and an empty slot reads as a bug, while
-            // four proposals with one marked simulated is honest and complete.
-            send({
-              type: 'competition:failed',
-              competitionId,
-              strategy,
-              error: outcome.error,
-            })
-            const fallback = buildMockProposal({ intent, strategy, market, chain })
+            // This agent's own route, so executing it signs what it proposed
+            // rather than what the winner proposed.
+            const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
+
+            const proposal = measured(
+              settlePlan(outcome.proposal, intent, book),
+              own?.quote as SwapQuote | undefined,
+              market.prices
+            )
+
             send({
               type: 'competition:proposal',
               competitionId,
-              proposal: fallback,
-              degraded: true,
+              proposal,
+              ...(own !== undefined ? { route: own.quote } : {}),
             })
-            return fallback
+            return proposal
           } finally {
             clearTimeout(timer)
           }
@@ -252,20 +305,38 @@ export async function POST(request: Request): Promise<Response> {
       )
 
       const proposals = settled.filter((p): p is AgentProposalResult => p !== undefined)
-      const scored = scoreProposals(proposals, { isBuy: isBuyIntent(intent.input.type) })
+
+      if (proposals.length === 0) {
+        send({
+          type: 'competition:error',
+          code: 'no_agent_answered',
+          message:
+            'None of the agents answered this time. Nothing was proposed. Try again in a moment.',
+        })
+        closed = true
+        controller.close()
+        return
+      }
+
+      const scored = scoreProposals(proposals, { competitionId })
       const winner = pickWinner(scored)
 
       if (winner !== null) {
-        // The winning agent's chosen route, resolved back to the full quote so
-        // the client can build a transaction from it without re-pricing.
         const winningProposal = proposals.find((p) => p.strategy === winner)
         const chosen = (market.routes ?? []).find((r) => r.id === winningProposal?.routeId)
+
+        // Agreement, named as such. When every agent that could execute chose
+        // the same route and the same plan, the "winner" was drawn by hash
+        // among equals — and saying "Recommended: Halcyon" over that reads as
+        // a judgement nobody made.
+        const unanimous = unanimousChoice(scored)
 
         send({
           type: 'competition:winner',
           competitionId,
           winner,
           scores: Object.fromEntries(scored.map((s) => [s.strategy, s.score])),
+          unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })
       }

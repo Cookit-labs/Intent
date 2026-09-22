@@ -1,30 +1,41 @@
 import type { AgentStrategyKey } from './brain'
 
 /**
- * The competing agents: visual identity plus the prompt that makes each one
- * reason differently.
+ * The competing agents: an identity each, and the one brief they all reason
+ * from.
  *
- * The failure mode this file is written against is four prompts that differ
- * only in name, producing four paraphrases of the same answer — which would
- * read worse than the hand-written mock text it replaces. So the strategies
- * differ *structurally*, not stylistically: each has its own objective, a
- * constrained action space, and one move it is forbidden to make. A TWAP agent
- * that cannot claim to predict price and must slice will not sound like a
- * momentum agent that must fill in one clip.
+ * They are not strategies. The keys — `twap`, `momentum`, `arbitrage`,
+ * `shadow` — survive as identifiers because they are persisted in history and
+ * shared with `@intent/types`, but nothing about an agent's reasoning is fixed
+ * by its key. Each may fill, rest, or split, on any venue the chain offers,
+ * and the tag shown beside its name is derived from what it proposed rather
+ * than assigned in advance. The earlier fixed tags ("Time-sliced",
+ * "Cross-venue", "Path search") described a method the agent was never
+ * actually held to, and read as one when its proposal said otherwise.
+ *
+ * What makes four agents differ is independent sampling over identical facts,
+ * plus each reading the routes in a different order. Measured rather than
+ * assumed: the model reasons before answering, and in that mode it is
+ * stochastic at every temperature — three identical prompts at 0.0 gave three
+ * different answers — while the temperature value itself changes nothing the
+ * provider documents. So the spread below is kept for the day it matters and
+ * is not what makes them differ today. When they disagree, that disagreement
+ * is the signal; when they agree, that is one too.
  */
 
 export interface StrategyDefinition {
   key: AgentStrategyKey
   name: string
-  tag: string
   gradient: string
-  /** Fallback prose, used when no model is configured. */
-  mockReasoning: string
-  /** Mock fill quality, relative to a $3,200 anchor. */
-  mockSlippagePct: number
-  mockPriceRatio: number
   systemPrompt: string
-  /** Procedural strategies want determinism; judgment ones want some spread. */
+  /**
+   * Sampling temperature, passed through to the provider.
+   *
+   * Not honoured in thinking mode — see the note above. Kept spread across the
+   * four so that a provider or model which does honour it gets four settings
+   * rather than one, and so `revealOrder` is not the only thing telling them
+   * apart in the config.
+   */
   temperature: number
   /** Order in which cards appear, independent of which model call returns first. */
   revealOrder: number
@@ -33,8 +44,8 @@ export interface StrategyDefinition {
 const SHARED_RULES = `You are one of four autonomous execution agents competing to fill a single user intent on a stablecoin-native marketplace.
 
 Rules that apply to every agent:
+- You are executing on the chain named in the market context, and only there. The venues listed are every venue that exists for this order. A venue from another chain does not exist here; naming one fails your proposal outright.
 - Use ONLY the prices given to you in the market context. Never use a price from memory; if a figure is not supplied, reason in relative terms instead.
-- Name only venues from the supplied venue list.
 - You are proposing an execution plan, not giving financial advice.
 - Be concrete and quantitative. State the actual numbers you are working from.
 - Your reasoning is shown directly to the user in a chat bubble: at most two sentences, no preamble, no restating the question.
@@ -45,17 +56,10 @@ Rules that apply to every agent:
   the budget before the tool call is emitted, which produces no answer at all.`
 
 /**
- * What every agent is actually deciding.
- *
- * One brief, shared by all four, because strategy is a way of thinking rather
- * than a lane to stay in. Each agent previously had its own prompt forbidding
- * the others' conclusions — TWAP had to slice, Momentum was forbidden from
- * splitting, Arbitrage had to name two venues — so an agent that correctly
- * judged "this order is small, just fill it" was rejected by validation for
- * being right. The judgement was the thing being filtered out.
- *
- * They now differ through temperature and independent reasoning over identical
- * facts. When they disagree, that disagreement is a real signal.
+ * What every agent is deciding. One brief for all four: strategy is a way of
+ * thinking, not a lane to stay in, and an agent that correctly judges "this
+ * order is small, just fill it" must not be penalised for reaching the same
+ * conclusion as another.
  */
 const STRATEGIST_BRIEF = `Your job is to decide how this specific order should be executed, and to justify it with the numbers you were given.
 
@@ -67,6 +71,7 @@ Three execution shapes are available. Choose whichever the evidence supports:
 
 How to decide:
 - Compare the order size against the liquidity you were shown. A large order against a thin book moves the price against itself; a small one does not.
+- Compare the routes against each other and against the oracle price. The venues on this chain disagree with each other by large margins in both directions, and which one is best depends on which way the trade goes. Pick the route by its numbers, not by its name.
 - If the user named a target price, that price is not yours to change. You decide whether to wait for it or explain why filling now is better.
 - If you rest without a user-stated price, set restPriceUsd to where you would actually wait. A price the market will never reach is not patience, it is a refusal to trade.
 - Do not rest simply to look sophisticated, and do not fill simply to look decisive. Either can be the wrong answer.
@@ -85,69 +90,47 @@ Three things govern that choice:
 
 thenAction is independent of executionMode. Filling now and then lending is a valid plan, and so is resting at a price and then lending whatever fills.`
 
+const SYSTEM_PROMPT = `${SHARED_RULES}
+
+${STRATEGIST_BRIEF}`
+
+/**
+ * Names carry no method. The previous ones — TWAP, Momentum, Arbitrage,
+ * Shadow — each named a textbook strategy, and a user reading "Arbitrage"
+ * beside a proposal to fill on one venue was right to be confused.
+ */
 export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
   twap: {
     key: 'twap',
-    name: 'TWAP',
-    tag: 'Time-sliced',
+    name: 'Atlas',
     gradient: 'linear-gradient(135deg, #7c8a9e, #cbb79a)',
-    mockReasoning:
-      'Slicing the order into even tranches to blend the fill and hold market impact flat.',
-    mockSlippagePct: 0.18,
-    mockPriceRatio: 3201.4 / 3200,
     temperature: 0.2,
     revealOrder: 0,
-    systemPrompt: `${SHARED_RULES}
-
-${STRATEGIST_BRIEF}`,
+    systemPrompt: SYSTEM_PROMPT,
   },
-
   momentum: {
     key: 'momentum',
-    name: 'Momentum',
-    tag: 'Breakout timing',
+    name: 'Meridian',
     gradient: 'linear-gradient(135deg, #8a9a5b, #d8c9a0)',
-    mockReasoning:
-      'Holding for the retest of the $3,180 level, then filling the whole clip in one clean shot.',
-    mockSlippagePct: 0.24,
-    mockPriceRatio: 3203.1 / 3200,
     temperature: 0.7,
     revealOrder: 1,
-    systemPrompt: `${SHARED_RULES}
-
-${STRATEGIST_BRIEF}`,
+    systemPrompt: SYSTEM_PROMPT,
   },
-
   arbitrage: {
     key: 'arbitrage',
-    name: 'Arbitrage',
-    tag: 'Cross-venue',
+    name: 'Cobalt',
     gradient: 'linear-gradient(135deg, #9e6f7c, #6b7b9e)',
-    mockReasoning:
-      'Routing across Curve and Uniswap to capture a 4bp spread the single-venue agents are leaving on the table.',
-    mockSlippagePct: 0.11,
-    mockPriceRatio: 3198.9 / 3200,
-    temperature: 0.3,
+    temperature: 0.4,
     revealOrder: 2,
-    systemPrompt: `${SHARED_RULES}
-
-${STRATEGIST_BRIEF}`,
+    systemPrompt: SYSTEM_PROMPT,
   },
-
   shadow: {
     key: 'shadow',
-    name: 'Shadow',
-    tag: 'Path search',
+    name: 'Halcyon',
     gradient: 'linear-gradient(135deg, #2b2b2f, #4a4a52)',
-    mockReasoning:
-      'Simulated 40 execution paths — the best is a hidden-order split across two pools. Tightest fill, lowest slip.',
-    mockSlippagePct: 0.09,
-    mockPriceRatio: 3197.6 / 3200,
-    temperature: 0.5,
+    temperature: 0.55,
     revealOrder: 3,
-    systemPrompt: `${SHARED_RULES}
-
-${STRATEGIST_BRIEF}`,
+    systemPrompt: SYSTEM_PROMPT,
   },
 }
 

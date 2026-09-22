@@ -27,9 +27,7 @@ function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
         <AgentAvatar gradient={agent.gradient} name={agent.name} className="h-10 w-10" />
         <div className="flex flex-1 flex-col">
           <span className="text-foreground text-sm font-semibold">{agent.name}</span>
-          <span className="text-muted-foreground text-xs">
-            {agent.handle} · {agent.tag}
-          </span>
+          <span className="text-muted-foreground text-xs">{agent.handle}</span>
         </div>
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <span
