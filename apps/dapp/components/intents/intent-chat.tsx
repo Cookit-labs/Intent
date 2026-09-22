@@ -51,6 +51,7 @@ import {
 import type { AnchorId } from '../../lib/offramp/anchors'
 import { isAnchorId } from '../../lib/offramp/anchors'
 import type { WithdrawLimits } from '../../lib/offramp/sep24'
+import { estimatedReceiveOf } from '../../lib/offramp/labels'
 import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
@@ -221,6 +222,10 @@ export function IntentChat(): JSX.Element {
   // wallet prompt (which is the *second* step, on that card) never came
   // because the button was never seen.
   const confirmRef = useRef<HTMLDivElement | null>(null)
+  // The agent most recently chosen. A ref rather than `executingKey`, because
+  // the offramp branch below reads it from inside an async closure that
+  // captured the state at click time and would never see a later pick.
+  const latestPickRef = useRef<string | null>(null)
   const awaitingConfirm = swap.phase === 'review'
   useEffect(() => {
     if (!awaitingConfirm) return
@@ -691,6 +696,7 @@ export function IntentChat(): JSX.Element {
     }
     setAffordError(null)
     setExecutingKey(key)
+    latestPickRef.current = key
     if (turnId !== null) updateTurn(turnId, { executedBy: key })
 
     // Every intent is recorded, whichever way it goes. Skipping the record for
@@ -783,7 +789,11 @@ export function IntentChat(): JSX.Element {
       const route = routesByAgent[key] ?? winnerRoute
       const anchor: AnchorId = isAnchorId(followOn.venue) ? followOn.venue : 'testanchor'
       if (route !== undefined && parsed.input.tokenOut === 'USDC') {
-        const estimated = (route as { receiveAmount?: string } | undefined)?.receiveAmount
+        // `destAmount`, in base units, converted to display — the field every
+        // venue's quote actually carries. `receiveAmount` belongs to a
+        // strict-receive request, so reading it here always gave undefined and
+        // the size check below never ran.
+        const estimated = estimatedReceiveOf(route)
         void (async () => {
           // The anchor's limits, so the size is checked before signature one.
           let limits: WithdrawLimits | undefined
@@ -795,6 +805,8 @@ export function IntentChat(): JSX.Element {
             // No limits means no warning; the anchor will still refuse an
             // out-of-range withdrawal and the card will say so then.
           }
+          // The user picked another agent while the anchor was being read.
+          if (latestPickRef.current !== key) return
           sequence.prepare({
             kind: 'swap-then-offramp',
             quote: route,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { offrampSizeWarning, withdrawStepLabel } from '../offramp/labels'
+import { estimatedReceiveOf, offrampSizeWarning, withdrawStepLabel } from '../offramp/labels'
 
 /**
  * What the review says before the first signature.
@@ -38,5 +38,31 @@ describe('offrampSizeWarning', () => {
   })
   it('says when withdrawals are disabled', () => {
     expect(offrampSizeWarning('5', { ...limits, enabled: false })).toMatch(/not accepting/)
+  })
+})
+
+/**
+ * Reading the estimate off a quote the browser holds opaquely.
+ *
+ * The field is `destAmount`, in base units — never `receiveAmount`, which
+ * belongs to a strict-receive *request* rather than to a quote. Reading the
+ * wrong name returned undefined silently, and the size check above simply
+ * never ran. These tests exist so that cannot happen again unnoticed.
+ */
+describe('estimatedReceiveOf', () => {
+  it('converts a quote destAmount to display units', () => {
+    const quote = {
+      destAmount: '64000000',
+      sendAmount: '600000000',
+      from: { code: 'XLM' },
+      to: { code: 'USDC' },
+    }
+    expect(estimatedReceiveOf(quote)).toBe('6.4000000')
+  })
+  it('gives nothing for an object without destAmount', () => {
+    expect(estimatedReceiveOf({ sendAmount: '600000000' })).toBeUndefined()
+  })
+  it('gives nothing for no route at all', () => {
+    expect(estimatedReceiveOf(undefined)).toBeUndefined()
   })
 })
