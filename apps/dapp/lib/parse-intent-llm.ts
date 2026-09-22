@@ -59,9 +59,9 @@ const READ_INTENT_TOOL = {
       properties: {
         action: {
           type: 'string',
-          enum: ['swap', 'supply', 'borrow', 'repay'],
+          enum: ['swap', 'supply', 'borrow', 'repay', 'offramp'],
           description:
-            "What the user wants done. 'swap' trades one asset for another. 'supply' puts an asset the account ALREADY HOLDS into a lending pool, with no trade at all — as in \"supply my XLM to Blend\". 'borrow' takes an asset OUT of a lending pool as a loan against collateral already posted — as in \"borrow wBTC against my position\". 'repay' pays a loan back. Use 'supply' whenever no trade is asked for.",
+            "What the user wants done. 'swap' trades one asset for another. 'supply' puts an asset the account ALREADY HOLDS into a lending pool, with no trade at all — as in \"supply my XLM to Blend\". 'borrow' takes an asset OUT of a lending pool as a loan against collateral already posted — as in \"borrow wBTC against my position\". 'repay' pays a loan back. Use 'supply' whenever no trade is asked for. 'offramp' sends USDC the account ALREADY HOLDS to the user's bank through an anchor, with no trade — as in \"withdraw 5 USDC to my bank\" or \"cash out my USDC\". On an 'offramp', tokenIn and tokenOut are both USDC.",
         },
         tokenIn: {
           type: 'string',
@@ -88,13 +88,14 @@ const READ_INTENT_TOOL = {
         },
         followOn: {
           type: 'string',
-          enum: ['none', 'lend'],
+          enum: ['none', 'lend', 'offramp'],
           description:
-            'Whether the proceeds should then be supplied to a lending pool. Almost always none.',
+            'What happens to the proceeds after the trade. "none" almost always. "lend" supplies them to a lending pool. "offramp" withdraws them to the user\'s bank through an anchor — only when the user asks for the dollars, their bank, cash out, or fiat.',
         },
         followOnVenue: {
           type: 'string',
-          description: 'Lending venue when followOn is lend, e.g. blend. Empty otherwise.',
+          description:
+            'The lending venue when followOn is lend (e.g. blend), or the anchor when followOn is offramp (moneygram or testanchor). Empty when none was named.',
         },
       },
       // Every property required, matching the discipline the proposal schema
@@ -133,6 +134,10 @@ const SYSTEM_PROMPT = [
   'Venue names are often misspelled. "Blende", "blnd" and "blend protocol" all mean Blend.',
   "followOn is 'lend' ONLY when the user asks for the proceeds to be supplied, lent,",
   'deposited, staked, or put to work in a lending pool.',
+  "followOn is 'offramp' ONLY when the user asks for the proceeds to go to their bank, to",
+  "fiat, to dollars, or to be cashed out. 'Send it to my friend' is not an offramp.",
+  "Use followOnVenue 'moneygram' when MoneyGram is named, 'testanchor' when the test anchor is,",
+  'otherwise an empty string.',
   'Joining two ASSETS with "and" is NOT a follow-on: "buy XLM and USDC" is one purchase',
   'of two things, and its followOn is none.',
   'amountStated is false when the user named no size; set amountUsd to 0 in that case.',
@@ -155,7 +160,7 @@ export interface LlmReadIntent {
    * *say* borrow until the machinery underneath could do it safely. They are
    * the only two that can cost the user money after the transaction settles.
    */
-  action: 'swap' | 'supply' | 'borrow' | 'repay'
+  action: 'swap' | 'supply' | 'borrow' | 'repay' | 'offramp'
   tokenIn: string
   tokenOut: string
   /** Zero when the user named no size; check `amountStated` before using it. */
@@ -181,6 +186,8 @@ export interface ReadIntentOptions {
   allowedSymbols?: string[]
   /** Lending venues that exist on this chain. */
   allowedVenues?: string[]
+  /** Anchors that withdraw to fiat on this chain. Empty means none. */
+  allowedAnchors?: string[]
 }
 
 interface ToolArguments {
@@ -267,7 +274,7 @@ function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent 
 
   // Anything unrecognised falls back to a swap rather than to a lending
   // action. A malformed reply must not silently open a liability.
-  const ACTIONS = ['swap', 'supply', 'borrow', 'repay'] as const
+  const ACTIONS = ['swap', 'supply', 'borrow', 'repay', 'offramp'] as const
   const action = ACTIONS.find((known) => known === args.action) ?? 'swap'
 
   const tokenIn = symbolOf(args.tokenIn, options.allowedSymbols)
@@ -293,7 +300,7 @@ function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent 
     amountUsd: amountStated ? amountUsd : 0,
     amountStated,
     amountIsUsd: args.amountIsUsd === true,
-    followOn: followOnOf(args, options.allowedVenues),
+    followOn: followOnOf(args, options.allowedVenues, options.allowedAnchors),
   }
 }
 
@@ -336,12 +343,23 @@ function symbolOf(value: unknown, allowed: string[] | undefined): string | undef
  */
 function followOnOf(
   args: ToolArguments,
-  allowedVenues: string[] | undefined
+  allowedVenues: string[] | undefined,
+  allowedAnchors: string[] | undefined
 ): FollowOnAction | null {
-  if (args.followOn !== 'lend') return null
-
   const named =
     typeof args.followOnVenue === 'string' ? args.followOnVenue.trim().toLowerCase() : ''
+
+  if (args.followOn === 'offramp') {
+    const anchors = allowedAnchors ?? []
+    if (anchors.length === 0) return null
+    if (named === '') {
+      const first = anchors[0]
+      return first === undefined ? null : { kind: 'offramp', venue: first }
+    }
+    return anchors.includes(named) ? { kind: 'offramp', venue: named } : null
+  }
+
+  if (args.followOn !== 'lend') return null
   const venues = allowedVenues ?? ['blend']
   if (venues.length === 0) return null
 

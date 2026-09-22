@@ -202,6 +202,14 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
 
       <StepList steps={steps} current={current} />
 
+      {/* Said before the button, not after it. A size the anchor will refuse
+          or cap is something to read while the trade can still be cancelled. */}
+      {sequence.warning !== undefined ? (
+        <p className="border-border text-muted-foreground rounded-md border border-dashed p-3 text-xs">
+          {sequence.warning}
+        </p>
+      ) : null}
+
       {/* Only once the supply is the step in hand: the risks below are about
           lending, and showing them beside a swap would misattribute them. */}
       {current > 0 && sequence.kind === 'swap-then-lend' ? <SupplyRisks /> : null}

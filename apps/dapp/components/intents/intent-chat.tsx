@@ -44,9 +44,13 @@ import { useSequence } from '../../hooks/use-sequence'
 import { SequenceConfirm } from './sequence-confirm'
 import {
   parseCompoundIntent,
+  parseOfframpOnlyIntent,
   parseSupplyOnlyIntent,
   type FollowOnAction,
 } from '../../lib/parse-compound'
+import type { AnchorId } from '../../lib/offramp/anchors'
+import { isAnchorId } from '../../lib/offramp/anchors'
+import type { WithdrawLimits } from '../../lib/offramp/sep24'
 import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
@@ -441,6 +445,10 @@ export function IntentChat(): JSX.Element {
     // in the competition.
     const single = parseIntent(text, swap.usdPrices)
     const regexFollowOn = parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null
+    // "Withdraw 2 USDC to my bank" is not a trade at all, and the trade parser
+    // reads it as one. Computed here with the rest of the fallback reading, so
+    // an outage leaves this path exactly as capable as the model does.
+    const regexOfframpOnly = parseOfframpOnlyIntent(text)
 
     // Reading by meaning rather than by wording. A regex recognises surface
     // forms and people do not write in surface forms: measured across twelve
@@ -458,7 +466,7 @@ export function IntentChat(): JSX.Element {
         })
         const body = (await res.json()) as {
           understood?: boolean
-          action?: 'swap' | 'supply' | 'borrow' | 'repay'
+          action?: 'swap' | 'supply' | 'borrow' | 'repay' | 'offramp'
           tokenIn?: string
           tokenOut?: string
           amountUsd?: number
@@ -489,6 +497,25 @@ export function IntentChat(): JSX.Element {
           setAffordError(
             `${verb} happens on your position rather than through an intent, because it depends on the collateral behind it. Open the History tab to see your Blend position, what it can support, and the price at which it would be liquidated.`
           )
+          return
+        }
+
+        if (body.understood === true && body.action === 'offramp' && slug === 'stellar') {
+          // No trade: the USDC is already held. Amount is optional — the
+          // anchor asks in its own page when none was named.
+          const stated = body.amountStated === true
+          const amount = stated ? String(body.amountUsd ?? 0) : undefined
+          const anchor =
+            body.followOn?.kind === 'offramp' && isAnchorId(body.followOn.venue)
+              ? body.followOn.venue
+              : 'testanchor'
+          setParsed(null)
+          setFollowOn(null)
+          sequence.prepare({
+            kind: 'offramp-only',
+            anchor,
+            ...(amount !== undefined && amount !== '0' ? { amount } : {}),
+          })
           return
         }
 
@@ -538,6 +565,20 @@ export function IntentChat(): JSX.Element {
         setParsing(false)
       }
 
+      // The model did not answer, and the regex read a withdrawal of USDC
+      // already held. Same destination as the branch above: one step, no
+      // competition, because there is no trade for agents to compete over.
+      if (read === null && regexOfframpOnly !== null && slug === 'stellar') {
+        setParsed(null)
+        setFollowOn(null)
+        sequence.prepare({
+          kind: 'offramp-only',
+          anchor: isAnchorId(regexOfframpOnly.venue) ? regexOfframpOnly.venue : 'testanchor',
+          ...(regexOfframpOnly.amount !== undefined ? { amount: regexOfframpOnly.amount } : {}),
+        })
+        return
+      }
+
       // A second action is worth confirming, whichever parser found it. The
       // instruction carries more than a swap, and a follow-on silently dropped
       // or silently added is the misreading that costs the user real money.
@@ -574,6 +615,22 @@ export function IntentChat(): JSX.Element {
 
     setPending(null)
     setFollowOn(withFollowOn ? confirmed.followOn : null)
+
+    // Only USDC reaches an anchor. Said here rather than after a competition,
+    // because the second half of the instruction cannot be done at all and a
+    // minute of agents arguing would not change that.
+    if (
+      withFollowOn &&
+      confirmed.followOn !== null &&
+      confirmed.followOn.kind === 'offramp' &&
+      confirmed.tokenOut !== 'USDC'
+    ) {
+      setAffordError(
+        `Only USDC can be withdrawn to a bank. Ask for the trade into USDC — "sell ${confirmed.tokenIn} for USDC and send the dollars to my bank".`
+      )
+      return
+    }
+
     // Re-parsed from the original text rather than rebuilt from the reading:
     // every downstream consumer expects a `ParsedIntent`, and the deterministic
     // parser is what derives escrow, base units and deadlines. The model
@@ -717,6 +774,43 @@ export function IntentChat(): JSX.Element {
 
       // No executable route means no honest sequence. Falling through to the
       // ordinary swap path is better than building one that cannot fill.
+    }
+
+    // The same shape, ending at an anchor rather than a lending pool. The
+    // anchor's limits are fetched before the sequence is prepared, so a size
+    // it will refuse is said while the trade can still be cancelled.
+    if (slug === 'stellar' && followOn !== null && followOn.kind === 'offramp') {
+      const route = routesByAgent[key] ?? winnerRoute
+      const anchor: AnchorId = isAnchorId(followOn.venue) ? followOn.venue : 'testanchor'
+      if (route !== undefined && parsed.input.tokenOut === 'USDC') {
+        const estimated = (route as { receiveAmount?: string } | undefined)?.receiveAmount
+        void (async () => {
+          // The anchor's limits, so the size is checked before signature one.
+          let limits: WithdrawLimits | undefined
+          try {
+            const res = await fetch(`/api/offramp/anchor?id=${anchor}`)
+            const info = (await res.json()) as { limits?: WithdrawLimits | null }
+            if (info.limits !== null && info.limits !== undefined) limits = info.limits
+          } catch {
+            // No limits means no warning; the anchor will still refuse an
+            // out-of-range withdrawal and the card will say so then.
+          }
+          sequence.prepare({
+            kind: 'swap-then-offramp',
+            quote: route,
+            receiveSymbol: 'USDC',
+            anchor,
+            swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for USDC`,
+            ...(estimated !== undefined ? { estimatedReceive: estimated } : {}),
+            ...(limits !== undefined ? { limits } : {}),
+          })
+        })()
+        return
+      }
+
+      // A swap that does not deliver USDC cannot be offramped. Fall through to
+      // the ordinary swap: the user said what they wanted and the app cannot
+      // do the second half, which the pending card already made clear.
     }
 
     // A split is two actions in one signature: part filled now, the remainder

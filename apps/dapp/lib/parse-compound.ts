@@ -1,4 +1,4 @@
-import { DEFAULT_ANCHOR, isAnchorId } from './offramp/anchors'
+import { DEFAULT_ANCHOR, isAnchorId, lookupAnchor } from './offramp/anchors'
 import { parseIntent } from './parse-intent'
 import type { ParsedIntent } from './parse-intent'
 
@@ -429,4 +429,12 @@ export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
     ...(amount !== undefined ? { amount } : {}),
     venue: anchor ?? DEFAULT_ANCHOR,
   }
+}
+
+/** The follow-on, as the confirmation card reads it back to the user. */
+export function describeFollowOn(followOn: FollowOnAction): string {
+  if (followOn.kind === 'lend') {
+    return `then supply it to ${followOn.venue === 'blend' ? 'Blend' : followOn.venue}`
+  }
+  return `then withdraw it to your bank through ${lookupAnchor(followOn.venue)?.name ?? followOn.venue}`
 }
