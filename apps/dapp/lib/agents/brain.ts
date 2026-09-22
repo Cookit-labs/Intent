@@ -32,7 +32,7 @@ export type AgentStrategyKey = Extract<
  *
  * See `brains/providers.ts` for each one's endpoint, limits and cost.
  */
-export type BrainProvider = 'deepseek' | 'groq' | 'ollama'
+export type BrainProvider = 'deepseek' | 'groq' | 'ollama' | 'openrouter'
 
 /**
  * Market facts handed to the model.
