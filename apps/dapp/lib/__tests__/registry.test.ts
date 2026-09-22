@@ -1,31 +1,146 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * Which model answers for each agent, and — more importantly — what happens
- * when none can.
+ * Which agents race, and what happens when none can.
  *
- * A mock brain used to stand in for a missing key, so a misconfigured
- * deployment ran four agents reciting canned text. The registry now returns
- * nothing, and the route turns nothing into a message the user reads.
- *
- * The rest of this file pins the per-agent assignment. Four calls to one model
- * are four samples of one mind and they converge; different models disagree
- * for real reasons, and the disagreement is what the competition is for. So
- * the mapping has to be configurable, and a typo in that configuration must
- * cost variety rather than an agent.
+ * An agent is a model. `AGENT_BRAINS` lists them, one entry per agent, and
+ * unset means every configured model. Nothing is padded to a fixed count and
+ * nothing is substituted: a model the user named and did not get is a
+ * warning, not a different agent wearing its name.
  *
  * Modules are reset between cases because each brain reads its key once, at
- * load. A registry imported fresh over stale brains would report the
- * environment as it was the first time, not as it is now.
+ * load.
  */
 
-const KEYS = ['DEEPSEEK_API_KEY', 'GROQ_API_KEY', 'OPENROUTER_API_KEY', 'AGENT_BRAINS'] as const
+const KEYS = [
+  'DEEPSEEK_API_KEY',
+  'GROQ_API_KEY',
+  'OPENROUTER_API_KEY',
+  'OPENROUTER_MODEL',
+  'AGENT_BRAINS',
+] as const
 
 async function registry(): Promise<typeof import('../agents/registry')> {
   return import('../agents/registry')
 }
 
-describe('getAgentBrains', () => {
+describe('getRoster', () => {
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    for (const k of KEYS) saved[k] = process.env[k]
+    for (const k of KEYS) delete process.env[k]
+    vi.resetModules()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    for (const k of KEYS) {
+      const was = saved[k]
+      if (was === undefined) delete process.env[k]
+      else process.env[k] = was
+    }
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  it('returns nothing rather than a stand-in when no provider is configured', async () => {
+    const { getRoster } = await registry()
+    expect(getRoster()).toBeUndefined()
+  })
+
+  it('fields one agent per configured provider default', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['GROQ_API_KEY'] = 'test-key'
+    const { getRoster } = await registry()
+    const keys = (getRoster() ?? []).map((a) => a.key)
+    expect(keys).toEqual(['deepseek:deepseek-v4-flash', 'groq:qwen/qwen3.8-27b'])
+  })
+
+  it('fields every curated OpenRouter model when that key is set', async () => {
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    const { getRoster } = await registry()
+    const roster = getRoster() ?? []
+    expect(roster).toHaveLength(5)
+    expect(new Set(roster.map((a) => a.model)).size).toBe(5)
+    expect(roster.every((a) => a.provider === 'openrouter')).toBe(true)
+  })
+
+  it('is seven agents with the three hosted keys', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['GROQ_API_KEY'] = 'test-key'
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    const { getRoster } = await registry()
+    expect(getRoster()).toHaveLength(7)
+  })
+
+  it('never fields a local daemon unless named', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    const { getRoster } = await registry()
+    expect((getRoster() ?? []).some((a) => a.provider === 'ollama')).toBe(false)
+  })
+
+  it('takes AGENT_BRAINS as the roster, in order, one entry per agent', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
+    const { getRoster } = await registry()
+    const roster = getRoster() ?? []
+    expect(roster.map((a) => a.key)).toEqual([
+      'openrouter:inclusionai/ling-3.0-flash-fin:free',
+      'deepseek:deepseek-v4-flash',
+    ])
+    expect(roster[0]?.name).toBe('Ling 3.0 Flash Fin')
+    expect(roster[0]?.brain.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+  })
+
+  it('accepts a raw catalogue id after the provider', async () => {
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/google/gemma-4-31b-it:free'
+    const { getRoster } = await registry()
+    expect(getRoster()?.[0]?.model).toBe('google/gemma-4-31b-it:free')
+  })
+
+  it('collapses an entry that resolves to an agent already listed', async () => {
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] =
+      'openrouter/ling-fin,openrouter/inclusionai/ling-3.0-flash-fin:free,openrouter'
+    const { getRoster } = await registry()
+    // The bare `openrouter` entry is its default model, which is ling-fin too.
+    expect(getRoster()).toHaveLength(1)
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it('drops a named agent whose provider has no key, and says so', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
+    const { getRoster } = await registry()
+    expect((getRoster() ?? []).map((a) => a.provider)).toEqual(['deepseek'])
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('OPENROUTER_API_KEY'))
+  })
+
+  it('drops an unrecognised provider name the same way', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'gpt5,deepseek'
+    const { getRoster } = await registry()
+    expect(getRoster()).toHaveLength(1)
+  })
+
+  it('returns nothing when every named agent is dropped', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin'
+    const { getRoster } = await registry()
+    expect(getRoster()).toBeUndefined()
+  })
+
+  it('gives every agent a stable colour from its key', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    const { getRoster } = await registry()
+    expect(getRoster()?.[0]?.gradient).toMatch(/^linear-gradient\(/)
+  })
+})
+
+describe('publicRoster', () => {
   const saved: Record<string, string | undefined> = {}
 
   beforeEach(() => {
@@ -43,92 +158,21 @@ describe('getAgentBrains', () => {
     vi.resetModules()
   })
 
-  it('returns nothing rather than a stand-in when no provider is configured', async () => {
-    const { getAgentBrains } = await registry()
-    expect(getAgentBrains()).toBeUndefined()
-  })
-
-  it('gives every agent a brain when one provider is configured', async () => {
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    const { getAgentBrains } = await registry()
-    const brains = getAgentBrains()
-    expect(Object.keys(brains ?? {})).toHaveLength(4)
-    expect(Object.values(brains ?? {}).every((b) => b.id === 'deepseek')).toBe(true)
-  })
-
-  it('spreads the configured providers across the agents by default', async () => {
-    // The point of more than one key: the four agents stop being four samples
-    // of the same model.
+  it('exposes identity and cost, never the brain', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['GROQ_API_KEY'] = 'test-key'
-    const { getAgentBrains } = await registry()
-    const ids = Object.values(getAgentBrains() ?? {}).map((b) => b.id)
-    expect(new Set(ids).size).toBeGreaterThan(1)
-  })
-
-  it('honours an explicit per-agent assignment', async () => {
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['GROQ_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'groq,deepseek,groq,deepseek'
-    const { getAgentBrains } = await registry()
-    const brains = getAgentBrains()
-    expect(brains?.twap.id).toBe('groq')
-    expect(brains?.momentum.id).toBe('deepseek')
-    expect(brains?.arbitrage.id).toBe('groq')
-    expect(brains?.shadow.id).toBe('deepseek')
-  })
-
-  it('moves an agent off a provider that has no key rather than silencing it', async () => {
-    // Groq is named but unconfigured. An agent with no brain would show as an
-    // agent that did not answer, which is a worse outcome than less variety.
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'groq,groq,groq,groq'
-    const { getAgentBrains } = await registry()
-    expect(Object.values(getAgentBrains() ?? {}).every((b) => b.id === 'deepseek')).toBe(true)
-  })
-
-  it('treats an unrecognised provider name the same way', async () => {
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'gpt5,deepseek,deepseek,deepseek'
-    const { getAgentBrains } = await registry()
-    expect(getAgentBrains()?.twap.id).toBe('deepseek')
-  })
-
-  it('gives agents on one provider different models when AGENT_BRAINS names them', async () => {
-    // OpenRouter is one key in front of many labs. Naming the model after the
-    // provider is what lets four agents share the key without sharing a mind.
-    process.env['OPENROUTER_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,openrouter/nemotron-super'
-    const { getAgentBrains } = await registry()
-    const brains = getAgentBrains()
-    expect(brains?.twap.id).toBe('openrouter')
-    expect(brains?.twap.model).toBe('inclusionai/ling-3.0-flash-fin:free')
-    expect(brains?.momentum.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
-    expect(brains?.arbitrage.model).toBe('inclusionai/ling-3.0-flash-fin:free')
-    expect(brains?.shadow.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
-  })
-
-  it('accepts a raw catalogue id after the provider', async () => {
-    // Ids contain slashes and colons of their own; everything after the first
-    // slash is the model.
-    process.env['OPENROUTER_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/google/gemma-4-31b-it:free'
-    const { getAgentBrains } = await registry()
-    expect(getAgentBrains()?.twap.model).toBe('google/gemma-4-31b-it:free')
-  })
-
-  it('moves an agent off a named model whose provider has no key', async () => {
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
-    const { getAgentBrains } = await registry()
-    expect(getAgentBrains()?.twap.id).toBe('deepseek')
-  })
-
-  it('names the model each agent runs on', async () => {
-    // The panel shows this, so that four agents agreeing on one model reads
-    // differently from four agents agreeing across three.
-    process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    const { getAgentBrains } = await registry()
-    expect(getAgentBrains()?.twap.model).toBe('deepseek-v4-flash')
+    const { getRoster, publicRoster } = await registry()
+    const rows = publicRoster(getRoster() ?? [])
+    expect(rows[0]).toEqual({
+      key: 'deepseek:deepseek-v4-flash',
+      name: 'DeepSeek V4 Flash',
+      gradient: expect.stringMatching(/^linear-gradient\(/) as string,
+      provider: 'deepseek',
+      providerName: 'DeepSeek',
+      model: 'deepseek-v4-flash',
+      free: false,
+    })
+    expect(rows[1]?.free).toBe(true)
+    expect(Object.keys(rows[0] ?? {})).not.toContain('brain')
   })
 })
