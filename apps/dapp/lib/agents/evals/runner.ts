@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import type { AgentProposalResult, AgentStrategyKey, ProposalOutcome } from '../brain'
 import { ALL_STRATEGIES } from '../brain'
 import { createBrain } from '../brains/openai-compatible'
+import { PROVIDERS, isBrainProvider, modelFor, resolveModel } from '../brains/providers'
 import { buildMarketContext } from '../market-context'
 import { parseIntent } from '../../parse-intent'
 
@@ -20,8 +21,9 @@ import { parseIntent } from '../../parse-intent'
  * All checks are programmatic. There is no LLM judge: a model grading its own
  * competition is neither reproducible between runs nor free.
  *
- *   pnpm agents:eval                     # deepseek-v4-flash
- *   pnpm agents:eval deepseek-v4-pro     # compare
+ *   pnpm agents:eval                              # deepseek-v4-flash
+ *   pnpm agents:eval deepseek-v4-pro              # compare
+ *   pnpm agents:eval openrouter nemotron-super    # another provider, by alias or raw id
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -111,11 +113,17 @@ function distinctness(a: string, b: string): number {
 }
 
 async function main(): Promise<void> {
-  const model = process.argv[2] ?? process.env['DEEPSEEK_MODEL'] ?? 'deepseek-v4-flash'
-  const apiKey = process.env['DEEPSEEK_API_KEY']
+  // `<model>` alone keeps the original DeepSeek form; `<provider> [model]`
+  // scores any other provider the agents can run on.
+  const [first, second] = process.argv.slice(2)
+  const provider = first !== undefined && isBrainProvider(first) ? first : 'deepseek'
+  const named = provider === first ? second : first
+  const model = named !== undefined ? resolveModel(provider, named) : modelFor(provider)
+  const keyEnv = PROVIDERS[provider].apiKeyEnv
+  const apiKey = keyEnv === '' ? 'local' : process.env[keyEnv]
 
   if (apiKey === undefined || apiKey === '') {
-    console.error('DEEPSEEK_API_KEY is not set. This eval calls the real API and costs money.')
+    console.error(`${keyEnv} is not set. This eval calls the real API and may cost money.`)
     process.exit(1)
   }
 
@@ -123,7 +131,7 @@ async function main(): Promise<void> {
     cases: GoldenCase[]
   }
 
-  const brain = createBrain({ apiKey, model })
+  const brain = createBrain({ provider, apiKey, model })
   const market = buildMarketContext('arc')
   const allowedVenues = new Set(market.venues.map((v) => v.id))
   const results: CaseResult[] = []

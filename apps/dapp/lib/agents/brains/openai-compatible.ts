@@ -530,4 +530,5 @@ export const BRAINS: Record<BrainProvider, AgentBrain> = {
   deepseek: createBrain({ provider: 'deepseek' }),
   groq: createBrain({ provider: 'groq' }),
   ollama: createBrain({ provider: 'ollama' }),
+  openrouter: createBrain({ provider: 'openrouter' }),
 }

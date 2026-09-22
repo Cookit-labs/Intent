@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * environment as it was the first time, not as it is now.
  */
 
-const KEYS = ['DEEPSEEK_API_KEY', 'GROQ_API_KEY', 'AGENT_BRAINS'] as const
+const KEYS = ['DEEPSEEK_API_KEY', 'GROQ_API_KEY', 'OPENROUTER_API_KEY', 'AGENT_BRAINS'] as const
 
 async function registry(): Promise<typeof import('../agents/registry')> {
   return import('../agents/registry')
@@ -90,6 +90,36 @@ describe('getAgentBrains', () => {
   it('treats an unrecognised provider name the same way', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['AGENT_BRAINS'] = 'gpt5,deepseek,deepseek,deepseek'
+    const { getAgentBrains } = await registry()
+    expect(getAgentBrains()?.twap.id).toBe('deepseek')
+  })
+
+  it('gives agents on one provider different models when AGENT_BRAINS names them', async () => {
+    // OpenRouter is one key in front of many labs. Naming the model after the
+    // provider is what lets four agents share the key without sharing a mind.
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,openrouter/nemotron-super'
+    const { getAgentBrains } = await registry()
+    const brains = getAgentBrains()
+    expect(brains?.twap.id).toBe('openrouter')
+    expect(brains?.twap.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+    expect(brains?.momentum.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
+    expect(brains?.arbitrage.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+    expect(brains?.shadow.model).toBe('nvidia/nemotron-3-super-120b-a12b:free')
+  })
+
+  it('accepts a raw catalogue id after the provider', async () => {
+    // Ids contain slashes and colons of their own; everything after the first
+    // slash is the model.
+    process.env['OPENROUTER_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/google/gemma-4-31b-it:free'
+    const { getAgentBrains } = await registry()
+    expect(getAgentBrains()?.twap.model).toBe('google/gemma-4-31b-it:free')
+  })
+
+  it('moves an agent off a named model whose provider has no key', async () => {
+    process.env['DEEPSEEK_API_KEY'] = 'test-key'
+    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
     const { getAgentBrains } = await registry()
     expect(getAgentBrains()?.twap.id).toBe('deepseek')
   })
