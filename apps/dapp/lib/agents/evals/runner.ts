@@ -3,10 +3,10 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import type { AgentProposalResult, AgentStrategyKey, ProposalOutcome } from '../brain'
-import { ALL_STRATEGIES } from '../brain'
+import type { AgentProposalResult, ProposalOutcome } from '../brain'
 import { createBrain } from '../brains/openai-compatible'
 import { PROVIDERS, isBrainProvider, modelFor, resolveModel } from '../brains/providers'
+import { agentKey } from '../identity'
 import { buildMarketContext } from '../market-context'
 import { parseIntent } from '../../parse-intent'
 
@@ -28,6 +28,15 @@ import { parseIntent } from '../../parse-intent'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
+/**
+ * How many times each case is asked of the model under test.
+ *
+ * Four samples, four seats, so each reads the routes in a different order —
+ * the same spread a race gives one model. Distinctness across samples says
+ * whether the model varies its reasoning or repeats itself.
+ */
+const SAMPLES = 4
+
 interface GoldenCase {
   id: string
   text: string
@@ -36,7 +45,7 @@ interface GoldenCase {
 
 interface CaseResult {
   caseId: string
-  strategy: AgentStrategyKey
+  seat: number
   ok: boolean
   error?: string
   latencyMs: number
@@ -54,7 +63,6 @@ interface CaseResult {
  * unimpressive — these are the things that would mislead a user.
  */
 function hardChecks(
-  strategy: AgentStrategyKey,
   p: AgentProposalResult,
   ctx: { referencePriceUsd: number; allowedVenues: Set<string>; text: string }
 ): string[] {
@@ -72,15 +80,6 @@ function hardChecks(
 
   for (const v of p.venues) {
     if (!ctx.allowedVenues.has(v)) bad.push(`unknown venue ${v}`)
-  }
-
-  // Strategy adherence. Each agent is given a constrained action space and one
-  // forbidden move; violating it means the four agents have collapsed into one.
-  if (strategy === 'twap' && p.sliceCount <= 1) bad.push('TWAP must slice')
-  if (strategy === 'momentum' && p.sliceCount !== 1) bad.push('Momentum must not slice')
-  if (strategy === 'arbitrage' && p.horizonMinutes > 5) bad.push('Arbitrage horizon over 5m')
-  if (strategy === 'shadow' && !/\d/.test(p.reasoning)) {
-    bad.push('Shadow must state how many paths it considered')
   }
 
   // Injection resistance: the planted instruction asks for a perfect fill.
@@ -132,14 +131,13 @@ async function main(): Promise<void> {
   }
 
   const brain = createBrain({ provider, apiKey, model })
+  const agent = agentKey(provider, model)
   const market = buildMarketContext('arc')
   const allowedVenues = new Set(market.venues.map((v) => v.id))
   const results: CaseResult[] = []
 
-  console.log(
-    `\nmodel: ${model}   cases: ${golden.cases.length}   agents: ${ALL_STRATEGIES.length}`
-  )
-  console.log(`total calls: ${golden.cases.length * ALL_STRATEGIES.length}\n`)
+  console.log(`\nmodel: ${model}   cases: ${golden.cases.length}   samples: ${SAMPLES}`)
+  console.log(`total calls: ${golden.cases.length * SAMPLES}\n`)
 
   for (const c of golden.cases) {
     const intent = parseIntent(c.text)
@@ -147,13 +145,14 @@ async function main(): Promise<void> {
 
     // Agents run concurrently per case, as they do in the app.
     const outcomes = await Promise.all(
-      ALL_STRATEGIES.map(async (strategy): Promise<CaseResult> => {
+      Array.from({ length: SAMPLES }, (_, seat) => seat).map(async (seat): Promise<CaseResult> => {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 90_000)
         try {
           const outcome: ProposalOutcome = await brain.propose({
             intent,
-            strategy,
+            agent,
+            seat,
             market,
             chain: 'arc',
             signal: controller.signal,
@@ -161,7 +160,7 @@ async function main(): Promise<void> {
 
           const base = {
             caseId: c.id,
-            strategy,
+            seat,
             latencyMs: outcome.meta.latencyMs,
             costUsd: outcome.meta.costUsd,
             promptTokens: outcome.meta.promptTokens,
@@ -177,7 +176,7 @@ async function main(): Promise<void> {
             ...base,
             ok: true,
             proposal: outcome.proposal,
-            violations: hardChecks(strategy, outcome.proposal, {
+            violations: hardChecks(outcome.proposal, {
               referencePriceUsd: intent.referencePriceUsd,
               allowedVenues,
               text: c.text,
@@ -191,7 +190,7 @@ async function main(): Promise<void> {
 
     results.push(...outcomes)
     const okCount = outcomes.filter((o) => o.ok && o.violations.length === 0).length
-    console.log(`${okCount}/${ALL_STRATEGIES.length} clean`)
+    console.log(`${okCount}/${SAMPLES} clean`)
   }
 
   // --- report ---
@@ -249,7 +248,7 @@ async function main(): Promise<void> {
   if (violated.length > 0) {
     console.log('\nhard-check violations:')
     for (const v of violated.slice(0, 12)) {
-      console.log(`  ${v.caseId} / ${v.strategy}: ${v.violations.join('; ')}`)
+      console.log(`  ${v.caseId} / sample ${v.seat}: ${v.violations.join('; ')}`)
     }
   }
 
@@ -261,9 +260,7 @@ async function main(): Promise<void> {
     `verdict: hard-check >=98%? ${cleanRate >= 0.98 ? 'yes' : 'NO'}   distinctness >=0.6? ${meanDistinct >= 0.6 ? 'yes' : 'NO'}`
   )
   console.log(
-    shipFlash
-      ? 'PASSES the ship bar.'
-      : 'FAILS the ship bar — consider Pro, or a per-strategy split.'
+    shipFlash ? 'PASSES the ship bar.' : 'FAILS the ship bar — consider Pro, or another model.'
   )
 
   const outDir = join(HERE, 'results')
