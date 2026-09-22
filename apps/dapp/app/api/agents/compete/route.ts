@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
-import type { AgentProposalResult, AgentStrategyKey } from '../../../../lib/agents/brain'
-import { ALL_STRATEGIES } from '../../../../lib/agents/brain'
+import type { AgentProposalResult } from '../../../../lib/agents/brain'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { measureRoute } from '../../../../lib/agents/measure'
-import { getAgentBrains } from '../../../../lib/agents/registry'
+import { getRoster } from '../../../../lib/agents/registry'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
-import { STRATEGIES, STRATEGY_ORDER } from '../../../../lib/agents/strategies'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
@@ -177,8 +175,8 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  const brains = getAgentBrains()
-  if (brains === undefined) {
+  const roster = getRoster()
+  if (roster === undefined) {
     return errorStream(
       'agents_offline',
       'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
@@ -246,29 +244,24 @@ export async function POST(request: Request): Promise<Response> {
       send({
         type: 'competition:started',
         competitionId,
-        // The model is named up front, while the card still says "thinking".
-        // Four agents on three models is the answer to "why does the same one
-        // always win", and it only answers it if the user can see it.
-        agents: STRATEGY_ORDER.map((key) => ({
-          key,
-          name: STRATEGIES[key].name,
-          gradient: STRATEGIES[key].gradient,
-          model: brains[key].model,
-        })),
+        // The line-up is named up front, while every card still says
+        // "thinking". Each agent is a model, and the user can see which.
+        agents: roster.map(({ key, name, gradient, model }) => ({ key, name, gradient, model })),
         windowSeconds: WINDOW_SECONDS,
       })
 
       // Agents run concurrently and are emitted as they finish, so one slow
       // agent delays only its own card.
       const settled = await Promise.all(
-        ALL_STRATEGIES.map(async (strategy: AgentStrategyKey) => {
+        roster.map(async (agent, seat) => {
           const controllerForAgent = new AbortController()
           const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
           try {
-            const outcome = await brains[strategy].propose({
+            const outcome = await agent.brain.propose({
               intent,
-              strategy,
+              agent: agent.key,
+              seat,
               market,
               chain,
               signal: controllerForAgent.signal,
@@ -277,7 +270,12 @@ export async function POST(request: Request): Promise<Response> {
             if (!outcome.ok) {
               // Said, and left empty. No placeholder: an agent that did not
               // answer has no proposal, and showing one would be inventing it.
-              send({ type: 'competition:failed', competitionId, strategy, error: outcome.error })
+              send({
+                type: 'competition:failed',
+                competitionId,
+                agent: agent.key,
+                error: outcome.error,
+              })
               return undefined
             }
 
@@ -322,7 +320,7 @@ export async function POST(request: Request): Promise<Response> {
       const winner = pickWinner(scored)
 
       if (winner !== null) {
-        const winningProposal = proposals.find((p) => p.strategy === winner)
+        const winningProposal = proposals.find((p) => p.agent === winner)
         const chosen = (market.routes ?? []).find((r) => r.id === winningProposal?.routeId)
 
         // Agreement, named as such. When every agent that could execute chose
@@ -335,7 +333,7 @@ export async function POST(request: Request): Promise<Response> {
           type: 'competition:winner',
           competitionId,
           winner,
-          scores: Object.fromEntries(scored.map((s) => [s.strategy, s.score])),
+          scores: Object.fromEntries(scored.map((s) => [s.agent, s.score])),
           unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })
