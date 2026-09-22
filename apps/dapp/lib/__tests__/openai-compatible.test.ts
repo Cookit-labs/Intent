@@ -26,7 +26,8 @@ const market: MarketContext = {
 
 const request: ProposalRequest = {
   intent: parseIntent('Accumulate 2 ETH below $3,200'),
-  strategy: 'twap',
+  agent: 'groq:qwen/qwen3.8-27b',
+  seat: 0,
   market,
   chain: 'arc',
 }
@@ -81,7 +82,7 @@ describe('deepseek brain', () => {
 
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
-    expect(outcome.proposal.strategy).toBe('twap')
+    expect(outcome.proposal.agent).toBe('groq:qwen/qwen3.8-27b')
     expect(outcome.proposal.sliceCount).toBe(6)
     expect(outcome.meta.costUsd).toBeGreaterThan(0)
   })

@@ -1,5 +1,3 @@
-import type { AgentStrategyType } from '@intent/types'
-
 import type { ParsedIntent } from '../parse-intent'
 
 /**
@@ -14,12 +12,6 @@ import type { ParsedIntent } from '../parse-intent'
  * something else later), so nothing outside `brains/` should know the provider
  * exists.
  */
-
-/** The four competing strategies. Narrower than `AgentStrategyType`, which also allows 'custom'. */
-export type AgentStrategyKey = Extract<
-  AgentStrategyType,
-  'twap' | 'momentum' | 'shadow' | 'arbitrage'
->
 
 /**
  * Which model service answered.
@@ -149,7 +141,13 @@ export interface QuotedRoute {
 
 export interface ProposalRequest {
   intent: ParsedIntent
-  strategy: AgentStrategyKey
+  agent: AgentKey
+  /**
+   * Position in the roster. Each agent reads the routes rotated by its seat
+   * so the line-up does not all anchor on the first one; nothing else about
+   * the request depends on it.
+   */
+  seat: number
   market: MarketContext
   /** Chain slug, so venue and settlement talk stays plausible for the chain. */
   chain: string
@@ -163,7 +161,7 @@ export interface ProposalRequest {
  * schema-valid 400% slippage is still possible and still has to be rejected.
  */
 export interface AgentProposalResult {
-  strategy: AgentStrategyKey
+  agent: AgentKey
   /**
    * The route this agent would execute, when one was offered and chosen.
    *
@@ -278,10 +276,3 @@ export interface AgentBrain {
    */
   propose: (req: ProposalRequest) => Promise<ProposalOutcome>
 }
-
-export const ALL_STRATEGIES: readonly AgentStrategyKey[] = [
-  'twap',
-  'momentum',
-  'arbitrage',
-  'shadow',
-]

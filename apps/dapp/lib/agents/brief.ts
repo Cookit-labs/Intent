@@ -1,47 +1,14 @@
-import type { AgentStrategyKey } from './brain'
-
 /**
- * The competing agents: an identity each, and the one brief they all reason
- * from.
+ * The one brief every agent reasons from.
  *
- * They are not strategies. The keys — `twap`, `momentum`, `arbitrage`,
- * `shadow` — survive as identifiers because they are persisted in history and
- * shared with `@intent/types`, but nothing about an agent's reasoning is fixed
- * by its key. Each may fill, rest, or split, on any venue the chain offers,
- * and the tag shown beside its name is derived from what it proposed rather
- * than assigned in advance. The earlier fixed tags ("Time-sliced",
- * "Cross-venue", "Path search") described a method the agent was never
- * actually held to, and read as one when its proposal said otherwise.
- *
- * What makes four agents differ is independent sampling over identical facts,
- * plus each reading the routes in a different order. Measured rather than
- * assumed: the model reasons before answering, and in that mode it is
- * stochastic at every temperature — three identical prompts at 0.0 gave three
- * different answers — while the temperature value itself changes nothing the
- * provider documents. So the spread below is kept for the day it matters and
- * is not what makes them differ today. When they disagree, that disagreement
- * is the signal; when they agree, that is one too.
+ * There are no strategies. Each agent is a model, given identical facts and
+ * this identical brief, and what makes them differ is that they are
+ * different models — plus each reading the routes in a different order. When
+ * they disagree, that disagreement is the signal; when they agree, that is
+ * one too.
  */
 
-export interface StrategyDefinition {
-  key: AgentStrategyKey
-  name: string
-  gradient: string
-  systemPrompt: string
-  /**
-   * Sampling temperature, passed through to the provider.
-   *
-   * Not honoured in thinking mode — see the note above. Kept spread across the
-   * four so that a provider or model which does honour it gets four settings
-   * rather than one, and so `revealOrder` is not the only thing telling them
-   * apart in the config.
-   */
-  temperature: number
-  /** Order in which cards appear, independent of which model call returns first. */
-  revealOrder: number
-}
-
-const SHARED_RULES = `You are one of four autonomous execution agents competing to fill a single user intent on a stablecoin-native marketplace.
+const SHARED_RULES = `You are one of several autonomous execution agents competing to fill a single user intent on a stablecoin-native marketplace.
 
 Rules that apply to every agent:
 - You are executing on the chain named in the market context, and only there. The venues listed are every venue that exists for this order. A venue from another chain does not exist here; naming one fails your proposal outright.
@@ -56,7 +23,7 @@ Rules that apply to every agent:
   the budget before the tool call is emitted, which produces no answer at all.`
 
 /**
- * What every agent is deciding. One brief for all four: strategy is a way of
+ * What every agent is deciding. One brief for all: strategy is a way of
  * thinking, not a lane to stay in, and an agent that correctly judges "this
  * order is small, just fill it" must not be penalised for reaching the same
  * conclusion as another.
@@ -92,51 +59,6 @@ Four things govern that choice:
 
 thenAction is independent of executionMode. Filling now and then lending is a valid plan, and so is resting at a price and then lending whatever fills.`
 
-const SYSTEM_PROMPT = `${SHARED_RULES}
+export const SYSTEM_PROMPT = `${SHARED_RULES}
 
 ${STRATEGIST_BRIEF}`
-
-/**
- * Names carry no method. The previous ones — TWAP, Momentum, Arbitrage,
- * Shadow — each named a textbook strategy, and a user reading "Arbitrage"
- * beside a proposal to fill on one venue was right to be confused.
- */
-export const STRATEGIES: Record<AgentStrategyKey, StrategyDefinition> = {
-  twap: {
-    key: 'twap',
-    name: 'Atlas',
-    gradient: 'linear-gradient(135deg, #7c8a9e, #cbb79a)',
-    temperature: 0.2,
-    revealOrder: 0,
-    systemPrompt: SYSTEM_PROMPT,
-  },
-  momentum: {
-    key: 'momentum',
-    name: 'Meridian',
-    gradient: 'linear-gradient(135deg, #8a9a5b, #d8c9a0)',
-    temperature: 0.7,
-    revealOrder: 1,
-    systemPrompt: SYSTEM_PROMPT,
-  },
-  arbitrage: {
-    key: 'arbitrage',
-    name: 'Cobalt',
-    gradient: 'linear-gradient(135deg, #9e6f7c, #6b7b9e)',
-    temperature: 0.4,
-    revealOrder: 2,
-    systemPrompt: SYSTEM_PROMPT,
-  },
-  shadow: {
-    key: 'shadow',
-    name: 'Halcyon',
-    gradient: 'linear-gradient(135deg, #2b2b2f, #4a4a52)',
-    temperature: 0.55,
-    revealOrder: 3,
-    systemPrompt: SYSTEM_PROMPT,
-  },
-}
-
-/** Display order for the competition panel. */
-export const STRATEGY_ORDER: readonly AgentStrategyKey[] = Object.values(STRATEGIES)
-  .sort((a, b) => a.revealOrder - b.revealOrder)
-  .map((s) => s.key)
