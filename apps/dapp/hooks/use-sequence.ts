@@ -347,12 +347,7 @@ export function useSequence(): Sequence {
     ): Promise<void> => {
       setState((s) => ({ ...s, phase: 'building' }))
 
-      const res = await fetch('/api/offramp/build', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account: signer, anchor, transactionId, authToken: token }),
-      })
-      const built = (await res.json()) as {
+      let built: {
         xdr?: string
         destination?: string
         memo?: string
@@ -363,16 +358,46 @@ export function useSequence(): Sequence {
         error?: string
         code?: string
       }
+      try {
+        const res = await fetch('/api/offramp/build', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: signer, anchor, transactionId, authToken: token }),
+        })
+        built = (await res.json()) as typeof built
+      } catch (e) {
+        // Caught rather than left to reject, because this runs from an effect
+        // as `void buildOfframp(...)`: an unhandled rejection would leave the
+        // phase at `anchor-ready` with no error and no way forward.
+        setState((s) => ({
+          ...s,
+          phase: 'failed',
+          error:
+            'The payment could not be prepared: ' +
+            (e instanceof Error ? e.message : 'the network did not answer') +
+            '. You are holding the USDC; start the withdrawal again.',
+        }))
+        // Released so a later `ready` can build this same transaction again.
+        // The withdrawal is still open at the anchor — nothing was sent, and
+        // the failure was on the way there rather than a decision about it.
+        builtFor.current = undefined
+        return
+      }
 
       const { xdr, destination, memo } = built
       if (xdr === undefined || destination === undefined || memo === undefined) {
         // Nothing was sent. A `declined` code means the anchor ended it, which
         // is its own outcome rather than a fault.
+        const declined = built.code === 'declined'
         setState((s) => ({
           ...s,
-          phase: built.code === 'declined' ? 'anchor-declined' : 'failed',
+          phase: declined ? 'anchor-declined' : 'failed',
           error: built.error ?? 'The withdrawal could not be built. You are holding the USDC.',
         }))
+        // Released on a failure, which may yet succeed on a retry; kept on a
+        // decline, where the anchor has ended this withdrawal and rebuilding
+        // it would be asking for a payment it no longer expects.
+        if (!declined) builtFor.current = undefined
         return
       }
 
