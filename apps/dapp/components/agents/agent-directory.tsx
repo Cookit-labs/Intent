@@ -2,52 +2,38 @@
 
 import { Plus, Terminal } from 'lucide-react'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 
-import { AGENT_PROFILES, formatVolumeUsd, type AgentProfile } from '../../lib/agent-roster'
-import { AgentAvatar } from './agent-avatar'
+import type { PublicAgent } from '../../lib/agents/registry'
 import { useChainHref } from '../../providers/chain-provider'
+import { AgentAvatar } from './agent-avatar'
 
-function Stat({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-foreground text-sm font-semibold tabular-nums">{value}</span>
-      <span className="text-muted-foreground text-xs">{label}</span>
-    </div>
-  )
-}
-
-function AgentRow({ agent }: { agent: AgentProfile }): JSX.Element {
+/**
+ * The agents that will race, as the server has them configured.
+ *
+ * Read from the roster endpoint rather than a table in this bundle: an agent
+ * is a model, and which models are wired in is a deployment's decision. The
+ * card shows what a reader can act on — who serves it and whether it costs —
+ * and nothing that would have to be invented.
+ */
+function AgentRow({ agent }: { agent: PublicAgent }): JSX.Element {
   const chainHref = useChainHref()
   return (
     <Link
-      href={chainHref(`/agents/${agent.key}`)}
+      href={chainHref(`/agents/${encodeURIComponent(agent.key)}`)}
       className="border-border hover:border-foreground/40 flex flex-col gap-4 rounded-xl border p-5 transition-colors"
     >
       <div className="flex items-center gap-3">
         <AgentAvatar gradient={agent.gradient} name={agent.name} className="h-10 w-10" />
         <div className="flex flex-1 flex-col">
           <span className="text-foreground text-sm font-semibold">{agent.name}</span>
-          <span className="text-muted-foreground text-xs">{agent.handle}</span>
+          <span className="text-muted-foreground text-xs">via {agent.providerName}</span>
         </div>
-        <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-          <span
-            className={
-              agent.status === 'active'
-                ? 'bg-foreground h-1.5 w-1.5 rounded-full'
-                : 'bg-muted-foreground h-1.5 w-1.5 rounded-full'
-            }
-          />
-          {agent.status === 'active' ? 'Active' : 'Idle'}
+        <span className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-[11px]">
+          {agent.free ? 'free' : 'paid'}
         </span>
       </div>
-
-      <p className="text-muted-foreground text-sm leading-relaxed">{agent.blurb}</p>
-
-      <div className="border-border grid grid-cols-3 gap-2 border-t pt-4 sm:gap-4">
-        <Stat label="Reputation" value={String(agent.reputation)} />
-        <Stat label="Win rate" value={`${Math.round(agent.winRate * 100)}%`} />
-        <Stat label="Volume" value={formatVolumeUsd(agent.volumeUsd)} />
-      </div>
+      <span className="text-muted-foreground truncate font-mono text-xs">{agent.model}</span>
     </Link>
   )
 }
@@ -83,12 +69,49 @@ function RegisterCard(): JSX.Element {
   )
 }
 
+type Roster =
+  | { status: 'loading' }
+  | { status: 'ready'; agents: PublicAgent[] }
+  | { status: 'failed'; message: string }
+
 export function AgentDirectory(): JSX.Element {
+  const [roster, setRoster] = useState<Roster>({ status: 'loading' })
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agents/roster')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`roster failed (${res.status})`)
+        return (await res.json()) as { agents: PublicAgent[] }
+      })
+      .then((body) => {
+        if (!cancelled) setRoster({ status: 'ready', agents: body.agents })
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setRoster({ status: 'failed', message: e instanceof Error ? e.message : String(e) })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      {AGENT_PROFILES.map((agent) => (
-        <AgentRow key={agent.key} agent={agent} />
-      ))}
+      {roster.status === 'loading' ? (
+        <div className="text-muted-foreground text-sm">Loading the roster…</div>
+      ) : roster.status === 'failed' ? (
+        <div className="text-muted-foreground text-sm">
+          Could not load the roster: {roster.message}
+        </div>
+      ) : roster.agents.length === 0 ? (
+        <div className="text-muted-foreground text-sm">
+          No agents configured. Set a provider key.
+        </div>
+      ) : (
+        roster.agents.map((agent) => <AgentRow key={agent.key} agent={agent} />)
+      )}
       <RegisterCard />
     </div>
   )
