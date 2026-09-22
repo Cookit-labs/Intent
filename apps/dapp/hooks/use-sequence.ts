@@ -4,9 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
+import type { AnchorId } from '../lib/offramp/anchors'
+import { ANCHORS } from '../lib/offramp/anchors'
+import { capToLimits, offrampSizeWarning, withdrawStepLabel } from '../lib/offramp/labels'
+import type { WithdrawLimits } from '../lib/offramp/sep24'
+import { fromBaseUnits } from '../lib/swap/assets'
 import { blendPositionUrl } from '../lib/swap/contract-registry'
 import { balanceOf, deliveredByBalanceChange } from '../lib/swap/delivered-balance'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
+import { useOfframpSession } from './use-offramp-session'
 
 /**
  * Signing several transactions in order.
@@ -47,6 +53,16 @@ export type SequencePhase =
   | 'settled'
   | 'stopped'
   | 'failed'
+  // The anchor's part of an offramp, between the swap settling and the
+  // payment being buildable. Distinct phases because each is something
+  // different for the user to do: sign a challenge, complete the anchor's
+  // page, or read what the anchor named before signing the payment.
+  | 'authenticating'
+  | 'anchor-interactive'
+  | 'anchor-ready'
+  // The anchor ended the withdrawal before any payment was sent. Nothing was
+  // lost, and this is its own state so the card can say exactly that.
+  | 'anchor-declined'
 
 export interface SequenceStep {
   /** What this step does, in words, for the review list. */
@@ -63,8 +79,11 @@ export interface SequenceStep {
    * someone who just lent actually wants.
    */
   positionUrl?: string
+  /** What the `positionUrl` link says. "View position on Blend" when absent. */
+  positionLabel?: string
   /** What the step actually delivered, in base units. Known only after it settles. */
   delivered?: string
+  anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
 }
 
 export interface SequenceState {
@@ -82,6 +101,31 @@ export interface SequenceState {
    * deliberate, because that is the moment the whole plan was approved.
    */
   autoAdvance?: boolean
+  kind?: SequenceRequest['kind']
+  /**
+   * Something worth saying before the first signature, that does not stop it.
+   *
+   * A size the anchor will refuse or cap is the case this exists for: the user
+   * should read it while the trade is still theirs to cancel, rather than
+   * discover it after a swap has settled.
+   */
+  warning?: string
+  /**
+   * What the server read from the anchor, shown verbatim on the review card
+   * so the user sees the destination the payment will actually go to.
+   */
+  offramp?: {
+    anchorName: string
+    destination: string
+    memo: string
+    memoType: string
+    amount: string
+    moreInfoUrl?: string
+    interactiveUrl?: string
+    anchorStatus?: string
+    /** Whether the automatic popup actually opened, so the card can say. */
+    popupOpen?: boolean
+  }
 }
 
 /** A swap, then a supply of whatever it delivered. */
@@ -106,14 +150,46 @@ export interface SwapThenLend {
   swapLabel?: string
 }
 
+/** A swap into USDC, then a withdrawal of whatever it delivered to fiat. */
+export interface SwapThenOfframp {
+  kind: 'swap-then-offramp'
+  quote: unknown
+  /** Always USDC today; carried so the balance delta can be measured. */
+  receiveSymbol: string
+  anchor: AnchorId
+  swapLabel?: string
+  /**
+   * What the chosen route expects the swap to deliver, in display units.
+   *
+   * An estimate, and said as one: it is what the anchor's limits are checked
+   * against before the first signature, because a swap sized outside them
+   * would settle and then have nowhere to go.
+   */
+  estimatedReceive?: string
+  /** The anchor's live limits, for the size warning before signature one. */
+  limits?: WithdrawLimits
+}
+
+/** A withdrawal of USDC already held. One step, one signature. */
+export interface OfframpOnly {
+  kind: 'offramp-only'
+  anchor: AnchorId
+  /** Display units. Absent means the anchor asks. */
+  amount?: string
+}
+
+export type SequenceRequest = SwapThenLend | SwapThenOfframp | OfframpOnly
+
 export interface Sequence extends SequenceState {
   /** Builds the first step and shows the whole sequence. Does not sign. */
-  prepare: (request: SwapThenLend) => void
+  prepare: (request: SequenceRequest) => void
   /** Signs and submits the step now awaiting signature. */
   confirm: () => void
   /** Stops after what has already settled, deliberately. */
   stop: () => void
   reset: () => void
+  /** Re-opens the anchor's page during `anchor-interactive`. */
+  reopenAnchor: () => void
 }
 
 const EMPTY: SequenceState = { phase: 'idle', steps: [], current: 0 }
@@ -122,12 +198,40 @@ export function useSequence(): Sequence {
   const { adapter } = useChain()
   const { address, isConnected } = useWallet()
   const [state, setState] = useState<SequenceState>(EMPTY)
-  const [request, setRequest] = useState<SwapThenLend | undefined>(undefined)
+  const [request, setRequest] = useState<SequenceRequest | undefined>(undefined)
+  const offramp = useOfframpSession()
+  // `begin` and `reset` are stable identities, so depending on them rather than
+  // on `offramp` itself keeps the effects and callbacks below from being
+  // rebuilt on every anchor poll. `reopen` is not stable — it closes over
+  // `interactiveUrl` and so re-identifies once, when the anchor's page opens —
+  // but nothing here depends on it beyond the passthrough at the bottom.
+  const {
+    begin: beginOfframp,
+    reopen: reopenOfframp,
+    reset: resetOfframp,
+    forget: forgetOfframp,
+  } = offramp
+
+  // Which anchor transaction the payment has already been built for. Guards the
+  // `ready` branch below, which would otherwise re-run: `ready` is terminal, so
+  // every later render of that effect still sees it.
+  const builtFor = useRef<string | undefined>(undefined)
+
+  // Mirrors `state.phase` for the guard in the anchor effect below, which must
+  // read the sequence's *current* phase from inside a closure that would
+  // otherwise capture a stale one — and must not depend on `state.phase`, or
+  // the effect would re-run on every phase change and re-enter its branches.
+  const sequencePhaseRef = useRef<SequencePhase>(state.phase)
+  useEffect(() => {
+    sequencePhaseRef.current = state.phase
+  }, [state.phase])
 
   const reset = useCallback(() => {
     setState(EMPTY)
     setRequest(undefined)
-  }, [])
+    builtFor.current = undefined
+    resetOfframp()
+  }, [resetOfframp])
 
   /**
    * Ends the sequence where it stands.
@@ -135,13 +239,20 @@ export function useSequence(): Sequence {
    * Reported as `stopped` rather than `failed`, because nothing went wrong. The
    * distinction is the whole point: a user holding the asset from step one made
    * a choice, and calling that a failure would misdescribe their position.
+   *
+   * The anchor session goes with it. Left running, its polling continued after
+   * "Stop here" and the mirroring effect below — keyed on the session's phase —
+   * overwrote `stopped` with `anchor-ready` and fired a build for a payment the
+   * user had just declined.
    */
   const stop = useCallback(() => {
     setState((s) => ({ ...s, phase: 'stopped' }))
-  }, [])
+    builtFor.current = undefined
+    resetOfframp()
+  }, [resetOfframp])
 
   const prepare = useCallback(
-    (req: SwapThenLend) => {
+    (req: SequenceRequest) => {
       if (!isConnected || address === undefined) {
         setState({ ...EMPTY, phase: 'failed', error: 'Connect a wallet to run this sequence.' })
         return
@@ -150,7 +261,22 @@ export function useSequence(): Sequence {
 
       async function run(): Promise<void> {
         setRequest(req)
-        setState({ ...EMPTY, phase: 'building' })
+
+        if (req.kind === 'offramp-only') {
+          // One step. The anchor's part starts immediately; the payment is
+          // built once the anchor is ready.
+          setState({
+            ...EMPTY,
+            kind: req.kind,
+            phase: 'authenticating',
+            current: 0,
+            steps: [{ label: withdrawStepLabel(req.anchor, req.amount) }],
+          })
+          beginOfframp(req.anchor, req.amount)
+          return
+        }
+
+        setState({ ...EMPTY, kind: req.kind, phase: 'building' })
 
         try {
           // The same endpoint an ordinary swap uses, so a sequence inherits its
@@ -174,18 +300,31 @@ export function useSequence(): Sequence {
             return
           }
 
+          // What step two is depends on where the proceeds are going: a Blend
+          // supply, or a payment to the anchor sized to whatever arrives.
+          const second =
+            req.kind === 'swap-then-lend'
+              ? { label: `Supply the result to ${req.venue === 'blend' ? 'Blend' : req.venue}` }
+              : { label: withdrawStepLabel(req.anchor) }
+
           // Both steps are named before the first signature. Showing only the
           // step being signed would let someone approve step one without
           // knowing a second was coming.
           setState({
+            kind: req.kind,
             phase: 'review',
             current: 0,
             xdr: built.xdr,
-            steps: [
-              { label: req.swapLabel ?? 'Swap' },
-              { label: `Supply the result to ${req.venue === 'blend' ? 'Blend' : req.venue}` },
-            ],
+            steps: [{ label: req.swapLabel ?? 'Swap' }, second],
           })
+
+          // Said before the first signature rather than after the swap
+          // settles. The anchor's minimum and maximum are facts the user can
+          // still act on here; past the signature they are only bad news.
+          if (req.kind === 'swap-then-offramp' && req.estimatedReceive !== undefined) {
+            const warning = offrampSizeWarning(req.estimatedReceive, req.limits)
+            if (warning !== undefined) setState((s) => ({ ...s, warning }))
+          }
         } catch {
           setState({ ...EMPTY, phase: 'failed', error: 'Could not reach the network.' })
         }
@@ -193,7 +332,7 @@ export function useSequence(): Sequence {
 
       void run()
     },
-    [address, isConnected]
+    [address, isConnected, beginOfframp]
   )
 
   /**
@@ -237,6 +376,197 @@ export function useSequence(): Sequence {
     []
   )
 
+  /**
+   * Builds the payment once the anchor is ready, and shows what the server
+   * read before asking for a signature.
+   *
+   * No `autoAdvance`: unlike a supply, the destination here is a third
+   * party's account, and the user should read it — the anchor's account and
+   * memo, as the server read them — before the wallet prompt.
+   */
+  const buildOfframp = useCallback(
+    async (
+      signer: string,
+      anchor: AnchorId,
+      transactionId: string,
+      token: string
+    ): Promise<void> => {
+      setState((s) => ({ ...s, phase: 'building' }))
+
+      let built: {
+        xdr?: string
+        destination?: string
+        memo?: string
+        memoType?: string
+        amount?: string
+        anchorStatus?: string
+        moreInfoUrl?: string
+        error?: string
+        code?: string
+      }
+      try {
+        const res = await fetch('/api/offramp/build', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: signer, anchor, transactionId, authToken: token }),
+        })
+        built = (await res.json()) as typeof built
+      } catch (e) {
+        // Caught rather than left to reject, because this runs from an effect
+        // as `void buildOfframp(...)`: an unhandled rejection would leave the
+        // phase at `anchor-ready` with no error and no way forward.
+        setState((s) => ({
+          ...s,
+          phase: 'failed',
+          error:
+            'The payment could not be prepared: ' +
+            (e instanceof Error ? e.message : 'the network did not answer') +
+            '. You are holding the USDC; start the withdrawal again.',
+        }))
+        // Released so a later `ready` can build this same transaction again.
+        // The withdrawal is still open at the anchor — nothing was sent, and
+        // the failure was on the way there rather than a decision about it.
+        builtFor.current = undefined
+        return
+      }
+
+      const { xdr, destination, memo } = built
+      if (xdr === undefined || destination === undefined || memo === undefined) {
+        // Nothing was sent. A `declined` code means the anchor ended it, which
+        // is its own outcome rather than a fault.
+        const declined = built.code === 'declined'
+        setState((s) => ({
+          ...s,
+          phase: declined ? 'anchor-declined' : 'failed',
+          error: built.error ?? 'The withdrawal could not be built. You are holding the USDC.',
+        }))
+        // Released on a failure, which may yet succeed on a retry; kept on a
+        // decline, where the anchor has ended this withdrawal and rebuilding
+        // it would be asking for a payment it no longer expects.
+        if (!declined) builtFor.current = undefined
+        return
+      }
+
+      setState((s) => ({
+        ...s,
+        phase: 'review',
+        xdr,
+        offramp: {
+          // Spread first so what the interactive phase learned — the anchor's
+          // page URL, and whether its popup opened — survives the build rather
+          // than being replaced by the subset the build itself returns.
+          ...s.offramp,
+          anchorName: ANCHORS[anchor].name,
+          destination,
+          memo,
+          memoType: built.memoType ?? '',
+          amount: built.amount ?? '',
+          ...(built.moreInfoUrl !== undefined ? { moreInfoUrl: built.moreInfoUrl } : {}),
+          ...(built.anchorStatus !== undefined ? { anchorStatus: built.anchorStatus } : {}),
+        },
+      }))
+    },
+    []
+  )
+
+  // The anchor session drives the sequence's anchor phases. Kept as an effect
+  // rather than callbacks so a reload that resumes the session lands in the
+  // right phase without re-running `prepare`.
+  const anchorStepIndex = request?.kind === 'offramp-only' ? 0 : 1
+  const {
+    phase: offrampPhase,
+    transactionId: offrampTransactionId,
+    token: offrampToken,
+    interactiveUrl: offrampInteractiveUrl,
+    status: offrampStatus,
+    error: offrampError,
+    popupOpen: offrampPopupOpen,
+  } = offramp
+  useEffect(() => {
+    if (
+      request === undefined ||
+      (request.kind !== 'swap-then-offramp' && request.kind !== 'offramp-only')
+    )
+      return
+    if (address === undefined) return
+    // The sequence has already ended. A session still winding down — a poll in
+    // flight when "Stop here" was pressed — must not drag a terminal sequence
+    // back into an anchor phase and build a payment nobody asked for. Read
+    // through a ref so the guard is the phase *now*, not the one captured when
+    // this effect was created.
+    const settled = sequencePhaseRef.current
+    if (settled === 'stopped' || settled === 'failed' || settled === 'settled') return
+
+    if (offrampPhase === 'authenticating' || offrampPhase === 'starting') {
+      setState((s) =>
+        s.phase === 'authenticating'
+          ? s
+          : { ...s, phase: 'authenticating', current: anchorStepIndex }
+      )
+    } else if (offrampPhase === 'interactive') {
+      setState((s) => ({
+        ...s,
+        phase: 'anchor-interactive',
+        current: anchorStepIndex,
+        offramp: {
+          ...(s.offramp ?? {
+            anchorName: ANCHORS[request.anchor].name,
+            destination: '',
+            memo: '',
+            memoType: '',
+            amount: '',
+          }),
+          ...(offrampInteractiveUrl !== undefined ? { interactiveUrl: offrampInteractiveUrl } : {}),
+          ...(offrampStatus !== undefined ? { anchorStatus: offrampStatus } : {}),
+          // Said so the card can offer its own button when the browser blocked
+          // the automatic window, which is the common case. Always a boolean on
+          // the session hook, so it is assigned rather than spread.
+          popupOpen: offrampPopupOpen,
+        },
+      }))
+    } else if (
+      offrampPhase === 'ready' &&
+      offrampTransactionId !== undefined &&
+      offrampToken !== undefined
+    ) {
+      // Built once per anchor transaction, guarded by a ref for the same reason
+      // `advancedFor` below is: React re-runs effects it has already run — in
+      // StrictMode on mount, and after any remount — and `ready` is terminal,
+      // so every one of those re-runs still sees it. Unguarded, a second
+      // `/api/offramp/build` would overwrite the envelope and the destination
+      // under a user who may already be signing, and drag `review` back to
+      // `building` mid-read.
+      if (builtFor.current === offrampTransactionId) return
+      builtFor.current = offrampTransactionId
+      setState((s) => ({ ...s, phase: 'anchor-ready', current: anchorStepIndex }))
+      void buildOfframp(address, request.anchor, offrampTransactionId, offrampToken)
+    } else if (offrampPhase === 'declined') {
+      setState((s) => ({
+        ...s,
+        phase: 'anchor-declined',
+        error: offrampError ?? 'The anchor ended this withdrawal.',
+      }))
+    } else if (offrampPhase === 'failed') {
+      setState((s) => ({
+        ...s,
+        phase: 'failed',
+        error: offrampError ?? 'The anchor could not be reached.',
+      }))
+    }
+  }, [
+    offrampPhase,
+    offrampTransactionId,
+    offrampToken,
+    offrampInteractiveUrl,
+    offrampStatus,
+    offrampError,
+    offrampPopupOpen,
+    request,
+    address,
+    anchorStepIndex,
+    buildOfframp,
+  ])
+
   const confirm = useCallback(() => {
     const envelope = state.xdr
     if (envelope === undefined || address === undefined || request === undefined) return
@@ -244,11 +574,20 @@ export function useSequence(): Sequence {
     const req = request
     const stepIndex = state.current
 
+    // Which step pays the anchor: the only one in an offramp-only run, the
+    // second in a swap-then-offramp.
+    const isOfframpStep =
+      (req.kind === 'offramp-only' && stepIndex === 0) ||
+      (req.kind === 'swap-then-offramp' && stepIndex === 1)
+
     async function run(): Promise<void> {
       // Captured before the swap runs, so what it delivers can be measured as
       // a difference. A router reports its output as a contract return value
       // that Horizon does not expose, so the account is the only honest source.
-      const before = stepIndex === 0 ? await balanceOf(signer, req.receiveSymbol) : undefined
+      const before =
+        stepIndex === 0 && req.kind !== 'offramp-only'
+          ? await balanceOf(signer, req.receiveSymbol)
+          : undefined
 
       setState((s) => {
         const next: SequenceState = { ...s, phase: 'signing' }
@@ -281,11 +620,29 @@ export function useSequence(): Sequence {
 
       setState((s) => ({ ...s, phase: 'submitting' }))
 
-      const endpoint = stepIndex === 0 ? '/api/plan/submit' : '/api/lend/submit'
+      const endpoint = isOfframpStep
+        ? '/api/offramp/submit'
+        : stepIndex === 0
+          ? '/api/plan/submit'
+          : '/api/lend/submit'
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signedXdr: signed.signedXdr, account: signer }),
+        body: JSON.stringify(
+          // The anchor's endpoint needs the withdrawal this payment belongs to,
+          // and the token that proves the account may act on it. `isOfframpStep`
+          // narrows `req` to the two offramp kinds, which is what carries the
+          // `anchor` field — no cast needed.
+          isOfframpStep
+            ? {
+                signedXdr: signed.signedXdr,
+                account: signer,
+                anchor: req.anchor,
+                transactionId: offrampTransactionId,
+                authToken: offrampToken,
+              }
+            : { signedXdr: signed.signedXdr, account: signer }
+        ),
       })
       const result = (await res.json()) as {
         ok?: boolean
@@ -307,6 +664,13 @@ export function useSequence(): Sequence {
         return
       }
 
+      // The withdrawal is paid, so its stored token and transaction id have
+      // done their work. Left behind, a second withdrawal to the same anchor
+      // inside the token's fifteen minutes resumed this finished one — the
+      // anchor would be asked about a transaction already settled rather than
+      // being asked to start a new one.
+      if (isOfframpStep) forgetOfframp()
+
       setState((s) => {
         const steps = s.steps.map((step, i) =>
           i === stepIndex
@@ -316,8 +680,46 @@ export function useSequence(): Sequence {
                 ...(result.explorerUrl !== undefined ? { explorerUrl: result.explorerUrl } : {}),
                 ...(result.delivered !== undefined ? { delivered: result.delivered } : {}),
                 // Only the supply has somewhere else worth looking. A swap is
-                // fully described by its transaction; a position is not.
-                ...(stepIndex > 0 ? { positionUrl: blendPositionUrl() } : {}),
+                // fully described by its transaction; a position is not. For a
+                // withdrawal, the place worth looking is the anchor's own page
+                // about this transaction, where the fiat side plays out.
+                ...(isOfframpStep
+                  ? {
+                      // Read from the updater's own `s`, not from the closure:
+                      // this runs after a balance read, a wallet signature and
+                      // a submit, by which time a captured `state` is stale.
+                      ...(s.offramp?.moreInfoUrl !== undefined
+                        ? {
+                            positionUrl: s.offramp.moreInfoUrl,
+                            positionLabel: 'Track at the anchor',
+                          }
+                        : {}),
+                      // The anchor's own id for this transaction, so a reload
+                      // — or Open positions — can ask it directly where the
+                      // withdrawal stands, rather than relying on whatever
+                      // this tab's session already knew.
+                      ...(offrampTransactionId !== undefined
+                        ? {
+                            anchor: {
+                              id: (req as SwapThenOfframp | OfframpOnly).anchor,
+                              transactionId: offrampTransactionId,
+                              ...(s.offramp?.moreInfoUrl !== undefined
+                                ? { moreInfoUrl: s.offramp.moreInfoUrl }
+                                : {}),
+                              // No `lastStatus`. Naming one here would be
+                              // stating an anchor fact the anchor has not
+                              // said — the payment has been broadcast, and
+                              // what the anchor makes of it is only known
+                              // once it is asked. `pendingWithdrawals`
+                              // already reads a missing status as pending,
+                              // and the first `refresh()` fills it in.
+                            },
+                          }
+                        : {}),
+                    }
+                  : stepIndex > 0
+                    ? { positionUrl: blendPositionUrl() }
+                    : {}),
               }
             : step
         )
@@ -334,7 +736,7 @@ export function useSequence(): Sequence {
       // result only carries a delivered amount for a classic path payment, and
       // an agent that picks a Soroban router produces neither — which stopped
       // the sequence after a swap that had actually succeeded.
-      if (stepIndex === 0) {
+      if (stepIndex === 0 && req.kind !== 'offramp-only') {
         const delivered =
           before !== undefined
             ? await deliveredByBalanceChange(signer, req.receiveSymbol, before)
@@ -346,18 +748,53 @@ export function useSequence(): Sequence {
             phase: 'failed',
             error:
               'The swap settled, but how much it delivered could not be read. ' +
-              'You are holding the asset; supply it manually rather than guessing an amount.',
+              'You are holding the asset; act on it manually rather than guessing an amount.',
           }))
           return
         }
-        await buildLend(signer, req.lendAsset, delivered)
+
+        if (req.kind === 'swap-then-lend') {
+          await buildLend(signer, req.lendAsset, delivered)
+        } else {
+          // The anchor is asked for what arrived, and the label is re-said
+          // with the real figure rather than the estimate.
+          //
+          // Capped at the anchor's maximum, which is what the pre-signature
+          // warning promised: "only the maximum will be withdrawn; the rest
+          // stays in your wallet". Asking for the whole of an over-sized
+          // delivery would be refused by the anchor after the swap had already
+          // settled — the outcome that warning exists to avoid.
+          const display = fromBaseUnits(delivered)
+          const capped = capToLimits(display, req.limits)
+          const wasCapped = capped !== display
+          const label = wasCapped
+            ? withdrawStepLabel(req.anchor, capped) +
+              " (the anchor's maximum; the rest stays in your wallet)"
+            : withdrawStepLabel(req.anchor, display)
+          setState((s) => ({
+            ...s,
+            steps: s.steps.map((step, i) => (i === 1 ? { ...step, label } : step)),
+          }))
+          beginOfframp(req.anchor, capped)
+        }
       }
     }
 
     void run().catch(() => {
       setState((s) => ({ ...s, phase: 'failed', error: 'Something went wrong signing this step.' }))
     })
-  }, [state.xdr, state.current, address, adapter, request, buildLend])
+  }, [
+    state.xdr,
+    state.current,
+    address,
+    adapter,
+    request,
+    buildLend,
+    beginOfframp,
+    forgetOfframp,
+    offrampTransactionId,
+    offrampToken,
+  ])
 
   // Raises the next wallet prompt once a later step is built and ready.
   //
@@ -372,5 +809,7 @@ export function useSequence(): Sequence {
     confirm()
   }, [state.autoAdvance, state.phase, state.xdr, confirm])
 
-  return { ...state, prepare, confirm, stop, reset }
+  const reopenAnchor = useCallback(() => reopenOfframp(), [reopenOfframp])
+
+  return { ...state, prepare, confirm, stop, reset, reopenAnchor }
 }

@@ -77,6 +77,14 @@ export interface BundleStep {
   positionUrl?: string
   /** The protocol this step touched, for labelling its link. */
   venue?: string
+  /**
+   * The anchor's side of an offramp step, when this step was one.
+   *
+   * The transaction hash proves the payment; it says nothing about whether
+   * the anchor has paid out. That lives with the anchor, under this id, and
+   * is what someone tracking a withdrawal actually wants.
+   */
+  anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
 }
 
 const STORAGE_KEY = 'intent.chat.v1'
@@ -108,6 +116,36 @@ function write(turns: ChatTurn[]): void {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(turns.slice(0, MAX_TURNS)))
   } catch {
     /* see read() */
+  }
+}
+
+/**
+ * Who to tell when the stored turns change.
+ *
+ * Open positions reads withdrawals out of history, and the chat writes them
+ * there — two components with no parent holding the list, so a withdrawal
+ * settled in this session did not appear until a reload. A module-level
+ * notification is the smallest thing that closes that: no context, no store,
+ * and nothing to keep in sync beyond "the rows changed, read them again".
+ */
+type TurnsListener = () => void
+const turnsListeners = new Set<TurnsListener>()
+
+export function onTurnsChanged(listener: TurnsListener): () => void {
+  turnsListeners.add(listener)
+  return () => {
+    turnsListeners.delete(listener)
+  }
+}
+
+function notifyTurnsChanged(): void {
+  for (const listener of turnsListeners) {
+    try {
+      listener()
+    } catch {
+      // A listener that throws must not stop the others, and must never fail
+      // the write that has already happened.
+    }
   }
 }
 
@@ -160,6 +198,7 @@ export function loadTurns(chain: string): ChatTurn[] {
 export function saveTurn(turn: ChatTurn): void {
   const existing = read().filter((t) => t.id !== turn.id)
   write([turn, ...existing])
+  notifyTurnsChanged()
 
   void saveTurnRemote(turn).catch((e) => reportSyncFailure('a conversation', e))
 }
@@ -200,11 +239,13 @@ export function updateTurn(
       ...patch,
     }
     write([created, ...all])
+    notifyTurnsChanged()
     void saveTurnRemote(created).catch((e) => reportSyncFailure('a settled trade', e))
     return
   }
 
   write(all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  notifyTurnsChanged()
   void updateTurnRemote(id, patch).catch((e) => reportSyncFailure('a trade outcome', e))
 }
 

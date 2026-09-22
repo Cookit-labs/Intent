@@ -3,7 +3,7 @@
 import { Button, Card } from '@intent/ui'
 import { Loader2 } from 'lucide-react'
 
-import type { FollowOnAction } from '../../lib/parse-compound'
+import { describeFollowOn, type FollowOnAction } from '../../lib/parse-compound'
 
 /**
  * Showing what was understood, before anything runs.
@@ -48,9 +48,6 @@ export function IntentConfirm({
 }): JSX.Element {
   const size = understood.amountStated ? `$${understood.amountUsd.toLocaleString()} of ` : 'your '
 
-  const venue = understood.followOn?.venue
-  const venueName = venue === 'blend' ? 'Blend' : (venue ?? 'a lending pool')
-
   return (
     <Card className="flex flex-col gap-4 p-5">
       <div className="flex flex-col gap-1">
@@ -67,10 +64,11 @@ export function IntentConfirm({
           1. Swap {size}
           {understood.tokenIn} for {understood.tokenOut}
         </li>
+        {/* Said by the describer rather than spelled out here: the second
+            action is a lending supply or a bank withdrawal, and a line that
+            only knows how to say "supply" would misdescribe the other. */}
         {understood.followOn !== null ? (
-          <li>
-            2. Supply the {understood.tokenOut} to {venueName}
-          </li>
+          <li>2. {describeFollowOn(understood.followOn, understood.tokenOut)}</li>
         ) : null}
       </ol>
 

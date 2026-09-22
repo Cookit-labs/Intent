@@ -44,9 +44,14 @@ import { useSequence } from '../../hooks/use-sequence'
 import { SequenceConfirm } from './sequence-confirm'
 import {
   parseCompoundIntent,
+  parseOfframpOnlyIntent,
   parseSupplyOnlyIntent,
   type FollowOnAction,
 } from '../../lib/parse-compound'
+import type { AnchorId } from '../../lib/offramp/anchors'
+import { isAnchorId } from '../../lib/offramp/anchors'
+import type { WithdrawLimits } from '../../lib/offramp/sep24'
+import { estimatedReceiveOf } from '../../lib/offramp/labels'
 import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
@@ -58,6 +63,17 @@ import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
+
+/**
+ * The price of the only asset an anchor withdraws.
+ *
+ * A constant rather than a live rate, and that is exactly the point: USDC is a
+ * dollar, so a dollar amount and a unit amount of it are the same number and
+ * the offramp path needs no conversion. Named, so that the assumption is
+ * visible at the one place that depends on it — and so that an asset with any
+ * other price cannot quietly reuse that path.
+ */
+const USDC_PRICE_USD = 1
 
 function TrafficLights(): JSX.Element {
   return (
@@ -217,6 +233,20 @@ export function IntentChat(): JSX.Element {
   // wallet prompt (which is the *second* step, on that card) never came
   // because the button was never seen.
   const confirmRef = useRef<HTMLDivElement | null>(null)
+  // The agent most recently chosen. A ref rather than `executingKey`, because
+  // the offramp branch below reads it from inside an async closure that
+  // captured the state at click time and would never see a later pick.
+  //
+  // Mirrored from the state rather than assigned at the click, which went
+  // stale on every path that clears `executingKey` without a click — a reset,
+  // a failed swap, a conversation restored from history. The ref then still
+  // named the last agent picked, so an anchor-limits fetch left over from that
+  // pick passed its own guard and prepared a sequence into a chat that had
+  // moved on. The same pattern as `phaseRef` in `use-offramp-session.ts`.
+  const latestPickRef = useRef<string | null>(null)
+  useEffect(() => {
+    latestPickRef.current = executingKey
+  }, [executingKey])
   const awaitingConfirm = swap.phase === 'review'
   useEffect(() => {
     if (!awaitingConfirm) return
@@ -273,8 +303,15 @@ export function IntentChat(): JSX.Element {
   // array is rebuilt on each render, so comparing it by reference would
   // re-record on every tick.
   const sequenceSteps = JSON.stringify(sequence.steps.filter((step) => step.hash !== undefined))
+  // An offramp-only run has no trade, so `parsed` is deliberately null — and
+  // this effect bailed on exactly that, which meant a withdrawal that really
+  // paid out left no record anywhere: not in history, and so not under Open
+  // positions either, where its anchor status is the only way to see the fiat
+  // side. A settled sequence is recorded whether or not a trade preceded it.
+  const sequenceKind = sequence.kind
   useEffect(() => {
-    if (sequenceHash === undefined || parsed === null) return
+    if (sequenceHash === undefined) return
+    if (parsed === null && sequenceKind !== 'offramp-only') return
 
     if (turnId !== null) {
       updateTurn(
@@ -288,17 +325,29 @@ export function IntentChat(): JSX.Element {
             ...(step.hash !== undefined ? { hash: step.hash } : {}),
             ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
             ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
-            ...(step.positionUrl !== undefined ? { venue: 'Blend' } : {}),
+            ...(step.positionUrl !== undefined && step.anchor === undefined
+              ? { venue: 'Blend' }
+              : {}),
+            ...(step.anchor !== undefined ? { anchor: step.anchor, venue: 'Anchor' } : {}),
           })),
         },
         // A turn is only written once its competition is decided, and a
         // sequence can settle before that or after a tab switch that wrote
         // none. Without this the trade happened on-chain and history kept no
         // record of it at all.
-        { chain: slug, text: message ?? parsed.outcome }
+        // `parsed.outcome` is the fallback text for a trade; an offramp-only
+        // run has no parse to describe, so what the user typed is the whole
+        // record of what was asked for.
+        { chain: slug, text: message ?? parsed?.outcome ?? '' }
       )
       setTurns(loadTurns(slug))
     }
+
+    // Only a trade becomes an intent on the backend. A withdrawal of USDC
+    // already held is not one — there is no `input` to create, and inventing a
+    // swap to carry it would put a trade that never happened in the activity
+    // list.
+    if (parsed === null) return
 
     createIntent.mutate(
       { ...parsed.input, chain: slug },
@@ -441,6 +490,10 @@ export function IntentChat(): JSX.Element {
     // in the competition.
     const single = parseIntent(text, swap.usdPrices)
     const regexFollowOn = parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null
+    // "Withdraw 2 USDC to my bank" is not a trade at all, and the trade parser
+    // reads it as one. Computed here with the rest of the fallback reading, so
+    // an outage leaves this path exactly as capable as the model does.
+    const regexOfframpOnly = parseOfframpOnlyIntent(text)
 
     // Reading by meaning rather than by wording. A regex recognises surface
     // forms and people do not write in surface forms: measured across twelve
@@ -458,7 +511,7 @@ export function IntentChat(): JSX.Element {
         })
         const body = (await res.json()) as {
           understood?: boolean
-          action?: 'swap' | 'supply' | 'borrow' | 'repay'
+          action?: 'swap' | 'supply' | 'borrow' | 'repay' | 'offramp'
           tokenIn?: string
           tokenOut?: string
           amountUsd?: number
@@ -489,6 +542,32 @@ export function IntentChat(): JSX.Element {
           setAffordError(
             `${verb} happens on your position rather than through an intent, because it depends on the collateral behind it. Open the History tab to see your Blend position, what it can support, and the price at which it would be liquidated.`
           )
+          return
+        }
+
+        if (body.understood === true && body.action === 'offramp' && slug === 'stellar') {
+          // No trade: the USDC is already held. Amount is optional — the
+          // anchor asks in its own page when none was named.
+          const stated = body.amountStated === true
+          // Read and honoured rather than ignored: the asset here is always
+          // USDC, whose price is one dollar, so the dollar reading and the unit
+          // reading of the same figure are the same amount — which is why this
+          // branch converts nothing. An asset with any other price would have
+          // to divide by it here rather than inherit this silence.
+          const amountIsUsd = body.amountIsUsd === true
+          const units = (body.amountUsd ?? 0) / (amountIsUsd ? USDC_PRICE_USD : 1)
+          const amount = stated ? String(units) : undefined
+          const anchor =
+            body.followOn?.kind === 'offramp' && isAnchorId(body.followOn.venue)
+              ? body.followOn.venue
+              : 'testanchor'
+          setParsed(null)
+          setFollowOn(null)
+          sequence.prepare({
+            kind: 'offramp-only',
+            anchor,
+            ...(amount !== undefined && amount !== '0' ? { amount } : {}),
+          })
           return
         }
 
@@ -538,6 +617,20 @@ export function IntentChat(): JSX.Element {
         setParsing(false)
       }
 
+      // The model did not answer, and the regex read a withdrawal of USDC
+      // already held. Same destination as the branch above: one step, no
+      // competition, because there is no trade for agents to compete over.
+      if (read === null && regexOfframpOnly !== null && slug === 'stellar') {
+        setParsed(null)
+        setFollowOn(null)
+        sequence.prepare({
+          kind: 'offramp-only',
+          anchor: isAnchorId(regexOfframpOnly.venue) ? regexOfframpOnly.venue : 'testanchor',
+          ...(regexOfframpOnly.amount !== undefined ? { amount: regexOfframpOnly.amount } : {}),
+        })
+        return
+      }
+
       // A second action is worth confirming, whichever parser found it. The
       // instruction carries more than a swap, and a follow-on silently dropped
       // or silently added is the misreading that costs the user real money.
@@ -574,6 +667,22 @@ export function IntentChat(): JSX.Element {
 
     setPending(null)
     setFollowOn(withFollowOn ? confirmed.followOn : null)
+
+    // Only USDC reaches an anchor. Said here rather than after a competition,
+    // because the second half of the instruction cannot be done at all and a
+    // minute of agents arguing would not change that.
+    if (
+      withFollowOn &&
+      confirmed.followOn !== null &&
+      confirmed.followOn.kind === 'offramp' &&
+      confirmed.tokenOut !== 'USDC'
+    ) {
+      setAffordError(
+        `Only USDC can be withdrawn to a bank. Ask for the trade into USDC — "sell ${confirmed.tokenIn} for USDC and send the dollars to my bank".`
+      )
+      return
+    }
+
     // Re-parsed from the original text rather than rebuilt from the reading:
     // every downstream consumer expects a `ParsedIntent`, and the deterministic
     // parser is what derives escrow, base units and deadlines. The model
@@ -717,6 +826,62 @@ export function IntentChat(): JSX.Element {
 
       // No executable route means no honest sequence. Falling through to the
       // ordinary swap path is better than building one that cannot fill.
+    }
+
+    // The same shape, ending at an anchor rather than a lending pool. The
+    // anchor's limits are fetched before the sequence is prepared, so a size
+    // it will refuse is said while the trade can still be cancelled.
+    if (slug === 'stellar' && followOn !== null && followOn.kind === 'offramp') {
+      const route = routesByAgent[key] ?? winnerRoute
+      const anchor: AnchorId = isAnchorId(followOn.venue) ? followOn.venue : 'testanchor'
+      if (route !== undefined && parsed.input.tokenOut === 'USDC') {
+        // `destAmount`, in base units, converted to display — the field every
+        // venue's quote actually carries. `receiveAmount` belongs to a
+        // strict-receive request, so reading it here always gave undefined and
+        // the size check below never ran.
+        const estimated = estimatedReceiveOf(route)
+        void (async () => {
+          // The anchor's limits, so the size is checked before signature one.
+          let limits: WithdrawLimits | undefined
+          try {
+            const res = await fetch(`/api/offramp/anchor?id=${anchor}`)
+            const info = (await res.json()) as { limits?: WithdrawLimits | null; error?: string }
+            if (!res.ok) {
+              // An unreachable anchor was read as "no limits", so the size
+              // warning silently disappeared and the user heard nothing at
+              // all. Said out loud, and the sequence still prepared without
+              // limits: the build route refuses an out-of-range withdrawal
+              // later, so losing the early warning is the honest degradation
+              // rather than a reason to refuse a trade the user asked for.
+              setAffordError(
+                `The anchor could not be reached: ${info.error ?? `the request failed (${res.status}).`}`
+              )
+            } else if (info.limits !== null && info.limits !== undefined) {
+              limits = info.limits
+            }
+          } catch {
+            // The same treatment for a network failure: said, and prepared
+            // without limits.
+            setAffordError('The anchor could not be reached: the network did not answer.')
+          }
+          // The user picked another agent while the anchor was being read.
+          if (latestPickRef.current !== key) return
+          sequence.prepare({
+            kind: 'swap-then-offramp',
+            quote: route,
+            receiveSymbol: 'USDC',
+            anchor,
+            swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for USDC`,
+            ...(estimated !== undefined ? { estimatedReceive: estimated } : {}),
+            ...(limits !== undefined ? { limits } : {}),
+          })
+        })()
+        return
+      }
+
+      // A swap that does not deliver USDC cannot be offramped. Fall through to
+      // the ordinary swap: the user said what they wanted and the app cannot
+      // do the second half, which the pending card already made clear.
     }
 
     // A split is two actions in one signature: part filled now, the remainder

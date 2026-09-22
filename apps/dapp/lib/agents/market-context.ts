@@ -11,6 +11,9 @@ import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
 import { venues } from '../venues'
 import { BLEND_XLM, readReserve } from '../lend/reserves'
+import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
+import { readWithdrawInfo } from '../offramp/sep24'
+import { readAnchorToml } from '../offramp/toml'
 
 /**
  * Assembles the facts an agent is allowed to reason from.
@@ -140,7 +143,11 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
   const base = buildMarketContext(chain)
   if (chain !== 'stellar') return base
 
-  const [prices, lending] = await Promise.all([fetchMarketPrices(), fetchLendingRates()])
+  const [prices, lending, offramps] = await Promise.all([
+    fetchMarketPrices(),
+    fetchLendingRates(),
+    fetchOfframpLimits(),
+  ])
 
   return {
     ...base,
@@ -150,6 +157,9 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
     // Omitted rather than empty when the read fails, so an agent sees "no
     // lending data" instead of "lending pays nothing".
     ...(lending.length > 0 ? { lending } : {}),
+    // Same omission discipline: absent means "could not be read", not "no
+    // limits apply".
+    ...(offramps.length > 0 ? { offramps } : {}),
   }
 }
 
@@ -176,6 +186,38 @@ async function fetchLendingRates(): Promise<
   } catch {
     return []
   }
+}
+
+/**
+ * Live withdrawal limits from each anchor. Silent on failure, like lending
+ * rates: an agent given no limits will not propose an offramp, which is the
+ * safe reading of "the anchor could not be reached".
+ *
+ * Anchors requiring a `client_domain` (MoneyGram today) are excluded: this
+ * deployment has none, so it never reads limits for — and can never offer —
+ * an anchor it cannot complete a withdrawal through.
+ */
+async function fetchOfframpLimits(): Promise<NonNullable<MarketContext['offramps']>> {
+  const out: NonNullable<MarketContext['offramps']> = []
+  await Promise.all(
+    ALL_ANCHORS.filter((id) => !ANCHORS[id].requiresClientDomain).map(async (id) => {
+      try {
+        const toml = await readAnchorToml(ANCHORS[id])
+        const limits = await readWithdrawInfo(toml, 'USDC')
+        if (limits === undefined || !limits.enabled) return
+        out.push({
+          venue: id,
+          asset: 'USDC',
+          ...(limits.minAmount !== undefined ? { minAmount: limits.minAmount } : {}),
+          ...(limits.maxAmount !== undefined ? { maxAmount: limits.maxAmount } : {}),
+          feeEnabled: limits.feeEnabled,
+        })
+      } catch {
+        // Left out. The agent reasons without it.
+      }
+    })
+  )
+  return out
 }
 
 export function buildMarketContext(chain: string): MarketContext {
@@ -209,6 +251,10 @@ export function buildMarketContext(chain: string): MarketContext {
     // rather than validated after the fact.
     venues: venues
       .filter((v) => family !== undefined && v.family === family)
+      // Anchors are follow-on destinations, named through `thenVenue` and
+      // validated against the anchor registry; they are not places a trade
+      // executes and must not be selectable as a swap venue.
+      .filter((v) => v.category !== 'offramp')
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.

@@ -1,0 +1,71 @@
+import type { AnchorId } from './anchors'
+import { ANCHORS } from './anchors'
+import type { WithdrawLimits } from './sep24'
+import { fromBaseUnits } from '../swap/assets'
+
+/** The withdraw step, as it reads in the review list. */
+export function withdrawStepLabel(anchor: AnchorId, amount?: string): string {
+  const name = ANCHORS[anchor].name
+  return amount !== undefined
+    ? `Withdraw about ${amount} USDC to your bank through ${name}`
+    : `Withdraw the USDC received to your bank through ${name}`
+}
+
+/**
+ * What a chosen route will deliver, in display units, or nothing.
+ *
+ * The browser holds the agent's quote as an opaque object; the one field
+ * every venue's quote shares is `destAmount`, in base units. Read here in
+ * one place so the review's size check cannot silently go dead again.
+ */
+export function estimatedReceiveOf(route: unknown): string | undefined {
+  const dest = (route as { destAmount?: unknown } | null | undefined)?.destAmount
+  if (typeof dest !== 'string' || dest === '') return undefined
+  try {
+    return fromBaseUnits(dest)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether the anchor will take this size, said before anything is signed.
+ *
+ * Undefined means no objection. Compared against the anchor's live `/info`,
+ * because the SDF test anchor caps at 10 USDC and a swap sized for a
+ * realistic order would settle and then have nowhere to go.
+ */
+export function offrampSizeWarning(
+  amountDisplay: string,
+  limits: WithdrawLimits | undefined
+): string | undefined {
+  if (limits === undefined) return undefined
+  if (!limits.enabled) return 'This anchor is not accepting withdrawals right now.'
+  const n = Number(amountDisplay)
+  if (!Number.isFinite(n)) return undefined
+  if (limits.minAmount !== undefined && n < limits.minAmount) {
+    return `About ${amountDisplay} USDC is below the anchor's minimum of ${limits.minAmount} USDC, so the withdrawal would be refused.`
+  }
+  if (limits.maxAmount !== undefined && n > limits.maxAmount) {
+    return `About ${amountDisplay} USDC is above the anchor's maximum of ${limits.maxAmount} USDC. Only the maximum will be withdrawn; the rest stays in your wallet.`
+  }
+  return undefined
+}
+
+/**
+ * The amount to actually ask the anchor for.
+ *
+ * The warning above promises that only the maximum is withdrawn and the rest
+ * stays in the wallet. Nothing enforced that, so a swap delivering more than
+ * the anchor's ceiling asked for the whole of it and was refused — after the
+ * swap had settled, which is exactly the outcome the warning exists to avoid.
+ *
+ * Only the maximum caps. A figure below the minimum is not adjustable: asking
+ * for more than was delivered is not something the app may decide.
+ */
+export function capToLimits(display: string, limits?: WithdrawLimits): string {
+  if (limits?.maxAmount === undefined) return display
+  const n = Number(display)
+  if (!Number.isFinite(n) || n <= limits.maxAmount) return display
+  return String(limits.maxAmount)
+}

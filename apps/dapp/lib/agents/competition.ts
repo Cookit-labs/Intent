@@ -48,7 +48,7 @@ export interface AgentProposalView {
   executionMode?: 'fill' | 'rest' | 'split'
   splitPct?: number
   restPriceUsd?: number
-  thenAction?: 'lend'
+  thenAction?: 'lend' | 'offramp'
   thenVenue?: string
   /** Set when the agent produced no proposal: timed out, refused, or was rejected. */
   failed?: BrainErrorCode
@@ -153,6 +153,8 @@ export function describePlan(
   if (view.source !== undefined) parts[0] = `${parts[0]} via ${view.source}`
   if (view.sliceCount !== undefined && view.sliceCount > 1) parts.push(`${view.sliceCount} slices`)
   if (view.thenAction === 'lend') parts.push(`then lends on ${view.thenVenue ?? 'a pool'}`)
+  if (view.thenAction === 'offramp')
+    parts.push(`then withdraws to fiat via ${view.thenVenue ?? 'an anchor'}`)
 
   return parts.join(' · ')
 }

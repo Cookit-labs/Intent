@@ -91,14 +91,14 @@ export const SUBMIT_PROPOSAL_TOOL = {
         },
         thenAction: {
           type: 'string',
-          enum: ['none', 'lend'],
+          enum: ['none', 'lend', 'offramp'],
           description:
-            'What happens to the proceeds after the trade. "none" for an ordinary trade. "lend" supplies them to a lending pool as a second, separately signed step — only when the user asked for it. This is independent of executionMode: you may fill now and then lend, or rest and then lend.',
+            'What happens to the proceeds after the trade. "none" for an ordinary trade. "lend" supplies them to a lending pool as a second, separately signed step — only when the user asked for it. "offramp" withdraws them to the user\'s bank through an anchor, also a second separately signed step, and also only when the user asked for the dollars, their bank, cash out or fiat. This is independent of executionMode: you may fill now and then lend, or rest and then lend.',
         },
         thenVenue: {
           type: 'string',
           description:
-            'Where to lend, when thenAction is "lend". Use "blend" on Stellar. Use an empty string otherwise.',
+            'Where the follow-on goes. For "lend": "blend" on Stellar. For "offramp": "testanchor" or "moneygram" on Stellar. Use an empty string otherwise.',
         },
       },
       required: [
@@ -165,7 +165,7 @@ export const proposalToolSchema = z.object({
   // and an agent should be able to say either *fill now, then supply* or *rest
   // at a price, then supply*. A combined enum needs an entry per pairing and
   // grows multiplicatively with every action added.
-  thenAction: z.enum(['none', 'lend']),
+  thenAction: z.enum(['none', 'lend', 'offramp']),
   // Empty on an ordinary trade, following the same sentinel idiom as `routeId`.
   // A separate field rather than being implied by `thenAction`, because a
   // second lending venue is a matter of time and an enum widened later is worse
@@ -216,6 +216,11 @@ export interface ValidationContext {
    * note on the downgrade below.
    */
   lendingVenueIds?: string[]
+  /**
+   * Anchors this chain can withdraw to fiat through. Empty or absent on a
+   * chain with none; an offramp follow-on there is downgraded like a lend.
+   */
+  offrampVenueIds?: string[]
 }
 
 /**
@@ -332,9 +337,11 @@ export function validateProposal(
   // sound judgement about the trade for the sake of an optional second step
   // the chain happens not to offer.
   const lendingVenues = new Set(ctx.lendingVenueIds ?? [])
+  const offrampVenues = new Set(ctx.offrampVenueIds ?? [])
   const lendIsPossible = value.thenAction === 'lend' && lendingVenues.has(value.thenVenue)
-  const thenAction = lendIsPossible ? value.thenAction : 'none'
-  const thenVenue = lendIsPossible ? value.thenVenue : ''
+  const offrampIsPossible = value.thenAction === 'offramp' && offrampVenues.has(value.thenVenue)
+  const thenAction = lendIsPossible ? 'lend' : offrampIsPossible ? 'offramp' : 'none'
+  const thenVenue = lendIsPossible || offrampIsPossible ? value.thenVenue : ''
 
   return {
     ok: true,
