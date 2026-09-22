@@ -431,10 +431,18 @@ export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
   }
 }
 
-/** The follow-on, as the confirmation card reads it back to the user. */
-export function describeFollowOn(followOn: FollowOnAction): string {
+/**
+ * The follow-on, as the confirmation card reads it back to the user.
+ *
+ * The asset is named whenever the caller knows it. "Supply it to Blend" and
+ * "supply the XLM to Blend" describe the same action, but only the second lets
+ * the user check that the app read the right asset out of their sentence —
+ * which is the whole reason the card is shown before the agents start.
+ */
+export function describeFollowOn(followOn: FollowOnAction, asset?: string): string {
+  const what = asset !== undefined && asset !== '' ? `the ${asset}` : 'it'
   if (followOn.kind === 'lend') {
-    return `then supply it to ${followOn.venue === 'blend' ? 'Blend' : followOn.venue}`
+    return `then supply ${what} to ${followOn.venue === 'blend' ? 'Blend' : followOn.venue}`
   }
-  return `then withdraw it to your bank through ${lookupAnchor(followOn.venue)?.name ?? followOn.venue}`
+  return `then withdraw ${what} to your bank through ${lookupAnchor(followOn.venue)?.name ?? followOn.venue}`
 }

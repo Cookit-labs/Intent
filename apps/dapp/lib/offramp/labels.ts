@@ -1,6 +1,7 @@
 import type { AnchorId } from './anchors'
 import { ANCHORS } from './anchors'
 import type { WithdrawLimits } from './sep24'
+import { fromBaseUnits } from '../swap/assets'
 
 /** The withdraw step, as it reads in the review list. */
 export function withdrawStepLabel(anchor: AnchorId, amount?: string): string {
@@ -8,6 +9,23 @@ export function withdrawStepLabel(anchor: AnchorId, amount?: string): string {
   return amount !== undefined
     ? `Withdraw about ${amount} USDC to your bank through ${name}`
     : `Withdraw the USDC received to your bank through ${name}`
+}
+
+/**
+ * What a chosen route will deliver, in display units, or nothing.
+ *
+ * The browser holds the agent's quote as an opaque object; the one field
+ * every venue's quote shares is `destAmount`, in base units. Read here in
+ * one place so the review's size check cannot silently go dead again.
+ */
+export function estimatedReceiveOf(route: unknown): string | undefined {
+  const dest = (route as { destAmount?: unknown } | null | undefined)?.destAmount
+  if (typeof dest !== 'string' || dest === '') return undefined
+  try {
+    return fromBaseUnits(dest)
+  } catch {
+    return undefined
+  }
 }
 
 /**

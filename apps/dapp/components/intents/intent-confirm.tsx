@@ -67,7 +67,9 @@ export function IntentConfirm({
         {/* Said by the describer rather than spelled out here: the second
             action is a lending supply or a bank withdrawal, and a line that
             only knows how to say "supply" would misdescribe the other. */}
-        {understood.followOn !== null ? <li>2. {describeFollowOn(understood.followOn)}</li> : null}
+        {understood.followOn !== null ? (
+          <li>2. {describeFollowOn(understood.followOn, understood.tokenOut)}</li>
+        ) : null}
       </ol>
 
       <div className="flex flex-wrap items-center gap-2">
