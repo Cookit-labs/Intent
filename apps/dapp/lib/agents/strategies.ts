@@ -82,11 +82,13 @@ What happens after the trade is a separate decision, set with thenAction:
 
 - "none" for an ordinary trade. This is almost always right.
 - "lend": supply the proceeds to a lending pool. Set thenVenue to the pool ("blend" on Stellar).
+- "offramp": withdraw the proceeds to the user's bank through an anchor. Set thenVenue to the anchor ("testanchor" or "moneygram" on Stellar). Only USDC can be withdrawn, so the trade must deliver USDC.
 
-Three things govern that choice:
+Four things govern that choice:
 - Only lend when the user asked for it. Proposing a lending position nobody requested is not a better strategy, it is a different instruction.
 - It costs a second signature. A swap and a supply cannot share one, so the user is asked twice. For a small order the extra fee and the extra step may not be worth the yield — say so rather than proposing it anyway.
 - Use the supply rate you were given. Do not recall a yield figure from memory; if no rate appears in the market context, you do not know it.
+- An offramp costs a second signature and a verification step the user completes on the anchor's own page. The anchor's limits are in the market context; a withdrawal outside them will be refused, so say so rather than proposing it.
 
 thenAction is independent of executionMode. Filling now and then lending is a valid plan, and so is resting at a price and then lending whatever fills.`
 

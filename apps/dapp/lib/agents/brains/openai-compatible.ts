@@ -6,6 +6,7 @@ import type {
   ProposalOutcome,
   ProposalRequest,
 } from '../brain'
+import { ALL_ANCHORS, ANCHORS } from '../../offramp/anchors'
 import { STRATEGIES } from '../strategies'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
 import type { ProviderConfig } from './providers'
@@ -146,6 +147,18 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
           : []),
         `Venues available on ${req.chain}: ${venueList}`,
         `Volatility: ${req.market.volatilityHint}. Gas: ${req.market.gasHint}.`,
+        ...(req.market.offramps !== undefined && req.market.offramps.length > 0
+          ? [
+              'Anchors that withdraw to fiat, with live limits:',
+              ...req.market.offramps.map(
+                (o) =>
+                  `  ${o.venue}: ${o.asset}` +
+                  (o.minAmount !== undefined ? `, min ${o.minAmount}` : '') +
+                  (o.maxAmount !== undefined ? `, max ${o.maxAmount}` : '') +
+                  (o.feeEnabled ? ', charges a fee' : ', no fee')
+              ),
+            ]
+          : []),
         ...routeLines(req),
       ].join('\n'),
     },
@@ -255,6 +268,20 @@ function routeLines(req: ProposalRequest): string[] {
  */
 function lendingVenuesFor(req: ProposalRequest): string[] {
   return req.chain === 'stellar' ? ['blend'] : []
+}
+
+/**
+ * Anchors this deployment can actually complete a withdrawal through.
+ *
+ * An anchor whose SEP-10 challenge requires a `client_domain` (MoneyGram
+ * today) is excluded here, not just refused later: this deployment has no
+ * such domain, so offering it would let an agent propose a step that can
+ * never be completed rather than one this chain merely lacks.
+ */
+function offrampVenuesFor(req: ProposalRequest): string[] {
+  return req.chain === 'stellar'
+    ? ALL_ANCHORS.filter((id) => !ANCHORS[id].requiresClientDomain)
+    : []
 }
 
 function impliedRates(req: ProposalRequest): number[] {
@@ -436,6 +463,10 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
         // whole proposal rejected: the trade is still sound, and the second
         // step was optional.
         lendingVenueIds: lendingVenuesFor(req),
+        // Which anchors this deployment can actually complete a withdrawal
+        // through. Same downgrade discipline as lending: naming one absent
+        // here loses only the follow-on, not the trade.
+        offrampVenueIds: offrampVenuesFor(req),
       })
 
       if (!validated.ok) {
@@ -477,7 +508,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           // Omitted rather than carried as 'none', so downstream code checks
           // presence like it does for every other optional field here.
           // Validation has already downgraded anything this chain cannot do.
-          ...(validated.value.thenAction === 'lend'
+          ...(validated.value.thenAction !== 'none'
             ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
             : {}),
         },
