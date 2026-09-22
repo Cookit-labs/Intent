@@ -121,7 +121,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
   /**
    * Groq's free plan. No payment method, no card on file.
    *
-   * **One agent, not four.** The binding limit is tokens per minute rather
+   * **One agent.** The binding limit is tokens per minute rather
    * than requests: the API reports 8,000 TPM against 1,000 requests a day, and
    * one competition prompt costs about 2,300 tokens. Four concurrent agents
    * therefore ask for ~9,200 and exceed it — measured, not predicted: running
@@ -187,9 +187,9 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
    *
    * **Limits are per key, across every free model together.** 20 requests a
    * minute; 50 a day until 10 credits have ever been bought, 1,000 a day
-   * after. A competition is four requests, so an untopped key runs twelve
-   * competitions a day and then every OpenRouter agent reports
-   * `rate_limited` until midnight UTC.
+   * after. The default roster puts five agents here, so a race is five
+   * requests: ten races a day on an untopped key, then every OpenRouter agent
+   * reports `rate_limited` until midnight UTC.
    *
    * `strict` is not sent: OpenRouter passes the request through to whichever
    * lab serves the model, and it is not in the shape they all accept.
