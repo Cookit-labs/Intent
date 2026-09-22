@@ -6,6 +6,7 @@ import {
   type ProposalToolInput,
 } from '../agents/tool-schema'
 import { describePlan } from '../agents/competition'
+import { buildMarketContext } from '../agents/market-context'
 
 /**
  * The third follow-on. Same rules as lending: independent of executionMode,
@@ -95,6 +96,14 @@ describe('an offramp follow-on', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value.thenAction).toBe('none')
+  })
+})
+
+describe('buildMarketContext', () => {
+  it('keeps anchors out of the swap venue list, but keeps ordinary venues', () => {
+    const ctx = buildMarketContext('stellar')
+    expect(ctx.venues.every((v) => v.category !== 'offramp')).toBe(true)
+    expect(ctx.venues.some((v) => v.id === 'soroswap')).toBe(true)
   })
 })
 

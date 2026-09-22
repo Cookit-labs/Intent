@@ -251,6 +251,10 @@ export function buildMarketContext(chain: string): MarketContext {
     // rather than validated after the fact.
     venues: venues
       .filter((v) => family !== undefined && v.family === family)
+      // Anchors are follow-on destinations, named through `thenVenue` and
+      // validated against the anchor registry; they are not places a trade
+      // executes and must not be selectable as a swap venue.
+      .filter((v) => v.category !== 'offramp')
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.
