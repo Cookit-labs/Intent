@@ -6,7 +6,7 @@ import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import type { AnchorId } from '../lib/offramp/anchors'
 import { ANCHORS } from '../lib/offramp/anchors'
-import { withdrawStepLabel } from '../lib/offramp/labels'
+import { offrampSizeWarning, withdrawStepLabel } from '../lib/offramp/labels'
 import type { WithdrawLimits } from '../lib/offramp/sep24'
 import { fromBaseUnits } from '../lib/swap/assets'
 import { blendPositionUrl } from '../lib/swap/contract-registry'
@@ -102,6 +102,14 @@ export interface SequenceState {
   autoAdvance?: boolean
   kind?: SequenceRequest['kind']
   /**
+   * Something worth saying before the first signature, that does not stop it.
+   *
+   * A size the anchor will refuse or cap is the case this exists for: the user
+   * should read it while the trade is still theirs to cancel, rather than
+   * discover it after a swap has settled.
+   */
+  warning?: string
+  /**
    * What the server read from the anchor, shown verbatim on the review card
    * so the user sees the destination the payment will actually go to.
    */
@@ -149,6 +157,14 @@ export interface SwapThenOfframp {
   receiveSymbol: string
   anchor: AnchorId
   swapLabel?: string
+  /**
+   * What the chosen route expects the swap to deliver, in display units.
+   *
+   * An estimate, and said as one: it is what the anchor's limits are checked
+   * against before the first signature, because a swap sized outside them
+   * would settle and then have nowhere to go.
+   */
+  estimatedReceive?: string
   /** The anchor's live limits, for the size warning before signature one. */
   limits?: WithdrawLimits
 }
@@ -279,6 +295,14 @@ export function useSequence(): Sequence {
             xdr: built.xdr,
             steps: [{ label: req.swapLabel ?? 'Swap' }, second],
           })
+
+          // Said before the first signature rather than after the swap
+          // settles. The anchor's minimum and maximum are facts the user can
+          // still act on here; past the signature they are only bad news.
+          if (req.kind === 'swap-then-offramp' && req.estimatedReceive !== undefined) {
+            const warning = offrampSizeWarning(req.estimatedReceive, req.limits)
+            if (warning !== undefined) setState((s) => ({ ...s, warning }))
+          }
         } catch {
           setState({ ...EMPTY, phase: 'failed', error: 'Could not reach the network.' })
         }

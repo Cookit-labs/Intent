@@ -24,6 +24,12 @@ const LENDING_VENUES: Record<string, string[]> = {
   arc: [],
 }
 
+/** Anchors that withdraw to fiat, per chain. */
+const OFFRAMP_ANCHORS: Record<string, string[]> = {
+  stellar: ['testanchor', 'moneygram'],
+  arc: [],
+}
+
 /**
  * Assets that can be borrowed but not traded here.
  *
@@ -72,6 +78,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // a real instruction is a trap this codebase has hit once already.
     allowedSymbols: [...tradeableSymbols(), ...(LENDABLE_ONLY[chain] ?? [])],
     allowedVenues: LENDING_VENUES[chain] ?? [],
+    allowedAnchors: OFFRAMP_ANCHORS[chain] ?? [],
   })
 
   if (read === null) {
