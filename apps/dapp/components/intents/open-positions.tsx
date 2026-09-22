@@ -10,11 +10,16 @@ import { useBlendPosition } from '../../hooks/use-blend-position'
 import { useWithdraw } from '../../hooks/use-withdraw'
 import { useBorrow } from '../../hooks/use-borrow'
 import { useCollateral } from '../../hooks/use-collateral'
+import { useWithdrawalStatus } from '../../hooks/use-withdrawal-status'
 import { BorrowConfirm } from './borrow-confirm'
 import { LIQUIDATION_HF, MINIMUM_SAFE_HF } from '../../lib/lend/health'
+import { loadTurns } from '../../lib/chat-history'
+import { lookupAnchor } from '../../lib/offramp/anchors'
+import { pendingWithdrawals } from '../../lib/offramp/pending-withdrawals'
 import type { OpenOffer } from '../../lib/swap/offers'
 import { blendPositionUrl } from '../../lib/swap/contract-registry'
 import { toBaseUnits } from '../../lib/swap/assets'
+import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
 import { WithdrawConfirm } from './withdraw-confirm'
 
@@ -114,6 +119,16 @@ export function OpenPositions(): JSX.Element | null {
   // build-review-sign machinery rather than a bespoke path.
   const collateral$ = useCollateral()
 
+  // Withdrawals the anchor has not finished, read from history rather than
+  // tracked separately — the same record a reopened conversation shows.
+  const { adapter } = useChain()
+  const slug = adapter.descriptor.slug
+  const withdrawals = useWithdrawalStatus()
+  const [pending, setPending] = useState(() => pendingWithdrawals(loadTurns(slug)))
+  useEffect(() => {
+    setPending(pendingWithdrawals(loadTurns(slug)))
+  }, [slug, withdrawals.busy])
+
   const { data: offers } = useQuery({
     queryKey: ['open-offers', address],
     queryFn: () => loadOffers(address as string),
@@ -156,7 +171,12 @@ export function OpenPositions(): JSX.Element | null {
   const resting = offers ?? []
   const collateral = positions?.collateral ?? []
   const borrowed = positions?.borrowed ?? []
-  const count = resting.length + (position != null ? 1 : 0) + collateral.length + borrowed.length
+  const count =
+    resting.length +
+    (position != null ? 1 : 0) +
+    collateral.length +
+    borrowed.length +
+    pending.length
 
   const busy = withdraw.phase !== 'idle'
   const typed = position == null ? undefined : typedBaseUnits(draft, position.amount)
@@ -490,6 +510,56 @@ export function OpenPositions(): JSX.Element | null {
           <span className="text-muted-foreground text-xs tabular-nums">@ {offer.price}</span>
         </Card>
       ))}
+
+      {pending.map((w) => {
+        const anchor = lookupAnchor(w.anchor.id)
+        const status = w.anchor.lastStatus ?? 'sent'
+        return (
+          <Card
+            key={`withdrawal-${w.anchor.transactionId}`}
+            className="flex items-center gap-4 p-4"
+          >
+            <TokenIcon symbol="USDC" size={28} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold">
+                  Withdrawal via {anchor?.name ?? w.anchor.id}
+                </span>
+                {/* on_hold is compliance review and can last days; it reads as
+                    waiting, never as a fault. */}
+                <span className="text-muted-foreground text-xs">
+                  {status === 'on_hold' ? 'under review' : status.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div className="text-muted-foreground mt-1.5 text-xs">{w.label}</div>
+              {withdrawals.error !== undefined ? (
+                <div className="text-muted-foreground mt-1 text-xs">{withdrawals.error}</div>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void withdrawals.refresh(w.turnId, w.anchor, slug)}
+                disabled={withdrawals.busy}
+              >
+                {withdrawals.busy ? 'Checking…' : 'Check status'}
+              </Button>
+              {w.anchor.moreInfoUrl !== undefined ? (
+                <a
+                  href={w.anchor.moreInfoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+                >
+                  At the anchor
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : null}
+            </div>
+          </Card>
+        )
+      })}
     </div>
   )
 }

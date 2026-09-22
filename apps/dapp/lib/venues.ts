@@ -156,6 +156,30 @@ export const venues: Venue[] = [
       'Reserves and rates are read live, and XLM can be supplied. Borrowing stays out of scope on purpose: a supply-only position cannot be liquidated, and that guarantee holds only while nothing here can open a liability.',
   },
   {
+    id: 'testanchor',
+    name: 'SDF test anchor',
+    family: 'stellar' as const,
+    category: 'offramp',
+    chains: ['Stellar'],
+    bestFor: 'Withdrawing USDC to a (fake) bank on testnet',
+    url: 'https://testanchor.stellar.org',
+    integration: 'executes',
+    capability:
+      'SEP-24 withdrawal of USDC. The anchor hosts verification and bank details on its own page; this app sends the payment it names, with the memo it names, and nothing else.',
+  },
+  {
+    id: 'moneygram',
+    name: 'MoneyGram Access',
+    family: 'stellar' as const,
+    category: 'offramp',
+    chains: ['Stellar'],
+    bestFor: 'Cash pickup at MoneyGram locations',
+    url: 'https://stellar.moneygram.com',
+    integration: 'executes',
+    capability:
+      'SEP-24 withdrawal of USDC on the testnet deployment. Production access needs a commercial agreement with MoneyGram; the flow is identical.',
+  },
+  {
     id: 'phoenix',
     name: 'Phoenix',
     family: 'stellar' as const,

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { lookupAnchor } from '../lib/offramp/anchors'
 import type { AnchorId } from '../lib/offramp/anchors'
-import { authenticate } from '../lib/offramp/sep10'
+import { ensureAuthSession } from '../lib/offramp/ensure-session'
 import type { Sep24Status, WithdrawLimits } from '../lib/offramp/sep24'
 import {
   AnchorHttpError,
@@ -13,7 +13,7 @@ import {
   readTransaction,
   startWithdraw,
 } from '../lib/offramp/sep24'
-import { clearSession, loadSession, saveSession } from '../lib/offramp/session-store'
+import { clearSession, saveSession } from '../lib/offramp/session-store'
 import { USDC } from '../lib/swap/assets'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
@@ -79,12 +79,6 @@ const IN_PROGRESS_PHASES = new Set<OfframpPhase>([
   'interactive',
   'ready',
 ])
-
-interface AnchorInfo {
-  anchor: { id: AnchorId; name: string; homeDomain: string; what: string }
-  toml: import('../lib/offramp/toml').AnchorToml
-  limits: WithdrawLimits | null
-}
 
 /**
  * Best-effort: this only actually opens a window when called synchronously
@@ -258,61 +252,33 @@ export function useOfframpSession(): OfframpSession {
 
         setState({ ...EMPTY, phase: 'authenticating', anchorId })
 
-        const infoRes = await fetch(`/api/offramp/anchor?id=${anchorId}`)
-        if (!infoRes.ok) {
-          let message = `The anchor lookup failed (HTTP ${infoRes.status}).`
-          try {
-            const body = (await infoRes.json()) as { error?: string }
-            if (body.error !== undefined) message = body.error
-          } catch {
-            // The status is the message.
-          }
-          setState({ ...EMPTY, phase: 'failed', anchorId, error: message })
-          return
-        }
-        const info = (await infoRes.json()) as Partial<AnchorInfo> & { error?: string }
-        if (info.toml === undefined || info.anchor === undefined) {
-          setState({
-            ...EMPTY,
-            phase: 'failed',
-            anchorId,
-            error: info.error ?? 'The anchor could not be reached.',
-          })
-          return
-        }
-        const anchorInfo = info.anchor
-        const toml = info.toml
+        // The anchor-info fetch, the lookup of a reusable token, and the
+        // wallet challenge when none is reusable — shared with the status
+        // refresh under Open positions, so both authenticate the same way.
+        const ensured = await ensureAuthSession({
+          anchorId,
+          account,
+          sign: async (xdr) => {
+            const out = await adapter.signTransaction?.({ xdr, address: account })
+            if (out === undefined) throw new Error('This wallet cannot sign here.')
+            if (!out.ok) {
+              throw new Error(
+                out.reason === 'rejected'
+                  ? 'You declined the anchor sign-in.'
+                  : (out.detail ?? 'The wallet could not sign.')
+              )
+            }
+            return out.signedXdr
+          },
+        })
+        const toml = ensured.toml
+        const session = ensured.session
         setState((s) => ({
           ...s,
-          anchorName: anchorInfo.name,
-          ...(info.limits !== null && info.limits !== undefined ? { limits: info.limits } : {}),
+          anchorName: ensured.entry.name,
+          ...(ensured.limits !== undefined ? { limits: ensured.limits } : {}),
         }))
 
-        // A token from a reload, if it is still alive. Otherwise the wallet
-        // signs a challenge — a sequence-0 transaction that can never be
-        // submitted, verified before the prompt is raised.
-        let session = loadSession(window.sessionStorage, anchorId, account)
-        if (session === undefined) {
-          const auth = await authenticate({
-            anchor: entry,
-            toml,
-            account,
-            sign: async (xdr) => {
-              const out = await adapter.signTransaction?.({ xdr, address: account })
-              if (out === undefined) throw new Error('This wallet cannot sign here.')
-              if (!out.ok) {
-                throw new Error(
-                  out.reason === 'rejected'
-                    ? 'You declined the anchor sign-in.'
-                    : (out.detail ?? 'The wallet could not sign.')
-                )
-              }
-              return out.signedXdr
-            },
-          })
-          session = { token: auth.token, expiresAt: auth.expiresAt }
-          saveSession(window.sessionStorage, anchorId, account, session)
-        }
         setState((s) => ({ ...s, phase: 'starting', token: session.token }))
 
         // Resume a withdrawal the anchor is still holding open, else start one.

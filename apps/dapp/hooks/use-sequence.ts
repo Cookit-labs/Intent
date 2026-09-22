@@ -83,6 +83,7 @@ export interface SequenceStep {
   positionLabel?: string
   /** What the step actually delivered, in base units. Known only after it settles. */
   delivered?: string
+  anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
 }
 
 export interface SequenceState {
@@ -656,6 +657,22 @@ export function useSequence(): Sequence {
                         ? {
                             positionUrl: s.offramp.moreInfoUrl,
                             positionLabel: 'Track at the anchor',
+                          }
+                        : {}),
+                      // The anchor's own id for this transaction, so a reload
+                      // — or Open positions — can ask it directly where the
+                      // withdrawal stands, rather than relying on whatever
+                      // this tab's session already knew.
+                      ...(offrampTransactionId !== undefined
+                        ? {
+                            anchor: {
+                              id: (req as SwapThenOfframp | OfframpOnly).anchor,
+                              transactionId: offrampTransactionId,
+                              ...(s.offramp?.moreInfoUrl !== undefined
+                                ? { moreInfoUrl: s.offramp.moreInfoUrl }
+                                : {}),
+                              lastStatus: 'pending_user_transfer_complete',
+                            },
                           }
                         : {}),
                     }

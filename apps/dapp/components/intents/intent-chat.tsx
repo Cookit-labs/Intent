@@ -297,7 +297,10 @@ export function IntentChat(): JSX.Element {
             ...(step.hash !== undefined ? { hash: step.hash } : {}),
             ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
             ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
-            ...(step.positionUrl !== undefined ? { venue: 'Blend' } : {}),
+            ...(step.positionUrl !== undefined && step.anchor === undefined
+              ? { venue: 'Blend' }
+              : {}),
+            ...(step.anchor !== undefined ? { anchor: step.anchor, venue: 'Anchor' } : {}),
           })),
         },
         // A turn is only written once its competition is decided, and a
