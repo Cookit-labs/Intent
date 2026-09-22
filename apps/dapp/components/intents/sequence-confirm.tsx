@@ -60,14 +60,102 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
     )
   }
 
+  if (phase === 'anchor-declined') {
+    return (
+      <Card className="flex flex-col gap-3 p-5">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <TriangleAlert className="h-4 w-4" />
+          The anchor ended this withdrawal
+        </div>
+        {/* Said first, because it is the thing someone reading this needs to
+              know: no payment was sent. */}
+        <p className="text-muted-foreground text-sm">
+          Nothing was sent. {sequence.error ?? ''} You are holding the USDC.
+        </p>
+        <StepList steps={steps} current={current} />
+        <Button variant="outline" size="sm" onClick={sequence.reset} className="self-start">
+          Done
+        </Button>
+      </Card>
+    )
+  }
+
+  if (phase === 'authenticating') {
+    return (
+      <Card className="flex flex-col gap-3 p-5">
+        <StepList steps={steps} current={current} />
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Signing in with {sequence.offramp?.anchorName ?? 'the anchor'}…
+        </div>
+        {/* The one wallet prompt here that moves nothing. Said, because a
+              second prompt right after the swap reads as a second payment. */}
+        <p className="text-muted-foreground text-xs">
+          Your wallet will ask you to sign a message proving you own this account. It cannot be
+          submitted to the network and moves no funds.
+        </p>
+      </Card>
+    )
+  }
+
+  if (phase === 'anchor-interactive') {
+    return (
+      <Card className="flex flex-col gap-3 p-5">
+        <StepList steps={steps} current={current} />
+        <div className="text-sm font-medium">
+          Finish with {sequence.offramp?.anchorName ?? 'the anchor'}
+        </div>
+        <p className="text-muted-foreground text-sm">
+          The anchor has opened its own page to verify you and take your bank details. Nothing is
+          sent until you finish there. This card updates on its own.
+        </p>
+        {sequence.offramp?.anchorStatus !== undefined ? (
+          <p className="text-muted-foreground text-xs">
+            Anchor status: {sequence.offramp.anchorStatus}
+          </p>
+        ) : null}
+        {sequence.offramp?.popupOpen === false ? (
+          <p className="text-muted-foreground text-xs">
+            The anchor&apos;s page did not open automatically. Open it here to finish.
+          </p>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={sequence.reopenAnchor}>
+            {sequence.offramp?.popupOpen === true
+              ? 'Reopen the anchor page'
+              : 'Open the anchor page'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={sequence.stop}>
+            Stop here
+          </Button>
+        </div>
+      </Card>
+    )
+  }
+
+  if (phase === 'anchor-ready') {
+    return (
+      <Card className="text-muted-foreground flex items-center gap-2 p-5 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        The anchor is ready. Reading where to send the payment…
+      </Card>
+    )
+  }
+
   if (phase === 'settled') {
     return (
       <Card className="flex flex-col gap-3 p-5">
         <div className="flex items-center gap-2 text-sm font-medium">
           <CheckCircle2 className="h-4 w-4" />
-          Both steps settled
+          {steps.length === 1 ? 'Withdrawal sent' : 'Both steps settled'}
         </div>
         <StepList steps={steps} current={steps.length} />
+        {sequence.kind === 'swap-then-offramp' || sequence.kind === 'offramp-only' ? (
+          <p className="text-muted-foreground text-xs">
+            The payment is on-chain. The anchor now moves the money to your bank, which can take
+            from minutes to days. Track it under Open positions.
+          </p>
+        ) : null}
         <Button variant="outline" size="sm" onClick={sequence.reset} className="self-start">
           Done
         </Button>
@@ -79,7 +167,11 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
     return (
       <Card className="text-muted-foreground flex items-center gap-2 p-5 text-sm">
         <Loader2 className="h-4 w-4 animate-spin" />
-        {current === 0 ? 'Building the sequence…' : 'Sizing the supply to what you received…'}
+        {current === 0
+          ? 'Building the sequence…'
+          : sequence.kind === 'swap-then-lend'
+            ? 'Sizing the supply to what you received…'
+            : 'Building the payment from what the anchor named…'}
       </Card>
     )
   }
@@ -90,7 +182,9 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
     <Card className="flex flex-col gap-4 p-5">
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">
-          {steps.length} steps, {steps.length} signatures
+          {steps.length === 1
+            ? '1 step, 1 signature'
+            : `${steps.length} steps, ${steps.length} signatures`}
         </span>
         {/* Stated rather than implied. A user who has signed multi-step plans
             here would otherwise reasonably expect one signature. */}
@@ -105,7 +199,10 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
 
       {/* Only once the supply is the step in hand: the risks below are about
           lending, and showing them beside a swap would misattribute them. */}
-      {current > 0 ? <SupplyRisks /> : null}
+      {current > 0 && sequence.kind === 'swap-then-lend' ? <SupplyRisks /> : null}
+      {sequence.offramp !== undefined && sequence.offramp.destination !== '' ? (
+        <OfframpReview offramp={sequence.offramp} />
+      ) : null}
 
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={sequence.confirm} disabled={busy}>
@@ -114,8 +211,10 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {phase === 'signing' ? 'Waiting for your wallet…' : 'Submitting…'}
             </span>
-          ) : current === 0 ? (
+          ) : current === 0 && steps.length > 1 ? (
             `Approve and sign ${steps.length} steps`
+          ) : sequence.offramp !== undefined ? (
+            'Sign the payment to the anchor'
           ) : (
             `Sign step ${current + 1} of ${steps.length}`
           )}
@@ -138,7 +237,13 @@ function StepList({
   steps,
   current,
 }: {
-  steps: { label: string; hash?: string; explorerUrl?: string; positionUrl?: string }[]
+  steps: {
+    label: string
+    hash?: string
+    explorerUrl?: string
+    positionUrl?: string
+    positionLabel?: string
+  }[]
   current: number
 }): JSX.Element {
   return (
@@ -174,7 +279,7 @@ function StepList({
                   rel="noreferrer"
                   className="text-muted-foreground hover:text-foreground ml-2 inline-flex items-center gap-1 text-xs underline underline-offset-2"
                 >
-                  View position on Blend
+                  {step.positionLabel ?? 'View position on Blend'}
                   <ExternalLink className="h-3 w-3" />
                 </a>
               ) : null}
@@ -212,6 +317,36 @@ function SupplyRisks(): JSX.Element {
         principal is not guaranteed.
       </span>
       <span>The rate moves with borrowing demand. It is not fixed at the figure shown.</span>
+    </div>
+  )
+}
+
+/**
+ * What the payment will do, as the server read it from the anchor.
+ *
+ * Every figure here came from the anchor's own answer for this withdrawal,
+ * read on the server, and the envelope about to be signed was checked
+ * against it. Shown verbatim because this is the one transaction in the app
+ * that pays somebody else, and the user should see who.
+ */
+function OfframpReview({ offramp }: { offramp: NonNullable<Sequence['offramp']> }): JSX.Element {
+  return (
+    <div className="border-border flex flex-col gap-1.5 rounded-md border p-3 text-xs">
+      <span className="text-foreground font-medium">Payment to {offramp.anchorName}</span>
+      <span className="text-muted-foreground">
+        Amount: <span className="text-foreground font-mono">{offramp.amount} USDC</span>
+      </span>
+      <span className="text-muted-foreground break-all">
+        To: <span className="text-foreground font-mono">{offramp.destination}</span>
+      </span>
+      <span className="text-muted-foreground break-all">
+        Memo ({offramp.memoType}): <span className="text-foreground font-mono">{offramp.memo}</span>
+      </span>
+      <span className="text-muted-foreground mt-1">
+        The memo is what tells the anchor this payment is yours. It was read from the anchor just
+        now and checked against the transaction you are about to sign. Once sent, it cannot be
+        reversed by this app.
+      </span>
     </div>
   )
 }
