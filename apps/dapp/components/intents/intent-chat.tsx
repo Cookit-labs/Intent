@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
+import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
 
 import {
@@ -186,10 +187,9 @@ export function IntentChat(): JSX.Element {
       ? {
           proposals: restored.proposals,
           revealed: Object.fromEntries(Object.keys(restored.proposals).map((k) => [k, true])),
-          // Empty, not guessed. A turn recorded before the model was tracked
-          // does not know which one answered, and naming today's line-up for
-          // yesterday's race would be inventing a fact about a signed trade.
-          models: {},
+          // Rebuilt from what the row recorded: name and, when tracked, the
+          // model. Nothing about today's line-up is assumed for an old race.
+          agents: agentsFromProposals(restored.proposals),
           phase: 'decided' as const,
           secondsLeft: 0,
           winner: restored.winner,

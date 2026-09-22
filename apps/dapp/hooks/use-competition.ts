@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 
 import type {
   AgentProposalView,
+  CompetingAgent,
   CompetitionError,
   CompetitionPhase,
   CompetitionState,
 } from '../lib/agents/competition'
-import { DECIDE_AT, RACE_DURATION, REVEAL_DELAYS, WINDOW_SECONDS } from '../lib/agents/competition'
+import { DECIDE_AT, RACE_DURATION, WINDOW_SECONDS, revealFloor } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
 import { planDecision, planReveal } from '../lib/agents/pacing'
-import { STRATEGIES, STRATEGY_ORDER } from '../lib/agents/strategies'
 import type { ParsedIntent } from '../lib/parse-intent'
 
 /**
@@ -55,7 +55,10 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   const [error, setError] = useState<CompetitionError | undefined>(undefined)
   const [route, setRoute] = useState<unknown>(undefined)
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
-  const [models, setModels] = useState<Record<string, string>>({})
+  const [agents, setAgents] = useState<CompetingAgent[]>([])
+  // The same list, readable inside the stream loop's closures without a
+  // stale render's copy.
+  const agentsRef = useRef<CompetingAgent[]>([])
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
@@ -69,7 +72,8 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       setError(undefined)
       setRoute(undefined)
       setRoutesByAgent({})
-      setModels({})
+      setAgents([])
+      agentsRef.current = []
       return
     }
 
@@ -96,7 +100,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               ...prev,
               [key]: {
                 key,
-                name: STRATEGIES[key as keyof typeof STRATEGIES]?.name ?? key,
+                name: agentsRef.current.find((a) => a.key === key)?.name ?? key,
                 avgPriceUsd: 0,
                 vsOraclePct: 0,
                 score: 0,
@@ -109,14 +113,15 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
 
     /** Ends the race: everything unanswered is marked, and the panel settles. */
     const settle = (): void => {
-      for (const key of STRATEGY_ORDER) {
+      for (const { key, name, model } of agentsRef.current) {
         setProposals((prev) => {
           if (prev[key] !== undefined) return prev
           return {
             ...prev,
             [key]: {
               key,
-              name: STRATEGIES[key].name,
+              name,
+              model,
               avgPriceUsd: 0,
               vsOraclePct: 0,
               score: 0,
@@ -140,7 +145,8 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
     // executable, signing a trade the user is no longer looking at.
     setRoute(undefined)
     setRoutesByAgent({})
-    setModels({})
+    setAgents([])
+    agentsRef.current = []
 
     // A stream that stalls without erroring would leave the panel waiting on
     // agents that will never answer. Past this point it is not slowness but a
@@ -208,25 +214,21 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
             if (frame.type === 'competition:started') {
               // Named while the cards still say "thinking", so the line-up is
               // visible before any of it has answered.
-              setModels(
-                Object.fromEntries(
-                  frame.agents
-                    .filter((a): a is typeof a & { model: string } => a.model !== undefined)
-                    .map((a) => [a.key, a.model])
-                )
-              )
+              agentsRef.current = frame.agents
+              setAgents(frame.agents)
               continue
             }
 
             if (frame.type === 'competition:failed') {
-              markFailed(frame.strategy, frame.error)
+              markFailed(frame.agent, frame.error)
               continue
             }
 
             if (frame.type === 'competition:proposal') {
-              const key = frame.proposal.strategy
-              const order = STRATEGIES[key].revealOrder
-              const floor = REVEAL_DELAYS[order] ?? 0
+              const key = frame.proposal.agent
+              const agent = agentsRef.current.find((a) => a.key === key)
+              const index = agentsRef.current.findIndex((a) => a.key === key)
+              const floor = revealFloor(Math.max(0, index))
               const { revealAtMs, delayMs } = planReveal(floor, Date.now() - startedAt)
               lastRevealRef.current = Math.max(lastRevealRef.current, revealAtMs)
 
@@ -239,7 +241,8 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
                 ...prev,
                 [key]: {
                   key,
-                  name: STRATEGIES[key].name,
+                  name: agent?.name ?? key,
+                  ...(agent !== undefined ? { model: agent.model } : {}),
                   // Measured by the server from the route, not claimed by the
                   // agent. See lib/agents/measure.ts.
                   avgPriceUsd: frame.proposal.projectedAvgPriceUsd,
@@ -318,7 +321,7 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
   return {
     proposals,
     revealed,
-    models,
+    agents,
     phase,
     secondsLeft,
     winner,

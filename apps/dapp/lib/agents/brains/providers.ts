@@ -56,6 +56,45 @@ export interface ProviderConfig {
   pricing: Record<string, { input: number; output: number }>
   /** Fallback rate when the model is not in the table above. */
   defaultPricing: { input: number; output: number }
+  /**
+   * Short names for the models worth running here, when the catalogue ids are
+   * too long to list one per agent. A name not in the table is a raw id.
+   */
+  aliases?: Record<string, string>
+  /**
+   * How a model is named on a card. Keyed by resolved model id; a model not
+   * listed is prettified from its id, which is usually good enough and
+   * occasionally wrong about capitalisation.
+   */
+  displayNames?: Record<string, string>
+}
+
+/**
+ * The free OpenRouter models the agents run on, by short name.
+ *
+ * Chosen from the catalogue on 2026-09-22 by three filters. Tool calling
+ * first: `supported_parameters` must list `tools` and `tool_choice`, since a
+ * proposal is a tool call and a model that cannot make one cannot compete —
+ * that removes GLM 5.2 and both Inkling models. Health next: each was
+ * answering that day. And one model per lab, because the point of a line-up
+ * is disagreement, and two sizes of the same family agree by construction.
+ *
+ * Not here on purpose: `qwen/qwen3.8-27b:free` is the model the Groq slot
+ * already runs, and Nemotron 3 Ultra (550B) was degraded and is slow enough
+ * on the free tier to meet the agent timeout. Either can be named by raw id
+ * in `AGENT_BRAINS` when that changes.
+ */
+export const OPENROUTER_MODELS: Record<string, string> = {
+  /** Finance-tuned. The best-ranked healthy tool-caller on the list. */
+  'ling-fin': 'inclusionai/ling-3.0-flash-fin:free',
+  /** 120B mixture-of-experts. 40 req/min on its own, on top of OpenRouter's. */
+  'nemotron-super': 'nvidia/nemotron-3-super-120b-a12b:free',
+  /** 26B with 4B active, so fast for its size. */
+  'gemma-4': 'google/gemma-4-26b-a4b-it:free',
+  /** Code-trained; disciplined about structured output. */
+  'laguna-s': 'poolside/laguna-s-2.1:free',
+  /** Cohere's Command lineage, which has done tool calling longest. */
+  'north-mini': 'cohere/north-mini-code:free',
 }
 
 export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
@@ -73,12 +112,16 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
       'deepseek-v4-pro': { input: 0.66, output: 1.98 },
     },
     defaultPricing: { input: 0.22, output: 0.66 },
+    displayNames: {
+      'deepseek-v4-flash': 'DeepSeek V4 Flash',
+      'deepseek-v4-pro': 'DeepSeek V4 Pro',
+    },
   },
 
   /**
    * Groq's free plan. No payment method, no card on file.
    *
-   * **One agent, not four.** The binding limit is tokens per minute rather
+   * **One agent.** The binding limit is tokens per minute rather
    * than requests: the API reports 8,000 TPM against 1,000 requests a day, and
    * one competition prompt costs about 2,300 tokens. Four concurrent agents
    * therefore ask for ~9,200 and exceed it — measured, not predicted: running
@@ -102,6 +145,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     toolChoice: 'auto',
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
+    displayNames: { 'qwen/qwen3.8-27b': 'Qwen3.8 27B' },
   },
 
   /**
@@ -130,6 +174,45 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     toolChoice: 'auto',
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
+    displayNames: { 'qwen3.5:latest': 'Qwen3.5 (local)' },
+  },
+
+  /**
+   * OpenRouter's free tier: one key, no card, and every `:free` model on
+   * their catalogue behind it. This is where the line-up gets its variety —
+   * five labs' models under one provider, each chosen for tool calling
+   * (checked against the catalogue's `supported_parameters`, since the
+   * proposal arrives as a tool call and a model that cannot make one cannot
+   * compete).
+   *
+   * **Limits are per key, across every free model together.** 20 requests a
+   * minute; 50 a day until 10 credits have ever been bought, 1,000 a day
+   * after. The default roster puts five agents here, so a race is five
+   * requests: ten races a day on an untopped key, then every OpenRouter agent
+   * reports `rate_limited` until midnight UTC.
+   *
+   * `strict` is not sent: OpenRouter passes the request through to whichever
+   * lab serves the model, and it is not in the shape they all accept.
+   */
+  openrouter: {
+    id: 'openrouter',
+    displayName: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'inclusionai/ling-3.0-flash-fin:free',
+    apiKeyEnv: 'OPENROUTER_API_KEY',
+    strictTools: false,
+    autoSelect: true,
+    toolChoice: 'auto',
+    pricing: {},
+    defaultPricing: { input: 0, output: 0 },
+    aliases: OPENROUTER_MODELS,
+    displayNames: {
+      'inclusionai/ling-3.0-flash-fin:free': 'Ling 3.0 Flash Fin',
+      'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super',
+      'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B',
+      'poolside/laguna-s-2.1:free': 'Laguna S 2.1',
+      'cohere/north-mini-code:free': 'North Mini Code',
+    },
   },
 }
 
@@ -148,5 +231,12 @@ export function isBrainProvider(value: string): value is BrainProvider {
  */
 export function modelFor(provider: BrainProvider, env: NodeJS.ProcessEnv = process.env): string {
   const override = env[`${provider.toUpperCase()}_MODEL`]
-  return override !== undefined && override !== '' ? override : PROVIDERS[provider].defaultModel
+  return override !== undefined && override !== ''
+    ? resolveModel(provider, override)
+    : PROVIDERS[provider].defaultModel
+}
+
+/** A model name as the provider will accept it: an alias expanded, anything else untouched. */
+export function resolveModel(provider: BrainProvider, name: string): string {
+  return PROVIDERS[provider].aliases?.[name] ?? name
 }

@@ -1,5 +1,5 @@
-import type { AgentStrategyKey, BrainErrorCode } from './brain'
-import { STRATEGIES, STRATEGY_ORDER } from './strategies'
+import type { AgentKey, BrainErrorCode } from './brain'
+import { agentGradient } from './identity'
 
 /**
  * What a competition looks like from the client's side.
@@ -29,6 +29,8 @@ export interface CompetitionError {
 export interface AgentProposalView {
   key: string
   name: string
+  /** Which model this agent is. Absent on rows recorded before models were tracked. */
+  model?: string
   /**
    * Measured from the route the agent chose, not reported by the agent.
    *
@@ -55,17 +57,14 @@ export interface AgentProposalView {
 }
 
 export interface CompetitionState {
+  /**
+   * The line-up, in display order, from the opening frame. Empty until it
+   * arrives. Every agent here is a model; four of them agreeing means
+   * something different from four samples of one.
+   */
+  agents: CompetingAgent[]
   proposals: Record<string, AgentProposalView>
   revealed: Record<string, boolean>
-  /**
-   * The model behind each agent, keyed by strategy.
-   *
-   * Shown on the card so the line-up is visible rather than asserted. Four
-   * agents on one model converge, and when they do the user deserves to see
-   * why; four on three models disagree, and that is worth seeing too. Empty
-   * until the opening frame arrives.
-   */
-  models: Record<string, string>
   phase: CompetitionPhase
   secondsLeft: number
   winner: string | null
@@ -80,27 +79,45 @@ export interface CompetitionState {
 }
 
 /**
- * Reveal timing. Floors, not a schedule — see `pacing.ts`. An agent that
- * answers quickly still waits its turn so the cards read as a race; one that
- * answers late appears the moment it can.
+ * When card `index` may appear at the earliest, in ms from the start.
+ *
+ * A step per roster position rather than a fixed table, so a seventh agent
+ * has a floor as well as a fourth. An agent that answers quickly still waits
+ * its turn so the cards read as a race; one that answers late appears the
+ * moment it can.
  */
-export const REVEAL_DELAYS = [1100, 2500, 3900, 5400] as const
+const REVEAL_FIRST_MS = 1100
+const REVEAL_STEP_MS = 1400
+export function revealFloor(index: number): number {
+  return REVEAL_FIRST_MS + REVEAL_STEP_MS * index
+}
 export const RACE_DURATION = 6800
 export const DECIDE_AT = RACE_DURATION + 600
 export const WINDOW_SECONDS = 30
 
 export interface CompetingAgent {
-  key: AgentStrategyKey
+  key: AgentKey
   name: string
   gradient: string
+  model: string
 }
 
-/** The four agents, in display order. Identity only — what each proposes is up to it. */
-export const AGENTS: CompetingAgent[] = STRATEGY_ORDER.map((key) => ({
-  key,
-  name: STRATEGIES[key].name,
-  gradient: STRATEGIES[key].gradient,
-}))
+/**
+ * The line-up of a turn that was recorded, rebuilt from what it recorded.
+ *
+ * A row keeps each agent's key, name and (since models became agents) its
+ * model. The colour is a function of the key, so it needs no storing.
+ */
+export function agentsFromProposals(
+  proposals: Record<string, AgentProposalView>
+): CompetingAgent[] {
+  return Object.values(proposals).map((p) => ({
+    key: p.key,
+    name: p.name,
+    gradient: agentGradient(p.key),
+    model: p.model ?? '',
+  }))
+}
 
 function money(n: number): string {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`

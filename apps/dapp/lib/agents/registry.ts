@@ -1,101 +1,149 @@
-import type { AgentBrain, AgentStrategyKey, BrainProvider } from './brain'
-import { ALL_STRATEGIES } from './brain'
-import { BRAINS } from './brains/openai-compatible'
-import { ALL_PROVIDERS, PROVIDERS, isBrainProvider } from './brains/providers'
+import type { AgentBrain, AgentKey, BrainProvider } from './brain'
+import { BRAINS, createBrain } from './brains/openai-compatible'
+import {
+  ALL_PROVIDERS,
+  OPENROUTER_MODELS,
+  PROVIDERS,
+  isBrainProvider,
+  resolveModel,
+} from './brains/providers'
+import { agentGradient, agentKey, agentName } from './identity'
 
 /**
- * Which model each agent runs on.
+ * Which agents race.
  *
  * Server-side only: every brain reads an API key, so this must be reachable
  * from route handlers and nothing else.
  *
+ * An agent is a model. The roster is one entry per model, and its length is
+ * the number of competitors — there are no seats to fill and nothing is
+ * repeated to make up a count. Different models disagree for real reasons,
+ * and that disagreement is the output this competition exists to produce;
+ * two copies of one model would agree by construction.
+ *
  * Returns nothing rather than a fallback when no provider is configured. A
- * mock used to stand in here, so a missing key produced four agents reciting
+ * mock used to stand in here, so a missing key produced agents reciting
  * canned text — proposals that carried no route, could not be signed, and
  * looked exactly like decisions somebody had made. The route now tells the
  * user the agents are not online, which is what is true.
- *
- * **Why a map rather than one brain.** Four calls to a single model are four
- * samples of one mind, and on a testnet where one route is plainly better they
- * converge: every agent agrees, the winner is drawn by tie-break hash, and the
- * race decides nothing. Different models disagree for real reasons — which
- * venue, whether to wait — and that disagreement is the output this
- * competition exists to produce.
  */
 
+export interface RosterAgent {
+  key: AgentKey
+  name: string
+  gradient: string
+  provider: BrainProvider
+  model: string
+  brain: AgentBrain
+}
+
+/** What the roster looks like from outside the server: identity and cost, no brain. */
+export interface PublicAgent {
+  key: string
+  name: string
+  gradient: string
+  provider: string
+  providerName: string
+  model: string
+  free: boolean
+}
+
 /**
- * `AGENT_BRAINS` assigns providers to agents in display order:
- * `deepseek,ollama,groq,deepseek` gives Atlas DeepSeek, Meridian the local
- * model, Cobalt Groq, and Halcyon DeepSeek again.
+ * `AGENT_BRAINS` is the roster, in display order: `deepseek,openrouter/ling-fin,
+ * openrouter/nemotron-super` is three agents. An entry is a provider, or a
+ * provider and a model after a slash — an alias from the provider's table or
+ * a raw catalogue id, which may itself contain slashes and colons; only the
+ * first slash separates. A bare provider runs its default (or
+ * `<PROVIDER>_MODEL`).
  *
- * A name that is not a provider, or a provider with no key, falls back to the
- * first configured provider rather than leaving that agent silent — a
- * misspelling in an environment variable should cost variety, not an agent.
- * Unset spreads the configured providers round-robin, so adding a key changes
- * the line-up without further configuration.
+ * An entry that cannot run is dropped with a warning, never replaced: the
+ * user named a model and did not get it, and a substitute wearing a different
+ * name would hide that. Two entries that resolve to one agent are one agent.
+ *
+ * Unset spreads over everything configured: each auto-select provider's
+ * default model, and every curated OpenRouter model when that key exists.
  */
 const ENV_KEY = 'AGENT_BRAINS'
 
-/**
- * Providers that may be chosen for an agent without being named.
- *
- * A provider needing no key is excluded: "configured" would then be true of a
- * local daemon that is not running, and spreading agents onto it by default
- * would fail them all with nothing in the environment to explain why. Naming
- * it in `AGENT_BRAINS` opts in.
- */
-function autoSelectable(): BrainProvider[] {
-  return ALL_PROVIDERS.filter((p) => PROVIDERS[p].autoSelect && BRAINS[p].isConfigured())
+function agent(provider: BrainProvider, model: string, brain: AgentBrain): RosterAgent {
+  const key = agentKey(provider, model)
+  return {
+    key,
+    name: agentName(provider, model),
+    gradient: agentGradient(key),
+    provider,
+    model,
+    brain,
+  }
 }
 
-/**
- * What `AGENT_BRAINS` asks for, one entry per agent — before any of it is
- * checked against what actually has a key.
- *
- * A shorter list than there are agents repeats: `deepseek,groq` alternates.
- * Unset asks for nothing, and the caller spreads what is available instead.
- */
-function requested(): (BrainProvider | undefined)[] {
-  const raw = process.env[ENV_KEY]
-  if (raw === undefined || raw.trim() === '') return []
+function parseEntry(entry: string): { provider: BrainProvider; model?: string } | undefined {
+  const slash = entry.indexOf('/')
+  const provider = (slash === -1 ? entry : entry.slice(0, slash)).toLowerCase()
+  if (!isBrainProvider(provider)) return undefined
+  const model = slash === -1 ? '' : entry.slice(slash + 1).trim()
+  return model === '' ? { provider } : { provider, model: resolveModel(provider, model) }
+}
 
-  const named = raw
+function requestedRoster(raw: string): RosterAgent[] {
+  const roster: RosterAgent[] = []
+  const entries = raw
     .split(',')
-    .map((s) => s.trim().toLowerCase())
+    .map((s) => s.trim())
     .filter((s) => s !== '')
-  if (named.length === 0) return []
 
-  return ALL_STRATEGIES.map((_, i) => {
-    const pick = named[i % named.length]
-    // An unrecognised name is a typo, not an instruction. It falls through to
-    // the default spread rather than failing the competition.
-    return pick !== undefined && isBrainProvider(pick) ? pick : undefined
-  })
+  for (const entry of entries) {
+    const ask = parseEntry(entry)
+    if (ask === undefined) {
+      // eslint-disable-next-line no-console
+      console.warn(`[agents] "${entry}" in ${ENV_KEY} names no known provider; skipped`)
+      continue
+    }
+    const shared = BRAINS[ask.provider]
+    if (!shared.isConfigured()) {
+      const env = PROVIDERS[ask.provider].apiKeyEnv
+      // eslint-disable-next-line no-console
+      console.warn(`[agents] "${entry}" in ${ENV_KEY} needs ${env}, which is not set; skipped`)
+      continue
+    }
+    const model = ask.model ?? shared.model
+    const brain = ask.model !== undefined ? createBrain({ provider: ask.provider, model }) : shared
+    const next = agent(ask.provider, model, brain)
+    if (roster.some((a) => a.key === next.key)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[agents] "${entry}" in ${ENV_KEY} is ${next.key} again; one agent per model`)
+      continue
+    }
+    roster.push(next)
+  }
+  return roster
 }
 
 /**
- * One brain per agent, or nothing at all.
- *
- * Nothing when no provider can answer — the whole competition is then offline,
- * which the route reports as such. One unusable provider among several is not
- * that case: that agent moves to one that works, because an agent with no
- * brain shows as an agent that did not answer, and less variety is a better
- * outcome than a silent card.
+ * Every model that can run. A provider needing no key is excluded: a local
+ * daemon that is not running looks exactly like one that is, right up until
+ * its agent fails. Naming it in `AGENT_BRAINS` opts in.
  */
-export function getAgentBrains(): Record<AgentStrategyKey, AgentBrain> | undefined {
-  const asked = requested()
+function defaultRoster(): RosterAgent[] {
+  const roster: RosterAgent[] = []
+  for (const provider of ALL_PROVIDERS) {
+    if (!PROVIDERS[provider].autoSelect || !BRAINS[provider].isConfigured()) continue
+    if (provider === 'openrouter') {
+      for (const model of Object.values(OPENROUTER_MODELS)) {
+        roster.push(agent(provider, model, createBrain({ provider, model })))
+      }
+      continue
+    }
+    roster.push(agent(provider, BRAINS[provider].model, BRAINS[provider]))
+  }
+  return roster
+}
 
-  // An explicitly named provider counts even when nothing is auto-selectable:
-  // `AGENT_BRAINS=ollama` with no API key anywhere is a complete and
-  // deliberate configuration, not a misconfigured one.
-  const usable = [
-    ...new Set([
-      ...asked.filter((p): p is BrainProvider => p !== undefined && BRAINS[p].isConfigured()),
-      ...autoSelectable(),
-    ]),
-  ]
+export function getRoster(): RosterAgent[] | undefined {
+  const raw = process.env[ENV_KEY]
+  const roster = raw !== undefined && raw.trim() !== '' ? requestedRoster(raw) : defaultRoster()
 
-  if (usable.length === 0) {
+  if (roster.length === 0) {
     // eslint-disable-next-line no-console
     console.warn(
       `[agents] no model provider configured — set one of ${ALL_PROVIDERS.filter(
@@ -106,17 +154,21 @@ export function getAgentBrains(): Record<AgentStrategyKey, AgentBrain> | undefin
     )
     return undefined
   }
+  return roster
+}
 
-  const entries = ALL_STRATEGIES.map((strategy, i) => {
-    const want = asked[i]
-    const provider =
-      want !== undefined && BRAINS[want].isConfigured()
-        ? want
-        : // Round-robin so an unset or partly-invalid assignment still spreads
-          // the agents across every provider that works.
-          (usable[i % usable.length] as BrainProvider)
-    return [strategy, BRAINS[provider]] as const
+export function publicRoster(roster: RosterAgent[]): PublicAgent[] {
+  return roster.map(({ key, name, gradient, provider, model }) => {
+    const config = PROVIDERS[provider]
+    const rate = config.pricing[model] ?? config.defaultPricing
+    return {
+      key,
+      name,
+      gradient,
+      provider,
+      providerName: config.displayName,
+      model,
+      free: rate.input === 0 && rate.output === 0,
+    }
   })
-
-  return Object.fromEntries(entries) as Record<AgentStrategyKey, AgentBrain>
 }

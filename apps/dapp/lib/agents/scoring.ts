@@ -1,4 +1,4 @@
-import type { AgentProposalResult, AgentStrategyKey } from './brain'
+import type { AgentKey, AgentProposalResult } from './brain'
 
 /**
  * Ranking proposals.
@@ -16,7 +16,7 @@ import type { AgentProposalResult, AgentStrategyKey } from './brain'
  */
 
 export interface ScoredProposal {
-  strategy: AgentStrategyKey
+  agent: AgentKey
   proposal: AgentProposalResult
   /** 100 at fair value, higher when the fill beats the oracle, lower when it trails it. */
   score: number
@@ -44,9 +44,9 @@ function scoreOf(proposal: AgentProposalResult): number {
  * differently (no standing favourite), and nothing an agent puts in its
  * proposal changes the outcome.
  */
-export function tieBreak(competitionId: string, strategy: string): number {
+export function tieBreak(competitionId: string, agent: string): number {
   let hash = 0x811c9dc5
-  const input = `${competitionId}:${strategy}`
+  const input = `${competitionId}:${agent}`
   for (let i = 0; i < input.length; i += 1) {
     hash ^= input.charCodeAt(i)
     hash = Math.imul(hash, 0x01000193) >>> 0
@@ -62,7 +62,7 @@ export function scoreProposals(
 
   return proposals
     .map((proposal) => ({
-      strategy: proposal.strategy,
+      agent: proposal.agent,
       proposal,
       score: scoreOf(proposal),
       executable: isExecutable(proposal),
@@ -72,14 +72,12 @@ export function scoreProposals(
       // real route beats a winning opinion.
       if (a.executable !== b.executable) return a.executable ? -1 : 1
       if (b.score !== a.score) return b.score - a.score
-      return (
-        tieBreak(options.competitionId, a.strategy) - tieBreak(options.competitionId, b.strategy)
-      )
+      return tieBreak(options.competitionId, a.agent) - tieBreak(options.competitionId, b.agent)
     })
 }
 
-export function pickWinner(scored: ScoredProposal[]): AgentStrategyKey | null {
-  return scored[0]?.strategy ?? null
+export function pickWinner(scored: ScoredProposal[]): AgentKey | null {
+  return scored[0]?.agent ?? null
 }
 
 /**

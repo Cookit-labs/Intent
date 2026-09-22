@@ -1,4 +1,4 @@
-import type { AgentProposalResult, AgentStrategyKey, BrainErrorCode } from './brain'
+import type { AgentKey, AgentProposalResult, BrainErrorCode } from './brain'
 
 /**
  * The wire format between the competition route and the client.
@@ -21,7 +21,7 @@ export interface CompetitionStartedFrame {
    * so it is on the card while it is still thinking. Optional because a client
    * built against the single-provider frames must keep working.
    */
-  agents: { key: AgentStrategyKey; name: string; gradient: string; model?: string }[]
+  agents: { key: AgentKey; name: string; gradient: string; model: string }[]
   windowSeconds: number
 }
 
@@ -42,14 +42,14 @@ export interface CompetitionProposalFrame {
 export interface CompetitionFailedFrame {
   type: 'competition:failed'
   competitionId: string
-  strategy: AgentStrategyKey
+  agent: AgentKey
   error: BrainErrorCode
 }
 
 export interface CompetitionWinnerFrame {
   type: 'competition:winner'
   competitionId: string
-  winner: AgentStrategyKey
+  winner: AgentKey
   scores: Record<string, number>
   /**
    * True when every executable proposal chose the same route and the same

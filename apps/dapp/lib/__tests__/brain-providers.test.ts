@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MarketContext, ProposalRequest } from '../agents/brain'
 import { createBrain } from '../agents/brains/openai-compatible'
-import { PROVIDERS } from '../agents/brains/providers'
+import { OPENROUTER_MODELS, PROVIDERS, modelFor, resolveModel } from '../agents/brains/providers'
 import { parseIntent } from '../parse-intent'
 
 /**
@@ -30,7 +30,8 @@ const market: MarketContext = {
 
 const request: ProposalRequest = {
   intent: parseIntent('Swap 20 USDC to XLM'),
-  strategy: 'twap',
+  agent: 'groq:qwen/qwen3.8-27b',
+  seat: 0,
   market,
   chain: 'stellar',
 }
@@ -89,6 +90,23 @@ describe('each provider is called at its own endpoint', () => {
     expect(seen[0]?.body.model).toBe(PROVIDERS.groq.defaultModel)
   })
 
+  it('sends OpenRouter to its OpenAI-compatible endpoint without strict tools', async () => {
+    // OpenRouter fronts every free model here under one key and passes the
+    // request through to whichever lab serves it; `strict` is not in the
+    // shape they all accept.
+    const seen: Captured[] = []
+    const brain = createBrain({
+      provider: 'openrouter',
+      apiKey: 'or-test',
+      fetchImpl: capture(seen),
+    })
+    await brain.propose(request)
+
+    expect(seen[0]?.url).toBe('https://openrouter.ai/api/v1/chat/completions')
+    expect(seen[0]?.body.tools[0]?.function.strict).toBe(false)
+    expect(seen[0]?.body.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+  })
+
   it('needs no key for a local daemon', async () => {
     // A local model is configured by being chosen. Whether it is running is a
     // request-time failure, which is a different thing from a missing key and
@@ -105,7 +123,7 @@ describe('each provider is called at its own endpoint', () => {
     // DeepSeek's thinking mode rejects a forced choice outright — "Thinking
     // mode does not support this tool_choice" — and Ollama ignores the field.
     // The brief instructs the model to call the tool instead.
-    for (const provider of ['deepseek', 'groq', 'ollama'] as const) {
+    for (const provider of ['deepseek', 'groq', 'ollama', 'openrouter'] as const) {
       const seen: Captured[] = []
       await createBrain({ provider, apiKey: 'k', fetchImpl: capture(seen) }).propose(request)
       expect(seen[0]?.body.tool_choice).toBe('auto')
@@ -138,5 +156,39 @@ describe('spend is reported per provider', () => {
     const outcome = await brain.propose(request)
     expect(outcome.meta.costUsd).toBe(0)
     expect(outcome.meta.provider).toBe('groq')
+  })
+})
+
+describe('OpenRouter models can be named by alias', () => {
+  // Full ids are long and punctuated (`inclusionai/ling-3.0-flash-fin:free`),
+  // and AGENT_BRAINS lists one per agent. A short name per curated model keeps
+  // that line readable; anything not in the table is passed through as an id.
+  it('expands a curated alias to its catalogue id', () => {
+    expect(resolveModel('openrouter', 'ling-fin')).toBe('inclusionai/ling-3.0-flash-fin:free')
+    expect(resolveModel('openrouter', 'nemotron-super')).toBe(
+      'nvidia/nemotron-3-super-120b-a12b:free'
+    )
+  })
+
+  it('passes an unknown name through as a raw model id', () => {
+    expect(resolveModel('openrouter', 'google/gemma-4-31b-it:free')).toBe(
+      'google/gemma-4-31b-it:free'
+    )
+  })
+
+  it('leaves other providers alone', () => {
+    expect(resolveModel('groq', 'ling-fin')).toBe('ling-fin')
+  })
+
+  it('accepts an alias in the per-provider model override', () => {
+    const env = { ...process.env, OPENROUTER_MODEL: 'gemma-4' }
+    expect(modelFor('openrouter', env)).toBe('google/gemma-4-26b-a4b-it:free')
+  })
+
+  it('curates five models, each from a different lab', () => {
+    const ids = Object.values(OPENROUTER_MODELS)
+    expect(ids).toHaveLength(5)
+    const labs = new Set(ids.map((id) => id.split('/')[0]))
+    expect(labs.size).toBe(5)
   })
 })
