@@ -47,10 +47,15 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
           <CheckCircle2 className="h-4 w-4" />
           Stopped after step {current}
         </div>
-        {/* The sentence that keeps a normal outcome from reading as a fault. */}
+        {/* The sentence that keeps a normal outcome from reading as a fault.
+            Branched on kind: an offramp never had a lending position to
+            compare against, so that comparison only belongs to swap-then-lend. */}
         <p className="text-muted-foreground text-sm">
-          Nothing went wrong. What has already settled stands, and you are holding the asset from it
-          rather than a lending position.
+          {sequence.kind === 'swap-then-offramp'
+            ? 'Nothing went wrong. The swap has settled and you are holding the USDC it delivered. Nothing was sent to the anchor.'
+            : sequence.kind === 'offramp-only'
+              ? 'Nothing went wrong. Nothing was sent to the anchor; your USDC is where it was.'
+              : 'Nothing went wrong. What has already settled stands, and you are holding the asset from it rather than a lending position.'}
         </p>
         <StepList steps={steps} current={current} />
         <Button variant="outline" size="sm" onClick={sequence.reset} className="self-start">
