@@ -65,6 +65,16 @@ export interface OfframpSession extends OfframpSessionState {
   /** Re-opens the anchor's page if the user closed it. */
   reopen: () => void
   reset: () => void
+  /**
+   * Drops the stored session for this anchor and account, leaving the hook's
+   * own state alone.
+   *
+   * Called once a withdrawal has been paid. The stored token and transaction
+   * id exist to resume a withdrawal the anchor is still holding open; a paid
+   * one is finished, and resuming it would hand a second withdrawal the first
+   * one's transaction id rather than starting a new one at the anchor.
+   */
+  forget: () => void
 }
 
 const POLL_MS = 3_000
@@ -339,6 +349,14 @@ export function useOfframpSession(): OfframpSession {
     setState((s) => ({ ...s, popupOpen: popup !== null }))
   }, [state.interactiveUrl])
 
+  // Deliberately no `setState`: the caller is a settled sequence still showing
+  // this withdrawal's details, and clearing them would blank the card that has
+  // just reported success. Only the stored copy goes.
+  const forget = useCallback(() => {
+    if (state.anchorId === undefined || address === undefined) return
+    clearSession(window.sessionStorage, state.anchorId, address)
+  }, [state.anchorId, address])
+
   // A declined session is not worth resuming. A `failed` session is not
   // cleared here: the 401 path clears it explicitly because that is the one
   // failure that means the token itself is dead; every other failure (a
@@ -351,5 +369,5 @@ export function useOfframpSession(): OfframpSession {
     }
   }, [state.phase, state.anchorId, address])
 
-  return { ...state, begin, reopen, reset }
+  return { ...state, begin, reopen, reset, forget }
 }

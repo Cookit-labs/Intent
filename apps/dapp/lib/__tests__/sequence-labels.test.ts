@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { estimatedReceiveOf, offrampSizeWarning, withdrawStepLabel } from '../offramp/labels'
+import {
+  capToLimits,
+  estimatedReceiveOf,
+  offrampSizeWarning,
+  withdrawStepLabel,
+} from '../offramp/labels'
 
 /**
  * What the review says before the first signature.
@@ -38,6 +43,26 @@ describe('offrampSizeWarning', () => {
   })
   it('says when withdrawals are disabled', () => {
     expect(offrampSizeWarning('5', { ...limits, enabled: false })).toMatch(/not accepting/)
+  })
+})
+
+/**
+ * The cap the warning above promises.
+ *
+ * The text said "only the maximum will be withdrawn" while the code asked the
+ * anchor for the whole delivered amount, which the anchor then refused — after
+ * the swap had settled.
+ */
+describe('capToLimits', () => {
+  const limits = { enabled: true, minAmount: 1, maxAmount: 10, feeEnabled: false }
+  it('leaves an amount inside the limits alone', () => {
+    expect(capToLimits('6.4', limits)).toBe('6.4')
+  })
+  it('caps an amount above the maximum', () => {
+    expect(capToLimits('50', limits)).toBe('10')
+  })
+  it('leaves the amount alone with no limits', () => {
+    expect(capToLimits('50', undefined)).toBe('50')
   })
 })
 

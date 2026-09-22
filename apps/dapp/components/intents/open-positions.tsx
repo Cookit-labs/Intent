@@ -13,7 +13,7 @@ import { useCollateral } from '../../hooks/use-collateral'
 import { useWithdrawalStatus } from '../../hooks/use-withdrawal-status'
 import { BorrowConfirm } from './borrow-confirm'
 import { LIQUIDATION_HF, MINIMUM_SAFE_HF } from '../../lib/lend/health'
-import { loadTurns } from '../../lib/chat-history'
+import { loadTurns, onTurnsChanged } from '../../lib/chat-history'
 import { lookupAnchor } from '../../lib/offramp/anchors'
 import { pendingWithdrawals } from '../../lib/offramp/pending-withdrawals'
 import type { OpenOffer } from '../../lib/swap/offers'
@@ -128,6 +128,11 @@ export function OpenPositions(): JSX.Element | null {
   useEffect(() => {
     setPending(pendingWithdrawals(loadTurns(slug)))
   }, [slug, withdrawals.refreshed])
+  // A withdrawal signed in this session is written to history by the chat,
+  // which is a sibling of this component rather than a parent — so without
+  // this the row did not appear until a reload, and a withdrawal that had
+  // just been paid looked like it had not been recorded at all.
+  useEffect(() => onTurnsChanged(() => setPending(pendingWithdrawals(loadTurns(slug)))), [slug])
 
   const { data: offers } = useQuery({
     queryKey: ['open-offers', address],

@@ -6,7 +6,8 @@ import { loadTurns, updateTurn } from '../lib/chat-history'
 import type { AnchorId } from '../lib/offramp/anchors'
 import { isAnchorId } from '../lib/offramp/anchors'
 import { ensureAuthSession } from '../lib/offramp/ensure-session'
-import { readTransaction } from '../lib/offramp/sep24'
+import { AnchorHttpError, readTransaction } from '../lib/offramp/sep24'
+import { clearSession } from '../lib/offramp/session-store'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 
@@ -91,6 +92,14 @@ export function useWithdrawalStatus(): {
         })
         setRefreshed((n) => n + 1)
       } catch (e) {
+        // A 401 means the stored token is dead. Cleared here exactly as the
+        // withdrawal poll clears it, so the next check signs a fresh challenge
+        // rather than re-presenting a token the anchor has already refused.
+        if (e instanceof AnchorHttpError && e.status === 401) {
+          clearSession(window.sessionStorage, anchorId, account)
+          setError('The anchor session expired. Check again to sign in.')
+          return
+        }
         setError(e instanceof Error ? e.message : 'Could not read the anchor.')
       } finally {
         setBusy(false)
