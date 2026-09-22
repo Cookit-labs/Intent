@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Bot, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
-import { AGENTS, describePlan } from '../../lib/agents/competition'
+import { describePlan } from '../../lib/agents/competition'
 
 /**
  * Three dots that keep moving while an agent reasons.
@@ -94,7 +94,7 @@ export function CompetitionPanel({
    */
   locked?: boolean
 }): JSX.Element | null {
-  const { proposals, revealed, models, phase, winner, error } = state
+  const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
 
   // Nothing to show until something is running. The panel used to paint
@@ -123,8 +123,8 @@ export function CompetitionPanel({
   }
 
   const decided = phase === 'decided'
-  const revealedAgents = AGENTS.filter((a) => revealed[a.key])
-  const pendingAgents = decided ? [] : AGENTS.filter((a) => !revealed[a.key])
+  const revealedAgents = agents.filter((a) => revealed[a.key])
+  const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key])
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
   return (
@@ -180,9 +180,9 @@ export function CompetitionPanel({
                         agents reaching the same conclusion means something
                         different when they are one model than when they are
                         three, and the user cannot tell those apart otherwise. */}
-                    {shortModel(models[agent.key]) !== '' ? (
+                    {shortModel(agent.model) !== '' ? (
                       <span className="text-muted-foreground/70 font-mono text-[11px]">
-                        {shortModel(models[agent.key])}
+                        {shortModel(agent.model)}
                       </span>
                     ) : null}
                     {/* What this agent proposed, not what it "is". The tag is
@@ -265,9 +265,9 @@ export function CompetitionPanel({
           />
           <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
             <span className="text-sm font-semibold">{agent.name}</span>
-            {shortModel(models[agent.key]) !== '' ? (
+            {shortModel(agent.model) !== '' ? (
               <span className="text-muted-foreground/70 ml-2 font-mono text-[11px]">
-                {shortModel(models[agent.key])}
+                {shortModel(agent.model)}
               </span>
             ) : null}
             <div

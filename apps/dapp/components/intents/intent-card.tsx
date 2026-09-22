@@ -23,8 +23,6 @@ const PRICE_USD: Record<string, number> = {
   WBTC: 95000,
 }
 
-const COMPETING_AGENTS = 4
-
 interface StatusView {
   live: boolean
   failed: boolean
@@ -48,7 +46,7 @@ function timeAgo(iso: string): string {
 function statusLabel(intent: Intent): string {
   switch (intent.status) {
     case 'competition':
-      return `Competing · ${COMPETING_AGENTS} agents`
+      return 'Competing'
     case 'executing':
       return 'Executing · live'
     case 'pending':
