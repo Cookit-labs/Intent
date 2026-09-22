@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { AGENTS, describePlan } from '../agents/competition'
+import { agentsFromProposals, describePlan, revealFloor } from '../agents/competition'
 
 /**
  * The tag under an agent's name is what it proposed, not what it "is".
@@ -47,12 +47,33 @@ describe('describing a plan', () => {
   })
 })
 
-describe('the agents carry identity only', () => {
-  it('has four, each with a name and a gradient and nothing prescribing a method', () => {
-    expect(AGENTS).toHaveLength(4)
-    for (const agent of AGENTS) {
-      expect(agent.name).not.toMatch(/twap|momentum|arbitrage|shadow/i)
-      expect(Object.keys(agent).sort()).toEqual(['gradient', 'key', 'name'])
-    }
+describe('reveal pacing', () => {
+  it('keeps the first four floors where they were, then keeps stepping', () => {
+    // The race used to be four fixed floors. Now it is a step per roster
+    // position, so a seventh agent has a floor too rather than falling to 0.
+    expect([0, 1, 2, 3].map(revealFloor)).toEqual([1100, 2500, 3900, 5300])
+    expect(revealFloor(6)).toBe(9500)
+  })
+})
+
+describe('a restored turn recovers its line-up', () => {
+  it('builds agents from the stored proposals, colour from the key', () => {
+    const agents = agentsFromProposals({
+      'deepseek:deepseek-v4-flash': {
+        key: 'deepseek:deepseek-v4-flash',
+        name: 'DeepSeek V4 Flash',
+        model: 'deepseek-v4-flash',
+        avgPriceUsd: 1,
+        vsOraclePct: 0,
+        score: 0,
+      },
+      twap: { key: 'twap', name: 'Atlas', avgPriceUsd: 1, vsOraclePct: 0, score: 0 },
+    })
+    expect(agents.map((a) => a.key)).toEqual(['deepseek:deepseek-v4-flash', 'twap'])
+    expect(agents[0]?.model).toBe('deepseek-v4-flash')
+    // A legacy row recorded no model; the caption is simply omitted.
+    expect(agents[1]?.model).toBe('')
+    expect(agents[1]?.name).toBe('Atlas')
+    expect(agents[1]?.gradient).toMatch(/^linear-gradient\(/)
   })
 })
