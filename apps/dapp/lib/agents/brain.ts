@@ -74,6 +74,20 @@ export interface MarketContext {
    */
   lending?: { venue: string; asset: string; supplyApy: number; utilisation: number }[]
   /**
+   * Live withdrawal limits from the anchors this chain integrates.
+   *
+   * Supplied for the same reason lending rates are: an agent told the limits
+   * can say "this exceeds what the anchor accepts" instead of proposing a
+   * step that will be refused. Absent on chains with no anchor.
+   */
+  offramps?: {
+    venue: string
+    asset: string
+    minAmount?: number
+    maxAmount?: number
+    feeEnabled: boolean
+  }[]
+  /**
    * Executable routes, already priced against real liquidity.
    *
    * The agents choose between these; they never invent one. A model is good at
@@ -187,7 +201,7 @@ export interface AgentProposalResult {
    * or rest at a price and then supply. Absent means an ordinary trade, which
    * is almost all of them.
    */
-  thenAction?: 'lend'
+  thenAction?: 'lend' | 'offramp'
   /** Where the follow-on supplies, when there is one. */
   thenVenue?: string
   /**
