@@ -57,6 +57,11 @@ describe('parseOfframpOnlyIntent', () => {
     ['Cash out 5 USDC', '5'],
     ['Offramp 5 USDC to fiat', '5'],
     ['Send $5 of USDC to my bank account', '5'],
+    // "my" after the figure used to hand the whole-balance branch the match,
+    // so a stated amount became the entire balance.
+    ['withdraw 5 of my usdc to my bank', '5'],
+    ['cash out 2 of my USDC to my bank', '2'],
+    ['send $20 of my usdc to my bank', '20'],
   ])('reads %j as an offramp of %s USDC', (text, amount) => {
     expect(parseOfframpOnlyIntent(text)).toEqual({
       kind: 'offramp-only',

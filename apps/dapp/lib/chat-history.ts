@@ -120,6 +120,36 @@ function write(turns: ChatTurn[]): void {
 }
 
 /**
+ * Who to tell when the stored turns change.
+ *
+ * Open positions reads withdrawals out of history, and the chat writes them
+ * there — two components with no parent holding the list, so a withdrawal
+ * settled in this session did not appear until a reload. A module-level
+ * notification is the smallest thing that closes that: no context, no store,
+ * and nothing to keep in sync beyond "the rows changed, read them again".
+ */
+type TurnsListener = () => void
+const turnsListeners = new Set<TurnsListener>()
+
+export function onTurnsChanged(listener: TurnsListener): () => void {
+  turnsListeners.add(listener)
+  return () => {
+    turnsListeners.delete(listener)
+  }
+}
+
+function notifyTurnsChanged(): void {
+  for (const listener of turnsListeners) {
+    try {
+      listener()
+    } catch {
+      // A listener that throws must not stop the others, and must never fail
+      // the write that has already happened.
+    }
+  }
+}
+
+/**
  * Reports a failed sync without breaking the caller.
  *
  * A trade that settled on-chain must not be reported as failed because its
@@ -168,6 +198,7 @@ export function loadTurns(chain: string): ChatTurn[] {
 export function saveTurn(turn: ChatTurn): void {
   const existing = read().filter((t) => t.id !== turn.id)
   write([turn, ...existing])
+  notifyTurnsChanged()
 
   void saveTurnRemote(turn).catch((e) => reportSyncFailure('a conversation', e))
 }
@@ -208,11 +239,13 @@ export function updateTurn(
       ...patch,
     }
     write([created, ...all])
+    notifyTurnsChanged()
     void saveTurnRemote(created).catch((e) => reportSyncFailure('a settled trade', e))
     return
   }
 
   write(all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  notifyTurnsChanged()
   void updateTurnRemote(id, patch).catch((e) => reportSyncFailure('a trade outcome', e))
 }
 

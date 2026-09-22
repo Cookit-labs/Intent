@@ -51,3 +51,21 @@ export function offrampSizeWarning(
   }
   return undefined
 }
+
+/**
+ * The amount to actually ask the anchor for.
+ *
+ * The warning above promises that only the maximum is withdrawn and the rest
+ * stays in the wallet. Nothing enforced that, so a swap delivering more than
+ * the anchor's ceiling asked for the whole of it and was refused — after the
+ * swap had settled, which is exactly the outcome the warning exists to avoid.
+ *
+ * Only the maximum caps. A figure below the minimum is not adjustable: asking
+ * for more than was delivered is not something the app may decide.
+ */
+export function capToLimits(display: string, limits?: WithdrawLimits): string {
+  if (limits?.maxAmount === undefined) return display
+  const n = Number(display)
+  if (!Number.isFinite(n) || n <= limits.maxAmount) return display
+  return String(limits.maxAmount)
+}

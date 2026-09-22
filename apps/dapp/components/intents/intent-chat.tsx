@@ -64,6 +64,17 @@ import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
 
+/**
+ * The price of the only asset an anchor withdraws.
+ *
+ * A constant rather than a live rate, and that is exactly the point: USDC is a
+ * dollar, so a dollar amount and a unit amount of it are the same number and
+ * the offramp path needs no conversion. Named, so that the assumption is
+ * visible at the one place that depends on it — and so that an asset with any
+ * other price cannot quietly reuse that path.
+ */
+const USDC_PRICE_USD = 1
+
 function TrafficLights(): JSX.Element {
   return (
     <div className="flex items-center gap-1.5" aria-hidden>
@@ -225,7 +236,17 @@ export function IntentChat(): JSX.Element {
   // The agent most recently chosen. A ref rather than `executingKey`, because
   // the offramp branch below reads it from inside an async closure that
   // captured the state at click time and would never see a later pick.
+  //
+  // Mirrored from the state rather than assigned at the click, which went
+  // stale on every path that clears `executingKey` without a click — a reset,
+  // a failed swap, a conversation restored from history. The ref then still
+  // named the last agent picked, so an anchor-limits fetch left over from that
+  // pick passed its own guard and prepared a sequence into a chat that had
+  // moved on. The same pattern as `phaseRef` in `use-offramp-session.ts`.
   const latestPickRef = useRef<string | null>(null)
+  useEffect(() => {
+    latestPickRef.current = executingKey
+  }, [executingKey])
   const awaitingConfirm = swap.phase === 'review'
   useEffect(() => {
     if (!awaitingConfirm) return
@@ -282,8 +303,15 @@ export function IntentChat(): JSX.Element {
   // array is rebuilt on each render, so comparing it by reference would
   // re-record on every tick.
   const sequenceSteps = JSON.stringify(sequence.steps.filter((step) => step.hash !== undefined))
+  // An offramp-only run has no trade, so `parsed` is deliberately null — and
+  // this effect bailed on exactly that, which meant a withdrawal that really
+  // paid out left no record anywhere: not in history, and so not under Open
+  // positions either, where its anchor status is the only way to see the fiat
+  // side. A settled sequence is recorded whether or not a trade preceded it.
+  const sequenceKind = sequence.kind
   useEffect(() => {
-    if (sequenceHash === undefined || parsed === null) return
+    if (sequenceHash === undefined) return
+    if (parsed === null && sequenceKind !== 'offramp-only') return
 
     if (turnId !== null) {
       updateTurn(
@@ -307,10 +335,19 @@ export function IntentChat(): JSX.Element {
         // sequence can settle before that or after a tab switch that wrote
         // none. Without this the trade happened on-chain and history kept no
         // record of it at all.
-        { chain: slug, text: message ?? parsed.outcome }
+        // `parsed.outcome` is the fallback text for a trade; an offramp-only
+        // run has no parse to describe, so what the user typed is the whole
+        // record of what was asked for.
+        { chain: slug, text: message ?? parsed?.outcome ?? '' }
       )
       setTurns(loadTurns(slug))
     }
+
+    // Only a trade becomes an intent on the backend. A withdrawal of USDC
+    // already held is not one — there is no `input` to create, and inventing a
+    // swap to carry it would put a trade that never happened in the activity
+    // list.
+    if (parsed === null) return
 
     createIntent.mutate(
       { ...parsed.input, chain: slug },
@@ -512,7 +549,14 @@ export function IntentChat(): JSX.Element {
           // No trade: the USDC is already held. Amount is optional — the
           // anchor asks in its own page when none was named.
           const stated = body.amountStated === true
-          const amount = stated ? String(body.amountUsd ?? 0) : undefined
+          // Read and honoured rather than ignored: the asset here is always
+          // USDC, whose price is one dollar, so the dollar reading and the unit
+          // reading of the same figure are the same amount — which is why this
+          // branch converts nothing. An asset with any other price would have
+          // to divide by it here rather than inherit this silence.
+          const amountIsUsd = body.amountIsUsd === true
+          const units = (body.amountUsd ?? 0) / (amountIsUsd ? USDC_PRICE_USD : 1)
+          const amount = stated ? String(units) : undefined
           const anchor =
             body.followOn?.kind === 'offramp' && isAnchorId(body.followOn.venue)
               ? body.followOn.venue
@@ -699,7 +743,6 @@ export function IntentChat(): JSX.Element {
     }
     setAffordError(null)
     setExecutingKey(key)
-    latestPickRef.current = key
     if (turnId !== null) updateTurn(turnId, { executedBy: key })
 
     // Every intent is recorded, whichever way it goes. Skipping the record for
@@ -802,11 +845,24 @@ export function IntentChat(): JSX.Element {
           let limits: WithdrawLimits | undefined
           try {
             const res = await fetch(`/api/offramp/anchor?id=${anchor}`)
-            const info = (await res.json()) as { limits?: WithdrawLimits | null }
-            if (info.limits !== null && info.limits !== undefined) limits = info.limits
+            const info = (await res.json()) as { limits?: WithdrawLimits | null; error?: string }
+            if (!res.ok) {
+              // An unreachable anchor was read as "no limits", so the size
+              // warning silently disappeared and the user heard nothing at
+              // all. Said out loud, and the sequence still prepared without
+              // limits: the build route refuses an out-of-range withdrawal
+              // later, so losing the early warning is the honest degradation
+              // rather than a reason to refuse a trade the user asked for.
+              setAffordError(
+                `The anchor could not be reached: ${info.error ?? `the request failed (${res.status}).`}`
+              )
+            } else if (info.limits !== null && info.limits !== undefined) {
+              limits = info.limits
+            }
           } catch {
-            // No limits means no warning; the anchor will still refuse an
-            // out-of-range withdrawal and the card will say so then.
+            // The same treatment for a network failure: said, and prepared
+            // without limits.
+            setAffordError('The anchor could not be reached: the network did not answer.')
           }
           // The user picked another agent while the anchor was being read.
           if (latestPickRef.current !== key) return

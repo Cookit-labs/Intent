@@ -394,8 +394,17 @@ export interface OfframpOnlyIntent {
   venue: string
 }
 
+/**
+ * The amount, and whether one was named at all.
+ *
+ * Numeric alternatives come first, and each absorbs an optional "my". With the
+ * whole-balance branch first, "withdraw 5 of my usdc to my bank" matched "my
+ * usdc" — the stated 5 was never read and the whole balance would have gone.
+ * An alternation is ordered, so the most specific reading has to be listed
+ * before the most general one.
+ */
 const OFFRAMP_TARGET =
-  /(?:\b(all\s+(?:of\s+)?my|my)\s+usdc\b|\$\s*([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?usdc\b|\b([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?usdc\b)/i
+  /(?:\$\s*([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?(?:my\s+)?usdc\b|\b([\d,]+(?:\.\d+)?)\s*(?:worth\s+)?(?:of\s+)?(?:my\s+)?usdc\b|\b(all\s+(?:of\s+)?my|my)\s+usdc\b)/i
 
 export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
   const text = raw.trim()
@@ -419,8 +428,10 @@ export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
   const match = OFFRAMP_TARGET.exec(text)
   if (match === null) return null
 
-  const wholeBalance = match[1] !== undefined
-  const rawAmount = wholeBalance ? undefined : (match[2] ?? match[3])
+  // Groups in the order the pattern lists them: a dollar figure, a count of
+  // USDC, then the whole balance.
+  const wholeBalance = match[3] !== undefined
+  const rawAmount = wholeBalance ? undefined : (match[1] ?? match[2])
   const amount = rawAmount?.replace(/,/g, '')
 
   return {

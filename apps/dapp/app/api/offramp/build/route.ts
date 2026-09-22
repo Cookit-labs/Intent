@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { buildOfframpPayment } from '../../../../lib/offramp/build-payment'
 import { readExpectation } from '../../../../lib/offramp/read-expectation'
-import { USDC, toBaseUnits } from '../../../../lib/swap/assets'
+import { USDC, fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
 
 /**
@@ -73,7 +73,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (held !== undefined && held < asked) {
       return NextResponse.json(
         {
-          error: `The anchor asks for ${read.expectation.amount} USDC and this account holds ${(Number(held) / 1e7).toFixed(7)}.`,
+          // Converted through the same exact-integer path the rest of the app
+          // uses. `Number(held) / 1e7` is a float division of a balance that
+          // is already a bigint, so the figure named in a money refusal could
+          // differ from the balance the network actually holds.
+          error: `The anchor asks for ${read.expectation.amount} USDC and this account holds ${fromBaseUnits(held.toString())}.`,
           code: 'insufficient',
         },
         { status: 409 }
