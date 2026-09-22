@@ -4,6 +4,8 @@ import { buildSwapTransaction } from '../../../../lib/swap/build-tx'
 import type { SwapQuote } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
+import { createAquariusQuoter } from '../../../../lib/swap/sources/aquarius-quoter'
+import { buildAquariusSwap } from '../../../../lib/swap/build-aquarius'
 import { buildSorobanSwap, prepareSorobanSwap } from '../../../../lib/swap/build-soroban'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
 import { applySlippage } from '../../../../lib/swap/assets'
@@ -76,6 +78,9 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   if (venue === 'soroban') {
     return await buildViaSoroban(body.account, submitted)
+  }
+  if (venue === 'aquarius') {
+    return await buildViaAquarius(body.account, submitted)
   }
 
   // Re-price from the source of truth. The client's numbers are treated as a
@@ -189,5 +194,85 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
     sendAmount: built.sendAmount,
     slippageBps: DEFAULT_SLIPPAGE_BPS,
     quote: fresh.quote,
+  })
+}
+
+/**
+ * Builds an Aquarius swap against the pool the agent chose.
+ *
+ * Re-quoted like every other venue, but re-quoted *for the same pool*. An
+ * Aquarius pair can have several pools — XLM/USDC has three — and the agent
+ * compared them and picked one. Re-quoting "the best" here could pick a
+ * different pool than the one that won, and the user would sign a route
+ * nobody had reviewed. So the quoted pool index selects which fresh quote is
+ * used, and a quote without an index is refused rather than defaulted.
+ */
+async function buildViaAquarius(account: string, submitted: SwapQuote): Promise<NextResponse> {
+  if (submitted.poolIndex === undefined) {
+    return NextResponse.json(
+      { error: 'an Aquarius route must name the pool it was quoted from' },
+      { status: 400 }
+    )
+  }
+
+  const all = await createAquariusQuoter().quoteAll?.({
+    kind: 'strict_send',
+    from: submitted.from,
+    to: submitted.to,
+    sendAmount: submitted.sendAmount,
+  })
+
+  if (all === undefined || !all.ok) {
+    return NextResponse.json(
+      { error: 'no_route', reason: all?.ok === false ? all.failure.reason : 'no_route' },
+      { status: 200 }
+    )
+  }
+
+  const fresh = all.quotes.find((q) => q.poolIndex === submitted.poolIndex)
+  if (fresh === undefined) {
+    // The pool existed when quoted and does not now — a drained pool, or a
+    // testnet reset between quote and build. Said plainly rather than
+    // silently substituting whichever pool remains.
+    return NextResponse.json(
+      { error: 'no_route', reason: 'the quoted pool is no longer available' },
+      { status: 200 }
+    )
+  }
+
+  const minReceive = applySlippage(fresh.destAmount, DEFAULT_SLIPPAGE_BPS)
+
+  let built
+  try {
+    built = await buildAquariusSwap({
+      account,
+      from: fresh.from,
+      to: fresh.to,
+      sendAmount: fresh.sendAmount,
+      minReceive,
+      poolIndex: submitted.poolIndex,
+    })
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'could not build the transaction' },
+      { status: 400 }
+    )
+  }
+
+  // Venue-agnostic: it simulates and assembles whatever envelope it is given.
+  const prepared = await prepareSorobanSwap(built.xdr)
+  if (!prepared.ok) {
+    return NextResponse.json(
+      { error: 'simulation_failed', reason: prepared.reason },
+      { status: 409 }
+    )
+  }
+
+  return NextResponse.json({
+    xdr: prepared.xdr,
+    destMin: minReceive,
+    sendAmount: built.sendAmount,
+    slippageBps: DEFAULT_SLIPPAGE_BPS,
+    quote: fresh,
   })
 }

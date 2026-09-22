@@ -10,7 +10,7 @@ import type { AssetRef, ClassicAsset } from './assets'
  * them is worth doing rather than theatre.
  */
 
-export type QuoteSourceId = 'horizon' | 'soroswap'
+export type QuoteSourceId = 'horizon' | 'soroswap' | 'aquarius'
 
 /** Fixed input, variable output — an ordinary market swap. */
 export interface StrictSendRequest {
@@ -64,6 +64,18 @@ export interface SwapQuote {
    * substitution impossible to miss at the point a transaction gets built.
    */
   deliversAsset?: AssetRef
+  /**
+   * Which pool within the venue, when the venue keeps several for one pair.
+   *
+   * Aquarius has three XLM/USDC pools with different depth and fees, and a
+   * quote from one is not a quote from another — for 20 USDC they answered
+   * 32, 42 and 43 XLM. So the pool an agent chose has to travel with the
+   * quote to the builder, as a hex-encoded 32-byte index. A builder that
+   * re-derived the pool could silently execute a different route than the
+   * one that was compared and picked. Absent for venues with one pool per
+   * pair, and the Aquarius builder refuses a quote without it.
+   */
+  poolIndex?: string
   /** When the quote was taken. Routes go stale; the caller re-quotes before building. */
   quotedAt: string
 }

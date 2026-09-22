@@ -5,6 +5,7 @@ import { bestQuote, collectQuotes } from '../../../../lib/swap/quote'
 import type { QuoteRequest } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
+import { createAquariusQuoter } from '../../../../lib/swap/sources/aquarius-quoter'
 
 /**
  * Prices a swap across every configured liquidity source.
@@ -22,7 +23,11 @@ export const dynamic = 'force-dynamic'
 /** Bounds a single request. Quotes are cheap but not free. */
 const QUOTE_TIMEOUT_MS = 15_000
 
-const sources = [createHorizonQuoter(), createSoroswapQuoter()]
+// Three venues, genuinely different liquidity. When measured, Soroswap won
+// buying XLM, Horizon won selling it, and Aquarius sat between the two both
+// ways — no venue wins everywhere, so `bestQuote` below decides per request
+// rather than by preference.
+const sources = [createHorizonQuoter(), createSoroswapQuoter(), createAquariusQuoter()]
 
 export async function POST(request: Request): Promise<NextResponse> {
   let body: {

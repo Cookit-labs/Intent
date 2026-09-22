@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 
-import type { MarketPrice } from '../../lib/swap/prices'
+import type { MarketPrice } from '../../lib/swap/price-types'
 
 /**
  * What XLM trades for, on the network this app actually executes against.
@@ -40,8 +40,25 @@ export function PriceTicker({
     staleTime: 30_000,
   })
 
-  const mainnet = prices?.['XLM']
-  if (testnet == null && mainnet === undefined) return null
+  // "What is it worth" — Reflector when it answers, the mainnet book when it
+  // does not, a labelled fallback when nothing does. The label follows the
+  // source rather than assuming one, because a Reflector reading and a
+  // hardcoded guess are both plausible-looking numbers.
+  const worth = prices?.['XLM']
+  if (testnet == null && worth === undefined) return null
+
+  const worthLabel =
+    worth?.source === 'reflector'
+      ? 'oracle'
+      : worth?.source === 'stellar-mainnet'
+        ? 'mainnet'
+        : 'fallback'
+  const worthTitle =
+    worth?.source === 'reflector'
+      ? 'XLM according to Reflector, an oracle aggregating exchange prices. Used to size dollar amounts and to judge whether a testnet quote is reasonable. Not what a swap here fills at, and not what Blend liquidates against.'
+      : worth?.source === 'stellar-mainnet'
+        ? 'XLM on the Stellar mainnet order book. Reflector could not be read, so this single venue stands in for it.'
+        : 'Neither Reflector nor the mainnet order book could be read, so this is a fallback figure rather than a live quote.'
 
   return (
     <span className="text-muted-foreground flex items-center gap-2 text-xs tabular-nums">
@@ -67,17 +84,9 @@ export function PriceTicker({
       {/* The real market, kept visible but subordinate. Dollar amounts typed
           into an intent are sized against this, and the agents compare routes
           with it, so hiding it would make those numbers unaccountable. */}
-      {mainnet !== undefined ? (
-        <span
-          className="hidden opacity-60 lg:inline"
-          title={
-            mainnet.source === 'stellar-mainnet'
-              ? 'XLM on the Stellar mainnet order book. Used to size dollar amounts and to judge whether a testnet quote is reasonable.'
-              : 'The mainnet order book could not be read, so this is a fallback figure rather than a live quote.'
-          }
-        >
-          · mainnet ${mainnet.usd.toFixed(4)}
-          {mainnet.source === 'fallback' ? ' (fallback)' : ''}
+      {worth !== undefined ? (
+        <span className="hidden opacity-60 lg:inline" title={worthTitle}>
+          · {worthLabel} ${worth.usd.toFixed(4)}
         </span>
       ) : null}
     </span>

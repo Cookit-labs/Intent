@@ -45,6 +45,16 @@ export const SOROSWAP_ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264
 export const BLEND_POOL = 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF'
 
 /**
+ * Aquarius's testnet router. Mirrors the id in `sources/aquarius-quoter.ts`.
+ *
+ * Confirmed live by reading its contract instance on 2026-09-17. Testnet
+ * resets remove contracts — three officially documented oracle addresses
+ * were found already gone that way — so a live test asserts this one still
+ * exists rather than trusting the constant.
+ */
+export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
+
+/**
  * Where to see a Blend position, as opposed to the transaction that made it.
  *
  * A block explorer proves the supply happened; it does not show the position,
@@ -66,12 +76,28 @@ const ENTRIES: ContractEntry[] = [
     },
   },
   {
+    id: AQUARIUS_ROUTER,
+    label: 'Swap via Aquarius',
+    functions: {
+      swap: 'Swap via Aquarius',
+      // Listed so a multi-hop route reads honestly if one is ever built. The
+      // builder does not produce it today and its assertion refuses it.
+      swap_chained: 'Swap via Aquarius',
+    },
+  },
+  {
     id: BLEND_POOL,
     label: 'Blend lending pool',
     functions: {
-      // Supply only. Borrowing is deliberately out of scope: a supply-only
-      // position cannot be liquidated, and that stays true only while nothing
-      // here can open a liability.
+      // `submit` carries a request vector whose type decides whether this is
+      // a supply, a withdrawal, collateral, a borrow or a repayment, and this
+      // registry labels by function name alone. The label is accurate here
+      // because the only path that reaches this table is a *plan* step, and
+      // `build-plan` builds supplies only. The direct lend routes never
+      // consult it — each asserts its own shape and names its own noun in a
+      // refusal (see `assertSelfPoolCall` in lend/blend-client.ts). If a
+      // plan step ever carries another request type, this label must learn
+      // to read the vector rather than stay a constant.
       submit: 'Supply to Blend',
     },
   },
