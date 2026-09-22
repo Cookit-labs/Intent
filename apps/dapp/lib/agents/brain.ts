@@ -35,6 +35,13 @@ export type AgentStrategyKey = Extract<
 export type BrainProvider = 'deepseek' | 'groq' | 'ollama' | 'openrouter'
 
 /**
+ * Which agent. `provider:model`, built by `identity.ts` — an agent is a
+ * model, and this is the model's name in the form every provider returns it.
+ * A string rather than a union because the roster is configuration, not code.
+ */
+export type AgentKey = string
+
+/**
  * Market facts handed to the model.
  *
  * Prices are passed in rather than left to the model's memory. Recall of

@@ -61,6 +61,12 @@ export interface ProviderConfig {
    * too long to list one per agent. A name not in the table is a raw id.
    */
   aliases?: Record<string, string>
+  /**
+   * How a model is named on a card. Keyed by resolved model id; a model not
+   * listed is prettified from its id, which is usually good enough and
+   * occasionally wrong about capitalisation.
+   */
+  displayNames?: Record<string, string>
 }
 
 /**
@@ -106,6 +112,10 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
       'deepseek-v4-pro': { input: 0.66, output: 1.98 },
     },
     defaultPricing: { input: 0.22, output: 0.66 },
+    displayNames: {
+      'deepseek-v4-flash': 'DeepSeek V4 Flash',
+      'deepseek-v4-pro': 'DeepSeek V4 Pro',
+    },
   },
 
   /**
@@ -135,6 +145,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     toolChoice: 'auto',
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
+    displayNames: { 'qwen/qwen3.8-27b': 'Qwen3.8 27B' },
   },
 
   /**
@@ -163,6 +174,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     toolChoice: 'auto',
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
+    displayNames: { 'qwen3.5:latest': 'Qwen3.5 (local)' },
   },
 
   /**
@@ -194,6 +206,13 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
     aliases: OPENROUTER_MODELS,
+    displayNames: {
+      'inclusionai/ling-3.0-flash-fin:free': 'Ling 3.0 Flash Fin',
+      'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super',
+      'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B',
+      'poolside/laguna-s-2.1:free': 'Laguna S 2.1',
+      'cohere/north-mini-code:free': 'North Mini Code',
+    },
   },
 }
 
