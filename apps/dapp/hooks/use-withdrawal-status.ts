@@ -26,15 +26,29 @@ export function useWithdrawalStatus(): {
   ) => Promise<void>
   busy: boolean
   error?: string
+  /**
+   * Bumped after every write to history, so a caller can key an effect on
+   * the data actually changing rather than on `busy` toggling — which also
+   * fires on a guard path that never wrote anything.
+   */
+  refreshed: number
 } {
   const { adapter } = useChain()
   const { address } = useWallet()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [refreshed, setRefreshed] = useState(0)
 
   const refresh = useCallback(
     async (turnId: string, anchor: { id: string; transactionId: string }, chain: string) => {
-      if (address === undefined || !isAnchorId(anchor.id)) return
+      if (address === undefined) {
+        setError('Connect a wallet to check a withdrawal.')
+        return
+      }
+      if (!isAnchorId(anchor.id)) {
+        setError(`${anchor.id} is not an anchor this app uses.`)
+        return
+      }
       const account = address
       const anchorId: AnchorId = anchor.id
       setBusy(true)
@@ -57,7 +71,10 @@ export function useWithdrawalStatus(): {
         // `updateTurn` takes a partial, so the bundle is read, mapped and
         // written back whole.
         const turn = loadTurns(chain).find((t) => t.id === turnId)
-        if (turn === undefined) return
+        if (turn === undefined) {
+          setError('This withdrawal is no longer in your history.')
+          return
+        }
         updateTurn(turnId, {
           bundle: (turn.bundle ?? []).map((step) =>
             step.anchor?.transactionId === anchor.transactionId
@@ -72,6 +89,7 @@ export function useWithdrawalStatus(): {
               : step
           ),
         })
+        setRefreshed((n) => n + 1)
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not read the anchor.')
       } finally {
@@ -81,5 +99,5 @@ export function useWithdrawalStatus(): {
     [address, adapter]
   )
 
-  return { refresh, busy, ...(error !== undefined ? { error } : {}) }
+  return { refresh, busy, refreshed, ...(error !== undefined ? { error } : {}) }
 }

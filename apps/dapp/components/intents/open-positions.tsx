@@ -127,7 +127,7 @@ export function OpenPositions(): JSX.Element | null {
   const [pending, setPending] = useState(() => pendingWithdrawals(loadTurns(slug)))
   useEffect(() => {
     setPending(pendingWithdrawals(loadTurns(slug)))
-  }, [slug, withdrawals.busy])
+  }, [slug, withdrawals.refreshed])
 
   const { data: offers } = useQuery({
     queryKey: ['open-offers', address],
