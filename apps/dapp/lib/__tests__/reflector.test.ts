@@ -1,7 +1,13 @@
 import { nativeToScVal, rpc, scValToNative, xdr } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { fetchReflectorPrices } from '../prices/reflector'
+import {
+  FX_SYMBOLS,
+  REFLECTOR_CEX_DEX,
+  REFLECTOR_FX,
+  fetchFxPrices,
+  fetchReflectorPrices,
+} from '../prices/reflector'
 import { fetchMarketPrices } from '../swap/prices'
 
 /**
@@ -237,5 +243,42 @@ describe('where Reflector sits in the hierarchy', () => {
     })
 
     expect(prices['USDC']?.usd).toBe(1)
+  })
+})
+
+describe('the FX and commodities feed', () => {
+  // A second Reflector contract, priced the same way, carrying currencies
+  // and gold rather than crypto. It matters because the tokenized bonds the
+  // app trades are denominated in pesos and reais, and until now the agents
+  // had no rate for either — nor a gold price for anything anchored to it.
+  const FX = {
+    decimals: 14,
+    resolution: 300,
+    lastTimestamp: 1789599900,
+    prices: {
+      MXN: BigInt('5796900000000'),
+      BRL: BigInt('19562600000000'),
+      EUR: BigInt('114575300000000'),
+      XAU: BigInt('435231000000000000'),
+    },
+  }
+
+  it('reads every FX symbol as dollars per unit', async () => {
+    const got = await fetchFxPrices({ serverImpl: fakeReflector(FX), nowSeconds: NOW })
+    expect(got['MXN']?.usd).toBeCloseTo(0.057969, 6)
+    expect(got['BRL']?.usd).toBeCloseTo(0.195626, 6)
+    expect(got['EUR']?.usd).toBeCloseTo(1.145753, 6)
+    expect(got['XAU']?.usd).toBeCloseTo(4352.31, 2)
+  })
+
+  it('asks the FX contract, not the crypto one', () => {
+    // The two feeds share an interface; only the id tells them apart, and
+    // asking the crypto feed for MXN returns nothing rather than an error.
+    expect(REFLECTOR_FX).not.toBe(REFLECTOR_CEX_DEX)
+    expect(REFLECTOR_FX.startsWith('C')).toBe(true)
+  })
+
+  it('names the currencies the bonds settle in and gold', () => {
+    expect([...FX_SYMBOLS]).toEqual(expect.arrayContaining(['MXN', 'BRL', 'XAU']))
   })
 })
