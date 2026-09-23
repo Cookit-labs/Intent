@@ -39,9 +39,12 @@ function chainSlug(chain: string): string {
 }
 
 /**
- * Venue logo, falling back to a lettermark. Only the original EVM venues ship
- * bitmaps in /images/venues; rather than commit a logo file per Stellar venue,
- * a missing image degrades to the venue's initial instead of a broken frame.
+ * Venue logo, falling back to a lettermark.
+ *
+ * Logos live at /images/venues/<id>.webp. A venue without one degrades to its
+ * initial rather than a broken frame, which is what an anchor added before its
+ * logo was sourced looks like — deliberate enough to ship, and obviously
+ * incomplete enough that nobody mistakes it for the final treatment.
  */
 function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
   const [failed, setFailed] = useState(false)
