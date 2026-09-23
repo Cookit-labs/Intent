@@ -98,7 +98,7 @@ export interface PlanStep {
  * contract — returns nothing and is refused by the caller. Neither is something
  * a trading plan does.
  */
-function readContractCall(op: Operation): { contractId?: string; functionName?: string } {
+export function readContractCall(op: Operation): { contractId?: string; functionName?: string } {
   // A decoded operation carries the host function already converted out of the
   // raw union: `type` is a plain string and `invokeContract` a plain property,
   // not the accessor methods the XDR classes expose. Verified against a decoded

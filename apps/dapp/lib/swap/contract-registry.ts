@@ -80,9 +80,12 @@ const ENTRIES: ContractEntry[] = [
     label: 'Swap via Aquarius',
     functions: {
       swap: 'Swap via Aquarius',
-      // Listed so a multi-hop route reads honestly if one is ever built. The
-      // builder does not produce it today and its assertion refuses it.
+      // The router's two multi-hop entry points, read from its live interface
+      // on 2026-09-23. Listed so a chained route reads honestly if a plan ever
+      // builds one; the swap builder does not produce either today and its
+      // assertion refuses both.
       swap_chained: 'Swap via Aquarius',
+      swap_chained_strict_receive: 'Swap via Aquarius',
     },
   },
   {

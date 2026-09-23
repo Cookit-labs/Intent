@@ -105,7 +105,9 @@ export const venues: Venue[] = [
     chains: ['Stellar'],
     bestFor: 'Incentivised AMM pools',
     url: 'https://aqua.network',
-    integration: 'listed',
+    integration: 'executes',
+    capability:
+      'Intents route here through its Soroban router, against the pool the agent chose: XLM/USDC has three, and the one that won the comparison is the one that executes. When measured it paid nearly six times Soroswap selling XLM and under a quarter of it buying, so which router wins depends on the direction.',
   },
   {
     id: 'stellarx',

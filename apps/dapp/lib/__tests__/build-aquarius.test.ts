@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveAsset } from '../swap/assets'
 import { assertSelfAquariusSwap, buildAquariusSwap } from '../swap/build-aquarius'
 import { sacFor } from '../swap/build-soroban'
+import { labelForCall } from '../swap/contract-registry'
 import { AQUARIUS_ROUTER } from '../swap/sources/aquarius-quoter'
 
 /**
@@ -173,5 +174,17 @@ describe('the swap must pay the account that funds it', () => {
     expect(() =>
       assertSelfAquariusSwap(handBuilt({ poolIndex: Buffer.from('short') }), ME)
     ).toThrow(/32-byte pool index/)
+  })
+})
+
+describe('the router is one this app will sign for', () => {
+  it('labels every swap entry point the router exposes', () => {
+    // Read from the live contract's interface: `swap`, `swap_chained` and
+    // `swap_chained_strict_receive` all move the caller's tokens through a
+    // pool. A plan step calling any of them must read as a swap in review,
+    // or the registry refuses it with a message about an unknown function.
+    for (const fn of ['swap', 'swap_chained', 'swap_chained_strict_receive']) {
+      expect(labelForCall(AQUARIUS_ROUTER, fn)).toEqual({ ok: true, label: 'Swap via Aquarius' })
+    }
   })
 })

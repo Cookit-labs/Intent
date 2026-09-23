@@ -50,11 +50,13 @@ describe('integration status is claimed accurately', () => {
     expect(capability).toMatch(/out of scope/i)
   })
 
-  it('marks Aquarius as quoted but not yet signable', () => {
-    // A second router whose prices are real and whose swap this app cannot
-    // yet build. 'listed' is the honest claim while that is true, and the
-    // agents may still compare its routes.
-    expect(byId('aquarius')?.integration).toBe('listed')
+  it('marks Aquarius as executing, now that a swap can be signed', () => {
+    // Was 'listed' while the builder existed but the submit route re-checked
+    // its envelope with Soroswap's source-only assertion, which never read
+    // the recipient argument the router pays. Now every Aquarius envelope is
+    // re-asserted with its own check before broadcast, and a swap has been
+    // signed and settled on testnet against the live router.
+    expect(byId('aquarius')?.integration).toBe('executes')
   })
 
   it('lists no Stellar venue the app cannot reach at all', () => {
