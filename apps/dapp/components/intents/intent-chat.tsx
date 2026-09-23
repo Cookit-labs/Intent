@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { Bell, Clock, Sparkles } from 'lucide-react'
+import { Bell, Clock, Inbox, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
@@ -23,7 +23,10 @@ import { useQuery } from '@tanstack/react-query'
 import { OpenIntentCard } from './open-intent-card'
 import { ChatHistoryPanel } from './chat-history-panel'
 import { StandingRulesPanel } from './standing-rules-panel'
+import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
+import { useStandingInbox } from '../../hooks/use-standing-inbox'
+import type { StandingRuleRecord } from '../../lib/api/standing-client'
 import { parseStandingIntent } from '../../lib/parse-standing'
 import {
   clearTurns,
@@ -109,9 +112,45 @@ export function IntentChat(): JSX.Element {
   const [turnId, setTurnId] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  // Standing rules watch prices while this page is open. Deliberately not a
-  // server-side job yet, and the panel says so.
+  // Standing rules are watched here while the page is open and by the
+  // server's tick while it is not. Both report to the same record.
   const standing = useStandingRules()
+  // Rules the tick fired while nobody was looking. The panel shows the items
+  // captured when it opened, so marking them seen does not empty it under
+  // the user; the badge reads the live count.
+  const inbox = useStandingInbox()
+  const [inboxOpen, setInboxOpen] = useState(false)
+  const [inboxItems, setInboxItems] = useState<StandingRuleRecord[]>([])
+  // The rule a fired-rule email linked to, from ?rule=<id>.
+  const [linkedRuleId, setLinkedRuleId] = useState<string | null>(null)
+  const openedFromLink = useRef(false)
+
+  function openInbox(): void {
+    const items = inbox.items
+    setInboxItems(items)
+    setInboxOpen(true)
+    setRulesOpen(false)
+    setHistoryOpen(false)
+    // Opening is seeing. The item has done its job once it has been looked
+    // at; the rule itself stays in the rules list, still waiting to be signed.
+    inbox.markSeen(items.map((i) => i.id))
+  }
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('rule')
+    if (id !== null && id !== '') setLinkedRuleId(id)
+  }, [])
+
+  // Opens on the linked rule once the inbox has answered, and only once: a
+  // user who closes it should not have it reopen on the next poll.
+  useEffect(() => {
+    if (linkedRuleId === null || !inbox.loaded || openedFromLink.current) return
+    openedFromLink.current = true
+    openInbox()
+    // `openInbox` reads the current inbox; re-running on its identity would
+    // reopen the panel on every poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedRuleId, inbox.loaded])
   const [turns, setTurns] = useState<ChatTurn[]>([])
   // A conversation reopened from history. While set, the panel renders what
   // was recorded rather than starting a new competition — reopening used to
@@ -1050,7 +1089,10 @@ export function IntentChat(): JSX.Element {
             is ready and unnoticed is the same as a rule that never fired. */}
         <button
           type="button"
-          onClick={() => setRulesOpen((v) => !v)}
+          onClick={() => {
+            setInboxOpen(false)
+            setRulesOpen((v) => !v)
+          }}
           aria-label="Standing rules"
           aria-expanded={rulesOpen}
           className={cn(
@@ -1065,6 +1107,29 @@ export function IntentChat(): JSX.Element {
             <span className="bg-foreground absolute right-1 top-1 h-1.5 w-1.5 rounded-full" />
           ) : null}
         </button>
+
+        {/* The inbox: rules the server fired while nobody was looking. Badged
+            with the count, because a firing that goes unnoticed is the same
+            as one that never happened. */}
+        <button
+          type="button"
+          onClick={() => (inboxOpen ? setInboxOpen(false) : openInbox())}
+          aria-label="Fired rules"
+          aria-expanded={inboxOpen}
+          className={cn(
+            'relative rounded-full p-1.5 transition-colors',
+            inboxOpen
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+          )}
+        >
+          <Inbox className="h-4 w-4" />
+          {inbox.items.length > 0 ? (
+            <span className="bg-foreground text-background absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none">
+              {inbox.items.length}
+            </span>
+          ) : null}
+        </button>
       </div>
 
       {/* Body.
@@ -1074,6 +1139,22 @@ export function IntentChat(): JSX.Element {
           panel was pinned above the visible region and appeared not to open at
           all. It rendered; it was simply scrolled off screen. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {inboxOpen ? (
+          <StandingInboxPanel
+            items={inboxItems}
+            {...(linkedRuleId !== null ? { focusId: linkedRuleId } : {})}
+            onClose={() => setInboxOpen(false)}
+            onSign={(item) => {
+              // The same path a due rule takes: an ordinary intent the user
+              // reviews and signs. The firing decided; this is the trade.
+              setInboxOpen(false)
+              handleSubmit(
+                `Swap ${item.rule.action.amountIn} ${item.rule.action.from} to ${item.rule.action.to}`
+              )
+            }}
+          />
+        ) : null}
+
         {rulesOpen ? (
           <StandingRulesPanel
             rules={standing.rules}
