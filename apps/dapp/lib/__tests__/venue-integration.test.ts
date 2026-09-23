@@ -100,3 +100,25 @@ describe('the integrated venues are on the right chain', () => {
     }
   })
 })
+
+describe('Noether, the perps venue', () => {
+  it('is listed as a Stellar perps venue that quotes but does not execute', () => {
+    // Reads are live and unauthenticated; opening a position needs an API
+    // key the gateway mints only for wallets on its closed-beta allowlist.
+    // `beta-status` answered `gated: true, allowed: false` for every address
+    // tried on 2026-09-23, so the sign path could not be exercised end to
+    // end, and `executes` would be a promise the app has not seen kept.
+    const noether = byId('noether')
+    expect(noether?.family).toBe('stellar')
+    expect(noether?.category).toBe('perps')
+    expect(noether?.integration).toBe('quotes')
+  })
+
+  it('says the protocol is unaudited and testnet-only', () => {
+    const capability = byId('noether')?.capability ?? ''
+    expect(capability).toMatch(/unaudited/i)
+    expect(capability).toMatch(/testnet/i)
+    expect(capability).toMatch(/0\.0\.0-dev/)
+    expect(capability).toMatch(/closed beta/i)
+  })
+})

@@ -14,6 +14,8 @@ import { BLEND_XLM, readReserve } from '../lend/reserves'
 import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
 import { readWithdrawInfo } from '../offramp/sep24'
 import { readAnchorToml } from '../offramp/toml'
+import { readPerpFacts } from '../perps/market-facts'
+import { createNoetherClient } from '../perps/noether-client'
 
 /**
  * Assembles the facts an agent is allowed to reason from.
@@ -143,10 +145,11 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
   const base = buildMarketContext(chain)
   if (chain !== 'stellar') return base
 
-  const [prices, lending, offramps] = await Promise.all([
+  const [prices, lending, offramps, perps] = await Promise.all([
     fetchMarketPrices(),
     fetchLendingRates(),
     fetchOfframpLimits(),
+    fetchPerpFacts(),
   ])
 
   return {
@@ -160,6 +163,21 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
     // Same omission discipline: absent means "could not be read", not "no
     // limits apply".
     ...(offramps.length > 0 ? { offramps } : {}),
+    // And again: absent means the perps venue could not be read or is paused.
+    ...(perps !== undefined ? { perps } : {}),
+  }
+}
+
+/**
+ * Live perp figures from Noether. Silent on failure like the two above; the
+ * gateway is a dev-tagged container app and a competition must not wait on
+ * it or fail with it.
+ */
+async function fetchPerpFacts(): Promise<MarketContext['perps']> {
+  try {
+    return await readPerpFacts(createNoetherClient())
+  } catch {
+    return undefined
   }
 }
 
@@ -255,6 +273,10 @@ export function buildMarketContext(chain: string): MarketContext {
       // validated against the anchor registry; they are not places a trade
       // executes and must not be selectable as a swap venue.
       .filter((v) => v.category !== 'offramp')
+      // A perps venue is not a swap venue either. Its figures reach the
+      // agents as facts under `perps`; a proposal naming it would pass
+      // validation and reach a builder with no way to open a position.
+      .filter((v) => v.category !== 'perps')
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.

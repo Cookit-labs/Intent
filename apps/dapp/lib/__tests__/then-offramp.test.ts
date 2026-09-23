@@ -105,6 +105,14 @@ describe('buildMarketContext', () => {
     expect(ctx.venues.every((v) => v.category !== 'offramp')).toBe(true)
     expect(ctx.venues.some((v) => v.id === 'soroswap')).toBe(true)
   })
+
+  it('keeps the perps venue out of the swap venue list too', () => {
+    // A proposal naming Noether as its venue would pass validation and then
+    // reach a plan builder with no way to open a position. The perp figures
+    // travel separately, as facts, under `perps`.
+    const ctx = buildMarketContext('stellar')
+    expect(ctx.venues.every((v) => v.category !== 'perps')).toBe(true)
+  })
 })
 
 describe('describePlan', () => {

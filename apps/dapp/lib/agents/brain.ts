@@ -1,4 +1,5 @@
 import type { ParsedIntent } from '../parse-intent'
+import type { PerpFacts } from '../perps/market-facts'
 
 /**
  * The seam between the competition flow and whatever produces agent proposals.
@@ -98,6 +99,15 @@ export interface MarketContext {
    * agents reason about the intent without proposing execution.
    */
   routes?: QuotedRoute[]
+  /**
+   * Live perpetual-futures figures: mark price, open interest, vault APY.
+   *
+   * Context only. Nothing in the proposal schema can express a perp, so the
+   * prompt says a perp cannot be a plan step; the figures are there so an
+   * agent weighing a spot trade knows what the leveraged market is doing
+   * rather than inventing it. Absent when the venue could not be read.
+   */
+  perps?: PerpFacts
 }
 
 /**

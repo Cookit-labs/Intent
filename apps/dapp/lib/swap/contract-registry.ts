@@ -55,6 +55,19 @@ export const BLEND_POOL = 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44
 export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
 
 /**
+ * Noether's testnet market and router, as its gateway listed them on
+ * 2026-09-23 (`/v1/health`, 624k invocations on the market, 0 errors).
+ *
+ * These constants decide only how a call is *worded* in review. The perp
+ * flow validates an envelope against the ids it resolves from the gateway at
+ * request time (`perps/assert-order.ts`), never against these — a testnet
+ * reset or a redeploy would otherwise leave this app narrating a call to a
+ * contract that no longer exists as a Noether order.
+ */
+export const NOETHER_MARKET = 'CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN'
+export const NOETHER_ROUTER = 'CBDVQKYEN6QMRGQZC77DFYEQXQHDMCVJ3TPBJKNERJVMIESA6GQT44LG'
+
+/**
  * Where to see a Blend position, as opposed to the transaction that made it.
  *
  * A block explorer proves the supply happened; it does not show the position,
@@ -99,6 +112,27 @@ const ENTRIES: ContractEntry[] = [
       // plan step ever carries another request type, this label must learn
       // to read the vector rather than stay a constant.
       submit: 'Supply to Blend',
+    },
+  },
+  {
+    id: NOETHER_MARKET,
+    label: 'Noether perps market',
+    functions: {
+      // The isolated open the gateway's `/v1/orders/prepare` builds. Closing,
+      // cross margin and orders are deliberately absent: nothing here builds
+      // them, and a label for a call no builder produces would only ever
+      // narrate a substituted envelope.
+      open_position: 'Open a perp position on Noether',
+    },
+  },
+  {
+    id: NOETHER_ROUTER,
+    label: 'Noether router',
+    functions: {
+      // The venue's own web app opens through the router with a signed oracle
+      // price attached. Listed so such an envelope reads honestly if one is
+      // ever presented; `assertPerpOrder` checks its arguments either way.
+      open_with_price: 'Open a perp position on Noether',
     },
   },
 ]
