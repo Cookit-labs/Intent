@@ -175,6 +175,23 @@ export const venues: Venue[] = [
       'Reserves and rates are read live, and XLM can be supplied. Borrowing stays out of scope on purpose: a supply-only position cannot be liquidated, and that guarantee holds only while nothing here can open a liability.',
   },
   {
+    id: 'defindex',
+    name: 'DeFindex',
+    family: 'stellar' as const,
+    category: 'lending',
+    chains: ['Stellar'],
+    bestFor: 'Yield vaults that autocompound',
+    url: 'https://defindex.io',
+    // 'quotes', not 'executes', and deliberately so. The rate is read live
+    // and offered to the agents, and the deposit path is built and checked
+    // end to end — but against the API's documented shapes, with no key to
+    // exercise them. 'executes' is a promise the app has not yet watched
+    // itself keep. Flip it once a deposit has been signed against a live key.
+    integration: 'quotes',
+    capability:
+      'Each vault’s 7-day APY is read live and offered to the agents beside Blend’s rate once DEFINDEX_API_KEY is set. A deposit is built by DeFindex’s API, checked here field by field before the wallet sees it, and relayed fee-free; that path is implemented against the documented shapes and awaits a key to be exercised, so it is not yet claimed as executing.',
+  },
+  {
     id: 'testanchor',
     name: 'SDF test anchor',
     family: 'stellar' as const,

@@ -106,6 +106,23 @@ describe('integration status is claimed accurately', () => {
   })
 })
 
+describe('DeFindex is claimed as far as it has been proven', () => {
+  it('is listed as a Stellar lending venue', () => {
+    expect(byId('defindex')?.family).toBe('stellar')
+    expect(byId('defindex')?.category).toBe('lending')
+  })
+
+  it('claims quotes, not execution, until a deposit has been signed against a live key', () => {
+    // The rate is read live and offered to the agents, and the deposit path
+    // is built and checked end to end — against the API's documented shapes,
+    // with no key to exercise them. 'executes' is a promise the app has not
+    // yet watched itself keep, so the claim stops at 'quotes' and the
+    // capability line says why.
+    expect(byId('defindex')?.integration).toBe('quotes')
+    expect(byId('defindex')?.capability).toMatch(/key/i)
+  })
+})
+
 describe('the integrated venues are on the right chain', () => {
   it('keeps every executing venue on Stellar', () => {
     // Execution is Stellar-only today. An EVM venue marked executable would

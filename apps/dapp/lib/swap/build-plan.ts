@@ -9,6 +9,7 @@ import {
   type xdr,
 } from '@stellar/stellar-sdk'
 
+import type { LendingVenueId } from '../lend/venues'
 import type { ClassicAsset } from './assets'
 import { fromBaseUnits, isNative } from './assets'
 import { resolveVerifiedAsset } from './asset-registry'
@@ -80,22 +81,23 @@ export interface PoolAction {
 }
 
 /**
- * Supply an asset to a lending pool.
+ * Supply an asset to a lending venue.
  *
  * Unlike every other action here, this one **cannot share a transaction**.
  * Soroban permits exactly one operation per transaction — verified on testnet
- * twice — so a lend is built as its own envelope by `buildBlendSupply` and
- * signed separately. It appears in this union so a plan can *describe* a
- * sequence containing one; `buildPlan` refuses to fold it into a shared
- * envelope rather than building something the network would reject.
+ * twice — so a lend is built as its own envelope (`buildBlendSupply`, or
+ * DeFindex's API for a vault deposit) and signed separately. It appears in
+ * this union so a plan can *describe* a sequence containing one; `buildPlan`
+ * refuses to fold it into a shared envelope rather than building something
+ * the network would reject.
  */
 export interface LendAction {
   kind: 'lend'
-  /** The reserve's asset, as a contract id. Read from the pool, never derived. */
+  /** The asset, as a contract id. Read from the pool or vault, never derived. */
   asset: string
   /** Base units. */
   amount: string
-  venue: 'blend'
+  venue: LendingVenueId
 }
 
 export type PlanAction = SwapAction | RestAction | TrustAction | PoolAction | LendAction

@@ -60,7 +60,9 @@ describe('a well-formed reply is read', () => {
     expect(got?.tokenIn).toBe('USDC')
     expect(got?.tokenOut).toBe('XLM')
     expect(got?.amountUsd).toBe(500)
-    expect(got?.followOn).toEqual({ kind: 'lend', venue: 'blend' })
+    // Named in the sentence, so marked as such: that is what lets the
+    // execution path tell the user's choice of pool from the default.
+    expect(got?.followOn).toEqual({ kind: 'lend', venue: 'blend', venueNamed: true })
   })
 
   it('reports no follow-on for an ordinary swap', async () => {

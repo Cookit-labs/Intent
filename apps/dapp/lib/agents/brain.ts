@@ -71,7 +71,23 @@ export interface MarketContext {
    * with no lending, which is how an agent learns the option does not exist
    * rather than being told not to use it.
    */
-  lending?: { venue: string; asset: string; supplyApy: number; utilisation: number }[]
+  lending?: {
+    venue: string
+    asset: string
+    /** As a percentage. */
+    supplyApy: number
+    /** Borrowed over supplied, as a percentage. A pool has one; a vault does not. */
+    utilisation?: number
+    /**
+     * How the figure was derived, when it is not a pool's instantaneous rate.
+     *
+     * Blend's number is derived from the pool's curve right now; DeFindex's
+     * is a trailing 7-day yield the API reports net of fees. Shown beside the
+     * figure so an agent comparing the two knows they are not the same kind
+     * of number.
+     */
+    basis?: string
+  }[]
   /**
    * Live withdrawal limits from the anchors this chain integrates.
    *
