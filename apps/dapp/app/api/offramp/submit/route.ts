@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { assertOfframpPayment } from '../../../../lib/offramp/build-payment'
 import { readExpectation } from '../../../../lib/offramp/read-expectation'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
+import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
 
 /**
  * Submits a signed offramp payment.
@@ -64,11 +65,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
 
-  const result = await submitSignedSwap(body.signedXdr as string)
+  // The app pays the fee when a sponsor key is configured. The user's own
+  // signed bytes are wrapped, never altered, and a bump that cannot be made
+  // sends the original instead, paying its own fee as before.
+  const sent = await sponsorForSubmission(body.signedXdr as string, body.account as string)
+  const result = await submitSignedSwap(sent.xdr)
   if (!result.ok) return NextResponse.json(result)
 
   return NextResponse.json({
     ...result,
+    feeSponsored: sent.sponsored,
     explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${result.hash}`,
   })
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { assertSelfOffer } from '../../../../lib/swap/build-offer'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
+import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
 
 /**
  * Submits a signed offer to the network.
@@ -44,6 +45,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Submission is asset-agnostic: it posts an envelope and reads back result
   // codes, so the swap submitter serves offers unchanged.
-  const result = await submitSignedSwap(body.signedXdr)
-  return NextResponse.json(result)
+  // The app pays the fee when a sponsor key is configured. The user's own
+  // signed bytes are wrapped, never altered, and a bump that cannot be made
+  // sends the original instead, paying its own fee as before.
+  const sent = await sponsorForSubmission(body.signedXdr, String(body.account ?? ''))
+  const result = await submitSignedSwap(sent.xdr)
+  return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }

@@ -2,6 +2,7 @@ import { stellarTestnet } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { sacFor } from '../../../../lib/swap/build-soroban'
+import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { derivePreview, simulatedPreview } from '../../../../lib/swap/preview'
 
 import { buildSwapTransaction } from '../../../../lib/swap/build-tx'
@@ -120,7 +121,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       xdr: built.xdr,
       // Read from the operations, not from the quote: the floor the network
       // will enforce is what the user is actually promised.
-      preview: derivePreview(built.xdr, body.account, stellarTestnet.networkPassphrase),
+      preview: {
+        ...derivePreview(built.xdr, body.account, stellarTestnet.networkPassphrase),
+        feePaidBy: feePaidBy(),
+      },
       destMin: built.destMin,
       sendAmount: built.sendAmount,
       slippageBps: built.slippageBps,
@@ -199,15 +203,18 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
     xdr: prepared.xdr,
     // The network's own simulation of this call, read for the signer's two
     // token balances. Neither figure is the agent's or the quoter's.
-    preview: simulatedPreview(
-      prepared.sim,
-      account,
-      [
-        { code: fresh.quote.from.code, contract: sacFor(fresh.quote.from) },
-        { code: fresh.quote.to.code, contract: sacFor(fresh.quote.to) },
-      ],
-      prepared.feeXlm
-    ),
+    preview: {
+      ...simulatedPreview(
+        prepared.sim,
+        account,
+        [
+          { code: fresh.quote.from.code, contract: sacFor(fresh.quote.from) },
+          { code: fresh.quote.to.code, contract: sacFor(fresh.quote.to) },
+        ],
+        prepared.feeXlm
+      ),
+      feePaidBy: feePaidBy(),
+    },
     destMin: minReceive,
     sendAmount: built.sendAmount,
     slippageBps: DEFAULT_SLIPPAGE_BPS,
