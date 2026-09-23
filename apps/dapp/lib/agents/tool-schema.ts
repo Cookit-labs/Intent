@@ -98,7 +98,7 @@ export const SUBMIT_PROPOSAL_TOOL = {
         thenVenue: {
           type: 'string',
           description:
-            'Where the follow-on goes. For "lend": "blend" on Stellar. For "offramp": "testanchor" or "moneygram" on Stellar. Use an empty string otherwise.',
+            'Where the follow-on goes. For "lend": the id of a lending venue listed in the market context with a rate ("blend" or "defindex" on Stellar); a venue with no rate listed is not available. For "offramp": "testanchor" or "moneygram" on Stellar. Use an empty string otherwise.',
         },
       },
       required: [

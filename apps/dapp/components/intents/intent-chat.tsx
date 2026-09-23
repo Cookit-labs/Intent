@@ -57,6 +57,7 @@ import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
 import { BLEND_XLM } from '../../lib/lend/reserves'
+import { lendingVenueName } from '../../lib/lend/venues'
 import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
@@ -325,9 +326,13 @@ export function IntentChat(): JSX.Element {
             ...(step.hash !== undefined ? { hash: step.hash } : {}),
             ...(step.explorerUrl !== undefined ? { explorerUrl: step.explorerUrl } : {}),
             ...(step.positionUrl !== undefined ? { positionUrl: step.positionUrl } : {}),
-            ...(step.positionUrl !== undefined && step.anchor === undefined
-              ? { venue: 'Blend' }
-              : {}),
+            // The venue the step named, when it named one. Before steps
+            // carried a venue, a position link with no anchor meant Blend.
+            ...(step.venue !== undefined
+              ? { venue: step.venue }
+              : step.positionUrl !== undefined && step.anchor === undefined
+                ? { venue: 'Blend' }
+                : {}),
             ...(step.anchor !== undefined ? { anchor: step.anchor, venue: 'Anchor' } : {}),
           })),
         },
@@ -449,6 +454,19 @@ export function IntentChat(): JSX.Element {
     if (supplyOnly !== null && slug === 'stellar') {
       setParsed(null)
       setFollowOn(null)
+
+      // Only Blend takes a balance already held. A DeFindex deposit exists
+      // here as the second step of a swap, sized to what the swap delivered;
+      // there is no single-step path to it yet. Said by name and refused,
+      // because supplying to Blend instead would be exactly the substitution
+      // the parser refuses everywhere else.
+      if (supplyOnly.venue !== 'blend') {
+        setAffordError(
+          `Supplying a balance you already hold to ${lendingVenueName(supplyOnly.venue)} is not supported yet. ` +
+            `Swap into ${supplyOnly.asset} and supply it in one intent, or name Blend.`
+        )
+        return
+      }
       // Three conversions, and getting any of them wrong moves the wrong
       // amount of money.
       //
@@ -813,12 +831,26 @@ export function IntentChat(): JSX.Element {
       // what a Soroswap route does and so could never meet its own floor.
       const route = routesByAgent[key] ?? winnerRoute
       if (route !== undefined) {
+        // Whose pool. A venue the user typed is theirs. "Supply it" leaves
+        // the pool to the chosen agent, which was shown every configured
+        // venue's rate precisely so it could choose — and whose choice was
+        // validated server-side against what this deployment can reach.
+        // An agent that named no pool falls back to the default.
+        const agentsVenue =
+          chosenPlan?.thenAction === 'lend' &&
+          chosenPlan.thenVenue !== undefined &&
+          chosenPlan.thenVenue !== ''
+            ? chosenPlan.thenVenue
+            : undefined
+        const venue =
+          followOn.venueNamed === true ? followOn.venue : (agentsVenue ?? followOn.venue)
+
         sequence.prepare({
           kind: 'swap-then-lend',
           quote: route,
           receiveSymbol: parsed.input.tokenOut,
           lendAsset: BLEND_XLM,
-          venue: followOn.venue,
+          venue,
           swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for ${parsed.input.tokenOut}`,
         })
         return

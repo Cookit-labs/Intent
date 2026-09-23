@@ -13,7 +13,11 @@ import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
 import { venues } from '../venues'
-import { BLEND_XLM, readReserve } from '../lend/reserves'
+import type { Env } from '../lend/defindex/config'
+import { VAULT_KEYS } from '../lend/defindex/contracts'
+import { readDefindexRate, type DefindexRate } from '../lend/defindex/rate'
+import { BLEND_XLM, readReserve, type Reserve } from '../lend/reserves'
+import { configuredLendingVenues } from '../lend/venues'
 import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
 import { readWithdrawInfo } from '../offramp/sep24'
 import { readAnchorToml } from '../offramp/toml'
@@ -218,6 +222,19 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
   }
 }
 
+export type LendingRate = NonNullable<MarketContext['lending']>[number]
+
+/** Said beside DeFindex's figure, because it is not the same kind of number as Blend's. */
+export const DEFINDEX_RATE_BASIS = '7-day trailing, net of vault fees'
+
+export interface FetchLendingRatesOptions {
+  /** Decides which venues are read at all. Tests pass one; production reads the process. */
+  env?: Env
+  /** Injected in tests. */
+  readBlend?: () => Promise<Reserve>
+  readDefindex?: (symbol: string) => Promise<DefindexRate | undefined>
+}
+
 /**
  * Dollar rates for the currencies the app's bonds settle in, and for gold.
  *
@@ -234,28 +251,62 @@ async function fetchFxRates(): Promise<Record<string, MarketPrice>> {
 }
 
 /**
- * Live supply rates from the lending pools this chain integrates.
+ * Live supply rates from every lending venue this deployment can reach.
  *
- * Failure is silent and returns nothing. A competition should not collapse
- * because a lending pool was unreachable — the trade is still the main event,
- * and an agent given no rate simply will not propose supplying.
+ * Each venue fails on its own and silently. A competition should not
+ * collapse because a lending pool was unreachable — the trade is still the
+ * main event — and one venue being down is no reason to hide the other's
+ * rate. An agent given no rate for a venue simply will not propose it.
+ *
+ * DeFindex is asked about each asset it maps to a vault. The read declines
+ * on its own when the vault holds a different asset from the one this app
+ * trades, which is what its USDC vault does.
  */
-async function fetchLendingRates(): Promise<
-  { venue: string; asset: string; supplyApy: number; utilisation: number }[]
-> {
-  try {
-    const reserve = await readReserve(BLEND_XLM)
-    return [
-      {
-        venue: 'blend',
-        asset: 'XLM',
-        supplyApy: Number(reserve.supplyApy.toFixed(2)),
-        utilisation: Number((reserve.utilisation * 100).toFixed(2)),
-      },
-    ]
-  } catch {
-    return []
-  }
+export async function fetchLendingRates(
+  options: FetchLendingRatesOptions = {}
+): Promise<LendingRate[]> {
+  const env = options.env ?? process.env
+  const offered = configuredLendingVenues(env)
+  const readBlend = options.readBlend ?? (() => readReserve(BLEND_XLM))
+  const readDefindex =
+    options.readDefindex ?? ((symbol: string) => readDefindexRate(symbol, { env }))
+
+  const blend: Promise<LendingRate[]> = offered.includes('blend')
+    ? readBlend()
+        .then((reserve) => [
+          {
+            venue: 'blend',
+            asset: 'XLM',
+            supplyApy: Number(reserve.supplyApy.toFixed(2)),
+            utilisation: Number((reserve.utilisation * 100).toFixed(2)),
+          },
+        ])
+        .catch(() => [])
+    : Promise.resolve([])
+
+  const defindex: Promise<LendingRate[]> = offered.includes('defindex')
+    ? Promise.all(
+        Object.keys(VAULT_KEYS).map((symbol) =>
+          readDefindex(symbol)
+            .then((rate): LendingRate[] =>
+              rate === undefined
+                ? []
+                : [
+                    {
+                      venue: 'defindex',
+                      asset: symbol,
+                      supplyApy: Number(rate.apy.toFixed(2)),
+                      basis: DEFINDEX_RATE_BASIS,
+                    },
+                  ]
+            )
+            .catch(() => [])
+        )
+      ).then((all) => all.flat())
+    : Promise.resolve([])
+
+  const [fromBlend, fromDefindex] = await Promise.all([blend, defindex])
+  return [...fromBlend, ...fromDefindex]
 }
 
 /**
@@ -290,7 +341,7 @@ async function fetchOfframpLimits(): Promise<NonNullable<MarketContext['offramps
   return out
 }
 
-export function buildMarketContext(chain: string): MarketContext {
+export function buildMarketContext(chain: string, env: Env = process.env): MarketContext {
   // An unrecognised slug used to fall through to 'evm', which quietly handed
   // the agents Curve and Uniswap on a Stellar competition — venues that do not
   // exist here and cannot be executed against. A stale client bundle sending
@@ -300,6 +351,9 @@ export function buildMarketContext(chain: string): MarketContext {
   // No chain means no venues. An agent with nothing to choose from is a
   // visible failure; an agent choosing Uniswap on Stellar is an invisible one.
   const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : undefined
+  // A lending venue this deployment cannot reach is absent, not listed and
+  // failing later. DeFindex needs a key; without one it does not exist here.
+  const lendingOffered: string[] = configuredLendingVenues(env)
 
   return {
     asOf: new Date().toISOString(),
@@ -325,6 +379,7 @@ export function buildMarketContext(chain: string): MarketContext {
       // validated against the anchor registry; they are not places a trade
       // executes and must not be selectable as a swap venue.
       .filter((v) => v.category !== 'offramp')
+      .filter((v) => v.category !== 'lending' || lendingOffered.includes(v.id))
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
+import { lendingVenueName } from '../lib/lend/venues'
 import type { AnchorId } from '../lib/offramp/anchors'
 import { ANCHORS } from '../lib/offramp/anchors'
 import { capToLimits, offrampSizeWarning, withdrawStepLabel } from '../lib/offramp/labels'
@@ -20,9 +21,9 @@ import { useOfframpSession } from './use-offramp-session'
  * Distinct from `use-plan-execution`, and the difference is forced by the
  * protocol rather than chosen. A plan is one transaction that Stellar executes
  * atomically: every step or none. **Soroban permits exactly one operation per
- * transaction** — verified on testnet twice — so a swap and a Blend supply
- * cannot share a signature, and a sequence is genuinely several transactions
- * signed one at a time.
+ * transaction** — verified on testnet twice — so a swap and a lending step
+ * (a Blend supply, or a DeFindex deposit) cannot share a signature, and a
+ * sequence is genuinely several transactions signed one at a time.
  *
  * That changes what honesty requires. A plan can promise atomicity; a sequence
  * cannot, so it must instead show every step before the first signature and say
@@ -81,6 +82,13 @@ export interface SequenceStep {
   positionUrl?: string
   /** What the `positionUrl` link says. "View position on Blend" when absent. */
   positionLabel?: string
+  /**
+   * Where this step put the funds, by name, for history.
+   *
+   * "Blend" or "DeFindex" on a lending step. History used to infer Blend
+   * from a position link with no anchor; with two venues, the step says.
+   */
+  venue?: string
   /** What the step actually delivered, in base units. Known only after it settles. */
   delivered?: string
   anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
@@ -102,6 +110,13 @@ export interface SequenceState {
    */
   autoAdvance?: boolean
   kind?: SequenceRequest['kind']
+  /**
+   * Which lending venue a swap-then-lend supplies, by id.
+   *
+   * The review card shows that venue's risks once the supply is the step in
+   * hand, and the two venues' risks are not the same list.
+   */
+  lendVenue?: string
   /**
    * Something worth saying before the first signature, that does not stop it.
    *
@@ -143,8 +158,9 @@ export interface SwapThenLend {
    * time.
    */
   quote: unknown
-  /** The reserve's asset, as a contract id. */
+  /** The reserve's asset, as a contract id. Blend only; DeFindex resolves its vault from `receiveSymbol`. */
   lendAsset: string
+  /** 'blend' or 'defindex', as `lib/lend/venues.ts` names them. */
   venue: string
   /** Shown in review before the first signature. */
   swapLabel?: string
@@ -217,6 +233,12 @@ export function useSequence(): Sequence {
   // every later render of that effect still sees it.
   const builtFor = useRef<string | undefined>(undefined)
 
+  // What the DeFindex deposit was built for, so its submit can be re-checked
+  // against the same asset and amount the user reviewed. Set when the deposit
+  // is built, read when it is submitted; a ref because `confirm` is rebuilt
+  // between the two and must not read a stale closure.
+  const lendPlan = useRef<{ asset: string; amount: string } | undefined>(undefined)
+
   // Mirrors `state.phase` for the guard in the anchor effect below, which must
   // read the sequence's *current* phase from inside a closure that would
   // otherwise capture a stale one — and must not depend on `state.phase`, or
@@ -230,6 +252,7 @@ export function useSequence(): Sequence {
     setState(EMPTY)
     setRequest(undefined)
     builtFor.current = undefined
+    lendPlan.current = undefined
     resetOfframp()
   }, [resetOfframp])
 
@@ -279,6 +302,44 @@ export function useSequence(): Sequence {
         setState({ ...EMPTY, kind: req.kind, phase: 'building' })
 
         try {
+          // What step two is depends on where the proceeds are going: a
+          // supply to a lending venue, or a payment to the anchor sized to
+          // whatever arrives.
+          //
+          // For DeFindex this is also the moment the deployment is asked
+          // whether it can reach the venue at all. The browser cannot see
+          // server keys, and a venue this deployment lacks has to be refused
+          // here, before any signature, rather than found missing after the
+          // swap has settled and left the user holding the asset with nowhere
+          // planned for it to go.
+          let second: SequenceStep
+          if (req.kind === 'swap-then-lend') {
+            const name = lendingVenueName(req.venue)
+            second = { label: `Supply the result to ${name}`, venue: name }
+            if (req.venue === 'defindex') {
+              const res = await fetch(
+                `/api/lend/defindex/vault?asset=${encodeURIComponent(req.receiveSymbol)}`
+              )
+              const info = (await res.json()) as { apy?: number; error?: string }
+              if (!res.ok) {
+                setState({
+                  ...EMPTY,
+                  kind: req.kind,
+                  phase: 'failed',
+                  error: `${info.error ?? 'DeFindex is not available on this deployment.'} Nothing was signed.`,
+                })
+                return
+              }
+              // Said as a testnet figure, because it is one: a trailing
+              // 7-day yield on synthetic liquidity, not a forecast.
+              second.label =
+                `Deposit the result into DeFindex’s ${req.receiveSymbol} vault` +
+                (info.apy !== undefined ? ` (about ${info.apy}% APY, a testnet figure)` : '')
+            }
+          } else {
+            second = { label: withdrawStepLabel(req.anchor) }
+          }
+
           // The same endpoint an ordinary swap uses, so a sequence inherits its
           // venue dispatch: a Soroswap route builds a router call, a classic
           // route builds a path payment. The plan endpoint could only ever
@@ -300,13 +361,6 @@ export function useSequence(): Sequence {
             return
           }
 
-          // What step two is depends on where the proceeds are going: a Blend
-          // supply, or a payment to the anchor sized to whatever arrives.
-          const second =
-            req.kind === 'swap-then-lend'
-              ? { label: `Supply the result to ${req.venue === 'blend' ? 'Blend' : req.venue}` }
-              : { label: withdrawStepLabel(req.anchor) }
-
           // Both steps are named before the first signature. Showing only the
           // step being signed would let someone approve step one without
           // knowing a second was coming.
@@ -316,6 +370,7 @@ export function useSequence(): Sequence {
             current: 0,
             xdr: built.xdr,
             steps: [{ label: req.swapLabel ?? 'Swap' }, second],
+            ...(req.kind === 'swap-then-lend' ? { lendVenue: req.venue } : {}),
           })
 
           // Said before the first signature rather than after the swap
@@ -340,15 +395,27 @@ export function useSequence(): Sequence {
    *
    * The amount is a parameter rather than a stored figure precisely because it
    * is not knowable until the previous step confirms.
+   *
+   * Two builders, chosen by venue. Blend's takes the reserve's contract id
+   * and builds the envelope here; DeFindex's takes the ticker, resolves the
+   * vault server-side, and admits an envelope its API built. Both hand back
+   * one unsigned transaction, which is all this hook needs to know.
    */
   const buildLend = useCallback(
-    async (signer: string, asset: string, amount: string): Promise<void> => {
+    async (signer: string, req: SwapThenLend, amount: string): Promise<void> => {
       setState((s) => ({ ...s, phase: 'building' }))
 
-      const res = await fetch('/api/lend/build', {
+      const isDefindex = req.venue === 'defindex'
+      if (isDefindex) lendPlan.current = { asset: req.receiveSymbol, amount }
+
+      const res = await fetch(isDefindex ? '/api/lend/defindex/build' : '/api/lend/build', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account: signer, asset, amount }),
+        body: JSON.stringify(
+          isDefindex
+            ? { account: signer, asset: req.receiveSymbol, amount }
+            : { account: signer, asset: req.lendAsset, amount }
+        ),
       })
       const built = (await res.json()) as { xdr?: string; bTokens?: string; error?: string }
 
@@ -580,6 +647,13 @@ export function useSequence(): Sequence {
       (req.kind === 'offramp-only' && stepIndex === 0) ||
       (req.kind === 'swap-then-offramp' && stepIndex === 1)
 
+    // Which step deposits into DeFindex: the second of a swap-then-lend whose
+    // venue is DeFindex. Its envelope came from DeFindex's API and goes back
+    // through DeFindex's relay, so it has its own submit route, which
+    // re-checks it against the asset and amount the deposit was built for.
+    const isDefindexStep =
+      req.kind === 'swap-then-lend' && req.venue === 'defindex' && stepIndex === 1
+
     async function run(): Promise<void> {
       // Captured before the swap runs, so what it delivers can be measured as
       // a difference. A router reports its output as a contract return value
@@ -624,7 +698,9 @@ export function useSequence(): Sequence {
         ? '/api/offramp/submit'
         : stepIndex === 0
           ? '/api/plan/submit'
-          : '/api/lend/submit'
+          : isDefindexStep
+            ? '/api/lend/defindex/submit'
+            : '/api/lend/submit'
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -641,7 +717,14 @@ export function useSequence(): Sequence {
                 transactionId: offrampTransactionId,
                 authToken: offrampToken,
               }
-            : { signedXdr: signed.signedXdr, account: signer }
+            : isDefindexStep
+              ? {
+                  signedXdr: signed.signedXdr,
+                  account: signer,
+                  asset: lendPlan.current?.asset,
+                  amount: lendPlan.current?.amount,
+                }
+              : { signedXdr: signed.signedXdr, account: signer }
         ),
       })
       const result = (await res.json()) as {
@@ -717,7 +800,9 @@ export function useSequence(): Sequence {
                           }
                         : {}),
                     }
-                  : stepIndex > 0
+                  : // DeFindex has no position page this app knows of, so
+                    // its step carries no link rather than Blend's.
+                    stepIndex > 0 && !isDefindexStep
                     ? { positionUrl: blendPositionUrl() }
                     : {}),
               }
@@ -754,7 +839,7 @@ export function useSequence(): Sequence {
         }
 
         if (req.kind === 'swap-then-lend') {
-          await buildLend(signer, req.lendAsset, delivered)
+          await buildLend(signer, req, delivered)
         } else {
           // The anchor is asked for what arrived, and the label is re-said
           // with the real figure rather than the estimate.

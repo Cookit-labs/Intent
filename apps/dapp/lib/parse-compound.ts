@@ -1,3 +1,4 @@
+import { DEFAULT_LENDING_VENUE, lendingVenueName } from './lend/venues'
 import { DEFAULT_ANCHOR, isAnchorId, lookupAnchor } from './offramp/anchors'
 import { parseIntent } from './parse-intent'
 import type { ParsedIntent } from './parse-intent'
@@ -89,8 +90,18 @@ export interface SupplyOnlyIntent {
 const LEND_PHRASING =
   /\b(?:lend(?:s|ing)?|suppl(?:y|ies|ied|ying)|deposit(?:s|ed|ing)?|earn\s+yield|put\s+it\s+(?:in|into))\b/i
 
-/** Venues the follow-on may name. */
-const VENUE_PHRASING: [RegExp, string][] = [[/\bblend\b/i, 'blend']]
+/**
+ * Venues the follow-on may name. Ids match `lib/lend/venues.ts`.
+ *
+ * Both are recognised whether or not this deployment can reach them: the
+ * parser runs in the browser, which cannot see the server's keys. A named
+ * venue the deployment lacks is refused by name before anything is signed,
+ * which is the right outcome — silently supplying elsewhere is the wrong one.
+ */
+const VENUE_PHRASING: [RegExp, string][] = [
+  [/\bblend\b/i, 'blend'],
+  [/\bdefindex\b/i, 'defindex'],
+]
 
 /**
  * Words that name sending the proceeds to fiat.
@@ -135,8 +146,17 @@ function detectAnchor(clause: string): string | null | undefined {
 
 export interface FollowOnAction {
   kind: FollowOnKind
-  /** The venue named, or the only one integrated when none was. */
+  /** The venue named, or the default when none was. */
   venue: string
+  /**
+   * True when the sentence actually named `venue`.
+   *
+   * Absent when it is the default. The distinction decides whose choice the
+   * execution honours: a venue the user typed is theirs, while "supply it"
+   * leaves the pool to the chosen agent, which was offered every configured
+   * venue's rate precisely so it could choose.
+   */
+  venueNamed?: true
   /**
    * The asset to supply, when the text named one.
    *
@@ -302,7 +322,8 @@ export function parseCompoundIntent(
 
   const followOn: FollowOnAction = {
     kind: 'lend',
-    venue: venue ?? 'blend',
+    venue: venue ?? DEFAULT_LENDING_VENUE,
+    ...(venue !== undefined ? { venueNamed: true as const } : {}),
   }
 
   return { head, followOn, clauses: [first, second] }
@@ -373,7 +394,7 @@ export function parseSupplyOnlyIntent(
     // A dollar figure has to be converted at the live price before anything is
     // supplied. Saying which unit this is beats the caller guessing.
     ...(amount !== undefined && usdAmount !== undefined ? { amountIsUsd: true } : {}),
-    venue: venue ?? 'blend',
+    venue: venue ?? DEFAULT_LENDING_VENUE,
   }
 }
 
@@ -453,7 +474,7 @@ export function parseOfframpOnlyIntent(raw: string): OfframpOnlyIntent | null {
 export function describeFollowOn(followOn: FollowOnAction, asset?: string): string {
   const what = asset !== undefined && asset !== '' ? `the ${asset}` : 'it'
   if (followOn.kind === 'lend') {
-    return `then supply ${what} to ${followOn.venue === 'blend' ? 'Blend' : followOn.venue}`
+    return `then supply ${what} to ${lendingVenueName(followOn.venue)}`
   }
   return `then withdraw ${what} to your bank through ${lookupAnchor(followOn.venue)?.name ?? followOn.venue}`
 }

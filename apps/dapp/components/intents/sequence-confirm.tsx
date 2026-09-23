@@ -212,7 +212,9 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
 
       {/* Only once the supply is the step in hand: the risks below are about
           lending, and showing them beside a swap would misattribute them. */}
-      {current > 0 && sequence.kind === 'swap-then-lend' ? <SupplyRisks /> : null}
+      {current > 0 && sequence.kind === 'swap-then-lend' ? (
+        <SupplyRisks venue={sequence.lendVenue} />
+      ) : null}
       {sequence.offramp !== undefined && sequence.offramp.destination !== '' ? (
         <OfframpReview offramp={sequence.offramp} />
       ) : null}
@@ -316,8 +318,36 @@ function StepList({
  *
  * The real risks are different, and less familiar, which is exactly why they
  * are worth the space.
+ *
+ * A DeFindex vault has its own list. Its strategy supplies Blend underneath
+ * (the XLM vault's one strategy is "XLM Blend Strategy", read from the vault
+ * on 2026-09-23), so Blend's risks apply at one remove; on top of that the
+ * vault takes fees from the yield (its `get_fees` reports 100 and 2000 basis
+ * points: 1% to the vault, 20% to DeFindex) and the rate shown is a trailing
+ * 7-day figure, not a forecast.
  */
-function SupplyRisks(): JSX.Element {
+function SupplyRisks({ venue }: { venue: string | undefined }): JSX.Element {
+  if (venue === 'defindex') {
+    return (
+      <div className="border-border text-muted-foreground flex flex-col gap-1.5 rounded-md border p-3 text-xs">
+        <span className="text-foreground font-medium">Before you deposit</span>
+        <span>
+          The vault hands your deposit to a strategy that supplies Blend, so Blend’s risks apply
+          underneath: withdrawals can stall while its pool is near full use, and suppliers absorb
+          defaults beyond the backstop.
+        </span>
+        <span>
+          Fees come out of what the vault earns, not your principal: 1% to the vault and 20% to
+          DeFindex, as the vault itself reports. The rate shown is net of them.
+        </span>
+        <span>
+          The rate is a trailing 7-day figure on testnet, not a forecast. You receive vault shares,
+          and what they are worth moves with the strategy.
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="border-border text-muted-foreground flex flex-col gap-1.5 rounded-md border p-3 text-xs">
       <span className="text-foreground font-medium">Before you supply</span>
