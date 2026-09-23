@@ -4,7 +4,7 @@ import { Button, Card } from '@intent/ui'
 import { ArrowRight, CheckCircle2, ExternalLink, Loader2, TriangleAlert } from 'lucide-react'
 
 import type { SwapPhase } from '../../hooks/use-swap'
-import type { SwapQuote } from '../../lib/swap/quote'
+import { sourceDisplayName, type SwapQuote } from '../../lib/swap/quote'
 import { needsTrustCaution, trustSummary, verificationOf } from '../../lib/swap/asset-registry'
 import { TokenIcon } from '../ui/token-icon'
 
@@ -214,7 +214,9 @@ export function SwapConfirm({
         {/* The agents differ in how they execute, not in which route they can
             reach — one executable quote exists, so they all take it. */}
         {sliceCount === 1 ? <span>single fill</span> : null}
-        <span>via {quote?.source === 'horizon' ? 'Stellar DEX' : quote?.source}</span>
+        {/* Named per source, because "Soroswap" and "Soroswap Aggregator"
+            are different claims about where a fill came from. */}
+        <span>via {quote !== undefined ? sourceDisplayName(quote.source) : undefined}</span>
         <span>
           {quote?.path.length === 0
             ? 'direct'

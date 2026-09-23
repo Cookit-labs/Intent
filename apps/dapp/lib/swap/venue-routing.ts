@@ -31,8 +31,14 @@ import type { SwapQuote } from './quote'
  * argument on one and the first on the other, and only one takes a pool
  * index. A shared kind would mean a shared assertion, and a shared assertion
  * proves less than either alone.
+ *
+ * `aggregator` is Soroswap's hosted route-finder: the transaction is built
+ * by its API rather than here, and takes one of three shapes the API chooses
+ * per quote. `build-aggregator` re-reads whichever arrives against the quote
+ * — the recipient sits sixth on the aggregator contract, fourth on the
+ * router, and in `destination` on a classic path payment.
  */
-export type VenueKind = 'classic' | 'soroban' | 'aquarius'
+export type VenueKind = 'classic' | 'soroban' | 'aquarius' | 'aggregator'
 
 /**
  * Which builder a quote must go to.
@@ -59,6 +65,8 @@ export function builderFor(quote: SwapQuote): VenueKind {
       return 'soroban'
     case 'aquarius':
       return 'aquarius'
+    case 'soroswap-aggregator':
+      return 'aggregator'
     default:
       throw new Error(`no builder for quotes from ${String(quote.source)}`)
   }

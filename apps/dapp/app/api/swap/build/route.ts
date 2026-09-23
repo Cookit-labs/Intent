@@ -6,7 +6,10 @@ import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
 import { createAquariusQuoter } from '../../../../lib/swap/sources/aquarius-quoter'
 import { buildAquariusSwap } from '../../../../lib/swap/build-aquarius'
+import { assertAggregatorSwap, buildAggregatorSwap } from '../../../../lib/swap/build-aggregator'
 import { buildSorobanSwap, prepareSorobanSwap } from '../../../../lib/swap/build-soroban'
+import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
+import { createSoroswapAggregatorQuoter } from '../../../../lib/swap/sources/soroswap-aggregator-quoter'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
 import { applySlippage } from '../../../../lib/swap/assets'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
@@ -81,6 +84,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (venue === 'aquarius') {
     return await buildViaAquarius(body.account, submitted)
+  }
+  if (venue === 'aggregator') {
+    return await buildViaAggregator(body.account, submitted)
   }
 
   // Re-price from the source of truth. The client's numbers are treated as a
@@ -195,6 +201,92 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
     slippageBps: DEFAULT_SLIPPAGE_BPS,
     quote: fresh.quote,
   })
+}
+
+/**
+ * Builds a swap through Soroswap's aggregator, whose API builds the envelope.
+ *
+ * This is the one venue where the transaction is not constructed here, and
+ * it is handled accordingly: the bytes the API returns are read back against
+ * a quote *this* route took, never against the quote the client sent. The
+ * client's numbers state intent; the fresh quote states amounts; and the
+ * assertion in `build-aggregator` is what stands between the API's answer
+ * and the wallet prompt.
+ *
+ * Re-quoted rather than rebuilt from the submitted quote for the reason
+ * every other venue re-quotes, and with one consequence worth naming: the
+ * API's route-finder may split the fresh quote differently from the one the
+ * agents compared. The fresh quote is echoed back so the UI shows that
+ * rather than hiding it, and the floor is derived from the fresh price, so
+ * a worse fill fails on-chain rather than filling badly.
+ *
+ * Simulated after building, like the other Soroban venues: the API's
+ * envelope is re-costed against this app's RPC, and the bytes that come
+ * back from assembly are checked a second time, since those — not the API's
+ * — are what the wallet signs. A classic-DEX plan is a path payment and
+ * needs neither step.
+ */
+async function buildViaAggregator(account: string, submitted: SwapQuote): Promise<NextResponse> {
+  const quoter = createSoroswapAggregatorQuoter()
+  if (!quoter.isConfigured()) {
+    // A route quoted by a deployment with a key, submitted to one without.
+    return NextResponse.json({ error: 'no_route', reason: 'unavailable' }, { status: 200 })
+  }
+
+  const fresh = await quoter.quoteWithRaw({
+    kind: 'strict_send',
+    from: submitted.from,
+    to: submitted.to,
+    sendAmount: submitted.sendAmount,
+  })
+  if (!fresh.ok) {
+    return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
+  }
+
+  let built
+  try {
+    built = await buildAggregatorSwap({ account, quoted: fresh.quoted, api: createSoroswapApi() })
+  } catch (e) {
+    // A refusal from the assertion is a safety property, not an ordinary
+    // failure, and surfaces with its reason rather than flattened.
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'could not build the transaction' },
+      { status: 400 }
+    )
+  }
+
+  const response = (xdr: string) =>
+    NextResponse.json({
+      xdr,
+      destMin: built.floor,
+      sendAmount: built.sendAmount,
+      slippageBps: fresh.quoted.slippageBps,
+      quote: fresh.quoted.quote,
+    })
+
+  if (built.platform === 'sdex') return response(built.xdr)
+
+  const prepared = await prepareSorobanSwap(built.xdr)
+  if (!prepared.ok) {
+    return NextResponse.json(
+      { error: 'simulation_failed', reason: prepared.reason },
+      { status: 409 }
+    )
+  }
+
+  // Assembly cannot change the call; that it cannot is a claim, and reading
+  // the assembled bytes is a fact. The wallet sees these bytes, so these are
+  // the ones checked.
+  try {
+    assertAggregatorSwap(prepared.xdr, account, built.expectation)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'the prepared transaction failed its check' },
+      { status: 400 }
+    )
+  }
+
+  return response(prepared.xdr)
 }
 
 /**

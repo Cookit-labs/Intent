@@ -50,6 +50,21 @@ describe('integration status is claimed accurately', () => {
     expect(capability).toMatch(/out of scope/i)
   })
 
+  it('lists the Soroswap aggregator as its own venue, in the aggregator category', () => {
+    // A different product from the Soroswap AMM above: it splits a swap
+    // across venues through a hosted route-finder, and several of its routes
+    // originate from routers already listed here on their own. Its card must
+    // say so rather than fold into the AMM's.
+    const aggregator = byId('soroswap-aggregator')
+    expect(aggregator?.category).toBe('aggregator')
+    expect(aggregator?.family).toBe('stellar')
+    expect(aggregator?.integration).toBe('executes')
+    // The gate is named: without a key the venue quotes nothing, and a card
+    // that promised execution unconditionally would be wrong for every
+    // deployment that has not registered one.
+    expect(aggregator?.capability).toMatch(/SOROSWAP_API_KEY/)
+  })
+
   it('marks Aquarius as quoted but not yet signable', () => {
     // A second router whose prices are real and whose swap this app cannot
     // yet build. 'listed' is the honest claim while that is true, and the
