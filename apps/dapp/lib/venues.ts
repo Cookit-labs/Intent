@@ -98,6 +98,23 @@ export const venues: Venue[] = [
       'Intents route here through the Soroban router. On identical assets it has quoted several times the classic DEX price.',
   },
   {
+    // A different product from the AMM above, and listed apart from it on
+    // purpose: the aggregator is Soroswap's hosted route-finder, splitting one
+    // swap across Soroswap's pools, Aquarius's and the classic book, and
+    // several of its routes originate from routers already on this page in
+    // their own right.
+    id: 'soroswap-aggregator',
+    name: 'Soroswap Aggregator',
+    family: 'stellar' as const,
+    category: 'aggregator',
+    chains: ['Stellar'],
+    bestFor: 'One swap split across several venues',
+    url: 'https://soroswap.finance',
+    integration: 'executes',
+    capability:
+      'Quotes and signs a swap split across Soroswap, Aquarius and the classic DEX through Soroswap’s route-finder. Active only when SOROSWAP_API_KEY is set. Every transaction its API returns is re-read against the quote — sender, recipient, contract, amounts, floor — before a wallet sees it; on testnet only venues whose adapter contract exists are asked for, which excludes Phoenix.',
+  },
+  {
     id: 'aquarius',
     name: 'Aquarius',
     family: 'stellar' as const,

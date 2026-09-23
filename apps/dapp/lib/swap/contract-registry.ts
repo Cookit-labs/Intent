@@ -55,6 +55,19 @@ export const BLEND_POOL = 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44
 export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
 
 /**
+ * Soroswap's testnet aggregator: a different contract from the router above,
+ * which splits one swap across several venues' adapters.
+ *
+ * Returned by `GET /api/testnet/aggregator` on 2026-09-23, and its
+ * `get_adapters()` simulated the same day. The quoter resolves the live id at
+ * runtime rather than reading this constant; this is the *allowlist* — the id
+ * a signature may be given to. If the API ever hands back a different one,
+ * the builder refuses rather than following it, because a contract this app
+ * has not reviewed is not one it should narrate as "Swap".
+ */
+export const SOROSWAP_AGGREGATOR = 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA'
+
+/**
  * Where to see a Blend position, as opposed to the transaction that made it.
  *
  * A block explorer proves the supply happened; it does not show the position,
@@ -86,6 +99,18 @@ const ENTRIES: ContractEntry[] = [
       // assertion refuses both.
       swap_chained: 'Swap via Aquarius',
       swap_chained_strict_receive: 'Swap via Aquarius',
+    },
+  },
+  {
+    id: SOROSWAP_AGGREGATOR,
+    label: 'Swap via Soroswap aggregator',
+    // The two trade entrypoints from the contract's `SoroswapAggregatorTrait`,
+    // and nothing else. It also exposes `update_adapters`, `set_pause`,
+    // `set_admin` and `upgrade`; none is something a swap does, and a review
+    // line reading "Swap" over any of them would be the registry lying.
+    functions: {
+      swap_exact_tokens_for_tokens: 'Swap via Soroswap aggregator',
+      swap_tokens_for_exact_tokens: 'Swap via Soroswap aggregator',
     },
   },
   {

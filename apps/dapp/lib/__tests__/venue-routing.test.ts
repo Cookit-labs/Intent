@@ -55,6 +55,16 @@ describe('the venue on the quote picks the builder', () => {
     expect(builderFor(soroswapQuote)).toBe<VenueKind>('soroban')
   })
 
+  it('sends an aggregator route to the aggregator builder, not the Soroban one', () => {
+    // Same vendor, different contract and different argument layout. The
+    // Soroban builder asserts a router call with the recipient fourth; the
+    // aggregator puts it sixth, or builds a path payment instead. Sharing a
+    // builder would mean sharing an assertion that fits neither.
+    expect(builderFor({ ...horizonQuote, source: 'soroswap-aggregator' as const })).toBe<VenueKind>(
+      'aggregator'
+    )
+  })
+
   it('refuses a venue it has no builder for', () => {
     // Guessing would sign the wrong transaction shape. A new source must add a
     // builder before it can be executed, not inherit one by accident.

@@ -10,7 +10,29 @@ import type { AssetRef, ClassicAsset } from './assets'
  * them is worth doing rather than theatre.
  */
 
-export type QuoteSourceId = 'horizon' | 'soroswap' | 'aquarius'
+/**
+ * `soroswap-aggregator` is Soroswap's hosted route-finder, a different
+ * product from the `soroswap` AMM: it splits one swap across Soroswap's
+ * pools, Aquarius's and the classic book, and several of its answers
+ * therefore originate from routers that are already sources of their own.
+ * It carries its own id so an agent, and the confirm screen, can tell the
+ * two apart — and the direct quoters stay in the line-up beside it rather
+ * than being replaced by one vendor's view of them.
+ */
+export type QuoteSourceId = 'horizon' | 'soroswap' | 'aquarius' | 'soroswap-aggregator'
+
+/** How each source is named where a person reads it. */
+const SOURCE_DISPLAY_NAMES: Record<QuoteSourceId, string> = {
+  horizon: 'Stellar DEX',
+  soroswap: 'Soroswap',
+  aquarius: 'Aquarius',
+  'soroswap-aggregator': 'Soroswap Aggregator',
+}
+
+/** A source's display name, or the raw id for one this build does not know. */
+export function sourceDisplayName(id: string): string {
+  return (SOURCE_DISPLAY_NAMES as Record<string, string>)[id] ?? id
+}
 
 /** Fixed input, variable output — an ordinary market swap. */
 export interface StrictSendRequest {
@@ -76,14 +98,38 @@ export interface SwapQuote {
    * pair, and the Aquarius builder refuses a quote without it.
    */
   poolIndex?: string
+  /**
+   * How an aggregator splits the fill across venues, when it does.
+   *
+   * `path` above is empty for such a route — there are no classic hops to
+   * replay, the API rebuilds its own plan at signing time — so without this
+   * an agent would see "direct" for a swap that went 60% through one AMM and
+   * 40% through another by way of a third asset. Present only on aggregator
+   * routes; `hops` counts intermediate assets on that leg.
+   */
+  routePlan?: { protocol: string; percent: string; hops: number }[]
+  /**
+   * Which shape an aggregator route executes as. The API decides per quote:
+   * a split invokes the aggregator contract, a single Soroswap route invokes
+   * the router alone, and a classic-book route is a path payment. The
+   * builder validates each differently, so the answer travels with the quote.
+   */
+  platform?: 'aggregator' | 'router' | 'sdex'
   /** When the quote was taken. Routes go stale; the caller re-quotes before building. */
   quotedAt: string
 }
 
 export interface QuoteFailure {
   source: QuoteSourceId
-  /** `no_route` is an ordinary outcome for a thin pair, not a fault. */
-  reason: 'no_route' | 'unsupported_pair' | 'upstream_error' | 'timeout'
+  /**
+   * `no_route` is an ordinary outcome for a thin pair, not a fault.
+   * `unavailable` is the source itself: configured, but unable to learn what
+   * it needs before asking — a contract id it could not resolve, an adapter
+   * list it could not read, a key the API rejected. Distinct from
+   * `upstream_error` because the fix is different: nothing about the market
+   * is being reported.
+   */
+  reason: 'no_route' | 'unsupported_pair' | 'upstream_error' | 'timeout' | 'unavailable'
   detail?: string
 }
 
