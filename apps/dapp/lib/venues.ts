@@ -215,4 +215,22 @@ export const venues: Venue[] = [
     capability:
       'SEP-24 withdrawal of USDC on the testnet deployment. Production access needs a commercial agreement with MoneyGram; the flow is identical.',
   },
+  // Perpetual futures. `quotes`, not `executes`: the reads are live and the
+  // order path is built, but the gateway mints the API key an order needs
+  // only for wallets on its closed-beta allowlist (`beta-status` answered
+  // `allowed: false` for every address tried on 2026-09-23), so no position
+  // has been signed through this app end to end.
+  {
+    id: 'noether',
+    name: 'Noether',
+    family: 'stellar' as const,
+    category: 'perps',
+    chains: ['Stellar'],
+    bestFor: 'Leveraged longs and shorts, up to 10x',
+    // The site answers; its `api.` and `docs.` subdomains do not resolve.
+    url: 'https://noether.exchange',
+    integration: 'quotes',
+    capability:
+      'Mark prices, open interest and vault APY are read live for the agents, and "long XLM 10x with 50 USDC" prepares an isolated position through the gateway for review and signature. Signing needs an API key the gateway issues only inside its closed beta, so the sign path is unverified end to end. The protocol is unaudited and testnet-only; its gateway reports version 0.0.0-dev.',
+  },
 ]

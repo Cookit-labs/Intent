@@ -55,6 +55,9 @@ import type { WithdrawLimits } from '../../lib/offramp/sep24'
 import { estimatedReceiveOf } from '../../lib/offramp/labels'
 import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
+import { usePerp } from '../../hooks/use-perp'
+import { PerpConfirm } from './perp-confirm'
+import { parsePerpIntent } from '../../lib/parse-perp'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
 import { BLEND_XLM } from '../../lib/lend/reserves'
 import { lendingVenueName } from '../../lib/lend/venues'
@@ -174,6 +177,22 @@ export function IntentChat(): JSX.Element {
     staleTime: 15_000,
   })
 
+  // Which markets the perps venue lists, so "long XLM" is recognised at all.
+  // A live read rather than a table: the venue's markets are its own fact,
+  // and an unreachable venue means no perp is read — the trade parser then
+  // sees the sentence, which is the same as before perps existed.
+  const { data: perpMarkets } = useQuery({
+    queryKey: ['perp-markets'],
+    queryFn: async () =>
+      (await (await fetch('/api/perps/markets')).json()) as {
+        online: boolean
+        markets: { asset: string }[]
+      },
+    enabled: slug === 'stellar',
+    staleTime: 60_000,
+  })
+  const perpSymbols = perpMarkets?.online === true ? perpMarkets.markets.map((m) => m.asset) : []
+
   // Live agents, always. There is no offline race any more: when the agents
   // are not online the route says so and the panel shows it. A build-time
   // toggle used to select a mock competition here, and a stale bundle once
@@ -227,6 +246,9 @@ export function IntentChat(): JSX.Element {
   // Supplying an asset already held. A separate shape from a sequence: there is
   // no earlier step whose output has to be carried.
   const supply = useSupply()
+  // A leveraged position on Noether. Its own shape again: no route, no
+  // competition, and a sign-in with the venue before anything is built.
+  const perp = usePerp()
 
   // Clicking Execute puts the swap into `review`, which renders the confirm
   // card — but that card sits below four agent cards in a scrolling panel, so
@@ -497,6 +519,20 @@ export function IntentChat(): JSX.Element {
       return
     }
     supply.reset()
+    perp.reset()
+
+    // "Long XLM 10x with 50 USDC" is a leveraged position, not a purchase,
+    // and the trade parser would read it as a spot buy of XLM with USDC. The
+    // model has no vocabulary for it either — nothing in the proposal schema
+    // can express a perp — so it is read here, before both, and takes the
+    // direct flow: no route, no competition, one position to review.
+    const regexPerp = parsePerpIntent(text, perpSymbols)
+    if (regexPerp !== null && slug === 'stellar') {
+      setParsed(null)
+      setFollowOn(null)
+      perp.prepare(regexPerp)
+      return
+    }
 
     // The regex reading, computed first and always. It is the fallback, so it
     // must never depend on the model answering — an outage or a missing key has
@@ -1213,6 +1249,10 @@ export function IntentChat(): JSX.Element {
               {/* Supplying what the account already holds. One transaction,
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
+
+              {/* A leveraged position. One transaction, one signature, and a
+                liquidation price to read before it. */}
+              {perp.phase !== 'idle' ? <PerpConfirm perp={perp} /> : null}
 
               {sequence.phase !== 'idle' ? <SequenceConfirm sequence={sequence} /> : null}
 

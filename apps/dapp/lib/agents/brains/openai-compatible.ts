@@ -187,6 +187,7 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
               ),
             ]
           : []),
+        ...perpLines(req),
         ...routeLines(req),
       ].join('\n'),
     },
@@ -210,6 +211,33 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         .filter((l) => l !== '')
         .join('\n'),
     },
+  ]
+}
+
+/**
+ * Live perp figures, stated as facts and fenced off from the proposal.
+ *
+ * The schema has no way to express a leveraged position, so an agent that
+ * read "XLM open interest is short-heavy" and proposed a long would produce a
+ * proposal the validator refuses. The fence is said in the same breath as
+ * the figures, where a model is most likely to read it.
+ */
+function perpLines(req: ProposalRequest): string[] {
+  const perps = req.market.perps
+  if (perps === undefined || perps.markets.length === 0) return []
+  const usd = (n: number): string => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+  return [
+    `Perpetual futures on Noether (${perps.venue}), read live. The protocol is unaudited and testnet-only; its gateway reports version ${perps.version}.`,
+    ...perps.markets.map(
+      (m) =>
+        `  ${m.asset}: mark $${m.markPriceUsd}` +
+        (m.openInterestLongUsd !== undefined && m.openInterestShortUsd !== undefined
+          ? `, open interest long $${usd(m.openInterestLongUsd)} / short $${usd(m.openInterestShortUsd)}`
+          : '') +
+        (m.openPositions !== undefined ? `, ${m.openPositions} open positions` : '')
+    ),
+    ...(perps.vaultApyPct !== undefined ? [`  vault APY ${perps.vaultApyPct}%`] : []),
+    'The gateway reports no funding rate. A perp cannot be proposed as a plan step yet; use these figures as context for the spot trade only.',
   ]
 }
 

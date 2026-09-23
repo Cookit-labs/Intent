@@ -8,6 +8,7 @@ export type VenueCategory =
   | 'rwa'
   | 'pool'
   | 'offramp'
+  | 'perps'
 
 /**
  * How far a venue is wired into the app.
