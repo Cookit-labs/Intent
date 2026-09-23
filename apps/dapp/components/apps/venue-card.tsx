@@ -22,8 +22,9 @@ const categoryLabel: Record<VenueCategory, string> = {
  * How far a venue is wired in, said plainly.
  *
  * The page used to list every venue identically, so a user could not tell that
- * intents can be signed through Soroswap and only priced on Aquarius. That is
- * the most useful thing this page can say, and it was the one thing missing.
+ * intents could be signed through Soroswap and, at the time, only priced on
+ * Aquarius. That is the most useful thing this page can say, and it was the
+ * one thing missing.
  */
 const integrationLabel: Record<VenueIntegration, string> = {
   executes: 'Integrated',

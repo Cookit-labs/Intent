@@ -1,7 +1,16 @@
+import { stellarTestnet } from '@intent/config'
+import { FeeBumpTransaction, TransactionBuilder } from '@stellar/stellar-sdk'
+
+import { assertSelfAquariusSwap } from './build-aquarius'
+import { assertSelfInvoke } from './build-soroban'
+import { assertSelfSwap } from './build-tx'
+import { AQUARIUS_ROUTER } from './contract-registry'
+import { readContractCall } from './plan-validator'
 import type { SwapQuote } from './quote'
 
 /**
- * Deciding which builder signs a given quote.
+ * Deciding which builder signs a given quote, and which assertion re-checks
+ * the envelope that comes back signed.
  *
  * Three builders exist and they are not interchangeable, because each asserts
  * a different security property:
@@ -62,4 +71,42 @@ export function builderFor(quote: SwapQuote): VenueKind {
     default:
       throw new Error(`no builder for quotes from ${String(quote.source)}`)
   }
+}
+
+/**
+ * Re-asserts a signed envelope with the check its shape calls for.
+ *
+ * Each builder's assertion proves a different thing, and the submit route
+ * used to pick between two of them by trial: the path-payment check first,
+ * and on failure the Soroswap one, which reads the source and the operation
+ * type and nothing else. An Aquarius envelope satisfied that fallback with
+ * any address in its first argument — the one the router pays — so the
+ * builder's guarantee held at build time and was dropped after the bytes had
+ * been through a browser and a wallet extension, which is the only point the
+ * re-check exists for.
+ *
+ * The shape is read from the bytes, not from a venue the client names. A
+ * lone call to the Aquarius router gets the Aquarius assertion; any other
+ * lone contract call keeps the Soroswap one; everything else is held to the
+ * path-payment check, whose message stays the one a malformed classic swap
+ * has always produced.
+ */
+export function assertSelfSubmission(signedXdr: string, account: string): void {
+  const decoded = TransactionBuilder.fromXDR(signedXdr, stellarTestnet.networkPassphrase)
+  if (decoded instanceof FeeBumpTransaction) {
+    throw new Error('fee-bump transactions are not supported here')
+  }
+
+  const op = decoded.operations.length === 1 ? decoded.operations[0] : undefined
+  if (op === undefined || op.type !== 'invokeHostFunction') {
+    assertSelfSwap(signedXdr, account)
+    return
+  }
+
+  if (readContractCall(op).contractId === AQUARIUS_ROUTER) {
+    assertSelfAquariusSwap(signedXdr, account)
+    return
+  }
+
+  assertSelfInvoke(signedXdr, account)
 }

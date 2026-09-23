@@ -30,8 +30,8 @@ export function VenueGrid(): JSX.Element {
     const onChain = venues.filter((v) => v.family === descriptor.family)
 
     // Venues the app can actually use come first. Alphabetical order put
-    // Aquarius — which intents have never touched — above Soroswap, which they
-    // route through, so the most useful thing the page knows was buried.
+    // Aquarius — then only priced, never signed — above Soroswap, which
+    // intents routed through, so the most useful thing the page knew was buried.
     const ranked = [...onChain].sort((a, b) => rank(b) - rank(a))
 
     const q = query.trim().toLowerCase()
