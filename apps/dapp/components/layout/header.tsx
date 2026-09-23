@@ -25,7 +25,9 @@ export function Header({
   onOpenMenu?: () => void
 }): JSX.Element {
   return (
-    <header className="border-border bg-surface-base/80 flex h-16 shrink-0 items-center justify-between gap-2 border-b px-4 backdrop-blur sm:gap-4 sm:px-6">
+    // Clear, so the canvas glow behind it reads through. The page scrolls in
+    // its own box, so nothing ever passes under the header for it to hide.
+    <header className="flex h-16 shrink-0 items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         {menuButton}
         <ChainSwitcher />

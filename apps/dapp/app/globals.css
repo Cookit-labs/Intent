@@ -39,6 +39,10 @@
    * colour in either theme, which is what makes a button unmistakably a
    * button — recolouring it per theme would cost that.
    *
+   * The one exception to "value alone" is the page canvas: see `.app-canvas`
+   * below, which lays a brand-tinted glow and film grain under the content in
+   * both themes. Surfaces above it stay neutral, so they still read as raised.
+   *
    * Only tokens are redefined here. Every component reads these, so a
    * component that hardcodes a colour is a bug this file cannot fix.
    */
@@ -88,6 +92,50 @@
   ::selection {
     @apply bg-brand/20 text-brand;
   }
+}
+
+/*
+ * Page canvas: a brand glow with film grain.
+ *
+ * Applied to the column that holds the header and the scrolling page. The
+ * column itself never scrolls, so the glow stays put and the content moves
+ * over it. Cards and inputs are opaque, so the tint shows only in the gaps
+ * between them.
+ *
+ * The grain is an SVG turbulence tile in a pseudo-element rather than a second
+ * background layer, so its strength is one `opacity` value. `isolation` keeps
+ * the negative z-index inside this element; without it the grain would drop
+ * behind the page.
+ *
+ * One strength for both themes. Light used to run gentler on the theory that
+ * the same alpha reads louder on off-white; in practice it read as a faint
+ * wash next to the dark canvas, and the brief is that the glow and grain be
+ * just as present in light. The grain darkens a light page and brightens a
+ * dark one, which is the only difference left.
+ */
+.app-canvas {
+  position: relative;
+  isolation: isolate;
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(
+      ellipse 90% 70% at 50% -15%,
+      hsl(var(--brand) / 0.5) 0%,
+      hsl(var(--brand) / 0.22) 35%,
+      hsl(var(--brand) / 0) 72%
+    ),
+    radial-gradient(ellipse 60% 40% at 50% 0%, hsl(var(--brand) / 0.2), transparent 60%);
+}
+
+.app-canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.11;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
 }
 
 /* RainbowKit connect button: normal weight to match the flat, no-bold rule. */

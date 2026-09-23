@@ -61,7 +61,9 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      {/* `app-canvas`: this column carries the brand glow and grain that the
+          header and page sit on. See globals.css. */}
+      <div className="app-canvas flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
           onOpenMenu={() => setMenuOpen(true)}
           menuButton={
