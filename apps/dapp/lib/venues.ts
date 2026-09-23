@@ -179,22 +179,4 @@ export const venues: Venue[] = [
     capability:
       'SEP-24 withdrawal of USDC on the testnet deployment. Production access needs a commercial agreement with MoneyGram; the flow is identical.',
   },
-  {
-    id: 'phoenix',
-    name: 'Phoenix',
-    family: 'stellar' as const,
-    category: 'swap',
-    chains: ['Stellar'],
-    bestFor: 'Soroban-native DEX',
-    url: 'https://www.phoenix-hub.io',
-  },
-  {
-    id: 'lumenswap',
-    name: 'Lumenswap',
-    family: 'stellar' as const,
-    category: 'orderbook',
-    chains: ['Stellar'],
-    bestFor: 'Lightweight SDEX trading',
-    url: 'https://lumenswap.io',
-  },
 ]

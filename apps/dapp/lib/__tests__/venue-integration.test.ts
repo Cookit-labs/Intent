@@ -6,9 +6,9 @@ import { venues } from '../venues'
  * What the Apps page claims the app can do.
  *
  * The page listed venues as links, which told a user nothing about whether an
- * intent could actually route through one. Soroswap and Phoenix appeared
- * identically, though the app executes on the first and has never spoken to
- * the second.
+ * intent could actually route through one. Soroswap and Aquarius appear
+ * identically, though the app can sign a swap on the first and only price one
+ * on the second.
  *
  * These tests exist because the claim is easy to get wrong in the direction
  * that matters: marking something `executes` when no builder reaches it is a
@@ -50,9 +50,24 @@ describe('integration status is claimed accurately', () => {
     expect(capability).toMatch(/out of scope/i)
   })
 
-  it('leaves an unintegrated venue unclaimed', () => {
-    // Phoenix is a real Stellar DEX the app has never called.
-    expect(byId('phoenix')?.integration ?? 'listed').toBe('listed')
+  it('marks Aquarius as quoted but not yet signable', () => {
+    // A second router whose prices are real and whose swap this app cannot
+    // yet build. 'listed' is the honest claim while that is true, and the
+    // agents may still compare its routes.
+    expect(byId('aquarius')?.integration).toBe('listed')
+  })
+
+  it('lists no Stellar venue the app cannot reach at all', () => {
+    // A venue earns its place by being reachable — quotable at least, and
+    // ideally signable. Phoenix and Lumenswap were neither: Phoenix's testnet
+    // router resolves to a contract that does not exist, so a route through it
+    // would be priced and then fail at signing, and Lumenswap has been
+    // unmaintained since 2024 with an API that no longer answers. Listing
+    // either one offered the agents a venue no intent could ever use.
+    const gone = ['phoenix', 'lumenswap']
+    for (const id of gone) {
+      expect(byId(id)).toBeUndefined()
+    }
   })
 
   it('gives every integrated venue a capability line', () => {
