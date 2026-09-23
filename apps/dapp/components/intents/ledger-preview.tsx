@@ -49,8 +49,17 @@ export function LedgerPreview({
           </li>
         ))}
         <li className="text-muted-foreground flex items-baseline gap-x-2 text-xs">
-          <span className="font-mono tabular-nums">-{preview.feeXlm} XLM</span>
-          <span>network fee</span>
+          {preview.feePaidBy === 'sponsor' ? (
+            <>
+              <span className="font-mono tabular-nums">{preview.feeXlm} XLM</span>
+              <span>network fee, paid by Intent. Nothing leaves your wallet for it.</span>
+            </>
+          ) : (
+            <>
+              <span className="font-mono tabular-nums">-{preview.feeXlm} XLM</span>
+              <span>network fee</span>
+            </>
+          )}
         </li>
         {preview.unresolved > 0 ? (
           <li className="text-muted-foreground text-xs">

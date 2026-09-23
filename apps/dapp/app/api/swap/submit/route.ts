@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { submitSignedSwap } from '../../../../lib/swap/submit'
+import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
 import { assertSelfSubmission } from '../../../../lib/swap/venue-routing'
 
 /**
@@ -43,6 +44,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  const result = await submitSignedSwap(body.signedXdr)
-  return NextResponse.json(result, { status: result.ok ? 200 : 200 })
+  // The app pays the fee when a sponsor key is configured. The user's own
+  // signed bytes are wrapped, never altered, and a bump that cannot be made
+  // sends the original instead, paying its own fee as before.
+  const sent = await sponsorForSubmission(body.signedXdr, String(body.account ?? ''))
+  const result = await submitSignedSwap(sent.xdr)
+  return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }

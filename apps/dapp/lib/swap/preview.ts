@@ -49,6 +49,11 @@ export interface LedgerPreview {
   changes: BalanceChange[]
   /** The whole transaction fee, in XLM. */
   feeXlm: string
+  /**
+   * Who pays it. `sponsor` when the app wraps the transaction in a fee-bump
+   * at submission, in which case nothing leaves the wallet for the fee.
+   */
+  feePaidBy?: 'sponsor' | 'account'
   /** Operations the derivation could not read. Zero on a simulated preview. */
   unresolved: number
 }
