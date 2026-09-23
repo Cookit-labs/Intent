@@ -16,11 +16,11 @@ import type { StoredRule } from '../../lib/standing-store'
  * is waiting for in the user's own terms — "when XLM falls to $0.16", not
  * "armed". Someone returning a week later has to recognise what they set up.
  *
- * And the watcher is a browser tab. A rule fires when this page is open and
- * the condition is met; close it and nothing is watching. Saying so plainly is
- * uncomfortable and necessary — someone who believes a rule is running
- * autonomously will not check back, and will find out only by missing the
- * trade they were waiting for.
+ * And a rule firing is not a trade. The server watches rules whether or not
+ * this page is open, and when one fires it emails the user and lists it in
+ * the inbox — but nothing has moved until they sign. So a fired rule with no
+ * transaction behind it is shown as waiting for a signature, not as done,
+ * and keeps its sign button until there is a hash to show.
  */
 
 function statusLabel(rule: StoredRule): string {
@@ -28,7 +28,7 @@ function statusLabel(rule: StoredRule): string {
     case 'armed':
       return 'Watching'
     case 'fired':
-      return 'Done'
+      return rule.lastTxHash === undefined ? 'Fired' : 'Done'
     case 'cancelled':
       return 'Stopped'
     case 'expired':
@@ -76,7 +76,11 @@ export function StandingRulesPanel({
           <ul className="flex flex-col gap-2">
             {rules.map((rule) => {
               const verdict = evaluateTrigger(rule, prices)
-              const isDue = rule.status === 'armed' && verdict.fires
+              // Due here, or fired by the server and not yet signed. Both are
+              // the same thing to the user: a trade waiting for their approval.
+              const isDue =
+                (rule.status === 'armed' && verdict.fires) ||
+                (rule.status === 'fired' && rule.lastTxHash === undefined)
 
               return (
                 <li key={rule.id}>
@@ -129,15 +133,16 @@ export function StandingRulesPanel({
         )}
       </div>
 
-      {/* The limitation, stated where it cannot be missed rather than buried.
-          A user who thinks a rule runs without them will not come back to it. */}
+      {/* What "watching" means, stated where it cannot be missed. The rule is
+          checked without the user; the trade still needs them. */}
       {armed.length > 0 ? (
         <div className="border-border text-muted-foreground shrink-0 border-t px-4 py-3 text-xs">
           <span className="inline-flex items-start gap-1.5">
             <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Rules are checked while this page is open, and each one asks for your signature before
-              it trades. Nothing runs while the tab is closed.
+              Rules are checked every minute, whether or not this page is open. When one fires you
+              get an email and it appears in your inbox here — and it still asks for your signature
+              before it trades.
             </span>
           </span>
         </div>

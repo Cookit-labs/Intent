@@ -13,7 +13,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
  */
 export { SESSION_COOKIE, SESSION_TTL_SECONDS } from './session-constants'
 
-import { SESSION_TTL_SECONDS as TTL } from './session-constants'
+import { SESSION_COOKIE as COOKIE, SESSION_TTL_SECONDS as TTL } from './session-constants'
 
 export interface SessionPayload {
   email: string
@@ -47,7 +47,10 @@ export function createSession(email: string, now = Date.now()): string {
  * expiry is in the future. Any malformed input returns undefined rather than
  * throwing, because this runs on attacker-controlled cookie values.
  */
-export function readSession(token: string | undefined, now = Date.now()): SessionPayload | undefined {
+export function readSession(
+  token: string | undefined,
+  now = Date.now()
+): SessionPayload | undefined {
   if (token === undefined || token === '') return undefined
 
   const parts = token.split('.')
@@ -67,6 +70,33 @@ export function readSession(token: string | undefined, now = Date.now()): Sessio
   } catch {
     return undefined
   }
+}
+
+/**
+ * The session carried by a request's Cookie header, if any.
+ *
+ * Reads the header directly rather than through `next/headers`, so a route
+ * handler that uses it can be called in a unit test with a plain `Request`.
+ * Same rules as `readSession`: malformed input is undefined, never a throw.
+ */
+export function readSessionFromRequest(
+  request: Request,
+  now = Date.now()
+): SessionPayload | undefined {
+  const header = request.headers.get('cookie')
+  if (header === null) return undefined
+
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq === -1) continue
+    if (part.slice(0, eq).trim() !== COOKIE) continue
+    try {
+      return readSession(decodeURIComponent(part.slice(eq + 1).trim()), now)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
 }
 
 export const sessionCookieOptions = {
