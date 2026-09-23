@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { buildPlan, type PlanAction } from '../../../../lib/swap/build-plan'
+import { derivePreview } from '../../../../lib/swap/preview'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { applySlippage } from '../../../../lib/swap/assets'
 import { collectQuotes } from '../../../../lib/swap/quote'
@@ -61,6 +62,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       xdr: built.xdr,
       steps: built.steps,
       description: built.description,
+      // The description says what each step intends; this says what the
+      // operations, as built, will do to the account that signs them.
+      preview: derivePreview(built.xdr, body.account, built.networkPassphrase),
     })
   } catch (e) {
     // Every refusal here is a safety property rather than an ordinary failure

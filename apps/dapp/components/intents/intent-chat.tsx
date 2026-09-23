@@ -1269,6 +1269,7 @@ export function IntentChat(): JSX.Element {
                   explorerUrl={swap.explorerUrl}
                   error={swap.error}
                   usdPrices={swap.usdPrices}
+                  preview={swap.preview}
                   agentName={
                     executingKey !== null ? competition.proposals[executingKey]?.name : undefined
                   }

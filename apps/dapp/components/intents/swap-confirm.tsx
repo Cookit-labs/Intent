@@ -4,9 +4,11 @@ import { Button, Card } from '@intent/ui'
 import { ArrowRight, CheckCircle2, ExternalLink, Loader2, TriangleAlert } from 'lucide-react'
 
 import type { SwapPhase } from '../../hooks/use-swap'
+import type { LedgerPreview as LedgerPreviewData } from '../../lib/swap/preview'
 import type { SwapQuote } from '../../lib/swap/quote'
 import { needsTrustCaution, trustSummary, verificationOf } from '../../lib/swap/asset-registry'
 import { TokenIcon } from '../ui/token-icon'
+import { LedgerPreview } from './ledger-preview'
 
 /**
  * The last screen before money moves.
@@ -61,6 +63,7 @@ export function SwapConfirm({
   agentName,
   sliceCount,
   horizonMinutes,
+  preview,
   onConfirm,
   onReset,
 }: {
@@ -92,6 +95,7 @@ export function SwapConfirm({
   agentName?: string | undefined
   sliceCount?: number | undefined
   horizonMinutes?: number | undefined
+  preview?: LedgerPreviewData | undefined
   onConfirm: () => void
   onReset: () => void
 }): JSX.Element | null {
@@ -222,6 +226,8 @@ export function SwapConfirm({
         </span>
         <span>0.5% max slippage</span>
       </div>
+
+      <LedgerPreview preview={preview} />
 
       {/* What the asset is, and how well its issuer is established. A ticker
           says neither, and both matter more for a tokenized bond than for a
