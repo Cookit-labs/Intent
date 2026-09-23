@@ -22,8 +22,8 @@ const categoryLabel: Record<VenueCategory, string> = {
  * How far a venue is wired in, said plainly.
  *
  * The page used to list every venue identically, so a user could not tell that
- * intents route through Soroswap and merely mention Phoenix. That is the most
- * useful thing this page can say, and it was the one thing missing.
+ * intents can be signed through Soroswap and only priced on Aquarius. That is
+ * the most useful thing this page can say, and it was the one thing missing.
  */
 const integrationLabel: Record<VenueIntegration, string> = {
   executes: 'Integrated',
@@ -39,9 +39,12 @@ function chainSlug(chain: string): string {
 }
 
 /**
- * Venue logo, falling back to a lettermark. Only the original EVM venues ship
- * bitmaps in /images/venues; rather than commit a logo file per Stellar venue,
- * a missing image degrades to the venue's initial instead of a broken frame.
+ * Venue logo, falling back to a lettermark.
+ *
+ * Logos live at /images/venues/<id>.webp. A venue without one degrades to its
+ * initial rather than a broken frame, which is what an anchor added before its
+ * logo was sourced looks like — deliberate enough to ship, and obviously
+ * incomplete enough that nobody mistakes it for the final treatment.
  */
 function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
   const [failed, setFailed] = useState(false)
