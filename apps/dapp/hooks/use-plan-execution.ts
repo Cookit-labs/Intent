@@ -5,6 +5,7 @@ import { useCallback, useState } from 'react'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 import type { PlanAction } from '../lib/swap/build-plan'
+import type { LedgerPreview } from '../lib/swap/preview'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 
 /**
@@ -34,6 +35,8 @@ export interface PlanExecutionState {
   xdr?: string
   /** Numbered steps, in the order they will execute. */
   description?: string[]
+  /** What the built transaction will do to the wallet, read from its operations. */
+  preview?: LedgerPreview
   hash?: string
   explorerUrl?: string
   error?: string
@@ -71,6 +74,7 @@ export function usePlanExecution(): PlanExecution {
           const built = (await res.json()) as {
             xdr?: string
             description?: string[]
+            preview?: LedgerPreview
             error?: string
           }
 
@@ -86,6 +90,7 @@ export function usePlanExecution(): PlanExecution {
             phase: 'review',
             xdr: built.xdr,
             ...(built.description !== undefined ? { description: built.description } : {}),
+            ...(built.preview !== undefined ? { preview: built.preview } : {}),
           })
         } catch {
           setState({ phase: 'failed', error: 'Could not reach the network.' })

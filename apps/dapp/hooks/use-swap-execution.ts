@@ -7,6 +7,7 @@ import { useWallet } from './use-wallet'
 import { fromBaseUnits } from '../lib/swap/assets'
 import { toPriceTable, type MarketPrice } from '../lib/swap/price-types'
 import { fetchMarketPricesFromRoute } from '../lib/swap/prices-client'
+import type { LedgerPreview } from '../lib/swap/preview'
 import type { SwapQuote } from '../lib/swap/quote'
 import { FAILURE_MESSAGES } from '../lib/swap/submit'
 import type { SwapPhase } from './use-swap'
@@ -27,6 +28,12 @@ export interface SwapExecutionState {
   hash?: string
   explorerUrl?: string
   error?: string
+  /**
+   * What signing will do to the wallet, read from a transaction built for
+   * this quote as soon as it is shown. Absent until that build answers, and
+   * absent when no wallet is connected to build for.
+   */
+  preview?: LedgerPreview
   /** Real market prices, so the card can show what the amounts are worth. */
   usdPrices?: Record<string, number>
   /**
@@ -86,7 +93,29 @@ export function useSwapExecution(route: unknown): SwapExecution {
       sendDisplay: fromBaseUnits(quote.sendAmount),
       receiveDisplay: fromBaseUnits(quote.destAmount),
     })
-  }, [route])
+
+    // Build now, sign later. Building has no side effect beyond reading the
+    // account's sequence and simulating, and it is the only way to show what
+    // the transaction does before the wallet asks for a signature. The build
+    // at signing time is a fresh one; this one exists to be read.
+    if (address === undefined) return
+    let cancelled = false
+    void fetch('/api/swap/build', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: address, quote }),
+    })
+      .then((r) => r.json())
+      .then((built: { preview?: LedgerPreview }) => {
+        const preview = built.preview
+        if (cancelled || preview === undefined) return
+        setState((s) => (s.phase === 'review' ? { ...s, preview } : s))
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [route, address])
 
   const reset = useCallback(() => setState({ phase: 'idle' }), [])
 

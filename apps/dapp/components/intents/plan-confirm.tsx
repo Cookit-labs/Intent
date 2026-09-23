@@ -5,6 +5,7 @@ import { CheckCircle2, ExternalLink, Loader2, TriangleAlert } from 'lucide-react
 import { useEffect } from 'react'
 
 import type { PlanExecution } from '../../hooks/use-plan-execution'
+import { LedgerPreview } from './ledger-preview'
 
 /**
  * Reviewing a plan before signing it.
@@ -107,6 +108,8 @@ export function PlanConfirm({
           </li>
         ))}
       </ol>
+
+      <LedgerPreview preview={plan.preview} />
 
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={plan.confirm} disabled={busy}>

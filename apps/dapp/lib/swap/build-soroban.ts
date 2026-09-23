@@ -15,6 +15,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
+import { plain } from './preview'
 import { resolveVerifiedAsset } from './asset-registry'
 
 /**
@@ -226,7 +227,17 @@ export function assertSelfInvoke(xdr: string, account: string): void {
 export async function prepareSorobanSwap(
   xdr: string,
   rpcUrl: string = stellarTestnet.sorobanRpcUrl
-): Promise<{ ok: true; xdr: string } | { ok: false; reason: string }> {
+): Promise<
+  | {
+      ok: true
+      xdr: string
+      /** The network's simulation, kept so the caller can read what it says will change. */
+      sim: rpc.Api.SimulateTransactionSuccessResponse
+      /** The fee the assembled transaction carries, in XLM. */
+      feeXlm: string
+    }
+  | { ok: false; reason: string }
+> {
   const server = new rpc.Server(rpcUrl)
 
   let tx
@@ -247,7 +258,7 @@ export async function prepareSorobanSwap(
       return { ok: false, reason: sim.error }
     }
     const prepared = rpc.assembleTransaction(tx, sim).build()
-    return { ok: true, xdr: prepared.toXDR() }
+    return { ok: true, xdr: prepared.toXDR(), sim, feeXlm: plain(BigInt(prepared.fee)) }
   } catch (e) {
     return {
       ok: false,
