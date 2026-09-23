@@ -14,7 +14,12 @@ import { describe, expect, it } from 'vitest'
 
 import { USDC, XLM } from '../swap/assets'
 import { sacFor } from '../swap/build-soroban'
-import { AQUARIUS_ROUTER, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import {
+  AQUARIUS_ROUTER,
+  BLEND_POOL,
+  SOROSWAP_AGGREGATOR,
+  SOROSWAP_ROUTER,
+} from '../swap/contract-registry'
 import { assertSelfSubmission, builderFor, type VenueKind } from '../swap/venue-routing'
 
 /**
@@ -131,14 +136,31 @@ function aquariusCall(opts: { user?: string; fn?: string } = {}): string {
   )
 }
 
-function soroswapCall(): string {
+/** A Soroswap router swap; the recipient sits fourth. */
+function soroswapCall(opts: { to?: string; fn?: string } = {}): string {
   return envelope(
     new Contract(SOROSWAP_ROUTER).call(
-      'swap_exact_tokens_for_tokens',
+      opts.fn ?? 'swap_exact_tokens_for_tokens',
       nativeToScVal(BigInt('100000000'), { type: 'i128' }),
       nativeToScVal(BigInt('1'), { type: 'i128' }),
       nativeToScVal([new Address(sacFor(XLM)).toScVal(), new Address(sacFor(USDC)).toScVal()]),
-      new Address(ME).toScVal(),
+      new Address(opts.to ?? ME).toScVal(),
+      nativeToScVal(BigInt(1_900_000_000), { type: 'u64' })
+    )
+  )
+}
+
+/** A Soroswap aggregator swap; the recipient sits sixth. */
+function aggregatorCall(opts: { to?: string } = {}): string {
+  return envelope(
+    new Contract(SOROSWAP_AGGREGATOR).call(
+      'swap_exact_tokens_for_tokens',
+      new Address(sacFor(XLM)).toScVal(),
+      new Address(sacFor(USDC)).toScVal(),
+      nativeToScVal(BigInt('100000000'), { type: 'i128' }),
+      nativeToScVal(BigInt('1'), { type: 'i128' }),
+      xdr.ScVal.scvVec([]),
+      new Address(opts.to ?? ME).toScVal(),
       nativeToScVal(BigInt(1_900_000_000), { type: 'u64' })
     )
   )
@@ -181,6 +203,41 @@ describe('a signed envelope is re-asserted by the shape it actually has', () => 
 
   it('still accepts a Soroswap router call from the signer', () => {
     expect(() => assertSelfSubmission(soroswapCall(), ME)).not.toThrow()
+  })
+
+  it('refuses a Soroswap router call that pays somebody else', () => {
+    // The same substitution on the other router. Source and function are
+    // right; the fourth argument is who the router pays.
+    expect(() => assertSelfSubmission(soroswapCall({ to: STRANGER }), ME)).toThrow(
+      /pays .* not the signing account/
+    )
+  })
+
+  it('refuses a Soroswap router call that is not the exact-in swap', () => {
+    expect(() =>
+      assertSelfSubmission(soroswapCall({ fn: 'swap_tokens_for_exact_tokens' }), ME)
+    ).toThrow(/not the swap this app builds/)
+  })
+
+  it('accepts an aggregator swap that pays the signer', () => {
+    expect(() => assertSelfSubmission(aggregatorCall(), ME)).not.toThrow()
+  })
+
+  it('refuses an aggregator swap that pays somebody else', () => {
+    // The aggregator's transaction is built by its API, so the bytes have
+    // been through one more party than a router call. The recipient sits
+    // sixth there, and that is the argument the contract pays.
+    expect(() => assertSelfSubmission(aggregatorCall({ to: STRANGER }), ME)).toThrow(
+      /pays .* not the signing account/
+    )
+  })
+
+  it('refuses a lone call to a contract that is not a swap router', () => {
+    // A signed call to any other listed contract is not a swap, whoever it
+    // pays; the swap relay does not carry it.
+    expect(() =>
+      assertSelfSubmission(envelope(new Contract(BLEND_POOL).call('submit'), ME), ME)
+    ).toThrow(/not a swap contract/)
   })
 
   it('still accepts a path payment back to the sender', () => {

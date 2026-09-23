@@ -2,9 +2,9 @@ import { stellarTestnet } from '@intent/config'
 import { FeeBumpTransaction, TransactionBuilder } from '@stellar/stellar-sdk'
 
 import { assertSelfAquariusSwap } from './build-aquarius'
-import { assertSelfInvoke } from './build-soroban'
+import { assertSelfSoroswapSwap } from './build-soroban'
 import { assertSelfSwap } from './build-tx'
-import { AQUARIUS_ROUTER } from './contract-registry'
+import { AQUARIUS_ROUTER, SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from './contract-registry'
 import { readContractCall } from './plan-validator'
 import type { SwapQuote } from './quote'
 
@@ -94,10 +94,12 @@ export function builderFor(quote: SwapQuote): VenueKind {
  * re-check exists for.
  *
  * The shape is read from the bytes, not from a venue the client names. A
- * lone call to the Aquarius router gets the Aquarius assertion; any other
- * lone contract call keeps the Soroswap one; everything else is held to the
- * path-payment check, whose message stays the one a malformed classic swap
- * has always produced.
+ * lone call to the Aquarius router gets the Aquarius assertion; one to the
+ * Soroswap router or aggregator gets the Soroswap one, which reads the
+ * recipient where that contract keeps it; a lone call to any other contract
+ * is refused, since no swap is built against one. Everything else is held to
+ * the path-payment check, whose message stays the one a malformed classic
+ * swap has always produced.
  */
 export function assertSelfSubmission(signedXdr: string, account: string): void {
   const decoded = TransactionBuilder.fromXDR(signedXdr, stellarTestnet.networkPassphrase)
@@ -111,10 +113,20 @@ export function assertSelfSubmission(signedXdr: string, account: string): void {
     return
   }
 
-  if (readContractCall(op).contractId === AQUARIUS_ROUTER) {
-    assertSelfAquariusSwap(signedXdr, account)
-    return
+  const { contractId } = readContractCall(op)
+  switch (contractId) {
+    case AQUARIUS_ROUTER:
+      assertSelfAquariusSwap(signedXdr, account)
+      return
+    case SOROSWAP_ROUTER:
+      assertSelfSoroswapSwap(signedXdr, account, 'router')
+      return
+    case SOROSWAP_AGGREGATOR:
+      assertSelfSoroswapSwap(signedXdr, account, 'aggregator')
+      return
+    default:
+      throw new Error(
+        `refusing to submit: ${contractId ?? 'the contract called'} is not a swap contract this app builds calls to`
+      )
   }
-
-  assertSelfInvoke(signedXdr, account)
 }

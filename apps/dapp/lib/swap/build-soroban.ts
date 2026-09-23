@@ -6,12 +6,13 @@ import {
   BASE_FEE,
   Contract,
   FeeBumpTransaction,
+  nativeToScVal,
   Networks,
   Operation,
-  TransactionBuilder,
-  nativeToScVal,
   rpc,
   scValToNative,
+  TransactionBuilder,
+  xdr,
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
@@ -167,11 +168,11 @@ export async function buildSorobanSwap(
     .setTimeout(TIMEOUT_SECONDS)
     .build()
 
-  const xdr = tx.toXDR()
-  assertSelfInvoke(xdr, account)
+  const built = tx.toXDR()
+  assertSelfSoroswapSwap(built, account, 'router')
 
   return {
-    xdr,
+    xdr: built,
     recipient,
     minReceive,
     sendAmount,
@@ -213,6 +214,69 @@ export function assertSelfInvoke(xdr: string, account: string): void {
 
   if (tx.source !== account) {
     throw new Error(`refusing to sign: transaction source ${tx.source} is not the account`)
+  }
+}
+
+/**
+ * Asserts a Soroswap swap, router or aggregator, pays the signing account.
+ *
+ * `assertSelfInvoke` proves the source and the shape and nothing about the
+ * arguments. Both Soroswap contracts take the recipient as an argument and pay
+ * whatever address sits there, so an envelope with a stranger in that position
+ * is a swap the signer funds and never receives. The router puts the recipient
+ * fourth of five arguments; the aggregator sixth of seven. The layout is named
+ * by the caller from the contract being called, not guessed from the arity.
+ */
+export function assertSelfSoroswapSwap(
+  envelope: string,
+  account: string,
+  layout: 'router' | 'aggregator'
+): void {
+  assertSelfInvoke(envelope, account)
+
+  const decoded = TransactionBuilder.fromXDR(envelope, stellarTestnet.networkPassphrase)
+  if (decoded instanceof FeeBumpTransaction) {
+    throw new Error('fee-bump transactions are not supported here')
+  }
+  const op = decoded.operations[0]
+
+  const hostFunction = (op as unknown as { func?: { type?: string; invokeContract?: unknown } })
+    .func
+  if (hostFunction?.type !== 'hostFunctionTypeInvokeContract') {
+    throw new Error('refusing to sign: this is not a contract invocation')
+  }
+  const invocation = hostFunction.invokeContract as
+    | { functionName?: unknown; args?: xdr.ScVal[] }
+    | undefined
+  if (invocation === undefined) throw new Error('refusing to sign: the call could not be read')
+
+  // `functionName` decodes to an `XdrString`; `String()` reads it.
+  const functionName = String(invocation.functionName)
+  if (functionName !== 'swap_exact_tokens_for_tokens') {
+    throw new Error(`refusing to sign: ${functionName} is not the swap this app builds`)
+  }
+
+  const shape = layout === 'aggregator' ? { arity: 7, to: 5 } : { arity: 5, to: 3 }
+  const args = invocation.args ?? []
+  if (args.length !== shape.arity) {
+    throw new Error(
+      `refusing to sign: a ${layout} swap takes ${shape.arity} arguments, found ${args.length}`
+    )
+  }
+  const toArg = args[shape.to]
+  if (toArg === undefined) throw new Error('refusing to sign: the recipient argument is missing')
+
+  let recipient: string
+  try {
+    recipient = Address.fromScVal(toArg).toString()
+  } catch {
+    throw new Error('refusing to sign: the recipient argument is not an address')
+  }
+  if (recipient !== account) {
+    throw new Error(
+      `refusing to sign: the swap pays ${recipient}, not the signing account. ` +
+        'A swap must pay the account that funds it.'
+    )
   }
 }
 
