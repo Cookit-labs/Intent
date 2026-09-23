@@ -1,4 +1,6 @@
 import type { AgentKey, AgentProposalResult } from './brain'
+import type { PlanContext, PlanPenalty } from './plan-scoring'
+import { planPenalties, planScore } from './plan-scoring'
 
 /**
  * Ranking proposals.
@@ -22,6 +24,14 @@ export interface ScoredProposal {
   score: number
   /** Whether there is anything to sign. Outranks score entirely. */
   executable: boolean
+  /**
+   * What this plan cost itself beyond its route, and why.
+   *
+   * Empty for a plan that does nothing the brief warns against. Carried here
+   * so the panel can say why an agent placed where it did rather than showing
+   * a bare number.
+   */
+  penalties: PlanPenalty[]
 }
 
 /**
@@ -32,8 +42,15 @@ export interface ScoredProposal {
  * route at the cap — turning the ranking into a draw exactly where the
  * differences are largest.
  */
-function scoreOf(proposal: AgentProposalResult): number {
-  return Number((100 - proposal.projectedSlippagePct).toFixed(1))
+/**
+ * With no plan context the score is the route measurement alone, which is
+ * exactly what it was before plans were scored. Callers that can describe the
+ * order — its size, the user's own words, the anchor's limits — get the
+ * fuller judgement; callers that cannot are no worse off than before.
+ */
+function scoreOf(proposal: AgentProposalResult, context?: PlanContext): number {
+  if (context === undefined) return Number((100 - proposal.projectedSlippagePct).toFixed(1))
+  return planScore(proposal, context)
 }
 
 /**
@@ -56,7 +73,7 @@ export function tieBreak(competitionId: string, agent: string): number {
 
 export function scoreProposals(
   proposals: AgentProposalResult[],
-  options: { competitionId: string }
+  options: { competitionId: string; plan?: PlanContext }
 ): ScoredProposal[] {
   if (proposals.length === 0) return []
 
@@ -64,8 +81,9 @@ export function scoreProposals(
     .map((proposal) => ({
       agent: proposal.agent,
       proposal,
-      score: scoreOf(proposal),
+      score: scoreOf(proposal, options.plan),
       executable: isExecutable(proposal),
+      penalties: options.plan === undefined ? [] : planPenalties(proposal, options.plan),
     }))
     .sort((a, b) => {
       // Nothing to sign is disqualifying, whatever the numbers say. A losing
@@ -97,7 +115,11 @@ export function unanimousChoice(scored: ScoredProposal[]): boolean {
     (s) =>
       s.score === first.score &&
       s.proposal.routeId === first.proposal.routeId &&
-      s.proposal.executionMode === first.proposal.executionMode
+      s.proposal.executionMode === first.proposal.executionMode &&
+      // Agreement has to survive the follow-on too: two agents routing and
+      // filling the same way are not agreeing if one also proposes lending
+      // the proceeds and the other does not.
+      (s.proposal.thenAction ?? 'none') === (first.proposal.thenAction ?? 'none')
   )
 }
 

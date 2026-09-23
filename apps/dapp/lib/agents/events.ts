@@ -52,6 +52,14 @@ export interface CompetitionWinnerFrame {
   winner: AgentKey
   scores: Record<string, number>
   /**
+   * Why each agent's score fell short, keyed by agent.
+   *
+   * A score that drops with no stated reason reads as arbitrary — the very
+   * thing the tie-break hash was criticised for. Absent for agents that were
+   * penalised nothing.
+   */
+  penalties?: Record<string, { reason: string; points: number; detail: string }[]>
+  /**
    * True when every executable proposal chose the same route and the same
    * plan, so the winner was drawn rather than judged.
    *

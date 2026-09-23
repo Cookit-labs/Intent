@@ -213,6 +213,26 @@ export function CompetitionPanel({
                   <>
                     <p className="text-foreground mt-2 text-sm">{proposal?.reasoning}</p>
 
+                    {/* Why the score fell short, in the plan's own terms. A number
+                        that drops with no stated reason reads as arbitrary, which
+                        is the thing the tie-break hash was rightly criticised for.
+                        Each line names the figures it was judged on. */}
+                    {(proposal?.penalties ?? []).length > 0 ? (
+                      <ul className="mt-2 flex flex-col gap-1">
+                        {(proposal?.penalties ?? []).map((p) => (
+                          <li
+                            key={p.reason}
+                            className="text-muted-foreground flex items-start gap-1.5 text-xs"
+                          >
+                            <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span>
+                              {p.detail} <span className="tabular-nums">&minus;{p.points}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+
                     <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
                       {proposal?.executionMode === 'rest' &&
                       proposal.horizonMinutes !== undefined &&
