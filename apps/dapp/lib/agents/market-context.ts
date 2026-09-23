@@ -3,11 +3,12 @@ import { CHAIN_DESCRIPTORS, isChainSlug } from '@intent/config'
 import type { MarketContext, QuotedRoute } from './brain'
 import type { MarketPrice } from '../swap/price-types'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
-import { collectQuotes } from '../swap/quote'
+import type { QuoteSource, SwapQuote } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
 import { fetchFxPrices } from '../prices/reflector'
+import { createSoroswapAggregatorQuoter } from '../swap/sources/soroswap-aggregator-quoter'
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
@@ -45,6 +46,79 @@ export interface QuoteRoutesOptions {
    * whatever the book offers, which is the opposite of what was asked.
    */
   minReceive?: string
+  /** Injected in tests. Every venue otherwise; see `defaultQuoteSources`. */
+  sources?: QuoteSource[]
+}
+
+/**
+ * Every venue the agents may be offered a route from.
+ *
+ * Four independent pools, and one that is not independent of two of them:
+ * Horizon covers the classic DEX and its AMMs, Soroswap and Aquarius are
+ * Soroban contracts with their own depth, and the Soroswap *aggregator* is a
+ * hosted route-finder that splits a swap across those same venues. It stays
+ * a fifth source under its own id rather than replacing the direct quoters,
+ * because several of its answers are one vendor's view of routers the app
+ * can already ask itself — and a comparison needs the independent answers
+ * to compare against. Absent without `SOROSWAP_API_KEY`: `isConfigured`
+ * is false, and an unconfigured source is skipped rather than asked.
+ */
+export function defaultQuoteSources(): QuoteSource[] {
+  return [
+    createHorizonQuoter(),
+    createAquariusQuoter(),
+    createSoroswapQuoter(),
+    createSoroswapAggregatorQuoter(),
+  ]
+}
+
+/**
+ * Every route a source can offer, or its one route when it offers no list.
+ *
+ * Horizon returns every path and Aquarius every pool, and both are worth
+ * choosing between: collapsing them handed four agents a list of one, which
+ * is why they kept reaching the same answer. A source without `quoteAll`
+ * simply has the one price to give.
+ */
+async function everyRoute(
+  source: QuoteSource,
+  req: Parameters<QuoteSource['quote']>[0],
+  signal?: AbortSignal
+): Promise<SwapQuote[]> {
+  if (source.quoteAll !== undefined) {
+    const all = await source.quoteAll(req, signal)
+    return all.ok ? all.quotes : []
+  }
+  const one = await source.quote(req, signal)
+  return one.ok ? [one.quote] : []
+}
+
+/**
+ * Where a route goes, in words an agent can choose on.
+ *
+ * "2 hops" twice says nothing; "via EURC" against "direct" is a real
+ * difference. An aggregator route has no classic hops to name — `path` is
+ * empty because the API replays its own plan — so its `routePlan` is
+ * described instead: a swap split 60/40 across two AMMs must not read
+ * "direct" beside a direct quote from either one.
+ */
+function describeVia(quote: SwapQuote): string {
+  if (quote.routePlan !== undefined && quote.routePlan.length > 0) {
+    const legs = quote.routePlan.map(
+      (leg) =>
+        `${leg.percent}% ${leg.protocol} ${leg.hops === 0 ? 'direct' : `via ${leg.hops} hop${leg.hops === 1 ? '' : 's'}`}`
+    )
+    return legs.length === 1 ? (legs[0] as string) : `split ${legs.join(' + ')}`
+  }
+  return quote.path.length === 0 ? 'direct' : quote.path.map((h) => h.code).join(' → ')
+}
+
+/** How many intermediate assets a route touches — the longest leg, for a split. */
+function hopsOf(quote: SwapQuote): number {
+  if (quote.routePlan !== undefined && quote.routePlan.length > 0) {
+    return Math.max(...quote.routePlan.map((leg) => leg.hops))
+  }
+  return quote.path.length
 }
 
 export async function quoteRoutes(
@@ -62,35 +136,13 @@ export async function quoteRoutes(
   if (from === undefined || to === undefined) return []
   if (from.code === to.code && from.issuer === to.issuer) return []
 
-  // Two independent pools, asked at once. Horizon covers the classic DEX and
-  // its AMMs; Soroswap is a Soroban contract with its own depth. Asking both
-  // is what makes this aggregation rather than a single venue with extra
-  // steps, and `collectQuotes` already tolerates either one being down.
+  // Every venue asked at once, and every route each can offer. Sources
+  // return outcomes rather than throwing, so one being down cannot take the
+  // others with it; an unconfigured one is skipped rather than asked.
   const req = { kind: 'strict_send' as const, from, to, sendAmount: amount }
-
-  // Every distinct Horizon path, not just its best. Stellar routes through an
-  // intermediate asset when that beats going direct, and the two can differ by
-  // more than a factor of two — collapsing them handed four agents a list of
-  // one, which is why they kept reaching the same answer. They were not
-  // failing to think; there was nothing to choose between.
-  const horizon = createHorizonQuoter()
-  const aquarius = createAquariusQuoter()
-  // Aquarius is asked for every pool, like Horizon for every path: it keeps
-  // three XLM/USDC pools with different depth, and "the venue's price" is
-  // three prices an agent can choose between. Collapsing them would hand the
-  // agents one Aquarius route when there are three, which is the same list-of-
-  // one problem the Horizon comment above describes.
-  const [horizonAll, aquariusAll, others] = await Promise.all([
-    horizon.quoteAll?.(req, signal),
-    aquarius.quoteAll?.(req, signal),
-    collectQuotes([createSoroswapQuoter()], req, signal),
-  ])
-
-  const quotes = [
-    ...(horizonAll?.ok === true ? horizonAll.quotes : []),
-    ...(aquariusAll?.ok === true ? aquariusAll.quotes : []),
-    ...others.quotes,
-  ]
+  const sources = (options.sources ?? defaultQuoteSources()).filter((s) => s.isConfigured())
+  const perSource = await Promise.all(sources.map((s) => everyRoute(s, req, signal)))
+  const quotes = perSource.flat()
 
   // A limit that the market cannot meet returns nothing, so the competition
   // reports "no route" rather than offering a fill the user did not ask for.
@@ -108,11 +160,8 @@ export async function quoteRoutes(
     // errors in exactly the number the user reads.
     sendAmount: `${fromBaseUnits(quote.sendAmount)} ${quote.from.code}`,
     receiveAmount: `${fromBaseUnits(quote.destAmount)} ${quote.to.code}`,
-    hops: quote.path.length,
-    // Which assets the route passes through, so several Horizon paths for the
-    // same pair are distinguishable. "2 hops" twice tells an agent nothing;
-    // "via EURC" versus "direct" is a choice it can reason about.
-    via: quote.path.length === 0 ? 'direct' : quote.path.map((h) => h.code).join(' → '),
+    hops: hopsOf(quote),
+    via: describeVia(quote),
     // Soroban tokens are separate contracts from classic issuers, so the USDC
     // Soroswap delivers is not the USDC Horizon delivers. Surfacing that keeps
     // an agent from reading two quotes as interchangeable and picking purely

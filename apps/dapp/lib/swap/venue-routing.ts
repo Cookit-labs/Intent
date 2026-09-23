@@ -2,9 +2,9 @@ import { stellarTestnet } from '@intent/config'
 import { FeeBumpTransaction, TransactionBuilder } from '@stellar/stellar-sdk'
 
 import { assertSelfAquariusSwap } from './build-aquarius'
-import { assertSelfInvoke } from './build-soroban'
+import { assertSelfSoroswapSwap } from './build-soroban'
 import { assertSelfSwap } from './build-tx'
-import { AQUARIUS_ROUTER } from './contract-registry'
+import { AQUARIUS_ROUTER, SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from './contract-registry'
 import { readContractCall } from './plan-validator'
 import type { SwapQuote } from './quote'
 
@@ -40,8 +40,14 @@ import type { SwapQuote } from './quote'
  * argument on one and the first on the other, and only one takes a pool
  * index. A shared kind would mean a shared assertion, and a shared assertion
  * proves less than either alone.
+ *
+ * `aggregator` is Soroswap's hosted route-finder: the transaction is built
+ * by its API rather than here, and takes one of three shapes the API chooses
+ * per quote. `build-aggregator` re-reads whichever arrives against the quote
+ * — the recipient sits sixth on the aggregator contract, fourth on the
+ * router, and in `destination` on a classic path payment.
  */
-export type VenueKind = 'classic' | 'soroban' | 'aquarius'
+export type VenueKind = 'classic' | 'soroban' | 'aquarius' | 'aggregator'
 
 /**
  * Which builder a quote must go to.
@@ -68,6 +74,8 @@ export function builderFor(quote: SwapQuote): VenueKind {
       return 'soroban'
     case 'aquarius':
       return 'aquarius'
+    case 'soroswap-aggregator':
+      return 'aggregator'
     default:
       throw new Error(`no builder for quotes from ${String(quote.source)}`)
   }
@@ -86,10 +94,12 @@ export function builderFor(quote: SwapQuote): VenueKind {
  * re-check exists for.
  *
  * The shape is read from the bytes, not from a venue the client names. A
- * lone call to the Aquarius router gets the Aquarius assertion; any other
- * lone contract call keeps the Soroswap one; everything else is held to the
- * path-payment check, whose message stays the one a malformed classic swap
- * has always produced.
+ * lone call to the Aquarius router gets the Aquarius assertion; one to the
+ * Soroswap router or aggregator gets the Soroswap one, which reads the
+ * recipient where that contract keeps it; a lone call to any other contract
+ * is refused, since no swap is built against one. Everything else is held to
+ * the path-payment check, whose message stays the one a malformed classic
+ * swap has always produced.
  */
 export function assertSelfSubmission(signedXdr: string, account: string): void {
   const decoded = TransactionBuilder.fromXDR(signedXdr, stellarTestnet.networkPassphrase)
@@ -103,10 +113,20 @@ export function assertSelfSubmission(signedXdr: string, account: string): void {
     return
   }
 
-  if (readContractCall(op).contractId === AQUARIUS_ROUTER) {
-    assertSelfAquariusSwap(signedXdr, account)
-    return
+  const { contractId } = readContractCall(op)
+  switch (contractId) {
+    case AQUARIUS_ROUTER:
+      assertSelfAquariusSwap(signedXdr, account)
+      return
+    case SOROSWAP_ROUTER:
+      assertSelfSoroswapSwap(signedXdr, account, 'router')
+      return
+    case SOROSWAP_AGGREGATOR:
+      assertSelfSoroswapSwap(signedXdr, account, 'aggregator')
+      return
+    default:
+      throw new Error(
+        `refusing to submit: ${contractId ?? 'the contract called'} is not a swap contract this app builds calls to`
+      )
   }
-
-  assertSelfInvoke(signedXdr, account)
 }
