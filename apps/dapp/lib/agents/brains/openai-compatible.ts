@@ -6,6 +6,7 @@ import type {
   ProposalOutcome,
   ProposalRequest,
 } from '../brain'
+import { configuredLendingVenues } from '../../lend/venues'
 import { ALL_ANCHORS, ANCHORS } from '../../offramp/anchors'
 import { SYSTEM_PROMPT } from '../brief'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
@@ -166,6 +167,24 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
               ),
             ]
           : []),
+        // One line per venue, with the figure's provenance, because the two
+        // venues' numbers are not the same kind of number: Blend's is the
+        // pool's instantaneous supply rate derived from its curve; DeFindex's
+        // is a trailing 7-day yield its API reports net of fees. Both are
+        // testnet figures — synthetic liquidity, synthetic borrowing demand —
+        // which is said outright so an agent does not present a three-digit
+        // APY to the user as a forecast.
+        ...(req.market.lending !== undefined && req.market.lending.length > 0
+          ? [
+              'Lending venues, with live supply rates (testnet figures, not a forecast):',
+              ...req.market.lending.map(
+                (l) =>
+                  `  ${l.venue}: ${l.asset} at ${l.supplyApy}% APY` +
+                  (l.utilisation !== undefined ? `, ${l.utilisation}% utilised` : '') +
+                  (l.basis !== undefined ? ` (${l.basis})` : '')
+              ),
+            ]
+          : []),
         ...routeLines(req),
       ].join('\n'),
     },
@@ -272,9 +291,13 @@ function routeLines(req: ProposalRequest): string[] {
  * Empty on any chain without a lending integration, which is every chain but
  * Stellar today. An agent that proposes lending on Arc is not punished for it:
  * the follow-on is downgraded and the trade stands.
+ *
+ * On Stellar, the venues this deployment is configured for — read at call
+ * time, so DeFindex joins the moment its key is set and leaves the moment it
+ * is not, without a restart of anything that holds a brain.
  */
 function lendingVenuesFor(req: ProposalRequest): string[] {
-  return req.chain === 'stellar' ? ['blend'] : []
+  return req.chain === 'stellar' ? configuredLendingVenues() : []
 }
 
 /**

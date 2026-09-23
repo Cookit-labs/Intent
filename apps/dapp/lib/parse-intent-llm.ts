@@ -1,3 +1,4 @@
+import { DEFAULT_LENDING_VENUE } from './lend/venues'
 import type { FollowOnAction } from './parse-compound'
 
 /**
@@ -141,7 +142,8 @@ const SYSTEM_PROMPT = [
   'Joining two ASSETS with "and" is NOT a follow-on: "buy XLM and USDC" is one purchase',
   'of two things, and its followOn is none.',
   'amountStated is false when the user named no size; set amountUsd to 0 in that case.',
-  "Use followOnVenue 'blend' when Blend is named or clearly implied, otherwise an empty string.",
+  "Use followOnVenue 'blend' when Blend is named or clearly implied, 'defindex' when DeFindex is,",
+  'otherwise an empty string.',
 ].join(' ')
 
 export interface LlmReadIntent {
@@ -360,15 +362,16 @@ function followOnOf(
   }
 
   if (args.followOn !== 'lend') return null
-  const venues = allowedVenues ?? ['blend']
+  const venues = allowedVenues ?? [DEFAULT_LENDING_VENUE]
   if (venues.length === 0) return null
 
-  // An unnamed venue defaults to the only one integrated, which is how "supply
-  // it" without a venue has always been read.
+  // An unnamed venue defaults to the first one offered — Blend, which is how
+  // "supply it" without a venue has always been read. Not marked as named,
+  // so the execution path may still honour the chosen agent's pool.
   if (named === '') {
     const only = venues[0]
     return only === undefined ? null : { kind: 'lend', venue: only }
   }
 
-  return venues.includes(named) ? { kind: 'lend', venue: named } : null
+  return venues.includes(named) ? { kind: 'lend', venue: named, venueNamed: true } : null
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { configuredLendingVenues } from '../../../../lib/lend/venues'
 import { isLlmParseConfigured, readIntentWithLlm } from '../../../../lib/parse-intent-llm'
 import { tradeableSymbols } from '../../../../lib/swap/asset-registry'
 
@@ -18,10 +19,14 @@ import { tradeableSymbols } from '../../../../lib/swap/asset-registry'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-/** Lending venues that exist per chain. Empty means the chain has none. */
-const LENDING_VENUES: Record<string, string[]> = {
-  stellar: ['blend'],
-  arc: [],
+/**
+ * Lending venues that exist per chain. Empty means the chain has none.
+ *
+ * Read per request rather than once: on Stellar the list is whatever this
+ * deployment is configured for, and DeFindex is in it only while its key is.
+ */
+function lendingVenuesOn(chain: string): string[] {
+  return chain === 'stellar' ? configuredLendingVenues() : []
 }
 
 /** Anchors that withdraw to fiat, per chain. */
@@ -77,7 +82,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // rather than trusted, because a hallucinated ticker reaching the quoter as
     // a real instruction is a trap this codebase has hit once already.
     allowedSymbols: [...tradeableSymbols(), ...(LENDABLE_ONLY[chain] ?? [])],
-    allowedVenues: LENDING_VENUES[chain] ?? [],
+    allowedVenues: lendingVenuesOn(chain),
     allowedAnchors: OFFRAMP_ANCHORS[chain] ?? [],
   })
 

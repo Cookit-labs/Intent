@@ -48,7 +48,7 @@ Set executionMode to your choice. Set restPriceUsd to your resting price, or 0 w
 What happens after the trade is a separate decision, set with thenAction:
 
 - "none" for an ordinary trade. This is almost always right.
-- "lend": supply the proceeds to a lending pool. Set thenVenue to the pool ("blend" on Stellar).
+- "lend": supply the proceeds to a lending venue. Set thenVenue to one of the lending venues in the market context, chosen by the rate you were given for it. A venue with no rate listed is not available.
 - "offramp": withdraw the proceeds to the user's bank through an anchor. Set thenVenue to the anchor ("testanchor" or "moneygram" on Stellar). Only USDC can be withdrawn, so the trade must deliver USDC.
 
 Four things govern that choice:
