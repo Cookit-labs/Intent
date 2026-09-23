@@ -1,11 +1,13 @@
 import { CHAIN_DESCRIPTORS, isChainSlug } from '@intent/config'
 
 import type { MarketContext, QuotedRoute } from './brain'
+import type { MarketPrice } from '../swap/price-types'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
 import { collectQuotes } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
+import { fetchFxPrices } from '../prices/reflector'
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
@@ -143,8 +145,9 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
   const base = buildMarketContext(chain)
   if (chain !== 'stellar') return base
 
-  const [prices, lending, offramps] = await Promise.all([
+  const [prices, fx, lending, offramps] = await Promise.all([
     fetchMarketPrices(),
+    fetchFxRates(),
     fetchLendingRates(),
     fetchOfframpLimits(),
   ])
@@ -153,13 +156,31 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
     ...base,
     // Real mainnet prices replace the indicative table. Testnet execution
     // still quotes its own synthetic rate; agents are told which is which.
-    prices: { ...base.prices, ...toPriceTable(prices) },
+    // FX and gold sit in the same table: CETES is priced in pesos and a
+    // Brazilian bond in reais, and an agent without those rates can only
+    // compare them to the dollar by guessing.
+    prices: { ...base.prices, ...toPriceTable(prices), ...toPriceTable(fx) },
     // Omitted rather than empty when the read fails, so an agent sees "no
     // lending data" instead of "lending pays nothing".
     ...(lending.length > 0 ? { lending } : {}),
     // Same omission discipline: absent means "could not be read", not "no
     // limits apply".
     ...(offramps.length > 0 ? { offramps } : {}),
+  }
+}
+
+/**
+ * Dollar rates for the currencies the app's bonds settle in, and for gold.
+ *
+ * Silent on failure, like every other read here: a competition without a
+ * peso rate is a competition where agents cannot value CETES, which is
+ * worse than none of them proposing it — but not worse than no competition.
+ */
+async function fetchFxRates(): Promise<Record<string, MarketPrice>> {
+  try {
+    return await fetchFxPrices()
+  } catch {
+    return {}
   }
 }
 

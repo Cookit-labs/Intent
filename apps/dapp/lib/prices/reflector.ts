@@ -39,6 +39,21 @@ import type { MarketPrice } from '../swap/price-types'
  */
 export const REFLECTOR_CEX_DEX = 'CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63'
 
+/**
+ * Reflector's FX and commodities feed on testnet. Same interface as the
+ * crypto feed, different contract: fiat currencies and gold, quoted in
+ * dollars per unit. Verified live on 2026-09-23 — MXN 0.057969, XAU 4352.31,
+ * EUR 1.145753, BRL 0.195626 — with fresh timestamps.
+ *
+ * It exists here because the tokenized bonds the app trades are denominated
+ * in pesos and reais, and until this feed the agents had no rate for either.
+ * Gold is carried for the same reason ahead of any asset anchored to it.
+ */
+export const REFLECTOR_FX = 'CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W'
+
+/** The currencies the app's bonds settle in, the euro, and gold. */
+export const FX_SYMBOLS = ['MXN', 'BRL', 'EUR', 'XAU'] as const
+
 export interface ReflectorOptions {
   oracleId?: string
   rpcUrl?: string
@@ -76,6 +91,13 @@ function toUsd(price: bigint, decimals: number): number {
  * produce an empty result, and the price hierarchy has answers below this
  * one.
  */
+/** Every FX symbol the FX feed carries, in dollars. Empty when the feed is unreachable. */
+export async function fetchFxPrices(
+  options: Omit<ReflectorOptions, 'oracleId'> = {}
+): Promise<Record<string, MarketPrice>> {
+  return fetchReflectorPrices([...FX_SYMBOLS], { ...options, oracleId: REFLECTOR_FX })
+}
+
 export async function fetchReflectorPrices(
   symbols: string[],
   options: ReflectorOptions = {}

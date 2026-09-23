@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { REFLECTOR_CEX_DEX, fetchReflectorPrices } from '../prices/reflector'
+import {
+  FX_SYMBOLS,
+  REFLECTOR_CEX_DEX,
+  fetchFxPrices,
+  fetchReflectorPrices,
+} from '../prices/reflector'
 import { readOracleId, readOracleMeta } from '../lend/oracle'
 import { fetchMarketPrices } from '../swap/prices'
 
@@ -91,4 +96,22 @@ describe.skipIf(SKIP)('Blend still liquidates against its own oracle', () => {
     expect(poolOracle).not.toBe(REFLECTOR_CEX_DEX)
     expect(poolOracle).toMatch(/^C[A-Z0-9]{55}$/)
   }, 60_000)
+})
+
+describe('the live FX feed', () => {
+  it('prices the peso, the real and gold in dollars', async () => {
+    // The bonds the app trades settle in MXN and BRL. The bounds below are
+    // wide on purpose: they catch a wrong-decimals read (a 10^7 error) and a
+    // dead feed, not a moving market.
+    const got = await fetchFxPrices()
+    for (const symbol of FX_SYMBOLS) {
+      expect(got[symbol], symbol).toBeDefined()
+    }
+    expect(got['MXN']?.usd).toBeGreaterThan(0.02)
+    expect(got['MXN']?.usd).toBeLessThan(0.2)
+    expect(got['BRL']?.usd).toBeGreaterThan(0.1)
+    expect(got['BRL']?.usd).toBeLessThan(0.5)
+    expect(got['XAU']?.usd).toBeGreaterThan(1000)
+    expect(got['XAU']?.usd).toBeLessThan(20000)
+  }, 30_000)
 })

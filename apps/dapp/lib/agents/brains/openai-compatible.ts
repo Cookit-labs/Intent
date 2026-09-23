@@ -8,6 +8,7 @@ import type {
 } from '../brain'
 import { ALL_ANCHORS, ANCHORS } from '../../offramp/anchors'
 import { SYSTEM_PROMPT } from '../brief'
+import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
 import type { ProviderConfig } from './providers'
 import { PROVIDERS, modelFor } from './providers'
@@ -166,13 +167,27 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
               ),
             ]
           : []),
+        // Live supply rates from the pools this chain integrates. Testnet
+        // liquidity is synthetic, and the pool says so to the agent: the
+        // figure is the pool's current state, not a yield to expect on mainnet.
+        ...(req.market.lending !== undefined && req.market.lending.length > 0
+          ? [
+              "Lending pools on this chain, with the rate each is paying right now (testnet pools; liquidity is synthetic, so read the rate as the pool's current state, not a mainnet yield):",
+              ...req.market.lending.map(
+                (l) =>
+                  `  ${promptSafe(l.venue, 40)}: ${promptSafe(l.asset, 16)} supply ${l.supplyApy}% APY, ${l.utilisation}% utilised`
+              ),
+            ]
+          : []),
         ...routeLines(req),
       ].join('\n'),
     },
     {
       role: 'user',
       content: [
-        `Intent: ${req.intent.outcome}`,
+        // The user's sentence, on one line. A newline in it would read as the
+        // next line of the brief rather than more of the intent.
+        `Intent: ${promptSafe(req.intent.outcome, 500)}`,
         `Parsed as: ${req.intent.input.type}, ${req.intent.input.tokenIn} -> ${req.intent.input.tokenOut}`,
         `Size: about $${Math.round(req.intent.escrowUsd)}`,
         // The routes above are live; this table is indicative and can be badly
@@ -218,9 +233,11 @@ function routeLines(req: ProposalRequest): string[] {
     'Executable routes, already priced against live liquidity:',
     ...routes.map(
       (r) =>
-        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} on ${r.source}, ${r.via ?? `${r.hops} hop(s)`}` +
+        // The path is asset codes anyone can issue; the note echoes a token code
+        // the venue's API chose. Both cross as one bounded line.
+        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} on ${r.source}, ${r.via !== undefined ? promptSafe(r.via) : `${r.hops} hop(s)`}` +
         (r.executable ? '' : ' [COMPARISON ONLY, cannot be executed]') +
-        (r.note !== undefined ? ` [${r.note}]` : '')
+        (r.note !== undefined ? ` [${promptSafe(r.note, 160)}]` : '')
     ),
     'Choose one by putting its id in routeId. These prices are measured, not estimates —',
     'do not quote a better number than the route you picked actually offers.',
