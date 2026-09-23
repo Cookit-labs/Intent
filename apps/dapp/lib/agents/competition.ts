@@ -52,6 +52,13 @@ export interface AgentProposalView {
   restPriceUsd?: number
   thenAction?: 'lend' | 'offramp'
   thenVenue?: string
+  /**
+   * What this plan cost itself beyond its route.
+   *
+   * Shown under the card so a lower score comes with its reason attached.
+   * Empty or absent for a plan that did nothing the brief warns against.
+   */
+  penalties?: { reason: string; points: number; detail: string }[]
   /** Set when the agent produced no proposal: timed out, refused, or was rejected. */
   failed?: BrainErrorCode
 }

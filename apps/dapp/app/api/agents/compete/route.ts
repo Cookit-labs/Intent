@@ -7,7 +7,9 @@ import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { measureRoute } from '../../../../lib/agents/measure'
 import { getRoster } from '../../../../lib/agents/registry'
+import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
+import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
@@ -316,7 +318,31 @@ export async function POST(request: Request): Promise<Response> {
         return
       }
 
-      const scored = scoreProposals(proposals, { competitionId })
+      // What the user actually asked for, so a follow-on nobody requested
+      // can be told apart from one they did. The same parser the sequence
+      // flow uses, rather than a second opinion about the same sentence.
+      const compound = parseCompoundIntent(text, market.prices)
+      const followOn = compound?.followOn.kind
+      const anchorLimits = (market.offramps ?? []).find((o) => o.asset === 'USDC')
+
+      const plan: PlanContext = {
+        escrowUsd: intent.escrowUsd,
+        referencePriceUsd: intent.referencePriceUsd,
+        askedToLend: followOn === 'lend',
+        askedToOfframp: followOn === 'offramp',
+        ...(intent.limitPriceUsd !== undefined
+          ? { statedLimitPriceUsd: intent.limitPriceUsd }
+          : {}),
+        // The live book's two sides are the tightest honest statement of
+        // where the market actually is. Absent when it could not be read, and
+        // the penalty then falls back to the oracle price.
+        ...(book?.bid !== undefined ? { recentLowUsd: book.bid } : {}),
+        ...(book?.ask !== undefined ? { recentHighUsd: book.ask } : {}),
+        ...(anchorLimits?.maxAmount !== undefined ? { offrampMaxUsd: anchorLimits.maxAmount } : {}),
+        ...(anchorLimits?.minAmount !== undefined ? { offrampMinUsd: anchorLimits.minAmount } : {}),
+      }
+
+      const scored = scoreProposals(proposals, { competitionId, plan })
       const winner = pickWinner(scored)
 
       if (winner !== null) {
@@ -334,6 +360,11 @@ export async function POST(request: Request): Promise<Response> {
           competitionId,
           winner,
           scores: Object.fromEntries(scored.map((s) => [s.agent, s.score])),
+          // Only the agents that actually lost points, so the common case
+          // sends nothing extra.
+          penalties: Object.fromEntries(
+            scored.filter((s) => s.penalties.length > 0).map((s) => [s.agent, s.penalties])
+          ),
           unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
         })

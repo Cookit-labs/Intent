@@ -275,11 +275,19 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
               const scores = frame.scores
               setUnanimous(frame.unanimous === true)
               if (frame.route !== undefined) setRoute(frame.route)
+              const penalties = frame.penalties ?? {}
               setProposals((prev) => {
                 const next = { ...prev }
                 for (const [key, score] of Object.entries(scores)) {
                   const existing = next[key]
-                  if (existing !== undefined) next[key] = { ...existing, score }
+                  if (existing !== undefined) {
+                    const owed = penalties[key]
+                    next[key] = {
+                      ...existing,
+                      score,
+                      ...(owed !== undefined && owed.length > 0 ? { penalties: owed } : {}),
+                    }
+                  }
                 }
                 return next
               })
