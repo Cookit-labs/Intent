@@ -1,4 +1,4 @@
-import { STELLAR_USDC } from '@intent/config'
+import { STELLAR_USDC, activeNetwork, type StellarNetworkName } from '@intent/config'
 
 import type { ClassicAsset } from './assets'
 
@@ -19,6 +19,11 @@ import type { ClassicAsset } from './assets'
  * Every entry below was verified that way against live testnet, by hand,
  * before being written down. The verification is recorded rather than implied
  * so a reader can check it rather than trust this comment.
+ *
+ * An issuer exists on one network. Etherfuse's sandbox issuer lives on
+ * testnet and nowhere else, so on mainnet its bonds are unknown here — not
+ * offered to an agent, not resolvable by a builder — until a mainnet issuer
+ * has been verified the same way. Each entry says which networks it is for.
  */
 
 export type AssetKind = 'native' | 'stablecoin' | 'rwa'
@@ -66,7 +71,11 @@ export interface VerifiedAsset {
    * in the repo notes for how to re-check after a testnet reset.
    */
   tradeableOnTestnet: boolean
+  /** The networks this issuer exists on. An entry is unknown elsewhere. */
+  networks: StellarNetworkName[]
 }
+
+const NETWORK = activeNetwork()
 
 /**
  * Etherfuse issues every one of its bonds from a single account, verified at
@@ -82,6 +91,7 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     trust: 'network',
     code: 'XLM',
     tradeableOnTestnet: true,
+    networks: ['testnet', 'mainnet'],
     // No issuer and no domain: XLM is the network, not something issued on it.
     decimals: 7,
     description: 'Stellar Lumens, the network’s native asset',
@@ -89,13 +99,16 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
 
   USDC: {
     category: 'stablecoin',
-    // centre.io lists Circle's *mainnet* issuer only. This testnet issuer
+    // centre.io lists Circle's *mainnet* issuer only. The testnet issuer
     // claims the domain and the domain does not name it back — verified by
     // fetching both. It is the canonical testnet USDC the whole ecosystem
     // uses, so it stays; the weaker evidence is recorded rather than hidden.
-    trust: 'claimed-only',
+    // On mainnet the issuer is the one centre.io names, and the round trip
+    // holds: real USDC must not carry the testnet caveat.
+    trust: NETWORK === 'mainnet' ? 'round-trip' : 'claimed-only',
     code: STELLAR_USDC.code,
     tradeableOnTestnet: true,
+    networks: ['testnet', 'mainnet'],
     issuer: STELLAR_USDC.issuer,
     decimals: STELLAR_USDC.decimals,
     homeDomain: 'centre.io',
@@ -111,6 +124,7 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     // Verified: 100 XLM buys ~2,299 CETES across two routes.
     code: 'CETES',
     tradeableOnTestnet: true,
+    networks: ['testnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
@@ -123,6 +137,7 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     // Issued and domain-verified, but nothing quotes it on testnet today.
     code: 'USTRY',
     tradeableOnTestnet: false,
+    networks: ['testnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
@@ -135,12 +150,18 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     // Issued and domain-verified, but nothing quotes it on testnet today.
     code: 'KTB',
     tradeableOnTestnet: false,
+    networks: ['testnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
     description: 'Korean treasury bonds, tokenized by Etherfuse',
   },
 }
+
+/** The catalogue as it applies here: entries whose issuer exists on this network. */
+const ASSETS_HERE: Record<string, VerifiedAsset> = Object.fromEntries(
+  Object.entries(KNOWN_ASSETS).filter(([, a]) => a.networks.includes(NETWORK))
+)
 
 /** The Stellar-encoding view, for code that only cares how to send it. */
 export function toClassicAsset(asset: VerifiedAsset): ClassicAsset {
@@ -158,7 +179,7 @@ export function toClassicAsset(asset: VerifiedAsset): ClassicAsset {
  * name.
  */
 export function resolveVerifiedAsset(symbol: string): VerifiedAsset | undefined {
-  return KNOWN_ASSETS[symbol.trim().toUpperCase()]
+  return ASSETS_HERE[symbol.trim().toUpperCase()]
 }
 
 export function isVerified(symbol: string): boolean {
@@ -184,12 +205,12 @@ export function verificationOf(symbol: string): Verification | undefined {
 
 /** Symbols the app will trade, for prompts and pickers. */
 export function verifiedSymbols(): string[] {
-  return Object.keys(KNOWN_ASSETS)
+  return Object.keys(ASSETS_HERE)
 }
 
 /** Just the real-world assets, which need different explanation than a currency. */
 export function realWorldAssets(): VerifiedAsset[] {
-  return Object.values(KNOWN_ASSETS).filter((a) => a.category === 'rwa')
+  return Object.values(ASSETS_HERE).filter((a) => a.category === 'rwa')
 }
 
 /**
@@ -200,7 +221,7 @@ export function realWorldAssets(): VerifiedAsset[] {
  * plan that fails at quote time for reasons the user cannot act on.
  */
 export function tradeableSymbols(): string[] {
-  return Object.values(KNOWN_ASSETS)
+  return Object.values(ASSETS_HERE)
     .filter((a) => a.tradeableOnTestnet)
     .map((a) => a.code)
 }
