@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { reportError } from '../../../../lib/server/report'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { buildOfferTransaction } from '../../../../lib/swap/build-offer'
 import { fetchOrderBookTop, offerPriceFromUsd } from '../../../../lib/swap/limit-price'
@@ -101,7 +102,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   let book
   try {
     book = await fetchOrderBookTop(base, counter)
-  } catch {
+  } catch (e) {
+    reportError('offers/build', e, { sellSymbol, buySymbol })
     return NextResponse.json({ error: 'horizon_unreachable' }, { status: 502 })
   }
 

@@ -1,5 +1,8 @@
+import type { SponsorBalance } from '../sponsor/balance'
 import { describeTrigger, evaluateTrigger } from '../standing-intent'
-import type { EmailSender } from './email'
+import type { AlertsRepo } from './alerts'
+import type { AlertMail, EmailSender } from './email'
+import { reportEvent } from './report'
 import type { StandingRulesRepo, StoredStandingRule } from './standing-rules'
 
 /**
@@ -24,6 +27,13 @@ import type { StandingRulesRepo, StoredStandingRule } from './standing-rules'
  * `notified_at` null, so the next tick sends it — but sending reads the
  * original firing's price and time, and never re-evaluates the rule. Duplicate
  * prompts to trade would be a real bug someone receives as email.
+ *
+ * **It also keeps an eye on the fee sponsor**, because it is the one thing
+ * that runs on a schedule. After the rules pass it reads the sponsor's
+ * balance and, when that is below the threshold, tells the operator — once
+ * a day, recorded in `alerts_sent`, because an alert that repeats every
+ * minute is one that gets filtered. A balance that cannot be read is not a
+ * low balance: nothing is sent, and the rules pass is unaffected either way.
  */
 
 export interface TickInput {
@@ -31,9 +41,23 @@ export interface TickInput {
   /** Symbol → USD, as the evaluator expects. */
   prices: Record<string, number>
   repo: Pick<StandingRulesRepo, 'armedRules' | 'markFired' | 'unnotifiedFired' | 'markNotified'>
-  mailer: Pick<EmailSender, 'sendRuleFired'>
+  mailer: Pick<EmailSender, 'sendRuleFired' | 'sendAlert'>
   /** Origin the email links into, e.g. https://intent.example. */
   appUrl: string
+  /** The sponsor to watch. Absent when none is configured. */
+  sponsor?: SponsorWatch
+}
+
+export interface SponsorWatch {
+  /** The sponsor's public key, for the message. Never the secret. */
+  account: string
+  /** What the sponsor holds; throws when Horizon cannot say. */
+  balance: () => Promise<SponsorBalance>
+  /** Below this many XLM the operator is told. */
+  alertBelowXlm: number
+  /** Who to tell. Undefined means nobody asked, so nothing is read or sent. */
+  alertEmail: string | undefined
+  alerts: Pick<AlertsRepo, 'wasSent' | 'markSent'>
 }
 
 export interface TickResult {
@@ -49,8 +73,68 @@ function ruleLink(appUrl: string, rule: StoredStandingRule): string {
   return `${appUrl.replace(/\/+$/, '')}/${rule.chain}/intents?rule=${encodeURIComponent(rule.id)}`
 }
 
+const LOW_BALANCE = 'sponsor_low_balance'
+
+/** The UTC date, which is what "once a day" is measured in. */
+function utcDay(now: Date): string {
+  return now.toISOString().slice(0, 10)
+}
+
+function lowBalanceMail(watch: SponsorWatch, balanceXlm: string): AlertMail {
+  return {
+    subject: `Sponsor balance low: ${balanceXlm} XLM`,
+    text: [
+      `The fee sponsor is running low.`,
+      ``,
+      `  account:   ${watch.account}`,
+      `  balance:   ${balanceXlm} XLM`,
+      `  threshold: ${watch.alertBelowXlm} XLM`,
+      ``,
+      `Fund the account to keep covering users' fees. Until then submissions`,
+      `still go through — each user pays their own fee, as before sponsorship.`,
+      ``,
+      `This is sent once a day while the balance stays below the threshold.`,
+    ].join('\n'),
+  }
+}
+
+/**
+ * Tells the operator once a day while the sponsor is low. The record is
+ * written after the send, so a failed send is tried again next tick; the
+ * record is read before the balance, so a sponsor already reported today
+ * costs nothing more.
+ */
+async function watchSponsor(
+  watch: SponsorWatch,
+  mailer: Pick<EmailSender, 'sendAlert'>,
+  now: Date
+): Promise<void> {
+  if (watch.alertEmail === undefined) return
+  const day = utcDay(now)
+
+  try {
+    if (await watch.alerts.wasSent(LOW_BALANCE, day)) return
+
+    const { balanceXlm } = await watch.balance()
+    if (Number(balanceXlm) >= watch.alertBelowXlm) return
+
+    reportEvent('sponsor.low_balance', {
+      account: watch.account,
+      balanceXlm,
+      threshold: watch.alertBelowXlm,
+    })
+    await mailer.sendAlert(watch.alertEmail, lowBalanceMail(watch, balanceXlm))
+    await watch.alerts.markSent(LOW_BALANCE, day)
+  } catch (e) {
+    // Horizon down, or the send refused. Neither is a low balance, and
+    // neither may stop the rules pass that already happened from returning.
+    // eslint-disable-next-line no-console
+    console.warn('[standing] could not check the sponsor balance:', e)
+  }
+}
+
 export async function runTick(input: TickInput): Promise<TickResult> {
-  const { now, prices, repo, mailer, appUrl } = input
+  const { now, prices, repo, mailer, appUrl, sponsor } = input
 
   const armed = await repo.armedRules()
   let fired = 0
@@ -93,6 +177,8 @@ export async function runTick(input: TickInput): Promise<TickResult> {
     await repo.markNotified(stored.id, now)
     notified += 1
   }
+
+  if (sponsor !== undefined) await watchSponsor(sponsor, mailer, now)
 
   return { evaluated: armed.length, fired, notified }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { reportError } from '../../../lib/server/report'
 import { fetchOpenOffers } from '../../../lib/swap/offers'
 
 /**
@@ -21,10 +22,11 @@ export async function GET(req: Request): Promise<NextResponse> {
   try {
     const offers = await fetchOpenOffers(account.trim())
     return NextResponse.json({ offers })
-  } catch {
+  } catch (e) {
     // Distinct from an empty list on purpose: "we could not reach the network"
     // must not read as "you have no resting orders" to someone deciding
     // whether to place another.
+    reportError('offers', e, { account: account.trim() })
     return NextResponse.json({ error: 'horizon_unreachable' }, { status: 502 })
   }
 }
