@@ -42,12 +42,14 @@ const config = {
  * instrumentation hook so instrumentation.ts runs at boot. Both are inert
  * without a DSN.
  *
- * Source maps are left alone entirely. Uploading them needs an auth token,
- * and a build must not depend on one — CI has none. Set `sourcemaps.disable`
- * to false and provide SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT when
- * readable stacks in Sentry are worth the step.
+ * Source maps and releases are left alone entirely. Both need an auth token
+ * to talk to Sentry, and a build must not depend on one — CI has none. Turn
+ * `sourcemaps.disable` off, `release.create` on, and provide
+ * SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT when readable stacks in
+ * Sentry are worth the step.
  */
 module.exports = withSentryConfig(config, {
   sourcemaps: { disable: true },
+  release: { create: false },
   telemetry: false,
 })

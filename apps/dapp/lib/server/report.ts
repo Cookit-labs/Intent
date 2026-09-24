@@ -14,8 +14,11 @@
  * because a log line carrying a signed XDR or a token is a leak with a
  * timestamp on it. Redaction is by name rather than by recognising values —
  * a route knows what it is passing, and a name is what it will pass next
- * time too. The one value-shaped rule is for a Stellar secret seed, which is
- * unmistakable and must not survive under any key.
+ * time too. Two value-shaped rules sit underneath, applied to every string
+ * including the error's own message: a Stellar secret seed is unmistakable
+ * and must not survive under any key, and an email address is masked
+ * wherever it appears, because a thrower writes whatever it likes into a
+ * message and "could not email alice@…" is a real one.
  */
 
 const REDACTED = '[redacted]'
@@ -28,17 +31,27 @@ const SECRET_KEY =
 const EMAIL_KEY = /email/i
 
 /** A Stellar secret seed: S followed by 55 base32 characters. */
-const SECRET_SEED = /S[A-Z2-7]{55}/
+const SECRET_SEED = /S[A-Z2-7]{55}/g
+
+/** An email address, wherever it appears in text. */
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
+
+function maskAddress(address: string): string {
+  return `${address[0]}…${address.slice(address.indexOf('@'))}`
+}
 
 function maskEmail(value: unknown): string {
-  if (typeof value !== 'string') return REDACTED
-  const at = value.indexOf('@')
-  if (at < 1) return REDACTED
-  return `${value[0]}…${value.slice(at)}`
+  if (typeof value !== 'string' || value.indexOf('@') < 1) return REDACTED
+  return maskAddress(value)
+}
+
+/** Text as it may be logged: seeds gone, addresses masked. */
+export function scrubText(text: string): string {
+  return text.replace(SECRET_SEED, REDACTED).replace(EMAIL, maskAddress)
 }
 
 function redactValue(value: unknown): unknown {
-  if (typeof value === 'string') return SECRET_SEED.test(value) ? REDACTED : value
+  if (typeof value === 'string') return scrubText(value)
   if (Array.isArray(value)) return value.map(redactValue)
   if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
     return redactContext(value as Record<string, unknown>)
@@ -71,13 +84,26 @@ export interface ReporterDeps {
 }
 
 function describe(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
+  if (error instanceof Error) return scrubText(error.message)
+  if (typeof error === 'string') return scrubText(error)
   try {
-    return JSON.stringify(error)
+    return scrubText(JSON.stringify(error))
   } catch {
-    return String(error)
+    return scrubText(String(error))
   }
+}
+
+/**
+ * The error as it may leave this module: the same class and frames, with
+ * the message and the stack's first line scrubbed. Sentry groups on frames,
+ * which carry paths and line numbers, never text a thrower wrote.
+ */
+function scrubbedError(error: unknown): unknown {
+  if (!(error instanceof Error)) return typeof error === 'string' ? scrubText(error) : error
+  const copy = new Error(scrubText(error.message))
+  copy.name = error.name
+  if (error.stack !== undefined) copy.stack = scrubText(error.stack)
+  return copy
 }
 
 export function createReporter(deps: ReporterDeps) {
@@ -96,8 +122,9 @@ export function createReporter(deps: ReporterDeps) {
   function reportError(where: string, error: unknown, context?: Record<string, unknown>): void {
     const safe = context === undefined ? undefined : redactContext(context)
     const tail = safe === undefined ? '' : ` ${JSON.stringify(safe)}`
-    log(`[${where}] ${describe(error)}${tail}`, error)
-    forward(() => sink?.error(where, error, safe ?? {}))
+    const clean = scrubbedError(error)
+    log(`[${where}] ${describe(clean)}${tail}`, clean)
+    forward(() => sink?.error(where, clean, safe ?? {}))
   }
 
   function reportEvent(name: string, context?: Record<string, unknown>): void {

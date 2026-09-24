@@ -51,12 +51,19 @@ describe('redactContext', () => {
     expect(redactContext({ email: 42 })).toEqual({ email: '[redacted]' })
   })
 
+  it('masks an email inside a string value under any key', () => {
+    expect(redactContext({ note: 'sent to alice@test.com twice' })).toEqual({
+      note: 'sent to a…@test.com twice',
+    })
+  })
+
   it('redacts a stellar secret seed under any key', () => {
-    // The one value-shaped rule: a seed is unmistakable, and the key it
-    // arrives under is whatever the caller happened to name it.
+    // A seed is unmistakable, and the key it arrives under is whatever the
+    // caller happened to name it. The text around it stays: that is the
+    // part that says what happened.
     const seed = `S${'A'.repeat(55)}`
     expect(redactContext({ note: `key ${seed} leaked`, list: [seed] })).toEqual({
-      note: '[redacted]',
+      note: 'key [redacted] leaked',
       list: ['[redacted]'],
     })
   })
@@ -111,6 +118,28 @@ describe('reportError', () => {
     reportError('swap/submit', error, { email: 'alice@test.com' })
 
     expect(sink.errors).toEqual([['swap/submit', error, { email: 'a…@test.com' }]])
+  })
+
+  it('scrubs the error message itself, in the line, the stack and the copy', () => {
+    // A thrower writes whatever it likes into a message — "could not email
+    // alice@…" is a real one — and a message is text, not a keyed context.
+    const sink = fakeSink()
+    const { log, reportError } = harness(sink)
+    const seed = `S${'A'.repeat(55)}`
+
+    reportError('standing', new Error(`could not email alice@test.com with ${seed}`))
+
+    expect(log.mock.calls[0]?.[0]).toBe('[standing] could not email a…@test.com with [redacted]')
+    const logged = log.mock.calls[0]?.[1] as Error
+    expect(logged.stack).not.toContain('alice@test.com')
+    expect(logged.stack).not.toContain(seed)
+
+    const forwarded = sink.errors[0]?.[1] as Error
+    expect(forwarded).toBeInstanceOf(Error)
+    expect(forwarded.message).toBe('could not email a…@test.com with [redacted]')
+    expect(forwarded.stack).not.toContain('alice@test.com')
+    // The frames survive: that is what Sentry groups on.
+    expect(forwarded.stack).toContain('report.test.ts')
   })
 
   it('still logs when the sink throws', () => {

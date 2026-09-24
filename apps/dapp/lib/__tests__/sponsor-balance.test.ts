@@ -52,6 +52,17 @@ describe('readSponsorBalance', () => {
     expect(out).toEqual({ funded: false, balanceXlm: '0' })
   })
 
+  it('refuses a balance it cannot read as a number', async () => {
+    // A balance that is not a number must not reach a comparison: NaN fails
+    // every guard, and the alert that follows would be a false one.
+    await expect(
+      readSponsorBalance(ACCOUNT, {
+        horizonUrl: 'https://horizon.test',
+        fetchImpl: horizon(200, { balances: [{ asset_type: 'native', balance: 'lots' }] }),
+      })
+    ).rejects.toThrow(/unreadable balance/)
+  })
+
   it('does not guess when Horizon fails', async () => {
     await expect(
       readSponsorBalance(ACCOUNT, {

@@ -47,5 +47,13 @@ export async function readSponsorBalance(
 
   const body = (await res.json()) as HorizonAccount
   const native = body.balances?.find((b) => b.asset_type === 'native')
-  return { funded: true, balanceXlm: native?.balance ?? '0' }
+  const balanceXlm = native?.balance ?? '0'
+
+  // Horizon prints a decimal string. Anything else must not reach a
+  // comparison: NaN fails every guard, and the alert that follows would be
+  // a false one.
+  if (!/^\d+(\.\d+)?$/.test(balanceXlm)) {
+    throw new Error(`Horizon returned an unreadable balance: ${balanceXlm}`)
+  }
+  return { funded: true, balanceXlm }
 }
