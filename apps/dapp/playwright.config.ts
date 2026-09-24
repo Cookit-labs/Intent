@@ -44,7 +44,9 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: BASE_URL,
-    trace: 'retain-on-failure',
+    // A retried run records the attempt, so a flake that passes on retry still
+    // leaves evidence of the first failure.
+    trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
@@ -65,6 +67,11 @@ export default defineConfig({
       DEEPSEEK_API_KEY: '',
       GROQ_API_KEY: '',
       OPENROUTER_API_KEY: '',
+      SOROSWAP_API_KEY: '',
+      DEFINDEX_API_KEY: '',
+      NOETHER_API_URL: '',
+      SPONSOR_SECRET_KEY: '',
+      REDIS_URL: '',
     },
   },
 })
