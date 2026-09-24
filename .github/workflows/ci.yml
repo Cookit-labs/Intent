@@ -20,4 +20,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # Every workspace's unit tests. The `*.live.test.ts` files reach testnet
+      # and skip themselves on SKIP_LIVE; turbo's strict env mode only hands a
+      # task the variables turbo.json names, which is why `test` lists it.
+      - run: pnpm test
+        env:
+          SKIP_LIVE: '1'
       - run: pnpm build
