@@ -1,4 +1,5 @@
 import { DEFAULT_LENDING_VENUE, lendingVenueName } from './lend/venues'
+import { recipientKind } from './names/kind'
 import { DEFAULT_ANCHOR, isAnchorId, lookupAnchor } from './offramp/anchors'
 import { parseIntent } from './parse-intent'
 import type { ParsedIntent } from './parse-intent'
@@ -47,12 +48,14 @@ const SEQUENCE_MARKERS = /\b(?:and\s+then|then|after\s+that|afterwards|followed\
 /**
  * What the follow-on action does.
  *
- * Two kinds. The vocabulary is deliberately narrow: a marker that matched
+ * Three kinds. The vocabulary is deliberately narrow: a marker that matched
  * anything would turn every "then" into a second action, including the many
  * that are not one. Offramp is checked before lending, because "put it in my
- * bank" contains lending's "put it in" and the bank decides.
+ * bank" contains lending's "put it in" and the bank decides; a send is
+ * checked between them, because "send the dollars to my bank" is a
+ * withdrawal and a recipient's name is not a venue.
  */
-export type FollowOnKind = 'lend' | 'offramp'
+export type FollowOnKind = 'lend' | 'offramp' | 'send'
 
 /**
  * An instruction to supply an asset already held, with no trade first.
@@ -164,6 +167,13 @@ export interface FollowOnAction {
    * first step produced, and the amount is not known until that step confirms.
    */
   asset?: string
+  /**
+   * Who a send goes to, as typed: an address, a `.xlm` name or `name*domain`.
+   *
+   * Only on a `send`, whose `venue` is empty — a recipient is a person, not a
+   * pool, and the server resolves the name rather than this parser.
+   */
+  recipient?: string
 }
 
 export interface CompoundIntent {
@@ -173,6 +183,21 @@ export interface CompoundIntent {
   followOn: FollowOnAction
   /** The clause each action was read from, for showing the user what was understood. */
   clauses: [string, string]
+}
+
+/**
+ * Words that name paying the proceeds to somebody, and who.
+ *
+ * The recipient is whatever single token follows "to", and it only counts
+ * when it is one of the forms the resolver reads. That check is what keeps
+ * "send it to my friend" from becoming a payment to an account called "my".
+ */
+const SEND_PHRASING = /\b(?:send|pay|transfer)\b.*?\bto\s+(\S+?)[.,;!]?\s*$/i
+
+function sendRecipientOf(clause: string): string | undefined {
+  const token = SEND_PHRASING.exec(clause)?.[1]
+  if (token === undefined || recipientKind(token) === undefined) return undefined
+  return token
 }
 
 /**
@@ -296,6 +321,18 @@ export function parseCompoundIntent(
     return {
       head,
       followOn: { kind: 'offramp', venue: anchor ?? DEFAULT_ANCHOR },
+      clauses: [first, second],
+    }
+  }
+
+  // A payment to somebody the resolver can name. "Send it to my friend" names
+  // nobody and falls through, as it always has.
+  const recipient = sendRecipientOf(second)
+  if (recipient !== undefined) {
+    const head = parseIntent(first, prices)
+    return {
+      head,
+      followOn: { kind: 'send', venue: '', recipient },
       clauses: [first, second],
     }
   }
@@ -475,6 +512,9 @@ export function describeFollowOn(followOn: FollowOnAction, asset?: string): stri
   const what = asset !== undefined && asset !== '' ? `the ${asset}` : 'it'
   if (followOn.kind === 'lend') {
     return `then supply ${what} to ${lendingVenueName(followOn.venue)}`
+  }
+  if (followOn.kind === 'send') {
+    return `then send ${what} to ${followOn.recipient ?? 'the recipient'}`
   }
   return `then withdraw ${what} to your bank through ${lookupAnchor(followOn.venue)?.name ?? followOn.venue}`
 }
