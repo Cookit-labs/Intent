@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { clearTurnsRemote } from '../api/conversation-client'
 import { clearTurns, loadTurns, saveTurn, updateTurn, type ChatTurn } from '../chat-history'
+
+vi.mock('../api/conversation-client', () => ({
+  listTurns: vi.fn().mockResolvedValue([]),
+  saveTurnRemote: vi.fn().mockResolvedValue(undefined),
+  updateTurnRemote: vi.fn().mockResolvedValue(undefined),
+  clearTurnsRemote: vi.fn().mockResolvedValue(undefined),
+}))
 
 /**
  * Conversations are kept so a reload does not erase what the agents said.
@@ -90,6 +98,18 @@ describe('chat history', () => {
 
     expect(loadTurns('stellar')).toHaveLength(0)
     expect(loadTurns('arc')).toHaveLength(1)
+  })
+
+  it('clears the list on this device and leaves the server record alone', () => {
+    // Clear is a tidy-up of the panel, not a deletion. The database is the
+    // record of trades that really happened, and a button in a history
+    // overlay must not be able to erase it.
+    saveTurn(turn({ id: 'a', chain: 'stellar' }))
+
+    clearTurns('stellar')
+
+    expect(loadTurns('stellar')).toHaveLength(0)
+    expect(clearTurnsRemote).not.toHaveBeenCalled()
   })
 
   it('survives unreadable storage', () => {

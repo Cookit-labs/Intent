@@ -14,7 +14,7 @@ const nav = [
   { href: '/agents', label: 'Agents', icon: Wallet },
   { href: '/apps', label: 'Apps', icon: Boxes },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, soon: true },
-  { href: '/history', label: 'History', icon: History, soon: true },
+  { href: '/history', label: 'History', icon: History },
   { href: '/vault', label: 'Vault', icon: Vault, soon: true },
   { href: '/settings', label: 'Settings', icon: Settings, soon: true },
 ] as const

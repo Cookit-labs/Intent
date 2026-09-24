@@ -1,11 +1,6 @@
 import type { AgentProposalView } from './agents/competition'
 
-import {
-  clearTurnsRemote,
-  listTurns,
-  saveTurnRemote,
-  updateTurnRemote,
-} from './api/conversation-client'
+import { listTurns, saveTurnRemote, updateTurnRemote } from './api/conversation-client'
 
 /**
  * Past conversations, kept across reloads — and across devices.
@@ -249,9 +244,17 @@ export function updateTurn(
   void updateTurnRemote(id, patch).catch((e) => reportSyncFailure('a trade outcome', e))
 }
 
+/**
+ * Empties the panel on this device and nothing else.
+ *
+ * The server keeps every turn. Clear used to delete there too, which made a
+ * tidy-up button in a history overlay the one thing in the app that could
+ * erase the record of a trade that really happened. Now it drops the local
+ * cache for this chain; the next `syncTurns` refills it from the record.
+ */
 export function clearTurns(chain: string): void {
   write(read().filter((t) => t.chain !== chain))
-  void clearTurnsRemote(chain).catch((e) => reportSyncFailure('a history clear', e))
+  notifyTurnsChanged()
 }
 
 /**

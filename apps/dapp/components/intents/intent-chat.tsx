@@ -169,6 +169,11 @@ export function IntentChat(): JSX.Element {
 
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
+  // Past intents belong to a wallet. With none connected there is nothing
+  // to attribute them to, so the overlay closes and its button goes away.
+  useEffect(() => {
+    if (!isConnected) setHistoryOpen(false)
+  }, [isConnected])
   // History lives on the server; the local copy is a cache. Refilled whenever
   // the wallet or chain changes, so clearing site data — or opening the app on
   // another device — shows the trades that actually happened rather than an
@@ -1070,20 +1075,22 @@ export function IntentChat(): JSX.Element {
         {/* Past conversations. The chat keeps nothing across a reload on its
             own, so without this the agents' reasoning is lost the moment the
             page refreshes or a second intent is composed. */}
-        <button
-          type="button"
-          onClick={() => setHistoryOpen((v) => !v)}
-          aria-label="Past intents"
-          aria-expanded={historyOpen}
-          className={cn(
-            'ml-auto rounded-full p-1.5 transition-colors',
-            historyOpen
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-          )}
-        >
-          <Clock className="h-4 w-4" />
-        </button>
+        {isConnected ? (
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((v) => !v)}
+            aria-label="Past intents"
+            aria-expanded={historyOpen}
+            className={cn(
+              'ml-auto rounded-full p-1.5 transition-colors',
+              historyOpen
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+            )}
+          >
+            <Clock className="h-4 w-4" />
+          </button>
+        ) : null}
 
         {/* Standing rules. Badged when one has come due, because a rule that
             is ready and unnoticed is the same as a rule that never fired. */}
@@ -1172,7 +1179,7 @@ export function IntentChat(): JSX.Element {
           />
         ) : null}
 
-        {historyOpen ? (
+        {historyOpen && isConnected ? (
           <ChatHistoryPanel
             turns={turns}
             onSelect={(turn) => {
