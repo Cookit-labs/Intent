@@ -12,6 +12,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import { NameLookupFailed, NameNotFound } from './errors'
+import { domainLabels, isSorobanDomain } from './kind'
 
 /**
  * `.xlm` names, resolved through the SorobanDomains registry.
@@ -38,21 +39,8 @@ const SOROBAN_DOMAINS_RPC_FALLBACK = 'https://rpc.lightsail.network'
 export const SOROBAN_DOMAINS_SIMULATION_ACCOUNT =
   'GALAXYVOIDAOPZTDLHILAJQKCVVFMD4IKLXLSZV5YHO7VY74IWZILUTO'
 
-const TLD = 'xlm'
-/** The registry's own rule: lowercase letters, one to fifteen of them. */
-const LABEL = /^[a-z]{1,15}$/
 /** The registry's error for a node it holds no record under. */
 const NOT_FOUND_CODE = '#307'
-
-function labelsOf(input: string): string[] {
-  return input.trim().toLowerCase().split('.')
-}
-
-export function isSorobanDomain(input: string): boolean {
-  const labels = labelsOf(input)
-  if (labels.length < 2 || labels[labels.length - 1] !== TLD) return false
-  return labels.slice(0, -1).every((label) => LABEL.test(label))
-}
 
 function utf8(s: string): Uint8Array {
   return new TextEncoder().encode(s)
@@ -66,7 +54,7 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 export function domainNode(name: string): Uint8Array {
-  const labels = labelsOf(name)
+  const labels = domainLabels(name)
   const tld = labels.pop() ?? ''
   const root = labels.pop() ?? ''
   let node = keccak_256(concat(keccak_256(utf8(tld)), keccak_256(utf8(root))))
@@ -84,7 +72,7 @@ export interface ResolveDomainOptions {
 }
 
 function recordKey(name: string): xdr.ScVal {
-  const kind = labelsOf(name).length > 2 ? 'SubDomain' : 'Domain'
+  const kind = domainLabels(name).length > 2 ? 'SubDomain' : 'Domain'
   return xdr.ScVal.scvVec([
     nativeToScVal(kind, { type: 'symbol' }),
     xdr.ScVal.scvBytes(Buffer.from(domainNode(name))),

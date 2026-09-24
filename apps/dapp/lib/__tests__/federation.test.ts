@@ -2,7 +2,8 @@ import { Keypair } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { NameLookupFailed, NameNotFound } from '../names/errors'
-import { isFederationAddress, resolveFederation } from '../names/federation'
+import { resolveFederation } from '../names/federation'
+import { isFederationAddress } from '../names/kind'
 
 /**
  * SEP-2 federation, without a network.

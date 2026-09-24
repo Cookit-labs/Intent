@@ -11,10 +11,10 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import { NameLookupFailed, NameNotFound } from '../names/errors'
+import { isSorobanDomain } from '../names/kind'
 import {
   SOROBAN_DOMAINS_REGISTRY,
   domainNode,
-  isSorobanDomain,
   resolveSorobanDomain,
 } from '../names/soroban-domains'
 

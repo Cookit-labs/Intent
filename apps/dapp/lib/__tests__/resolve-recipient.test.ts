@@ -2,7 +2,8 @@ import { Keypair, StrKey } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { NameNotFound, UnsupportedRecipient } from '../names/errors'
-import { recipientKind, resolveRecipient } from '../names/resolve'
+import { recipientKind } from '../names/kind'
+import { resolveRecipient } from '../names/resolve'
 
 /**
  * One resolver for the three ways a recipient can be written.

@@ -1,9 +1,11 @@
 import { StrKey } from '@stellar/stellar-sdk'
 
 import { UnsupportedRecipient } from './errors'
-import { isFederationAddress, resolveFederation } from './federation'
+import { resolveFederation } from './federation'
 import type { FederationAnswer } from './federation'
-import { isSorobanDomain, resolveSorobanDomain } from './soroban-domains'
+import { recipientKind } from './kind'
+import type { RecipientKind } from './kind'
+import { resolveSorobanDomain } from './soroban-domains'
 
 /**
  * A recipient, however it was written, as one account to pay.
@@ -23,34 +25,12 @@ import { isSorobanDomain, resolveSorobanDomain } from './soroban-domains'
 export interface ResolvedRecipient {
   /** As typed, trimmed. */
   input: string
-  kind: 'address' | 'soroban-domain' | 'federation'
+  kind: RecipientKind
   address: string
   memo?: string
   memoType?: 'text' | 'id' | 'hash'
   /** Where the answer came from, for the card. */
   resolvedOn?: 'stellar-mainnet' | 'federation'
-}
-
-/**
- * Which form the input takes, or nothing when it is none of them.
- *
- * A contract or muxed address counts as `address` here: the form is
- * recognisably an address, and the parser should read "send 5 XLM to C…" as
- * a payment so that the refusal can name the reason. The refusal itself is
- * `resolveRecipient`'s.
- */
-export function recipientKind(input: string): ResolvedRecipient['kind'] | undefined {
-  const trimmed = input.trim()
-  if (
-    StrKey.isValidEd25519PublicKey(trimmed) ||
-    StrKey.isValidContract(trimmed) ||
-    StrKey.isValidMed25519PublicKey(trimmed)
-  ) {
-    return 'address'
-  }
-  if (isSorobanDomain(trimmed)) return 'soroban-domain'
-  if (isFederationAddress(trimmed)) return 'federation'
-  return undefined
 }
 
 export interface ResolveRecipientOptions {
@@ -59,13 +39,20 @@ export interface ResolveRecipientOptions {
   resolveFederation?: (address: string) => Promise<FederationAnswer>
 }
 
+/**
+ * The checksum check the browser's shape check deferred to here.
+ *
+ * A key with a typo and a contract address are both refused, but they are
+ * different mistakes, and the message says which.
+ */
 function accountOnly(address: string, what: string): string {
-  if (!StrKey.isValidEd25519PublicKey(address)) {
+  if (StrKey.isValidEd25519PublicKey(address)) return address
+  if (StrKey.isValidContract(address) || StrKey.isValidMed25519PublicKey(address)) {
     throw new UnsupportedRecipient(
       `${what} is not an account address; only accounts (G…) can be paid here, not contracts or muxed accounts`
     )
   }
-  return address
+  throw new UnsupportedRecipient(`${what} is not a valid account address; check it for a typo`)
 }
 
 export async function resolveRecipient(

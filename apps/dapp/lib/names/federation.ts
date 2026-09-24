@@ -1,6 +1,7 @@
 import { StrKey } from '@stellar/stellar-sdk'
 
 import { NameLookupFailed, NameNotFound } from './errors'
+import { isFederationAddress } from './kind'
 
 /**
  * SEP-2 federation: `name*domain` to an account, through the domain's own
@@ -21,16 +22,10 @@ import { NameLookupFailed, NameNotFound } from './errors'
  * the address from here, and the payment builder refuses to omit it.
  */
 
-/** `name*domain`, where the domain has at least one dot and a letters-only TLD. */
-const FEDERATION_ADDRESS = /^[^*\s]+\*[a-z0-9.-]+\.[a-z]{2,}$/i
 const FEDERATION_SERVER = /^\s*FEDERATION_SERVER\s*=\s*"([^"]*)"/m
 
 export type FederationMemoType = 'text' | 'id' | 'hash'
 const MEMO_TYPES = new Set<string>(['text', 'id', 'hash'])
-
-export function isFederationAddress(input: string): boolean {
-  return FEDERATION_ADDRESS.test(input.trim())
-}
 
 export interface ResolveFederationOptions {
   fetchImpl?: typeof fetch
