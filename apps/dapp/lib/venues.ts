@@ -231,6 +231,6 @@ export const venues: Venue[] = [
     url: 'https://noether.exchange',
     integration: 'quotes',
     capability:
-      'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs a closed-beta API key, so it is unverified end to end. Unaudited and testnet-only.',
+      'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs an API key from its closed beta, so it is unverified end to end. Unaudited, testnet-only; its gateway reports 0.0.0-dev.',
   },
 ]
