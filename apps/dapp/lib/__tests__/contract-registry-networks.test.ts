@@ -124,14 +124,22 @@ describe('on mainnet', () => {
     expect(out.ok).toBe(false)
   })
 
-  it('labels the mainnet contracts and refuses the testnet ones', async () => {
+  it('allowlists only the venues that are on mainnet, and refuses the testnet ids', async () => {
     const { registry } = await on('mainnet')
     expect(registry.lookupContract(MAINNET.soroswapRouter)?.label).toBe('Swap via Soroswap')
-    expect(registry.lookupContract(MAINNET.aquariusRouter)?.label).toBe('Swap via Aquarius')
-    expect(registry.lookupContract(MAINNET.blendPool)?.label).toBe('Blend lending pool')
+    expect(registry.labelForCall(MAINNET.soroswapRouter, 'swap_exact_tokens_for_tokens')).toEqual({
+      ok: true,
+      label: 'Swap via Soroswap',
+    })
+
+    // Verified ids, but their venues are not on mainnet at launch, so a call
+    // to any of them is refused rather than narrated as a swap or a supply.
+    expect(registry.lookupContract(MAINNET.aquariusRouter)).toBeUndefined()
+    expect(registry.lookupContract(MAINNET.blendPool)).toBeUndefined()
+    expect(registry.lookupContract(MAINNET.soroswapAggregator)).toBeUndefined()
     expect(
-      registry.labelForCall(MAINNET.soroswapAggregator, 'swap_exact_tokens_for_tokens')
-    ).toEqual({ ok: true, label: 'Swap via Soroswap aggregator' })
+      registry.labelForCall(MAINNET.soroswapAggregator, 'swap_exact_tokens_for_tokens').ok
+    ).toBe(false)
 
     expect(registry.lookupContract(TESTNET.soroswapRouter)).toBeUndefined()
     const out = registry.labelForCall(TESTNET.soroswapRouter, 'swap_exact_tokens_for_tokens')

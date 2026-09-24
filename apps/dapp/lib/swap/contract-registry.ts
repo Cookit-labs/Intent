@@ -1,5 +1,7 @@
 import { activeNetwork } from '@intent/config'
 
+import { venueIdOn } from '../venues'
+
 /**
  * Which Soroban contracts a plan may call, and what each one is named on the
  * confirmation screen.
@@ -164,9 +166,10 @@ export function blendPositionUrl(poolId: string = BLEND_POOL): string {
 }
 
 /** Every contract the app knows, on this network or not; see `ENTRIES`. */
-const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
+const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined; venue: string })[] = [
   {
     id: SOROSWAP_ROUTER,
+    venue: 'soroswap',
     label: 'Swap via Soroswap',
     functions: {
       swap_exact_tokens_for_tokens: 'Swap via Soroswap',
@@ -175,6 +178,7 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   },
   {
     id: AQUARIUS_ROUTER,
+    venue: 'aquarius',
     label: 'Swap via Aquarius',
     functions: {
       swap: 'Swap via Aquarius',
@@ -188,6 +192,7 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   },
   {
     id: SOROSWAP_AGGREGATOR,
+    venue: 'soroswap-aggregator',
     label: 'Swap via Soroswap aggregator',
     // The two trade entrypoints from the contract's `SoroswapAggregatorTrait`,
     // and nothing else. It also exposes `update_adapters`, `set_pause`,
@@ -200,6 +205,7 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   },
   {
     id: BLEND_POOL,
+    venue: 'blend',
     label: 'Blend lending pool',
     functions: {
       // `submit` carries a request vector whose type decides whether this is
@@ -216,6 +222,7 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   },
   {
     id: NOETHER_MARKET,
+    venue: 'noether',
     label: 'Noether perps market',
     functions: {
       // The isolated open the gateway's `/v1/orders/prepare` builds. Closing,
@@ -227,6 +234,7 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   },
   {
     id: NOETHER_ROUTER,
+    venue: 'noether',
     label: 'Noether router',
     functions: {
       // The venue's own web app opens through the router with a signed oracle
@@ -239,9 +247,14 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
 
 /**
  * The candidates that exist on this network. One whose id is `undefined`
- * has no verified contract here, and a venue with no contract has no entry.
+ * has no verified contract here, and one whose venue is not on this network
+ * is not allowlisted either, however real its contract: a verified id is a
+ * fact about the chain, and whether the app executes there is a separate
+ * decision (`networks` in `lib/venues.ts`).
  */
-const ENTRIES: ContractEntry[] = CANDIDATES.filter((e): e is ContractEntry => e.id !== undefined)
+const ENTRIES: ContractEntry[] = CANDIDATES.filter(
+  (e): e is ContractEntry & { venue: string } => e.id !== undefined && venueIdOn(e.venue)
+)
 
 const BY_ID = new Map(ENTRIES.map((e) => [e.id, e]))
 

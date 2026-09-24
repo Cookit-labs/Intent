@@ -20,7 +20,12 @@ function rank(venue: { integration?: string }): number {
   }
 }
 
-export function VenueGrid(): JSX.Element {
+export function VenueGrid({
+  availableIds,
+}: {
+  /** Venue ids that exist on the active network, as the server decided. */
+  availableIds: string[]
+}): JSX.Element {
   const [query, setQuery] = useState('')
   const { descriptor } = useChain()
 
@@ -66,7 +71,7 @@ export function VenueGrid(): JSX.Element {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((venue) => (
-            <VenueCard key={venue.id} venue={venue} />
+            <VenueCard key={venue.id} venue={venue} onNetwork={availableIds.includes(venue.id)} />
           ))}
         </div>
       )}

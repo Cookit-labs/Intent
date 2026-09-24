@@ -1,5 +1,6 @@
 'use client'
 
+import { activeNetwork } from '@intent/config'
 import { useQuery } from '@tanstack/react-query'
 
 import type { MarketPrice } from '../../lib/swap/price-types'
@@ -7,17 +8,20 @@ import type { MarketPrice } from '../../lib/swap/price-types'
 /**
  * What XLM trades for, on the network this app actually executes against.
  *
- * **Testnet is the headline figure, not mainnet.** A swap signed here fills
- * against testnet's book, so testnet's price is the one that describes what
- * happens to the user's own money. Mainnet sits beside it as the reference the
- * agents reason with — both are true, and which one matters depends on whether
- * you are asking "what will I get" or "is that a good rate".
+ * **The execution network's book is the headline figure.** A swap signed
+ * here fills against that book, so its price is the one that describes what
+ * happens to the user's own money. "What it is worth" sits beside it as the
+ * reference the agents reason with — both are true, and which one matters
+ * depends on whether you are asking "what will I get" or "is that a good
+ * rate".
  *
- * They diverge widely and permanently: testnet liquidity is synthetic, so the
- * gap is a property of the venue rather than a staleness to be corrected. Both
- * are shown rather than one reconciled figure, because averaging them would
- * describe no market at all.
+ * On testnet they diverge widely and permanently: its liquidity is synthetic,
+ * so the gap is a property of the venue rather than a staleness to be
+ * corrected. Both are shown rather than one reconciled figure, because
+ * averaging them would describe no market at all.
  */
+const HERE = activeNetwork()
+
 async function loadTestnetPrice(): Promise<MarketPrice | null> {
   const res = await fetch('/api/prices/testnet')
   if (!res.ok) return null
@@ -55,7 +59,7 @@ export function PriceTicker({
         : 'fallback'
   const worthTitle =
     worth?.source === 'reflector'
-      ? 'XLM according to Reflector, an oracle aggregating exchange prices. Used to size dollar amounts and to judge whether a testnet quote is reasonable. Not what a swap here fills at, and not what Blend liquidates against.'
+      ? 'XLM according to Reflector, an oracle aggregating exchange prices. Used to size dollar amounts and to judge whether a quote here is reasonable. Not what a swap here fills at, and not what Blend liquidates against.'
       : worth?.source === 'stellar-mainnet'
         ? 'XLM on the Stellar mainnet order book. Reflector could not be read, so this single venue stands in for it.'
         : 'Neither Reflector nor the mainnet order book could be read, so this is a fallback figure rather than a live quote.'
@@ -65,19 +69,19 @@ export function PriceTicker({
       {testnet != null ? (
         <span
           className="flex items-center gap-1.5"
-          title="XLM mid price from the Stellar testnet order book — the venue this app signs against, so this is the rate your swaps actually fill near."
+          title={`XLM mid price from the Stellar ${HERE} order book — the venue this app signs against, so this is the rate your swaps actually fill near.`}
         >
           <span className="bg-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
           <span className="text-foreground font-medium">XLM ${testnet.usd.toFixed(4)}</span>
-          <span className="opacity-60">testnet</span>
+          <span className="opacity-60">{HERE}</span>
         </span>
       ) : (
         <span
           className="flex items-center gap-1.5"
-          title="Testnet's XLM/USDC order book could not be read, or has no offers resting on it right now."
+          title={`The ${HERE} XLM/USDC order book could not be read, or has no offers resting on it right now.`}
         >
           <span className="bg-muted-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
-          <span className="opacity-60">testnet book unavailable</span>
+          <span className="opacity-60">{HERE} book unavailable</span>
         </span>
       )}
 

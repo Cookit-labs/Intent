@@ -35,6 +35,10 @@ interface WithdrawBody {
   amount?: string
 }
 
+// No mainnet trade cap here. This venue is testnet-only (`networks` in
+// lib/venues.ts) and its builder refuses any other network, so nothing is
+// spent on mainnet through this route. Give it `assertTradeWithinCap` before
+// the venue gains `networks: ['mainnet']`.
 export async function POST(request: Request): Promise<NextResponse> {
   let body: WithdrawBody
   try {

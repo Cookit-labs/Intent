@@ -72,13 +72,20 @@ function VenueLogo({ venue }: { venue: Venue }): JSX.Element {
   )
 }
 
-export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
+export function VenueCard({
+  venue,
+  onNetwork,
+}: {
+  venue: Venue
+  /** Whether the venue exists on the active network, as the server decided. */
+  onNetwork: boolean
+}): JSX.Element {
   // Absent means listed. A venue nobody wired in is exactly that, and
   // defaulting the other way would claim integrations that do not exist.
   const integration = venue.integration ?? 'listed'
   // Quiet, and only where it is true: a venue wired in against testnet whose
   // mainnet contracts are not yet verified is not "Integrated" on mainnet.
-  const notHere = notOnNetworkLabel(venue)
+  const notHere = notOnNetworkLabel(venue, undefined, onNetwork)
 
   return (
     <a href={venue.url} target="_blank" rel="noopener noreferrer" className="block">

@@ -4,7 +4,14 @@ import { buildMarketContext } from '../agents/market-context'
 import { configuredLendingVenues } from '../lend/venues'
 import { buildAquariusSwap } from '../swap/build-aquarius'
 import { collectQuotes, type QuoteSource } from '../swap/quote'
-import { assertVenueOn, isVenueOn, notOnNetworkLabel, venues, venuesOn } from '../venues'
+import {
+  assertVenueOn,
+  availableVenueIds,
+  isVenueOn,
+  notOnNetworkLabel,
+  venues,
+  venuesOn,
+} from '../venues'
 
 /**
  * Which venues exist on which network.
@@ -157,5 +164,44 @@ describe('quote sources follow the venue list', () => {
     // Not asked means not failed either: a venue that is not here has no
     // answer to report, and a failure line for it would read as an outage.
     expect(failures.map((f) => f.source).sort()).toEqual(['horizon', 'soroswap'])
+  })
+})
+
+describe('what the Apps page may call available, decided on the server', () => {
+  it('is the venue list, plus MoneyGram once its production domain is named', () => {
+    const bare = availableVenueIds('mainnet', {})
+    expect(bare.has('soroswap')).toBe(true)
+    expect(bare.has('moneygram')).toBe(false)
+    expect(bare.has('aquarius')).toBe(false)
+
+    const configured = availableVenueIds('mainnet', {
+      MONEYGRAM_PRODUCTION_HOME_DOMAIN: 'stellar.moneygram.com',
+    })
+    expect(configured.has('moneygram')).toBe(true)
+    expect(configured.has('testanchor')).toBe(false)
+  })
+
+  it('has every Stellar venue on testnet', () => {
+    const ids = availableVenueIds('testnet', {})
+    for (const v of stellar) expect(ids.has(v.id), v.id).toBe(true)
+  })
+
+  it('labels by that decision, not by the static list alone', () => {
+    const moneygram = byId('moneygram')!
+    expect(notOnNetworkLabel(moneygram, 'mainnet', true)).toBeUndefined()
+    expect(notOnNetworkLabel(moneygram, 'mainnet', false)).toBe('Not on mainnet yet')
+  })
+})
+
+describe('venue copy on mainnet', () => {
+  it('does not say the payment settles on testnet', async () => {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
+    const { venues: onMainnet } = await import('../venues')
+    const names = onMainnet.find((v) => v.id === 'sorobandomains')
+    expect(names?.capability).toMatch(/mainnet/i)
+    expect(names?.capability).not.toMatch(/testnet/i)
+    vi.unstubAllEnvs()
+    vi.resetModules()
   })
 })

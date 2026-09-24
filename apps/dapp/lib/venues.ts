@@ -1,6 +1,8 @@
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
 import type { Venue } from '@intent/types'
 
+import { anchorsOn } from './offramp/anchors'
+
 export const venues: Venue[] = [
   {
     id: 'cow-swap',
@@ -250,7 +252,9 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
+      activeNetwork() === 'mainnet'
+        ? 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names and payments both live on Stellar mainnet.'
+        : 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
   },
 ]
 
@@ -292,10 +296,26 @@ export function venuesOn(network: StellarNetworkName = activeNetwork()): Venue[]
  */
 export function notOnNetworkLabel(
   venue: Pick<Venue, 'family' | 'networks'>,
-  network: StellarNetworkName = activeNetwork()
+  network: StellarNetworkName = activeNetwork(),
+  onNetwork: boolean = isVenueOn(venue, network)
 ): string | undefined {
   if (network !== 'mainnet' || venue.family !== 'stellar') return undefined
-  return isVenueOn(venue, network) ? undefined : 'Not on mainnet yet'
+  return onNetwork ? undefined : 'Not on mainnet yet'
+}
+
+/**
+ * Which venues the Apps page may call available here — decided on the
+ * server, because MoneyGram's mainnet presence depends on configuration the
+ * browser cannot see. The static list, plus MoneyGram once its production
+ * domain is named.
+ */
+export function availableVenueIds(
+  network: StellarNetworkName = activeNetwork(),
+  env: Record<string, string | undefined> = process.env
+): Set<string> {
+  const ids = new Set(venuesOn(network).map((v) => v.id))
+  if (anchorsOn(network, env).includes('moneygram')) ids.add('moneygram')
+  return ids
 }
 
 /**

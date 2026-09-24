@@ -130,7 +130,7 @@ export const stellarMainnet: StellarNetwork = withOverrides(
 /**
  * The network this deployment is on. Everything that talks to Stellar reads
  * this; `stellarTestnet` stays exported for the few places that mean testnet
- * specifically, such as funding a throwaway account from friendbot.
+ * specifically — the live tests, which fund throwaway accounts from friendbot.
  */
 export const stellarNetwork: StellarNetwork =
   NETWORK === 'mainnet' ? stellarMainnet : stellarTestnet
