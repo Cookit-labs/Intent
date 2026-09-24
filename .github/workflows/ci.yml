@@ -27,3 +27,45 @@ jobs:
         env:
           SKIP_LIVE: '1'
       - run: pnpm build
+      # The e2e job starts the dapp from this build rather than making its
+      # own: a second `next build` would be the slowest step in the pipeline.
+      # `.next` is a dot-directory, which upload-artifact skips by default.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dapp-build
+          path: |
+            apps/dapp/.next
+            !apps/dapp/.next/cache
+          include-hidden-files: true
+          retention-days: 1
+
+  e2e:
+    name: Browser smoke (Playwright)
+    runs-on: ubuntu-latest
+    needs: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: dapp-build
+          path: apps/dapp/.next
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/dapp
+      # No wallet, no model key, no database; playwright.config.ts sets the
+      # server env. `start` because the build was downloaded above.
+      - run: pnpm test:e2e
+        working-directory: apps/dapp
+        env:
+          E2E_SERVER: start
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/dapp/playwright-report/
+          retention-days: 7
