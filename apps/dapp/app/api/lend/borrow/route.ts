@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildBlendBorrow, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError, isTransientPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a borrow against collateral already posted.
@@ -61,7 +62,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!accepted.includes(body.asset)) {
       return NextResponse.json({ error: 'Blend does not lend this asset.' }, { status: 400 })
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/borrow', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

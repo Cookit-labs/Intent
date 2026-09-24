@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildBlendRepay, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a repayment, in whole or in part.
@@ -53,7 +54,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/repay', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 
