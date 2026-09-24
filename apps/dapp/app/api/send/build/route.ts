@@ -65,7 +65,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Refused before the name is asked about: an asset the app cannot send is
   // a refusal whatever the name resolves to, and a registry read is not free.
-  if (resolveAsset(symbol) === undefined) {
+  const asset = resolveAsset(symbol)
+  if (asset === undefined) {
     return NextResponse.json(
       { error: `${symbol} is not an asset this app can send` },
       { status: 400 }
@@ -95,7 +96,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Against the mainnet cap, sized from the same table as the amount above.
   try {
-    await assertTradeWithinCap(symbol, amount)
+    await assertTradeWithinCap(asset.code, amount)
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },

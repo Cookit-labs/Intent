@@ -153,7 +153,7 @@ export async function buildSwapTransaction(options: BuildSwapOptions): Promise<B
 }
 
 /** Widens an amount upward, for the `sendMax` ceiling on a fixed-output swap. */
-function widen(baseAmount: string, toleranceBps: number): string {
+export function widen(baseAmount: string, toleranceBps: number): string {
   return ((BigInt(baseAmount) * BigInt(10_000 + toleranceBps)) / BigInt(10_000)).toString()
 }
 

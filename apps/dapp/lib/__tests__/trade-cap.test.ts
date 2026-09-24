@@ -208,3 +208,39 @@ describe('checking a plan, step by step', () => {
     ).resolves.toBeUndefined()
   })
 })
+
+describe('a plan cannot move more than the cap in one asset across its steps', () => {
+  const XLM = { kind: 'classic' as const, code: 'XLM' }
+  const USDC = { kind: 'classic' as const, code: 'USDC', issuer: 'G' }
+  const prices = () => Promise.resolve(table)
+  const swap = (usdc: string) => ({
+    kind: 'swap' as const,
+    from: USDC,
+    to: XLM,
+    sendAmount: usdc,
+    minReceive: '1',
+  })
+
+  it('refuses two steps that together spend over the cap of one asset', async () => {
+    // Ten steps of $30 would be $300 out of one account on one signature.
+    await expect(
+      assertPlanWithinCap([swap('300000000'), swap('300000000')], {
+        env: {},
+        network: 'mainnet',
+        prices,
+      })
+    ).rejects.toThrow(/USDC across this plan/)
+  })
+
+  it('passes steps that spend different assets, each under the cap', async () => {
+    await expect(
+      assertPlanWithinCap(
+        [
+          swap('300000000'),
+          { kind: 'rest', selling: XLM, buying: USDC, amount: '150', price: { n: 1, d: 5 } },
+        ],
+        { env: {}, network: 'mainnet', prices }
+      )
+    ).resolves.toBeUndefined()
+  })
+})

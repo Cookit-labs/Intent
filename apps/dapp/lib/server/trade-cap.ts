@@ -107,10 +107,11 @@ export async function assertTradeWithinCap(
 }
 
 /**
- * Checks a plan against the cap one step at a time: each step's outflow is
- * a trade of its own, and the cap is per trade. A pool deposit spends both
- * sides, so both are valued together; a pool that cannot be found cannot be
- * valued, and is refused for that. On testnet nothing is read.
+ * Checks a plan against the cap: each step on its own, and then every step
+ * together per asset. One signature over ten steps could otherwise move ten
+ * times the cap out of an account in independent outflows. A pool deposit
+ * spends both sides, so both are valued; a pool that cannot be found cannot
+ * be valued, and is refused for that. On testnet nothing is read.
  */
 export async function assertPlanWithinCap(
   actions: PlanAction[],
@@ -118,48 +119,58 @@ export async function assertPlanWithinCap(
 ): Promise<void> {
   const env = options.env ?? process.env
   const network = options.network ?? activeNetwork()
-  if (tradeCapUsd(env, network) === undefined) return
+  const cap = tradeCapUsd(env, network)
+  if (cap === undefined) return
   const table = await (options.prices ?? fetchMarketPrices)()
+
+  const spentBySymbol = new Map<string, number>()
+  const spend = (symbol: string, amount: string): void => {
+    const usd = usdValue(symbol, amount, table)
+    assertWithinCap(usd, env, network)
+    spentBySymbol.set(symbol, (spentBySymbol.get(symbol) ?? 0) + usd)
+  }
 
   let pools: Pool[] | undefined
   for (const action of actions) {
     switch (action.kind) {
       case 'swap':
-        assertWithinCap(
-          usdValue(action.from.code, fromBaseUnits(action.sendAmount), table),
-          env,
-          network
-        )
+        spend(action.from.code, fromBaseUnits(action.sendAmount))
         break
       case 'rest':
-        assertWithinCap(usdValue(action.selling.code, action.amount, table), env, network)
+        spend(action.selling.code, action.amount)
         break
       case 'lend':
         // Named by contract. XLM is the one reserve this app supplies, and
         // anything else has no price here to cap by.
-        assertWithinCap(
-          usdValue(
-            action.asset === BLEND_XLM ? 'XLM' : action.asset,
-            fromBaseUnits(action.amount),
-            table
-          ),
-          env,
-          network
-        )
+        spend(action.asset === BLEND_XLM ? 'XLM' : action.asset, fromBaseUnits(action.amount))
         break
       case 'pool': {
         pools ??= await (options.pools ?? fetchPools)()
         const [a, b] = pools.find((p) => p.id === action.poolId)?.assets ?? []
-        const usd =
-          a === undefined || b === undefined
-            ? Number.NaN
-            : usdValue(a.code, action.maxAmountA, table) +
-              usdValue(b.code, action.maxAmountB, table)
-        assertWithinCap(usd, env, network)
+        if (a === undefined || b === undefined) assertWithinCap(Number.NaN, env, network)
+        else {
+          // Both sides leave together, so the deposit is one trade of their sum.
+          assertWithinCap(
+            usdValue(a.code, action.maxAmountA, table) + usdValue(b.code, action.maxAmountB, table),
+            env,
+            network
+          )
+          spend(a.code, action.maxAmountA)
+          spend(b.code, action.maxAmountB)
+        }
         break
       }
       case 'trust':
         break
+    }
+  }
+
+  for (const [symbol, usd] of spentBySymbol) {
+    if (usd > cap) {
+      throw new TradeCapExceeded(
+        `this deployment caps each trade at $${cap} on mainnet, and these steps together spend ` +
+          `about $${usd.toFixed(2)} in ${symbol} across this plan. Set ${TRADE_CAP_ENV} to change it.`
+      )
     }
   }
 }

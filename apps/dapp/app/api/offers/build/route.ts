@@ -95,7 +95,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // What the order gives up, against the mainnet cap.
   try {
-    await assertTradeWithinCap(sellSymbol, amount)
+    await assertTradeWithinCap(selling.code, amount)
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },

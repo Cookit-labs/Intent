@@ -5,7 +5,7 @@ import { sacFor } from '../../../../lib/swap/build-soroban'
 import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { derivePreview, simulatedPreview } from '../../../../lib/swap/preview'
 
-import { buildSwapTransaction } from '../../../../lib/swap/build-tx'
+import { buildSwapTransaction, widen } from '../../../../lib/swap/build-tx'
 import type { SwapQuote } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
@@ -85,16 +85,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
 
-  // What leaves the account, against the mainnet cap. A no-op on testnet.
-  try {
-    await assertTradeWithinCap(submitted.from.code, fromBaseUnits(submitted.sendAmount))
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
-      { status: 400 }
-    )
-  }
-
   if (venue === 'soroban') {
     return await buildViaSoroban(body.account, submitted)
   }
@@ -126,6 +116,18 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!fresh.ok) {
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
+
+  // The cap reads the fresh quote, never the client's figure. On a fixed
+  // output the client's send amount is a claim about nothing — the envelope
+  // spends up to the quoted input widened by the tolerance, so that ceiling
+  // is what is capped.
+  const slippageBps = typeof body.slippageBps === 'number' ? body.slippageBps : DEFAULT_SLIPPAGE_BPS
+  const spends =
+    fresh.quote.kind === 'strict_receive'
+      ? widen(fresh.quote.sendAmount, slippageBps)
+      : fresh.quote.sendAmount
+  const capped = await overCap(fresh.quote.from.code, spends)
+  if (capped !== undefined) return capped
 
   try {
     const built = await buildSwapTransaction({
@@ -161,6 +163,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 /**
+ * The mainnet cap, checked on what a fresh quote says will leave the account
+ * — in base units of the asset sent — and never on a figure the client sent.
+ * A no-op on testnet. Answers the refusal so each venue's builder can return
+ * it as is.
+ */
+async function overCap(symbol: string, baseAmount: string): Promise<NextResponse | undefined> {
+  try {
+    await assertTradeWithinCap(symbol, fromBaseUnits(baseAmount))
+    return undefined
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
+  }
+}
+
+/**
  * Builds a Soroswap swap and prepares it for signature.
  *
  * Two things differ from the classic path. The router enforces the floor
@@ -187,6 +207,9 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
   if (!fresh.ok) {
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
+
+  const capped = await overCap(fresh.quote.from.code, fresh.quote.sendAmount)
+  if (capped !== undefined) return capped
 
   const minReceive = applySlippage(fresh.quote.destAmount, DEFAULT_SLIPPAGE_BPS)
 
@@ -279,6 +302,9 @@ async function buildViaAggregator(account: string, submitted: SwapQuote): Promis
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
 
+  const capped = await overCap(fresh.quoted.quote.from.code, fresh.quoted.quote.sendAmount)
+  if (capped !== undefined) return capped
+
   let built
   try {
     built = await buildAggregatorSwap({ account, quoted: fresh.quoted, api: createSoroswapApi() })
@@ -367,6 +393,9 @@ async function buildViaAquarius(account: string, submitted: SwapQuote): Promise<
       { status: 200 }
     )
   }
+
+  const capped = await overCap(fresh.from.code, fresh.sendAmount)
+  if (capped !== undefined) return capped
 
   const minReceive = applySlippage(fresh.destAmount, DEFAULT_SLIPPAGE_BPS)
 
