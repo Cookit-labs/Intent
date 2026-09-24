@@ -52,6 +52,7 @@ import {
   parseSupplyOnlyIntent,
   type FollowOnAction,
 } from '../../lib/parse-compound'
+import { parseSendIntent } from '../../lib/parse-send'
 import type { AnchorId } from '../../lib/offramp/anchors'
 import { isAnchorId } from '../../lib/offramp/anchors'
 import type { WithdrawLimits } from '../../lib/offramp/sep24'
@@ -375,10 +376,12 @@ export function IntentChat(): JSX.Element {
   // paid out left no record anywhere: not in history, and so not under Open
   // positions either, where its anchor status is the only way to see the fiat
   // side. A settled sequence is recorded whether or not a trade preceded it.
+  // A send-only run is the same: no trade, `parsed` null, and a payment that
+  // really settled must still reach history.
   const sequenceKind = sequence.kind
   useEffect(() => {
     if (sequenceHash === undefined) return
-    if (parsed === null && sequenceKind !== 'offramp-only') return
+    if (parsed === null && sequenceKind !== 'offramp-only' && sequenceKind !== 'send-only') return
 
     if (turnId !== null) {
       updateTurn(
@@ -511,6 +514,27 @@ export function IntentChat(): JSX.Element {
     setHistoryOpen(false)
     setRestored(null)
     setPending(null)
+
+    // "Send 50 USDC to deon.xlm" is a payment, not a trade, and the trade
+    // parser would read it as a buy of USDC. Read first, for the same reason
+    // the supply reader is: every parser below assumes an intent is a trade.
+    // The recipient goes to the server as typed; nothing here resolves it.
+    const sendOnly = parseSendIntent(text, tradeableSymbols())
+    if (sendOnly !== null && slug === 'stellar') {
+      setParsed(null)
+      setFollowOn(null)
+      supply.reset()
+      perp.reset()
+      sequence.prepare({
+        kind: 'send-only',
+        asset: sendOnly.asset,
+        amount: sendOnly.amount,
+        ...(sendOnly.amountIsUsd ? { amountIsUsd: true } : {}),
+        recipient: sendOnly.recipient,
+        ...(sendOnly.memo !== undefined ? { memo: sendOnly.memo } : {}),
+      })
+      return
+    }
 
     // "Supply my XLM to Blend" is not a trade at all, and the trade parser
     // reads it as a market *buy* of XLM — spending USDC the user never
@@ -994,6 +1018,28 @@ export function IntentChat(): JSX.Element {
       // A swap that does not deliver USDC cannot be offramped. Fall through to
       // the ordinary swap: the user said what they wanted and the app cannot
       // do the second half, which the pending card already made clear.
+    }
+
+    // The same shape again, ending at somebody's account. The recipient is
+    // resolved on the server when the payment is built, after the swap has
+    // settled and its delivery is known; nothing here names an address.
+    if (
+      slug === 'stellar' &&
+      followOn !== null &&
+      followOn.kind === 'send' &&
+      followOn.recipient !== undefined
+    ) {
+      const route = routesByAgent[key] ?? winnerRoute
+      if (route !== undefined) {
+        sequence.prepare({
+          kind: 'swap-then-send',
+          quote: route,
+          receiveSymbol: parsed.input.tokenOut,
+          recipient: followOn.recipient,
+          swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for ${parsed.input.tokenOut}`,
+        })
+        return
+      }
     }
 
     // A split is two actions in one signature: part filled now, the remainder
