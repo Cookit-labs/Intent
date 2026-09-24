@@ -15,6 +15,7 @@ const categoryLabel: Record<VenueCategory, string> = {
   pool: 'Liquidity pool',
   offramp: 'Off-ramp',
   perps: 'Perpetuals',
+  names: 'Names',
 }
 
 /**

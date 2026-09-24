@@ -402,6 +402,8 @@ export function buildMarketContext(chain: string, env: Env = process.env): Marke
       // agents as facts under `perps`; a proposal naming it would pass
       // validation and reach a builder with no way to open a position.
       .filter((v) => v.category !== 'perps')
+      // Nor is a name service: it resolves recipients, it fills nothing.
+      .filter((v) => v.category !== 'names')
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.
