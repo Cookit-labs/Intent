@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { lookupAnchor } from '../../../../lib/offramp/anchors'
+import { resolveAnchor } from '../../../../lib/offramp/anchors'
 import { readWithdrawInfo } from '../../../../lib/offramp/sep24'
 import { readAnchorToml } from '../../../../lib/offramp/toml'
 import { USDC } from '../../../../lib/swap/assets'
@@ -19,10 +19,13 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request): Promise<NextResponse> {
   const id = new URL(request.url).searchParams.get('id') ?? ''
-  const anchor = lookupAnchor(id)
-  if (anchor === undefined) {
-    return NextResponse.json({ error: `${id} is not an anchor this app uses` }, { status: 400 })
+  // For this network. On mainnet with nothing configured the answer is that
+  // there is no off-ramp yet, which is what the person asking needs to hear.
+  const resolved = resolveAnchor(id)
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.reason }, { status: 400 })
   }
+  const anchor = resolved.anchor
 
   try {
     const toml = await readAnchorToml(anchor)

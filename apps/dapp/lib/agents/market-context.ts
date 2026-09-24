@@ -23,7 +23,7 @@ import { VAULT_KEYS } from '../lend/defindex/contracts'
 import { readDefindexRate, type DefindexRate } from '../lend/defindex/rate'
 import { BLEND_XLM, readReserve, type Reserve } from '../lend/reserves'
 import { configuredLendingVenues } from '../lend/venues'
-import { ALL_ANCHORS, ANCHORS } from '../offramp/anchors'
+import { anchorOn, anchorsOn, type AnchorEntry } from '../offramp/anchors'
 import { readWithdrawInfo } from '../offramp/sep24'
 import { readAnchorToml } from '../offramp/toml'
 import { readPerpFacts } from '../perps/market-facts'
@@ -347,14 +347,19 @@ export async function fetchLendingRates(
  */
 async function fetchOfframpLimits(): Promise<NonNullable<MarketContext['offramps']>> {
   const out: NonNullable<MarketContext['offramps']> = []
+  // Only anchors on this network: on mainnet with none configured the list
+  // is empty, and the agents propose no off-ramp at all.
+  const anchors = anchorsOn()
+    .map((id) => anchorOn(id))
+    .filter((a): a is AnchorEntry => a !== undefined && !a.requiresClientDomain)
   await Promise.all(
-    ALL_ANCHORS.filter((id) => !ANCHORS[id].requiresClientDomain).map(async (id) => {
+    anchors.map(async (anchor) => {
       try {
-        const toml = await readAnchorToml(ANCHORS[id])
+        const toml = await readAnchorToml(anchor)
         const limits = await readWithdrawInfo(toml, 'USDC')
         if (limits === undefined || !limits.enabled) return
         out.push({
-          venue: id,
+          venue: anchor.id,
           asset: 'USDC',
           ...(limits.minAmount !== undefined ? { minAmount: limits.minAmount } : {}),
           ...(limits.maxAmount !== undefined ? { maxAmount: limits.maxAmount } : {}),

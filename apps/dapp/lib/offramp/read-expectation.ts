@@ -1,4 +1,4 @@
-import { lookupAnchor } from './anchors'
+import { resolveAnchor } from './anchors'
 import type { OfframpExpectation } from './build-payment'
 import { expectationFrom } from './build-payment'
 import type { AnchorTransaction, Sep24Status } from './sep24'
@@ -34,14 +34,14 @@ export interface ReadExpectationOptions {
 export async function readExpectation(
   options: ReadExpectationOptions
 ): Promise<ReadExpectationResult> {
-  const anchor = lookupAnchor(options.anchorId)
-  if (anchor === undefined) {
-    return {
-      ok: false,
-      code: 'unknown_anchor',
-      message: `${options.anchorId} is not an anchor this app uses`,
-    }
+  // Resolved for this network before the anchor is asked anything: on
+  // mainnet with no off-ramp configured the message says so, rather than
+  // calling a test anchor unknown.
+  const resolved = resolveAnchor(options.anchorId)
+  if (!resolved.ok) {
+    return { ok: false, code: 'unknown_anchor', message: resolved.reason }
   }
+  const anchor = resolved.anchor
 
   let tx: AnchorTransaction
   try {

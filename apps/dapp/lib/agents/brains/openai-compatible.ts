@@ -7,7 +7,7 @@ import type {
   ProposalRequest,
 } from '../brain'
 import { configuredLendingVenues } from '../../lend/venues'
-import { ALL_ANCHORS, ANCHORS } from '../../offramp/anchors'
+import { anchorOn, anchorsOn } from '../../offramp/anchors'
 import { SYSTEM_PROMPT } from '../brief'
 import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
@@ -344,7 +344,7 @@ function lendingVenuesFor(req: ProposalRequest): string[] {
  */
 function offrampVenuesFor(req: ProposalRequest): string[] {
   return req.chain === 'stellar'
-    ? ALL_ANCHORS.filter((id) => !ANCHORS[id].requiresClientDomain)
+    ? anchorsOn().filter((id) => anchorOn(id)?.requiresClientDomain === false)
     : []
 }
 
