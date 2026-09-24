@@ -1,12 +1,10 @@
 'use client'
 
 import type { Venue, VenueCategory, VenueIntegration } from '@intent/types'
-import { Badge, Card } from '@intent/ui'
+import { Badge, Card, ChainMark } from '@intent/ui'
 import { ArrowUpRight, Check } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
-
-import { StellarMark } from '../layout/chain-marks'
 
 const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
@@ -116,11 +114,14 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
 
         <div className="mt-auto flex items-center -space-x-1.5">
           {venue.chains.map((chain) =>
-            // Stellar has no bitmap in /images/chains, and shipping one for a
-            // 20px badge is not worth it — the inline mark scales better and
-            // matches the switcher exactly.
-            chainSlug(chain) === 'stellar' ? (
-              <StellarMark key={chain} className="ring-background h-5 w-5 rounded-full ring-2" />
+            // The chains this app runs on draw the shared mark, which scales
+            // better than a bitmap at 20px and matches the switcher exactly.
+            chainSlug(chain) === 'stellar' || chainSlug(chain) === 'arc' ? (
+              <ChainMark
+                key={chain}
+                chain={chainSlug(chain) as 'stellar' | 'arc'}
+                className="ring-background h-5 w-5 rounded-full ring-2"
+              />
             ) : (
               <Image
                 key={chain}

@@ -12,13 +12,6 @@ const THUMBNAILS = [
 export function Hero() {
   return (
     <section id="hero" className="relative overflow-hidden px-6 py-24 md:py-28 2xl:py-32">
-      {/* <div className="pointer-events-none absolute left-1/4 top-1 hidden h-[200px] w-[200px] rotate-[20deg] -translate-x-1/2 overflow-hidden lg:block">
-        <Image src="/images/Arc.png" alt="" fill sizes="160px" className="object-contain p-4" />
-      </div>
-      <div className="pointer-events-none absolute right-1/4 top-1/3 hidden h-[200px] w-[200px] rotate-[-20deg] translate-x-1/2 overflow-hidden lg:block">
-        <Image src="/images/desktop.jpg" alt="" fill sizes="160px" className="object-contain p-4" />
-      </div> */}
-
       <div className="mx-auto max-w-3xl text-center">
         <h1 className="font-display mt-4 text-4xl leading-tight md:text-5xl 2xl:text-6xl">
           State your intentions

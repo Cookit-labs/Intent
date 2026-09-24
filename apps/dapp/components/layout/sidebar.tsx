@@ -1,12 +1,10 @@
 'use client'
 
-import { cn } from '@intent/ui'
+import { ChainMark, cn } from '@intent/ui'
 import { BarChart3, Boxes, History, Settings, Sparkles, Vault, Wallet } from 'lucide-react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-import { StellarMark } from './chain-marks'
 import { useChain } from '../../providers/chain-provider'
 
 const nav = [
@@ -79,11 +77,7 @@ export function Sidebar({
       </nav>
 
       <div className="border-border flex items-center gap-2 border-t px-6 py-4">
-        {slug === 'arc' ? (
-          <Image src="/images/Arc.png" alt="" width={18} height={18} className="rounded" />
-        ) : (
-          <StellarMark className="h-[18px] w-[18px]" />
-        )}
+        <ChainMark chain={slug} className="h-[18px] w-[18px]" />
         <p className="text-muted-foreground text-[11px]">Powered by {descriptor.name} network</p>
       </div>
     </aside>

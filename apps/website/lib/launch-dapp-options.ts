@@ -9,14 +9,18 @@
  * warning the component prints for whoever deploys the site, never in the
  * menu a visitor reads.
  */
+export type ChainOptionId = 'arc' | 'stellar' | 'solana' | 'avalanche'
+
 export interface ChainOption {
-  chain: 'arc' | 'stellar'
+  chain: ChainOptionId
   name: string
   tagline: string
   href: string | null
 }
 
 export const UNAVAILABLE = 'Not available yet'
+/** For the chains that are planned and not built. Never a link, whatever the origin. */
+export const COMING_SOON = 'Coming soon'
 
 /**
  * Both chains deep-link into the dApp's chain segment (`/arc/...`,
@@ -39,5 +43,7 @@ export function chainOptions(dappUrl: string | undefined): ChainOption[] {
       tagline: configured ? 'Stellar testnet · live' : UNAVAILABLE,
       href: configured ? `${origin}/stellar/intents` : null,
     },
+    { chain: 'solana', name: 'Solana', tagline: COMING_SOON, href: null },
+    { chain: 'avalanche', name: 'Avalanche', tagline: COMING_SOON, href: null },
   ]
 }
