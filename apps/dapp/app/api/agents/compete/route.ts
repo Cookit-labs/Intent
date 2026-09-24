@@ -18,6 +18,7 @@ import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Runs one competition and streams each agent's proposal as it lands.
@@ -146,6 +147,9 @@ function errorStream(code: 'agents_offline' | 'chain_unsupported', message: stri
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const limited = await enforceRateLimit(request, 'compete')
+  if (limited !== undefined) return limited
+
   let text: string
   let chain: string
 

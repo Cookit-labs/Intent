@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { configuredLendingVenues } from '../../../../lib/lend/venues'
 import { isLlmParseConfigured, readIntentWithLlm } from '../../../../lib/parse-intent-llm'
 import { tradeableSymbols } from '../../../../lib/swap/asset-registry'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Reads a typed instruction into a structured intent.
@@ -58,6 +59,9 @@ interface ParseBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'compete')
+  if (limited !== undefined) return limited
+
   let body: ParseBody
   try {
     body = (await request.json()) as ParseBody

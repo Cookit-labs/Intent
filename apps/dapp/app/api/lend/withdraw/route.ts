@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildBlendWithdraw, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds a withdrawal from Blend, ready for signature.
@@ -36,6 +37,9 @@ interface WithdrawBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: WithdrawBody
   try {
     body = (await request.json()) as WithdrawBody

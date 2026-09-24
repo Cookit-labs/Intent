@@ -14,6 +14,7 @@ import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { derivePreview } from '../../../../lib/swap/preview'
 import { fetchMarketPrices } from '../../../../lib/swap/prices'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds the payment a user is about to sign, to whoever the recipient
@@ -42,6 +43,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

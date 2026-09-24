@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolveRecipient } from '../../../../lib/names/resolve'
 import { CannotReceive, assertCanReceive, resolutionFailure } from '../../../../lib/send/prepare'
 import { resolveAsset } from '../../../../lib/swap/assets'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Resolves a recipient, so the review card can show where a name points
@@ -19,6 +20,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'resolve')
+  if (limited !== undefined) return limited
+
   let body: { recipient?: unknown; asset?: unknown }
   try {
     body = (await request.json()) as typeof body

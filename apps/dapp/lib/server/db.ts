@@ -29,6 +29,15 @@ export function getPool(): Pool {
   return pool
 }
 
+/**
+ * What the repositories take instead of the pool, so unit tests can run them
+ * over an in-memory fake. The production wiring adapts `pool.query` to it.
+ */
+export type QueryFn = (
+  sql: string,
+  params?: unknown[]
+) => Promise<{ rows: Record<string, unknown>[] }>
+
 export type WaitlistStatus = 'pending' | 'accepted' | 'rejected'
 
 export interface WaitlistEntry {

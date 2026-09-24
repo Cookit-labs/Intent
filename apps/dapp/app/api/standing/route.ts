@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { readSessionFromRequest } from '../../../lib/server/session'
 import { getStandingRulesRepo } from '../../../lib/server/standing-rules'
 import type { StandingIntent } from '../../../lib/standing-intent'
+import { enforceRateLimit } from '../../../lib/server/rate-limit'
 
 /**
  * A user's standing rules, on the server.
@@ -100,6 +101,9 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'standing')
+  if (limited !== undefined) return limited
+
   const session = readSessionFromRequest(request)
   if (session === undefined) return unauthorised()
 

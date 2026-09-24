@@ -7,6 +7,7 @@ import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { applySlippage } from '../../../../lib/swap/assets'
 import { collectQuotes } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds a multi-step plan for signature.
@@ -33,6 +34,9 @@ interface PlanBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: PlanBody
   try {
     body = (await request.json()) as PlanBody

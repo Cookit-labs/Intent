@@ -7,6 +7,7 @@ import {
 } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Posting collateral, and taking it back.
@@ -34,6 +35,9 @@ interface CollateralBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: CollateralBody
   try {
     body = (await request.json()) as CollateralBody

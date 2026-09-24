@@ -10,6 +10,7 @@ import {
 } from '../../../../lib/lend/blend-client'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Submits a signed supply.
@@ -25,6 +26,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'submit')
+  if (limited !== undefined) return limited
+
   // `kind` only selects which noun a refusal is phrased with. Both assertions
   // enforce the same rules, so an absent or unrecognised value is safe rather
   // than a hole — it falls through to the supply wording.

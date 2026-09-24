@@ -5,6 +5,7 @@ import { assertOfframpPayment } from '../../../../lib/offramp/build-payment'
 import { readExpectation } from '../../../../lib/offramp/read-expectation'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Submits a signed offramp payment.
@@ -27,6 +28,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'submit')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

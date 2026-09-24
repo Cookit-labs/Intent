@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { buildOfferTransaction } from '../../../../lib/swap/build-offer'
 import { fetchOrderBookTop, offerPriceFromUsd } from '../../../../lib/swap/limit-price'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds the transaction that places a resting order.
@@ -36,6 +37,9 @@ interface BuildOfferBody {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(req, 'build')
+  if (limited !== undefined) return limited
+
   let body: BuildOfferBody
   try {
     body = (await req.json()) as BuildOfferBody

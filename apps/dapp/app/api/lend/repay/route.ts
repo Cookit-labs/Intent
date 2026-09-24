@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildBlendRepay, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds a repayment, in whole or in part.
@@ -28,6 +29,9 @@ interface RepayBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: RepayBody
   try {
     body = (await request.json()) as RepayBody
