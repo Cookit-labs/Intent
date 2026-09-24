@@ -2,8 +2,10 @@
 
 import { Button, Card } from '@intent/ui'
 import { CheckCircle2, Circle, ExternalLink, Loader2, TriangleAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import type { Sequence } from '../../hooks/use-sequence'
+import { SendConfirm } from './send-confirm'
 
 /**
  * Reviewing a sequence before signing the first of its steps.
@@ -21,6 +23,13 @@ import type { Sequence } from '../../hooks/use-sequence'
  */
 export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Element | null {
   const { phase, steps, current } = sequence
+
+  // The acknowledgement a moved name demands, forgotten for every new
+  // envelope so a tick given for one payment cannot carry over to the next.
+  const [acknowledged, setAcknowledged] = useState(false)
+  useEffect(() => {
+    setAcknowledged(false)
+  }, [sequence.xdr])
 
   if (phase === 'idle') return null
 
@@ -55,7 +64,9 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
             ? 'Nothing went wrong. The swap has settled and you are holding the USDC it delivered. Nothing was sent to the anchor.'
             : sequence.kind === 'offramp-only'
               ? 'Nothing went wrong. Nothing was sent to the anchor; your USDC is where it was.'
-              : 'Nothing went wrong. What has already settled stands, and you are holding the asset from it rather than a lending position.'}
+              : sequence.kind === 'swap-then-send'
+                ? `Nothing went wrong. The swap has settled and you are holding what it delivered. Nothing was sent to ${sequence.send?.recipient ?? 'the recipient'}.`
+                : 'Nothing went wrong. What has already settled stands, and you are holding the asset from it rather than a lending position.'}
         </p>
         <StepList steps={steps} current={current} />
         <Button variant="outline" size="sm" onClick={sequence.reset} className="self-start">
@@ -152,13 +163,23 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
       <Card className="flex flex-col gap-3 p-5">
         <div className="flex items-center gap-2 text-sm font-medium">
           <CheckCircle2 className="h-4 w-4" />
-          {steps.length === 1 ? 'Withdrawal sent' : 'Both steps settled'}
+          {steps.length === 1
+            ? sequence.kind === 'send-only'
+              ? 'Payment sent'
+              : 'Withdrawal sent'
+            : 'Both steps settled'}
         </div>
         <StepList steps={steps} current={steps.length} />
         {sequence.kind === 'swap-then-offramp' || sequence.kind === 'offramp-only' ? (
           <p className="text-muted-foreground text-xs">
             The payment is on-chain. The anchor now moves the money to your bank, which can take
             from minutes to days. Track it under Open positions.
+          </p>
+        ) : null}
+        {sequence.send !== undefined ? (
+          <p className="text-muted-foreground break-all text-xs">
+            Paid to <span className="font-mono">{sequence.send.address}</span>. This browser will
+            say if {sequence.send.recipient} points somewhere else next time.
           </p>
         ) : null}
         <Button variant="outline" size="sm" onClick={sequence.reset} className="self-start">
@@ -173,15 +194,22 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
       <Card className="text-muted-foreground flex items-center gap-2 p-5 text-sm">
         <Loader2 className="h-4 w-4 animate-spin" />
         {current === 0
-          ? 'Building the sequence…'
+          ? sequence.kind === 'send-only'
+            ? 'Resolving the recipient and building the payment…'
+            : 'Building the sequence…'
           : sequence.kind === 'swap-then-lend'
             ? 'Sizing the supply to what you received…'
-            : 'Building the payment from what the anchor named…'}
+            : sequence.kind === 'swap-then-send'
+              ? 'Sizing the payment to what you received…'
+              : 'Building the payment from what the anchor named…'}
       </Card>
     )
   }
 
   const busy = phase === 'signing' || phase === 'submitting'
+  // A name that moved since it was last paid holds the signature until the
+  // new address has been read and the box ticked.
+  const blocked = sequence.send?.pin.status === 'changed' && !acknowledged
 
   return (
     <Card className="flex flex-col gap-4 p-5">
@@ -218,9 +246,16 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
       {sequence.offramp !== undefined && sequence.offramp.destination !== '' ? (
         <OfframpReview offramp={sequence.offramp} />
       ) : null}
+      {sequence.send !== undefined ? (
+        <SendConfirm
+          send={sequence.send}
+          acknowledged={acknowledged}
+          onAcknowledge={setAcknowledged}
+        />
+      ) : null}
 
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={sequence.confirm} disabled={busy}>
+        <Button size="sm" onClick={sequence.confirm} disabled={busy || blocked}>
           {busy ? (
             <span className="flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -228,6 +263,8 @@ export function SequenceConfirm({ sequence }: { sequence: Sequence }): JSX.Eleme
             </span>
           ) : current === 0 && steps.length > 1 ? (
             `Approve and sign ${steps.length} steps`
+          ) : sequence.send !== undefined ? (
+            `Sign the payment to ${sequence.send.recipient}`
           ) : sequence.offramp !== undefined ? (
             'Sign the payment to the anchor'
           ) : (

@@ -19,6 +19,7 @@
     "@intent/sdk": "workspace:*",
     "@intent/types": "workspace:*",
     "@intent/ui": "workspace:*",
+    "@noble/hashes": "^1.8.0",
     "@rainbow-me/rainbowkit": "^2.1.3",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^17.0.1",
