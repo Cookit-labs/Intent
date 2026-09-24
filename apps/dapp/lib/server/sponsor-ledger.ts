@@ -25,7 +25,10 @@ export interface DayUsage {
 export interface SponsorLedger {
   ensureSchema: () => Promise<void>
   usage: (day: string, account?: string) => Promise<DayUsage>
-  record: (day: string, account: string, stroops: bigint) => Promise<void>
+  /** Adds a fee to the account and the day, answering with both as written. */
+  record: (day: string, account: string, stroops: bigint) => Promise<DayUsage>
+  /** Takes a `record` back, when what it reserved turned out not to fit. */
+  release: (day: string, account: string, stroops: bigint) => Promise<void>
 }
 
 /**
@@ -46,6 +49,29 @@ export const SPONSOR_LEDGER_DDL: readonly string[] = [
 /** The account the day as a whole is counted under. */
 const EVERYONE = '*'
 
+/** The account row and the `*` row, in either order, as one usage. */
+function toUsage(rows: Record<string, unknown>[]): DayUsage {
+  const usage: DayUsage = {
+    totalStroops: BigInt(0),
+    totalCount: 0,
+    accountStroops: BigInt(0),
+    accountCount: 0,
+  }
+  for (const row of rows) {
+    // BIGINT comes back from pg as a string.
+    const stroops = BigInt(String(row['stroops']))
+    const count = Number(row['count'])
+    if (row['account'] === EVERYONE) {
+      usage.totalStroops = stroops
+      usage.totalCount = count
+    } else {
+      usage.accountStroops = stroops
+      usage.accountCount = count
+    }
+  }
+  return usage
+}
+
 export function createSponsorLedger(query: QueryFn): SponsorLedger {
   return {
     async ensureSchema() {
@@ -58,36 +84,32 @@ export function createSponsorLedger(query: QueryFn): SponsorLedger {
          WHERE day = $1 AND account = ANY($2::text[])`,
         [day, account === undefined ? [EVERYONE] : [account, EVERYONE]]
       )
-      const usage: DayUsage = {
-        totalStroops: BigInt(0),
-        totalCount: 0,
-        accountStroops: BigInt(0),
-        accountCount: 0,
-      }
-      for (const row of rows) {
-        // BIGINT comes back from pg as a string.
-        const stroops = BigInt(String(row['stroops']))
-        const count = Number(row['count'])
-        if (row['account'] === EVERYONE) {
-          usage.totalStroops = stroops
-          usage.totalCount = count
-        } else {
-          usage.accountStroops = stroops
-          usage.accountCount = count
-        }
-      }
-      return usage
+      return toUsage(rows)
     },
 
     async record(day, account, stroops) {
       // Both rows in one statement, so a failure between them cannot leave
-      // the day's total behind its accounts.
-      await query(
+      // the day's total behind its accounts. RETURNING carries them back as
+      // written, which is what lets the budget be judged after reserving:
+      // two submissions racing for the last of it each see the total their
+      // own write produced, and the one that went over gives it back.
+      const { rows } = await query(
         `INSERT INTO sponsor_ledger (day, account, stroops, count)
          VALUES ($1, $2, $3, 1), ($1, '*', $3, 1)
          ON CONFLICT (day, account) DO UPDATE
            SET stroops = sponsor_ledger.stroops + EXCLUDED.stroops,
-               count = sponsor_ledger.count + 1`,
+               count = sponsor_ledger.count + 1
+         RETURNING account, stroops, count`,
+        [day, account, stroops.toString()]
+      )
+      return toUsage(rows)
+    },
+
+    async release(day, account, stroops) {
+      await query(
+        `UPDATE sponsor_ledger
+         SET stroops = sponsor_ledger.stroops - $3, count = sponsor_ledger.count - 1
+         WHERE day = $1 AND account IN ($2, '*')`,
         [day, account, stroops.toString()]
       )
     },
@@ -96,8 +118,8 @@ export function createSponsorLedger(query: QueryFn): SponsorLedger {
 
 /**
  * The production ledger, over the shared pool. Every statement is bounded
- * so a database that hangs delays a submission by this much and no more;
- * the caller treats the timeout like any other failure and sponsors anyway.
+ * so a database that hangs holds a submission for this long per statement
+ * and no longer; the caller treats the timeout like any other failure.
  */
 const LEDGER_TIMEOUT_MS = 2_000
 

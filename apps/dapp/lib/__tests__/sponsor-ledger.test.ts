@@ -116,18 +116,51 @@ describe('withinBudget', () => {
     accountCount,
   })
 
-  it('allows a fee that fits, up to and including the whole budget', () => {
-    expect(withinBudget(usage(0, 0), BigInt(200), limits)).toBe(true)
-    expect(withinBudget(usage(800, 0), BigInt(200), limits)).toBe(true)
+  // Judged on the usage after the fee is reserved, so the reservation can be
+  // the atomic step and this the plain comparison.
+  it('holds up to and including the whole budget', () => {
+    expect(withinBudget(usage(200, 1), limits)).toBe(true)
+    expect(withinBudget(usage(1000, 1), limits)).toBe(true)
   })
 
-  it('refuses a fee that would take the day over budget', () => {
-    expect(withinBudget(usage(801, 0), BigInt(200), limits)).toBe(false)
+  it('fails once the day is over budget', () => {
+    expect(withinBudget(usage(1001, 1), limits)).toBe(false)
   })
 
-  it('refuses an account that has had its share for the day', () => {
-    expect(withinBudget(usage(0, 1), BigInt(200), limits)).toBe(true)
-    expect(withinBudget(usage(0, 2), BigInt(200), limits)).toBe(false)
+  it('fails once an account is past its share for the day', () => {
+    expect(withinBudget(usage(200, 2), limits)).toBe(true)
+    expect(withinBudget(usage(200, 3), limits)).toBe(false)
+  })
+})
+
+describe('reserving and releasing', () => {
+  it('record answers with the usage after the write', async () => {
+    expect(await ledger.record(DAY, A, BigInt(100))).toEqual({
+      totalStroops: BigInt(100),
+      totalCount: 1,
+      accountStroops: BigInt(100),
+      accountCount: 1,
+    })
+    await ledger.record(DAY, B, BigInt(50))
+    expect(await ledger.record(DAY, A, BigInt(100))).toEqual({
+      totalStroops: BigInt(250),
+      totalCount: 3,
+      accountStroops: BigInt(200),
+      accountCount: 2,
+    })
+  })
+
+  it('release takes a record back', async () => {
+    await ledger.record(DAY, B, BigInt(50))
+    await ledger.record(DAY, A, BigInt(200))
+    await ledger.release(DAY, A, BigInt(200))
+
+    expect(await ledger.usage(DAY, A)).toEqual({
+      totalStroops: BigInt(50),
+      totalCount: 1,
+      accountStroops: BigInt(0),
+      accountCount: 0,
+    })
   })
 })
 

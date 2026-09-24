@@ -51,7 +51,26 @@ describe.skipIf(SKIP)('sponsor ledger against Postgres', () => {
   it('records against the account and the day, and reads both back', async () => {
     await ledger.record(DAY, A, BigInt(100))
     await ledger.record(DAY, A, BigInt(250))
-    await ledger.record(DAY, B, BigInt('12345678901234'))
+    // The upsert's RETURNING is what the budget check judges, so it has to
+    // carry both rows as they are after the write.
+    expect(await ledger.record(DAY, B, BigInt('12345678901234'))).toEqual({
+      totalStroops: BigInt('12345678901584'),
+      totalCount: 3,
+      accountStroops: BigInt('12345678901234'),
+      accountCount: 1,
+    })
+
+    expect(await ledger.usage(DAY, A)).toEqual({
+      totalStroops: BigInt('12345678901584'),
+      totalCount: 3,
+      accountStroops: BigInt(350),
+      accountCount: 2,
+    })
+  })
+
+  it('releases a reservation from both rows', async () => {
+    await ledger.record(DAY, A, BigInt(1000))
+    await ledger.release(DAY, A, BigInt(1000))
 
     expect(await ledger.usage(DAY, A)).toEqual({
       totalStroops: BigInt('12345678901584'),

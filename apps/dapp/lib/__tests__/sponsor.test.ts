@@ -10,6 +10,7 @@ import {
 } from '@stellar/stellar-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { QueryFn } from '../server/db'
 import { createSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
 import { sponsorBudgetToday, sponsorConfigured, sponsorForSubmission } from '../sponsor/sponsor'
 import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
@@ -184,8 +185,45 @@ describe('the daily budget', () => {
       now: NOW,
     })
     expect(out).toEqual({ xdr, sponsored: false, reason: 'budget' })
-    // A refusal costs nothing, so nothing is written.
-    expect((await ledger.usage(DAY)).totalCount).toBe(1)
+    // The fee was reserved and then released: a refusal leaves the day as
+    // it found it.
+    expect(await ledger.usage(DAY, user.publicKey())).toMatchObject({
+      totalStroops: BigInt(500_000_000 - 100),
+      totalCount: 1,
+      accountCount: 0,
+    })
+  })
+
+  it('keeps refusing when a reservation over budget cannot be released', async () => {
+    // The reservation is what makes the cap hold under concurrent
+    // submissions; a release that fails leaves the day over-counted, which
+    // errs the safe way. What must not happen is the failure turning into
+    // an allow.
+    vi.resetModules()
+    const fresh = await import('../sponsor/sponsor')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    const db = fakeSponsorLedgerDb()
+    await createSponsorLedger(db.query).record(
+      DAY,
+      Keypair.random().publicKey(),
+      BigInt(500_000_000 - 100)
+    )
+    const releaseFails: QueryFn = async (sql, params) => {
+      if (sql.trim().startsWith('UPDATE')) throw new Error('connect ECONNRESET')
+      return db.query(sql, params)
+    }
+
+    const xdr = signedByUser()
+    const out = await fresh.sponsorForSubmission(xdr, user.publicKey(), {
+      env,
+      fetchImpl: horizon(true, []),
+      ledger: createSponsorLedger(releaseFails),
+      now: NOW,
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'budget' })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('[sponsor-ledger]')
   })
 
   it('falls back when this account has had its share for the day', async () => {

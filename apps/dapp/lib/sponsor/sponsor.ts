@@ -1,7 +1,7 @@
 import { stellarTestnet } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
-import { getSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
+import { getSponsorLedger, type DayUsage, type SponsorLedger } from '../server/sponsor-ledger'
 import { budgetLimits, dayOf, describeBudget, withinBudget, type BudgetReport } from './budget'
 import { sponsorFee } from './fee-bump'
 
@@ -70,13 +70,31 @@ export type SponsoredSubmission =
 
 let warnedLedgerUnreachable = false
 
+/** Said once in the log, then quiet until the process restarts. */
+function warnLedgerUnreachable(e: unknown): void {
+  if (warnedLedgerUnreachable) return
+  warnedLedgerUnreachable = true
+  console.warn(
+    `[sponsor-ledger] database unreachable, sponsoring without a budget: ${
+      e instanceof Error ? e.message : String(e)
+    }`
+  )
+}
+
 /**
- * Whether today has room for this fee, recording it when it does.
+ * Whether today has room for this fee, keeping it on the books when it does.
+ *
+ * Reserved first and judged on the result, rather than checked and then
+ * recorded: two submissions racing for the last of the budget would each
+ * pass a check, but each sees the total its own reservation produced, and
+ * the one that went over gives it back.
  *
  * A ledger that cannot be reached is an allow. Sponsorship must never add a
  * failure, and that includes its own bookkeeping failing; a database blip
  * should cost the budget its accuracy for a moment, not cost users their
- * fees. Said once in the log, then quiet until the process restarts.
+ * fees. The one exception is a release that fails after a reservation went
+ * over: the day stays over-counted, which is the safe direction for a cap,
+ * and the refusal stands.
  */
 async function commitToBudget(
   account: string,
@@ -85,23 +103,25 @@ async function commitToBudget(
   now: Date,
   ledger: SponsorLedger | undefined
 ): Promise<boolean> {
+  const day = dayOf(now)
+  let book: SponsorLedger
+  let after: DayUsage
   try {
-    const book = ledger ?? (await getSponsorLedger())
-    const day = dayOf(now)
-    if (!withinBudget(await book.usage(day, account), feeStroops, budgetLimits(env))) return false
-    await book.record(day, account, feeStroops)
-    return true
+    book = ledger ?? (await getSponsorLedger())
+    after = await book.record(day, account, feeStroops)
   } catch (e) {
-    if (!warnedLedgerUnreachable) {
-      warnedLedgerUnreachable = true
-      console.warn(
-        `[sponsor-ledger] database unreachable, sponsoring without a budget: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      )
-    }
+    warnLedgerUnreachable(e)
     return true
   }
+
+  if (withinBudget(after, budgetLimits(env))) return true
+
+  try {
+    await book.release(day, account, feeStroops)
+  } catch (e) {
+    warnLedgerUnreachable(e)
+  }
+  return false
 }
 
 /**

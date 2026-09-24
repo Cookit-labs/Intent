@@ -61,10 +61,24 @@ export function fakeSponsorLedgerDb(): FakeSponsorLedgerDb {
 
       if (sql.startsWith('INSERT INTO sponsor_ledger')) {
         const [day, account, stroops] = p as [string, string, string]
+        const returned: Record<string, unknown>[] = []
         for (const who of [account, '*']) {
           const id = `${day}|${who}`
           const row = rows.get(id) ?? { stroops: BigInt(0), count: 0 }
-          rows.set(id, { stroops: row.stroops + BigInt(stroops), count: row.count + 1 })
+          const next = { stroops: row.stroops + BigInt(stroops), count: row.count + 1 }
+          rows.set(id, next)
+          returned.push({ account: who, stroops: next.stroops.toString(), count: next.count })
+        }
+        return { rows: returned }
+      }
+
+      if (sql.startsWith('UPDATE sponsor_ledger SET stroops = sponsor_ledger.stroops - $3')) {
+        const [day, account, stroops] = p as [string, string, string]
+        for (const who of [account, '*']) {
+          const row = rows.get(`${day}|${who}`)
+          if (row === undefined) continue
+          row.stroops -= BigInt(stroops)
+          row.count -= 1
         }
         return { rows: [] }
       }

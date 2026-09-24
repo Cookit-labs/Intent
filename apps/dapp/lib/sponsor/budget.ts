@@ -50,11 +50,13 @@ export function dayOf(now: Date): string {
   return now.toISOString().slice(0, 10)
 }
 
-/** Whether today has room for one more fee of this size, from this account. */
-export function withinBudget(usage: DayUsage, feeStroops: bigint, limits: BudgetLimits): boolean {
-  return (
-    usage.totalStroops + feeStroops <= limits.dailyStroops && usage.accountCount < limits.perAccount
-  )
+/**
+ * Whether the day, with a fee just reserved on it, is still within budget.
+ * Judged after the reservation rather than before, so the reservation can
+ * be the atomic step and this the plain comparison.
+ */
+export function withinBudget(usage: DayUsage, limits: BudgetLimits): boolean {
+  return usage.totalStroops <= limits.dailyStroops && usage.accountCount <= limits.perAccount
 }
 
 export interface BudgetReport {
