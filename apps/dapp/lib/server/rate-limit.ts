@@ -212,14 +212,24 @@ export async function checkRateLimit(
 /**
  * The address a request came from, as the proxy in front reports it. The
  * first hop of `x-forwarded-for` is the client; later hops are proxies.
- * With neither header the request is counted under one shared key, which
- * limits a deployment with no proxy as a whole rather than not at all.
+ *
+ * The header is only as honest as the proxy that sets it. A platform that
+ * writes it from the connection (Vercel does) makes the key the client's
+ * real address; one that merely appends leaves the first hop to the client,
+ * who could then pick their own bucket. This deployment's proxy is assumed
+ * to write it. What is guarded here is a different abuse: a value too long
+ * to be an address would fail the key's index, and that failure would read
+ * as "database unreachable" and allow. Such a value is ignored. With no
+ * usable header the request is counted under one shared key, which limits
+ * a deployment with no proxy as a whole rather than not at all.
  */
+const MAX_ADDRESS_LENGTH = 64
+
 export function clientIp(request: Request): string {
   const first = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  if (first !== undefined && first !== '') return first
+  if (first !== undefined && first !== '' && first.length <= MAX_ADDRESS_LENGTH) return first
   const real = request.headers.get('x-real-ip')?.trim()
-  if (real !== undefined && real !== '') return real
+  if (real !== undefined && real !== '' && real.length <= MAX_ADDRESS_LENGTH) return real
   return 'unknown'
 }
 
