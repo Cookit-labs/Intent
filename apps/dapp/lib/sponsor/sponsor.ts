@@ -2,7 +2,7 @@ import { stellarTestnet } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
 import { getSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
-import { budgetLimits, dayOf, withinBudget } from './budget'
+import { budgetLimits, dayOf, describeBudget, withinBudget, type BudgetReport } from './budget'
 import { sponsorFee } from './fee-bump'
 
 /**
@@ -170,4 +170,21 @@ export async function sponsorForSubmission(
   if (!room) return { xdr: signedXdr, sponsored: false, reason: 'budget' }
 
   return { xdr: bumped.xdr, sponsored: true, feeStroops: bumped.feeStroops }
+}
+
+/**
+ * Today's budget and how much of it is spent, for `GET /api/sponsor`.
+ * Undefined when the ledger cannot be reached: the route answers what it
+ * can rather than failing over a number that is only informational.
+ */
+export async function sponsorBudgetToday(
+  options: { env?: Env; ledger?: SponsorLedger; now?: Date } = {}
+): Promise<BudgetReport | undefined> {
+  const day = dayOf(options.now ?? new Date())
+  try {
+    const book = options.ledger ?? (await getSponsorLedger())
+    return describeBudget(day, await book.usage(day), budgetLimits(options.env ?? process.env))
+  } catch {
+    return undefined
+  }
 }

@@ -11,7 +11,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
-import { sponsorConfigured, sponsorForSubmission } from '../sponsor/sponsor'
+import { sponsorBudgetToday, sponsorConfigured, sponsorForSubmission } from '../sponsor/sponsor'
 import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
 
 /**
@@ -251,5 +251,38 @@ describe('the daily budget', () => {
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('[sponsor-ledger]')
     expect(String(warn.mock.calls[0]?.[0])).toContain('ECONNREFUSED')
+  })
+})
+
+describe('sponsorBudgetToday', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("describes the day's use from the ledger", async () => {
+    const ledger = emptyLedger()
+    await ledger.record('2026-09-24', user.publicKey(), BigInt(15_000_000))
+
+    const report = await sponsorBudgetToday({
+      env: {},
+      ledger,
+      now: new Date('2026-09-24T12:00:00.000Z'),
+    })
+    expect(report).toEqual({
+      day: '2026-09-24',
+      spentXlm: 1.5,
+      budgetXlm: 50,
+      submissions: 1,
+      perAccount: 20,
+    })
+  })
+
+  it('is undefined when the ledger cannot be reached', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const db = fakeSponsorLedgerDb()
+    db.down = new Error('connect ECONNREFUSED 127.0.0.1:55432')
+
+    const report = await sponsorBudgetToday({ env: {}, ledger: createSponsorLedger(db.query) })
+    expect(report).toBeUndefined()
   })
 })
