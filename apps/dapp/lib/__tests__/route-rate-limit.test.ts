@@ -53,15 +53,27 @@ const ROUTES: Record<string, () => Promise<Route>> = {
   waitlist: () => import('../../app/api/waitlist/route'),
 }
 
+/**
+ * Most of each case is the route's first import: the competition route
+ * alone pulls in the agents and their providers and takes a few seconds on
+ * a quiet machine, more on a loaded one. The limit is for that, not for
+ * anything the route does.
+ */
+const IMPORT_TIMEOUT_MS = 30_000
+
 describe('the limiter runs first on every POST route', () => {
   for (const [path, load] of Object.entries(ROUTES)) {
-    it(`api/${path}`, async () => {
-      const { POST } = await load()
-      const res = await POST(
-        new Request(`http://localhost/api/${path}`, { method: 'POST', body: 'not json' })
-      )
-      expect(res.status).toBe(429)
-      expect(await res.json()).toEqual({ error: 'rate_limited', retryAfter: 7 })
-    })
+    it(
+      `api/${path}`,
+      async () => {
+        const { POST } = await load()
+        const res = await POST(
+          new Request(`http://localhost/api/${path}`, { method: 'POST', body: 'not json' })
+        )
+        expect(res.status).toBe(429)
+        expect(await res.json()).toEqual({ error: 'rate_limited', retryAfter: 7 })
+      },
+      IMPORT_TIMEOUT_MS
+    )
   }
 })
