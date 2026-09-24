@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { useChain } from '../../providers/chain-provider'
+import { MobileAppCard } from './mobile-app-card'
 
 const nav = [
   { href: '/intents', label: 'Intents', icon: Sparkles },
@@ -75,6 +76,8 @@ export function Sidebar({
           )
         })}
       </nav>
+
+      <MobileAppCard className="mx-3 mb-3" />
 
       <div className="border-border flex items-center gap-2 border-t px-6 py-4">
         <ChainMark chain={slug} className="h-[18px] w-[18px]" />

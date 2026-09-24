@@ -233,4 +233,18 @@ export const venues: Venue[] = [
     capability:
       'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs an API key from its closed beta, so it is unverified end to end. Unaudited, testnet-only; its gateway reports 0.0.0-dev.',
   },
+  // A name service, not a trading venue. It earns its place because a send
+  // to deon.xlm settles through what it resolves; the agents never see it.
+  {
+    id: 'sorobandomains',
+    name: 'Soroban Domains',
+    family: 'stellar' as const,
+    category: 'names',
+    chains: ['Stellar'],
+    bestFor: 'Send to a .xlm name instead of an address',
+    url: 'https://sorobandomains.org',
+    integration: 'executes',
+    capability:
+      'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
+  },
 ]

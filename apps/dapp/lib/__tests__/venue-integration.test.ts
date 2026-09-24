@@ -156,3 +156,16 @@ describe('Noether, the perps venue', () => {
     expect(capability).toMatch(/closed beta/i)
   })
 })
+
+describe('Soroban Domains, the name service', () => {
+  it('is listed as an integrated names venue that says where names resolve', () => {
+    // A send to deon.xlm settles through it, so it earns the badge. The one
+    // caveat a user must see: the registry lives on mainnet while the
+    // payment runs here on testnet.
+    const names = byId('sorobandomains')
+    expect(names?.category).toBe('names')
+    expect(names?.integration).toBe('executes')
+    expect(names?.capability).toMatch(/mainnet/i)
+    expect(names?.capability).toMatch(/.xlm/)
+  })
+})
