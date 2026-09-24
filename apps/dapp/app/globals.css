@@ -11,8 +11,13 @@
     --border: 60 10% 85%;
     --input: 60 10% 85%;
     --ring: 240 4.9% 83.9%;
-    --brand: 239 84% 67%;
+    /* Controls: the purple the page glow reads as, lifted enough to stay
+       clearly clickable. `--glow` is the same hue at the strength the canvas
+       has always used; the two were one token until the buttons looked
+       brighter and bluer than the glow they were meant to match. */
+    --brand: 237 45% 45%;
     --brand-foreground: 0 0% 98%;
+    --glow: 239 84% 67%;
     --accent: 189 94% 43%;
     --accent-foreground: 0 0% 98%;
     --muted: 60 10% 90%;
@@ -60,8 +65,9 @@
     --ring: 0 0% 32%;
 
     /* Unchanged from light. The one colour that carries meaning. */
-    --brand: 239 84% 67%;
+    --brand: 237 45% 45%;
     --brand-foreground: 0 0% 98%;
+    --glow: 239 84% 67%;
     --accent: 189 94% 43%;
     --accent-foreground: 0 0% 98%;
 
@@ -120,11 +126,11 @@
   background-image:
     radial-gradient(
       ellipse 90% 70% at 50% -15%,
-      hsl(var(--brand) / 0.5) 0%,
-      hsl(var(--brand) / 0.22) 35%,
-      hsl(var(--brand) / 0) 72%
+      hsl(var(--glow) / 0.5) 0%,
+      hsl(var(--glow) / 0.22) 35%,
+      hsl(var(--glow) / 0) 72%
     ),
-    radial-gradient(ellipse 60% 40% at 50% 0%, hsl(var(--brand) / 0.2), transparent 60%);
+    radial-gradient(ellipse 60% 40% at 50% 0%, hsl(var(--glow) / 0.2), transparent 60%);
 }
 
 .app-canvas::before {

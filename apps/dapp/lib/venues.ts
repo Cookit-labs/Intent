@@ -95,7 +95,7 @@ export const venues: Venue[] = [
     url: 'https://soroswap.finance',
     integration: 'executes',
     capability:
-      'Intents route here through the Soroban router. On identical assets it has quoted several times the classic DEX price.',
+      'Swaps route through Soroswap’s Soroban router. On the same assets it has quoted several times the classic DEX price.',
   },
   {
     // A different product from the AMM above, and listed apart from it on
@@ -112,7 +112,7 @@ export const venues: Venue[] = [
     url: 'https://soroswap.finance',
     integration: 'executes',
     capability:
-      'Quotes and signs a swap split across Soroswap, Aquarius and the classic DEX through Soroswap’s route-finder. Active only when SOROSWAP_API_KEY is set. Every transaction its API returns is re-read against the quote — sender, recipient, contract, amounts, floor — before a wallet sees it; on testnet only venues whose adapter contract exists are asked for, which excludes Phoenix.',
+      'One swap split across Soroswap, Aquarius and the classic DEX. Needs SOROSWAP_API_KEY; every transaction it returns is re-checked before signing.',
   },
   {
     id: 'aquarius',
@@ -124,7 +124,7 @@ export const venues: Venue[] = [
     url: 'https://aqua.network',
     integration: 'executes',
     capability:
-      'Intents route here through its Soroban router, against the pool the agent chose: XLM/USDC has three, and the one that won the comparison is the one that executes. When measured it paid nearly six times Soroswap selling XLM and under a quarter of it buying, so which router wins depends on the direction.',
+      'Swaps route through Aquarius’s router against the pool the agent chose. Which router wins depends on the direction of the trade.',
   },
   {
     id: 'stellarx',
@@ -136,7 +136,7 @@ export const venues: Venue[] = [
     url: 'https://www.stellarx.com',
     integration: 'executes',
     capability:
-      'Swaps and resting limit orders settle on the network’s own order book, read and written directly rather than through a venue.',
+      'Swaps and resting limit orders settle on the network’s own order book, read and written directly.',
   },
   {
     id: 'etherfuse',
@@ -148,7 +148,7 @@ export const venues: Venue[] = [
     url: 'https://etherfuse.com',
     integration: 'executes',
     capability:
-      'Buy tokenized Mexican, US and Korean treasury bills. They settle through the same path payments as any other classic asset, so no separate execution path was needed.',
+      'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.',
   },
   {
     id: 'stellar-pools',
@@ -160,7 +160,7 @@ export const venues: Venue[] = [
     url: 'https://developers.stellar.org/docs/build/guides/liquidity-pools',
     integration: 'executes',
     capability:
-      'Deposit both sides of a pair and earn a share of the 0.3% fee on trades routed through it. The network runs these, so there is no contract to trust and nothing that can be shut down.',
+      'Deposit both sides of a pair and earn a share of the 0.3% trading fee. Run by the network itself, with no contract to trust.',
   },
   {
     id: 'blend',
@@ -172,7 +172,7 @@ export const venues: Venue[] = [
     url: 'https://blend.capital',
     integration: 'executes',
     capability:
-      'Reserves and rates are read live, and XLM can be supplied. Borrowing stays out of scope on purpose: a supply-only position cannot be liquidated, and that guarantee holds only while nothing here can open a liability.',
+      'Rates are read live and XLM can be supplied. Borrowing is out of scope, so a position here can never be liquidated.',
   },
   {
     id: 'defindex',
@@ -189,7 +189,7 @@ export const venues: Venue[] = [
     // itself keep. Flip it once a deposit has been signed against a live key.
     integration: 'quotes',
     capability:
-      'Each vault’s 7-day APY is read live and offered to the agents beside Blend’s rate once DEFINDEX_API_KEY is set. A deposit is built by DeFindex’s API, checked here field by field before the wallet sees it, and relayed fee-free; that path is implemented against the documented shapes and awaits a key to be exercised, so it is not yet claimed as executing.',
+      'Vault APYs are read live once DEFINDEX_API_KEY is set. Deposits are built by DeFindex’s API and checked here before signing; a key is still needed to verify that end to end.',
   },
   {
     id: 'testanchor',
@@ -201,7 +201,7 @@ export const venues: Venue[] = [
     url: 'https://testanchor.stellar.org',
     integration: 'executes',
     capability:
-      'SEP-24 withdrawal of USDC. The anchor hosts verification and bank details on its own page; this app sends the payment it names, with the memo it names, and nothing else.',
+      'SEP-24 withdrawal of USDC. The anchor handles verification and bank details; this app sends only the payment it names.',
   },
   {
     id: 'moneygram',
@@ -213,7 +213,7 @@ export const venues: Venue[] = [
     url: 'https://stellar.moneygram.com',
     integration: 'executes',
     capability:
-      'SEP-24 withdrawal of USDC on the testnet deployment. Production access needs a commercial agreement with MoneyGram; the flow is identical.',
+      'SEP-24 withdrawal of USDC on testnet. Production needs a commercial agreement with MoneyGram; the flow is the same.',
   },
   // Perpetual futures. `quotes`, not `executes`: the reads are live and the
   // order path is built, but the gateway mints the API key an order needs
@@ -231,6 +231,6 @@ export const venues: Venue[] = [
     url: 'https://noether.exchange',
     integration: 'quotes',
     capability:
-      'Mark prices, open interest and vault APY are read live for the agents, and "long XLM 10x with 50 USDC" prepares an isolated position through the gateway for review and signature. Signing needs an API key the gateway issues only inside its closed beta, so the sign path is unverified end to end. The protocol is unaudited and testnet-only; its gateway reports version 0.0.0-dev.',
+      'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs an API key from its closed beta, so it is unverified end to end. Unaudited, testnet-only; its gateway reports 0.0.0-dev.',
   },
 ]
