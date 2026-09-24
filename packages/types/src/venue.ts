@@ -45,4 +45,10 @@ export interface Venue {
   integration?: VenueIntegration
   /** What the app can do here, in a few words. Shown only when integrated. */
   capability?: string
+  /**
+   * The Stellar networks the venue is wired in against. Absent means testnet
+   * only: a venue's mainnet contracts are a separate act of verification,
+   * and claiming mainnet by omission would be the wrong default.
+   */
+  networks?: ('testnet' | 'mainnet')[]
 }

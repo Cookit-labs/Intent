@@ -1,3 +1,4 @@
+import { activeNetwork } from '@intent/config'
 import type { rpc } from '@stellar/stellar-sdk'
 
 import {
@@ -30,26 +31,46 @@ import type { MarketPrice } from '../swap/price-types'
  */
 
 /**
- * Reflector's CEX/DEX feed on testnet. Base currency USD.
+ * Which network's oracles to read, decided once at import like the config.
  *
- * Confirmed live by reading its contract instance on 2026-09-17. A testnet
- * reset can remove it, and three other officially documented oracle addresses
- * were found already gone that way — so a failure here is an ordinary
- * outcome the callers fall through, not an exception.
+ * The mainnet ids are Reflector's own: its contract repository's README
+ * (https://github.com/reflector-network/reflector-contract#usage) reads the
+ * CEX/DEX feed from the id below, and reflector.network's published text
+ * says to "verify contract addresses against
+ * https://developers.stellar.org/docs/data/oracles/oracle-providers", which
+ * lists both feeds on both networks — with exactly the testnet ids pinned
+ * here. Both mainnet contracts were read on the public network on
+ * 2026-09-24: `decimals()` 14, XLM, EUR and MXN with fresh timestamps.
  */
-export const REFLECTOR_CEX_DEX = 'CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63'
+const NETWORK = activeNetwork()
 
 /**
- * Reflector's FX and commodities feed on testnet. Same interface as the
- * crypto feed, different contract: fiat currencies and gold, quoted in
- * dollars per unit. Verified live on 2026-09-23 — MXN 0.057969, XAU 4352.31,
+ * Reflector's CEX/DEX feed. Base currency USD.
+ *
+ * Testnet confirmed live by reading its contract instance on 2026-09-17. A
+ * testnet reset can remove it, and three other officially documented oracle
+ * addresses were found already gone that way — so a failure here is an
+ * ordinary outcome the callers fall through, not an exception.
+ */
+export const REFLECTOR_CEX_DEX =
+  NETWORK === 'mainnet'
+    ? 'CAFJZQWSED6YAWZU3GWRTOCNPPCGBN32L7QV43XX5LZLFTK6JLN34DLN'
+    : 'CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63'
+
+/**
+ * Reflector's FX and commodities feed. Same interface as the crypto feed,
+ * different contract: fiat currencies and gold, quoted in dollars per unit.
+ * Testnet verified live on 2026-09-23 — MXN 0.057969, XAU 4352.31,
  * EUR 1.145753, BRL 0.195626 — with fresh timestamps.
  *
  * It exists here because the tokenized bonds the app trades are denominated
  * in pesos and reais, and until this feed the agents had no rate for either.
  * Gold is carried for the same reason ahead of any asset anchored to it.
  */
-export const REFLECTOR_FX = 'CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W'
+export const REFLECTOR_FX =
+  NETWORK === 'mainnet'
+    ? 'CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC'
+    : 'CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W'
 
 /** The currencies the app's bonds settle in, the euro, and gold. */
 export const FX_SYMBOLS = ['MXN', 'BRL', 'EUR', 'XAU'] as const

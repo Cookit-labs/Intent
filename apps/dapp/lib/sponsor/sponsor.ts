@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
 import { getSponsorLedger, type DayUsage, type SponsorLedger } from '../server/sponsor-ledger'
@@ -24,8 +24,9 @@ import { sponsorFee } from './fee-bump'
  *
  * Testnet only in one respect: an unfunded sponsor account is created
  * through friendbot on first use, so a fresh deployment does not need a
- * hand-funded key before it can pay. Nothing here would fund anything on
- * mainnet, and the app executes only on testnet today.
+ * hand-funded key before it can pay. Mainnet has no friendbot and nothing
+ * here funds anything there — an unfunded sponsor is reported as such, and
+ * the user's transaction pays its own fee.
  */
 
 const ENV_KEY = 'SPONSOR_SECRET_KEY'
@@ -126,20 +127,23 @@ async function commitToBudget(
 
 /**
  * Makes sure the sponsor account exists on the ledger, funding it from
- * friendbot if it does not. Throws when the account can neither be found
- * nor funded; the caller then submits unsponsored.
+ * friendbot if it does not and the network has one. Throws when the account
+ * can neither be found nor funded; the caller then submits unsponsored.
  */
 async function ensureFunded(
   account: string,
   doFetch: typeof fetch,
   horizonUrl: string,
-  friendbotUrl: string
+  friendbotUrl: string | undefined
 ): Promise<void> {
   const res = await doFetch(`${horizonUrl}/accounts/${account}`, {
     headers: { Accept: 'application/json' },
   })
   if (res.ok) return
   if (res.status !== 404) throw new Error(`Horizon ${res.status}`)
+  // No friendbot on mainnet. The account stays unfunded, and that is a
+  // reason to submit unsponsored — never a reason to reach for a faucet.
+  if (friendbotUrl === undefined) throw new Error('sponsor account is unfunded')
   const funded = await doFetch(`${friendbotUrl}/?addr=${encodeURIComponent(account)}`)
   if (!funded.ok) throw new Error(`Friendbot ${funded.status}`)
 }
@@ -163,8 +167,8 @@ export async function sponsorForSubmission(
     await ensureFunded(
       sponsor.publicKey(),
       options.fetchImpl ?? fetch,
-      options.horizonUrl ?? stellarTestnet.horizonUrl,
-      options.friendbotUrl ?? stellarTestnet.friendbotUrl
+      options.horizonUrl ?? stellarNetwork.horizonUrl,
+      options.friendbotUrl ?? stellarNetwork.friendbotUrl
     )
   } catch {
     return { xdr: signedXdr, sponsored: false, reason: 'sponsor_unfunded' }
@@ -172,7 +176,7 @@ export async function sponsorForSubmission(
 
   const bumped = sponsorFee(signedXdr, account, {
     sponsor,
-    passphrase: stellarTestnet.networkPassphrase,
+    passphrase: stellarNetwork.networkPassphrase,
     ...(options.maxFeeStroops !== undefined ? { maxFeeStroops: options.maxFeeStroops } : {}),
   })
   if (!bumped.ok) return { xdr: signedXdr, sponsored: false, reason: bumped.reason }

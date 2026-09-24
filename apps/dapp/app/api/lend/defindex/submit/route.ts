@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { sendSigned } from '../../../../../lib/lend/defindex/api'
@@ -90,6 +90,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     ...result,
-    explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${result.hash}`,
+    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${result.hash}`,
   })
 }

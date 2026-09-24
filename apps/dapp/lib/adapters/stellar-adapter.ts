@@ -1,6 +1,6 @@
 'use client'
 
-import { accountExplorerUrl, stellarDescriptor, stellarTestnet } from '@intent/config'
+import { accountExplorerUrl, stellarDescriptor, stellarNetwork } from '@intent/config'
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -8,6 +8,7 @@ import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../cha
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
 import { clearSession, ensureSession } from '../api/auth'
+import { isWrongStellarNetwork, switchNetworkMessage } from '../wallet-network'
 
 /**
  * Remembers that a session was established, so a reload can restore it.
@@ -111,7 +112,7 @@ function buildLoginMessage(address: string): string {
     'Intent — sign in',
     '',
     `Account: ${address}`,
-    `Network: ${stellarTestnet.name}`,
+    `Network: ${stellarNetwork.name}`,
     `Issued: ${new Date().toISOString()}`,
     '',
     'Signing proves you control this account. It authorises no transaction and moves no funds.',
@@ -256,8 +257,7 @@ function useStellarWallet(): ChainWallet {
     void run()
   }, [])
 
-  const isWrongNetwork =
-    address !== undefined && network !== undefined && network !== stellarTestnet.networkPassphrase
+  const isWrongNetwork = address !== undefined && isWrongStellarNetwork(network)
 
   const { data: balances } = useQuery({
     queryKey: ['stellar-balances', address],
@@ -269,7 +269,7 @@ function useStellarWallet(): ChainWallet {
   const switchNetwork = useCallback(() => {
     // Stellar wallets expose no programmatic network switch; the user changes
     // it in the wallet. Saying so beats a button that silently does nothing.
-    setError(`Switch your wallet to ${stellarTestnet.name}, then reconnect.`)
+    setError(switchNetworkMessage())
   }, [])
 
   return {
@@ -308,7 +308,7 @@ async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
   try {
     const { signedTxXdr } = await StellarWalletsKit.signTransaction(req.xdr, {
       address: req.address,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
 
     if (signedTxXdr === undefined || signedTxXdr === '') {
@@ -330,6 +330,7 @@ export const stellarAdapter: ChainAdapter = {
   descriptor: stellarDescriptor,
   useWallet: useStellarWallet,
   accountUrl: (address) => accountExplorerUrl('stellar', address),
-  faucetUrl: 'https://friendbot.stellar.org',
+  // Testnet only. On mainnet there is no faucet and the field is absent.
+  ...(stellarNetwork.friendbotUrl !== undefined ? { faucetUrl: stellarNetwork.friendbotUrl } : {}),
   signTransaction: signStellarTransaction,
 }

@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -13,6 +13,7 @@ import {
 
 import type { ClassicAsset } from '../assets'
 import { sacFor } from '../build-soroban'
+import { AQUARIUS_ROUTER } from '../contract-registry'
 import type {
   MultiQuoteOutcome,
   QuoteFailure,
@@ -51,8 +52,8 @@ import type {
  * its spec and simulating each pool.
  */
 
-/** Aquarius's testnet router. Confirmed live on 2026-09-17; a reset can remove it. */
-export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
+/** The router for the active network, from the registry; re-exported for the builder. */
+export { AQUARIUS_ROUTER }
 
 /**
  * Simulation needs a source account but never submits, so any well-formed
@@ -115,7 +116,7 @@ function failure(reason: QuoteFailure['reason'], detail?: string): QuoteOutcome 
 }
 
 export function createAquariusQuoter(options: AquariusQuoterOptions = {}): QuoteSource {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
   const routerId = options.routerId ?? AQUARIUS_ROUTER
   const enabled = options.enabled ?? true
 
@@ -126,7 +127,7 @@ export function createAquariusQuoter(options: AquariusQuoterOptions = {}): Quote
   async function simulate(fn: string, args: xdr.ScVal[]): Promise<unknown> {
     const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, '0'), {
       fee: BASE_FEE,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
       .addOperation(new Contract(routerId).call(fn, ...args))
       .setTimeout(30)

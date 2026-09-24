@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -48,7 +48,7 @@ function resolvedTo(address: string, input = 'deon.xlm'): ResolvedRecipient {
 function signedPayment(destination: string): string {
   const tx = new TransactionBuilder(new Account(ME, '100'), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(Operation.payment({ destination, asset: Asset.native(), amount: '5' }))
     .setTimeout(180)
@@ -180,7 +180,7 @@ describe('POST /api/send/build', () => {
     expect(body.preview?.changes).toEqual([{ code: 'XLM', delta: '-5', bound: 'exact' }])
     expect(body.preview?.feePaidBy).toMatch(/^(sponsor|account)$/)
     // The envelope pays the resolved address, not anything the client said.
-    const tx = TransactionBuilder.fromXDR(body.xdr as string, stellarTestnet.networkPassphrase)
+    const tx = TransactionBuilder.fromXDR(body.xdr as string, stellarNetwork.networkPassphrase)
     expect((tx.operations[0] as { destination: string }).destination).toBe(THEM)
   })
 

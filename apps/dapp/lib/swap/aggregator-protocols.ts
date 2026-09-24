@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   BASE_FEE,
@@ -125,7 +125,7 @@ function readAdapters(native: unknown): { id: number; router: string; paused: bo
 export async function resolveAggregatorProtocols(
   options: ResolveProtocolsOptions
 ): Promise<ProtocolWhitelist | undefined> {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
   const now = options.now ?? Date.now
   const ttl = options.ttlMs ?? PROTOCOLS_TTL_MS
   const key = `${rpcUrl}|${options.aggregatorId}`
@@ -140,7 +140,7 @@ export async function resolveAggregatorProtocols(
   try {
     const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, '0'), {
       fee: BASE_FEE,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
       .addOperation(new Contract(options.aggregatorId).call('get_adapters'))
       .setTimeout(30)

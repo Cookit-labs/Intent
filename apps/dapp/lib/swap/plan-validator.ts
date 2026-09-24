@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   FeeBumpTransaction,
@@ -151,7 +151,7 @@ export function readContractCall(op: Operation): { contractId?: string; function
  * existing builders keep their guarantee without keeping their own copy of it.
  */
 export function assertSelfPlan(xdr: string, account: string): PlanStep[] {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   // A fee bump wraps another transaction, so the operations visible here are
   // not the ones that would execute. Refusing outright beats inspecting the

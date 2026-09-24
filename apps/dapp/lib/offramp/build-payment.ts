@@ -1,5 +1,5 @@
 // apps/dapp/lib/offramp/build-payment.ts
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -141,14 +141,14 @@ export async function buildOfframpPayment(
   options: BuildOfframpOptions
 ): Promise<{ xdr: string; networkPassphrase: string }> {
   const { account, expectation } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   const sequence = await loadSequence(account, horizonUrl, fetchImpl)
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(
       Operation.payment({
@@ -167,7 +167,7 @@ export async function buildOfframpPayment(
   // one time it fires is the one time it matters.
   assertOfframpPayment(xdr, account, expectation)
 
-  return { xdr, networkPassphrase: stellarTestnet.networkPassphrase }
+  return { xdr, networkPassphrase: stellarNetwork.networkPassphrase }
 }
 
 function refuse(field: string, detail: string): never {
@@ -195,7 +195,7 @@ export function assertOfframpPayment(
   account: string,
   expectation: OfframpExpectation
 ): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction)
     refuse('shape', 'fee-bump transactions are not built here')
   const tx = decoded

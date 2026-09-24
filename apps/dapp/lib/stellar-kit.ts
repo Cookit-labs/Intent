@@ -1,3 +1,4 @@
+import { isMainnet } from '@intent/config'
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
 import { FreighterModule } from '@creit.tech/stellar-wallets-kit/modules/freighter'
 import { AlbedoModule } from '@creit.tech/stellar-wallets-kit/modules/albedo'
@@ -33,7 +34,9 @@ export function ensureKit(): void {
       new AlbedoModule(),
       new HanaModule(),
     ],
-    network: Networks.TESTNET,
+    // The network this deployment is on, so every wallet in the picker is
+    // asked to sign for it rather than for a hardcoded testnet.
+    network: isMainnet() ? Networks.PUBLIC : Networks.TESTNET,
     authModal: { showInstallLabel: true },
   })
 

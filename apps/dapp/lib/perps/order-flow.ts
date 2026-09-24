@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { StrKey } from '@stellar/stellar-sdk'
 
 import { toBaseUnits } from '../swap/assets'
@@ -7,6 +7,7 @@ import type { NoetherClient, NoetherContracts } from './noether-client'
 import { NoetherHttpError, NoetherOfflineError } from './noether-client'
 import type { Simulate, SimulatedOpen } from './simulate-order'
 import { readSimulatedOpen } from './simulate-order'
+import { assertVenueOn } from '../venues'
 
 /**
  * The server's half of opening a position.
@@ -120,6 +121,14 @@ export async function prepareOrder(options: {
   request: OrderRequest
 }): Promise<{ ok: true; prepared: PreparedOrder } | OrderFailure> {
   const { client, simulate, token, request } = options
+
+  // Testnet-only venue: refused in the same shape as a paused market, before
+  // the gateway is asked for anything.
+  try {
+    assertVenueOn('noether')
+  } catch (e) {
+    return failure(e)
+  }
 
   let health
   try {
@@ -243,7 +252,7 @@ export async function submitOrder(options: {
       ok: true,
       hash: result.hash,
       ...(result.ledger !== undefined ? { ledger: result.ledger } : {}),
-      explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${result.hash}`,
+      explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${result.hash}`,
     }
   }
   if (result.status === 'PENDING') {

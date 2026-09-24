@@ -53,6 +53,7 @@ import {
   type FollowOnAction,
 } from '../../lib/parse-compound'
 import { parseSendIntent } from '../../lib/parse-send'
+import { classifyAnchorAnswer } from '../../lib/offramp/anchor-answer'
 import type { AnchorId } from '../../lib/offramp/anchors'
 import { isAnchorId } from '../../lib/offramp/anchors'
 import type { WithdrawLimits } from '../../lib/offramp/sep24'
@@ -982,18 +983,25 @@ export function IntentChat(): JSX.Element {
           try {
             const res = await fetch(`/api/offramp/anchor?id=${anchor}`)
             const info = (await res.json()) as { limits?: WithdrawLimits | null; error?: string }
-            if (!res.ok) {
+            const answer = classifyAnchorAnswer(res.status, info)
+            if (answer.kind === 'refused') {
+              // The server says this anchor cannot be used here — on mainnet
+              // with no off-ramp configured, that is the whole answer. The
+              // swap is not prepared: its second half cannot happen, and the
+              // user is told why instead of being sold the first half.
+              setAffordError(answer.message)
+              return
+            }
+            if (answer.kind === 'unreachable') {
               // An unreachable anchor was read as "no limits", so the size
               // warning silently disappeared and the user heard nothing at
               // all. Said out loud, and the sequence still prepared without
               // limits: the build route refuses an out-of-range withdrawal
               // later, so losing the early warning is the honest degradation
               // rather than a reason to refuse a trade the user asked for.
-              setAffordError(
-                `The anchor could not be reached: ${info.error ?? `the request failed (${res.status}).`}`
-              )
-            } else if (info.limits !== null && info.limits !== undefined) {
-              limits = info.limits
+              setAffordError(answer.message)
+            } else if (answer.limits !== undefined) {
+              limits = answer.limits
             }
           } catch {
             // The same treatment for a network failure: said, and prepared

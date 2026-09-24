@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { NameLookupFailed, NameNotFound, UnsupportedRecipient } from '../names/errors'
 import type { ResolvedRecipient } from '../names/resolve'
@@ -113,7 +113,7 @@ export async function assertCanReceive(
   asset: SendExpectation['asset'],
   options: CanReceiveOptions = {}
 ): Promise<void> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const res = await (options.fetchImpl ?? fetch)(`${horizonUrl}/accounts/${resolved.address}`, {
     headers: { Accept: 'application/json' },
   })

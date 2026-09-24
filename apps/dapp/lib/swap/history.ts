@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { BLEND_POOL, blendPositionUrl } from './contract-registry'
 import { OFFER_MEMO } from './build-offer'
@@ -204,7 +204,7 @@ export async function fetchSwapHistory(
   account: string,
   options: HistoryOptions = {}
 ): Promise<SwapRecord[]> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
   const limit = options.limit ?? 100
   const onlyThisApp = options.onlyThisApp ?? true
@@ -246,7 +246,7 @@ export async function fetchSwapHistory(
       // A classic transaction can carry a text memo, so the stamp is a question
       // worth asking of it.
       stampable: true,
-      explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+      explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
 
   // A resting order is neither a path payment nor a contract call, so the
@@ -273,7 +273,7 @@ export async function fetchSwapHistory(
       kind: 'limit' as const,
       fromThisApp: KNOWN_MEMOS.has(memoByHash.get(op.transaction_hash) ?? ''),
       stampable: true,
-      explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+      explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${op.transaction_hash}`,
     }))
 
   const routed = records
@@ -355,7 +355,7 @@ function routerSwapOf(
     // Soroban transactions cannot carry a text memo, so this trade is not
     // filterable by one either way.
     stampable: false,
-    explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${op.transaction_hash}`,
+    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${op.transaction_hash}`,
   }
 }
 
@@ -454,7 +454,7 @@ function attachBundles(swaps: SwapRecord[], supplied: LedgerSupply[]): void {
       {
         label: `Supply ${supply.amount} ${supply.asset} to Blend`,
         hash: supply.txHash,
-        explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${supply.txHash}`,
+        explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${supply.txHash}`,
         positionUrl: blendPositionUrl(supply.to),
         venue: 'Blend',
       },

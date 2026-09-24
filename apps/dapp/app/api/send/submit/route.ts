@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { resolveRecipient } from '../../../../lib/names/resolve'
@@ -92,6 +92,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   return NextResponse.json({
     ...result,
     feeSponsored: sent.sponsored,
-    explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${result.hash}`,
+    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${result.hash}`,
   })
 }

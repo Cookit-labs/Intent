@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { STELLAR_USDC, stellarNetwork } from '@intent/config'
 import { Asset } from '@stellar/stellar-sdk'
 import {
   Account,
@@ -13,6 +13,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from '../assets'
+import { SOROSWAP_ROUTER } from '../contract-registry'
 import type { QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
 
 /**
@@ -35,26 +36,27 @@ import type { QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
  * as one comparable number.
  */
 
-/** Soroswap's testnet router. */
-const ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
-
 /**
- * Soroban contract ids for the assets this app trades.
+ * Soroban contract ids for the two assets this source prices.
  *
- * Explicit rather than resolved: a wrong id quotes the wrong asset, and the
- * number that comes back gives no hint that it happened.
+ * The canonical Stellar Asset Contract for each classic asset, derived from
+ * the asset and the active network's passphrase and therefore not a matter
+ * of opinion — on testnet these are `CDLZFC3S…` and `CBIELTK6…`, the ids
+ * once pinned here, and on mainnet the SACs of XLM and of Circle's issuer.
+ * Still a closed list rather than a lookup: this source prices the pair it
+ * has been verified against, and nothing else.
+ *
+ * USDC previously pointed at `CB3TLW74…`, which is a Soroswap test token
+ * that calls itself "USDCoin" and shares the ticker. Every quote against it
+ * was priced in an asset the user does not hold and cannot spend — the exact
+ * ticker-impersonation the asset registry exists to catch, reached through a
+ * hardcoded constant rather than a lookup.
  */
 const CONTRACTS: Record<string, string> = {
-  // The canonical Stellar Asset Contract for each classic asset, derived from
-  // the asset itself and therefore not a matter of opinion.
-  //
-  // USDC previously pointed at `CB3TLW74…`, which is a Soroswap test token
-  // that calls itself "USDCoin" and shares the ticker. Every quote against it
-  // was priced in an asset the user does not hold and cannot spend — the exact
-  // ticker-impersonation the asset registry exists to catch, reached through a
-  // hardcoded constant rather than a lookup.
-  XLM: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-  USDC: 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA',
+  XLM: Asset.native().contractId(stellarNetwork.networkPassphrase),
+  USDC: new Asset(STELLAR_USDC.code, STELLAR_USDC.issuer).contractId(
+    stellarNetwork.networkPassphrase
+  ),
 }
 
 /**
@@ -75,8 +77,8 @@ function contractFor(asset: ClassicAsset): string | undefined {
 }
 
 export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): QuoteSource {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
-  const routerId = options.routerId ?? ROUTER
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
+  const routerId = options.routerId ?? SOROSWAP_ROUTER
   const enabled = options.enabled ?? true
 
   return {
@@ -115,7 +117,7 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
 
         const tx = new TransactionBuilder(source, {
           fee: BASE_FEE,
-          networkPassphrase: stellarTestnet.networkPassphrase,
+          networkPassphrase: stellarNetwork.networkPassphrase,
         })
           .addOperation(
             contract.call(
@@ -202,7 +204,7 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
   }
 }
 
-export { ROUTER as SOROSWAP_ROUTER, CONTRACTS as SOROSWAP_CONTRACTS }
+export { SOROSWAP_ROUTER, CONTRACTS as SOROSWAP_CONTRACTS }
 
 /**
  * Whether a contract id is the canonical Stellar Asset Contract for an asset.
@@ -217,7 +219,7 @@ function isCanonicalSac(asset: ClassicAsset, contractId: string): boolean {
   try {
     const sdkAsset =
       asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
-    return sdkAsset.contractId(stellarTestnet.networkPassphrase) === contractId
+    return sdkAsset.contractId(stellarNetwork.networkPassphrase) === contractId
   } catch {
     // An asset we cannot construct cannot be matched, and guessing would
     // defeat the point of the check.

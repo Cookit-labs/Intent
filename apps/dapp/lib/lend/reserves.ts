@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { activeNetwork, stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -91,8 +91,16 @@ const READ_ONLY_SOURCE = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVV
  * Callers that accept user input should still check `readReserveList` rather
  * than trusting this constant; it exists for the one asset the app supplies
  * today.
+ *
+ * Both ids are the `XLM` entries of Blend's own deployment files,
+ * https://github.com/blend-capital/blend-utils/blob/main/testnet.contracts.json
+ * and `mainnet.contracts.json` (read 2026-09-24); the mainnet one is the
+ * first reserve the `Fixed` pool listed on the public network that day.
  */
-export const BLEND_XLM = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
+export const BLEND_XLM =
+  activeNetwork() === 'mainnet'
+    ? 'CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA'
+    : 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
 
 export interface ReserveConfig {
   index: number
@@ -171,7 +179,7 @@ export interface PoolRates {
 }
 
 function serverFor(options: ReadReserveOptions): Pick<rpc.Server, 'simulateTransaction'> {
-  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarTestnet.sorobanRpcUrl)
+  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarNetwork.sorobanRpcUrl)
 }
 
 async function simulate(
@@ -183,7 +191,7 @@ async function simulate(
 
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(new Contract(poolId).call(fn, ...args))
     .setTimeout(60)

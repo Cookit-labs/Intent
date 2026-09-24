@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 /**
  * Resting orders, read from the ledger rather than remembered by the app.
@@ -61,7 +61,7 @@ export async function fetchOpenOffers(
   account: string,
   options: OffersOptions = {}
 ): Promise<OpenOffer[]> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
 
   const res = await doFetch(`${horizonUrl}/accounts/${account}/offers?limit=200`, {

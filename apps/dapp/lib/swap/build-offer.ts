@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -12,6 +12,7 @@ import {
 import type { ClassicAsset } from './assets'
 import { isNative, toBaseUnits } from './assets'
 import type { PriceFraction } from './limit-price'
+import { assertVenueOn } from '../venues'
 
 /**
  * Turning a limit price into an order that rests on Stellar's book.
@@ -108,8 +109,9 @@ async function loadSequence(
 }
 
 export async function buildOfferTransaction(options: BuildOfferOptions): Promise<BuiltOffer> {
+  assertVenueOn('stellarx')
   const { account, selling, buying, amount, price } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
   const offerId = options.offerId ?? NEW_OFFER
 
@@ -128,7 +130,7 @@ export async function buildOfferTransaction(options: BuildOfferOptions): Promise
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(
       Operation.manageSellOffer({
@@ -153,7 +155,7 @@ export async function buildOfferTransaction(options: BuildOfferOptions): Promise
     offerId,
     amount: normalised,
     price,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -180,7 +182,7 @@ function formatAmount(amount: string): string {
  * envelope certainly can.
  */
 export function assertSelfOffer(xdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   // A fee bump wraps another transaction, so its operations are not the ones
   // that would execute. Refusing outright beats inspecting the wrong envelope.

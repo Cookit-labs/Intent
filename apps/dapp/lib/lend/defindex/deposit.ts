@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   FeeBumpTransaction,
@@ -11,6 +11,7 @@ import { sacFor } from '../../swap/build-soroban'
 import { requestDeposit, type DefindexApiOptions } from './api'
 import { resolveDefindexVault, type ContractsRegistry } from './contracts'
 import { readVaultAssets, type VaultAsset } from './vault'
+import { assertVenueOn } from '../../venues'
 
 /**
  * A deposit into a DeFindex vault: built elsewhere, admitted here.
@@ -73,7 +74,7 @@ export function assertDefindexDeposit(
   account: string,
   expectation: DepositExpectation
 ): void {
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction) {
     refuse('shape', 'fee-bump transactions are not signed here; the relay adds its own')
   }
@@ -180,6 +181,7 @@ export interface BuiltDefindexDeposit {
 export async function buildDefindexDeposit(
   options: BuildDefindexDepositOptions
 ): Promise<BuiltDefindexDeposit> {
+  assertVenueOn('defindex')
   const { account, symbol, amount } = options
 
   const asset = resolveAsset(symbol)
@@ -212,6 +214,6 @@ export async function buildDefindexDeposit(
     assetContract,
     amount,
     recipient: account,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }

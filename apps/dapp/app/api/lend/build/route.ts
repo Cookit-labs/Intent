@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 
 import { buildBlendSupply, prepareBlendSupply } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
-import { readReserveList } from '../../../../lib/lend/reserves'
+import { BLEND_XLM, readReserveList } from '../../../../lib/lend/reserves'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
+import { fromBaseUnits } from '../../../../lib/swap/assets'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
 
@@ -61,6 +63,20 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/build', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
+  }
+
+  // Against the mainnet cap. The reserve is named by contract; XLM is the
+  // one this app supplies, and anything else has no price here to cap by.
+  try {
+    await assertTradeWithinCap(
+      body.asset === BLEND_XLM ? 'XLM' : body.asset,
+      fromBaseUnits(body.amount)
+    )
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
   }
 
   try {

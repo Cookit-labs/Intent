@@ -198,10 +198,10 @@ export async function fetchOrderBookTop(
   counter: ClassicAsset,
   options: { horizonUrl?: string; fetchImpl?: typeof fetch } = {}
 ): Promise<OrderBookTop> {
-  const { stellarTestnet } = await import('@intent/config')
+  const { stellarNetwork } = await import('@intent/config')
   const { toHorizonParams } = await import('./assets')
 
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
 
   const params = new URLSearchParams({

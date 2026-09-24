@@ -4,6 +4,7 @@ import { buildOfframpPayment } from '../../../../lib/offramp/build-payment'
 import { readExpectation } from '../../../../lib/offramp/read-expectation'
 import { USDC, fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -66,6 +67,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         ...(read.status !== undefined ? { status: read.status } : {}),
       },
       { status: STATUS_FOR[read.code] ?? 500 }
+    )
+  }
+
+  // The amount the anchor asks for, against the mainnet cap.
+  try {
+    await assertTradeWithinCap(USDC.code, read.expectation.amount)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
     )
   }
 

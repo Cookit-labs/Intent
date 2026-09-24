@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -23,7 +23,7 @@ import { USDC } from '../swap/assets'
 
 const ME = Keypair.random().publicKey()
 const THEM = Keypair.random().publicKey()
-const NET = stellarTestnet.networkPassphrase
+const NET = stellarNetwork.networkPassphrase
 const USDC_ASSET = new Asset(USDC.code, USDC.issuer as string)
 const HASH_B64 = Buffer.alloc(32, 7).toString('base64')
 

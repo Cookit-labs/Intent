@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { resolveRecipient } from '../../../../lib/names/resolve'
@@ -14,6 +14,7 @@ import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { derivePreview } from '../../../../lib/swap/preview'
 import { fetchMarketPrices } from '../../../../lib/swap/prices'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -68,7 +69,8 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Refused before the name is asked about: an asset the app cannot send is
   // a refusal whatever the name resolves to, and a registry read is not free.
-  if (resolveAsset(symbol) === undefined) {
+  const asset = resolveAsset(symbol)
+  if (asset === undefined) {
     return NextResponse.json(
       { error: `${symbol} is not an asset this app can send` },
       { status: 400 }
@@ -94,6 +96,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
+  }
+
+  // Against the mainnet cap, sized from the same table as the amount above.
+  try {
+    await assertTradeWithinCap(asset.code, amount)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
   }
 
   let expectation
@@ -132,7 +144,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       expectation,
       resolved,
       preview: {
-        ...derivePreview(built.xdr, account, stellarTestnet.networkPassphrase),
+        ...derivePreview(built.xdr, account, stellarNetwork.networkPassphrase),
         feePaidBy: feePaidBy(),
       },
     })

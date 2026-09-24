@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   Asset,
@@ -12,6 +12,7 @@ import { applySlippage, isNative, toBaseUnits, type ClassicAsset } from './asset
 import { labelForCall, lookupContract } from './contract-registry'
 import type { AggregatorPlatform, SoroswapApi } from './soroswap-api'
 import type { AggregatorQuoted } from './sources/soroswap-aggregator-quoter'
+import { assertVenueOn } from '../venues'
 
 /**
  * Admitting a transaction somebody else built.
@@ -314,7 +315,7 @@ export function assertAggregatorSwap(
 ): CheckedAggregatorSwap {
   const nowSeconds = clock.nowSeconds ?? (() => Math.floor(Date.now() / 1000))
 
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   // A fee bump wraps another transaction, so the operations visible here are
   // not the ones that would execute. The API's sponsored flows produce one;
   // this app never asks for those, and refuses the shape outright.
@@ -375,6 +376,7 @@ export interface BuiltAggregatorSwap {
 export async function buildAggregatorSwap(
   options: BuildAggregatorSwapOptions
 ): Promise<BuiltAggregatorSwap> {
+  assertVenueOn('soroswap-aggregator')
   const { account, quoted, api } = options
   const platform = quoted.raw.platform
 
@@ -426,7 +428,7 @@ export async function buildAggregatorSwap(
     sendAmount: quoted.raw.amountIn,
     platform,
     label: checked.label,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
     expectation,
   }
 }

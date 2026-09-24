@@ -3,7 +3,7 @@
 import { cn } from '@intent/ui'
 import { ExternalLink, Plus, X } from 'lucide-react'
 
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import type { ChatTurn } from '../../lib/chat-history'
 
 /**
@@ -122,7 +122,7 @@ export function ChatHistoryPanel({
                       ) : null}
                       {turn.bundle === undefined && turn.txHash !== undefined ? (
                         <a
-                          href={`${stellarTestnet.blockExplorerUrl}/tx/${turn.txHash}`}
+                          href={`${stellarNetwork.blockExplorerUrl}/tx/${turn.txHash}`}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}

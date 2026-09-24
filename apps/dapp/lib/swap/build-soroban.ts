@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -16,8 +16,10 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
+import { SOROSWAP_ROUTER } from './contract-registry'
 import { plain } from './preview'
 import { resolveVerifiedAsset } from './asset-registry'
+import { assertVenueOn } from '../venues'
 
 /**
  * Swapping through Soroswap's router.
@@ -38,9 +40,6 @@ import { resolveVerifiedAsset } from './asset-registry'
  * 473 XLM for 50 USDC against Horizon's 128. That is not a rounding
  * difference, and until now it was unreachable.
  */
-
-/** Soroswap's testnet router. */
-const ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
 
 /** How long the router will accept the swap. Long enough to sign, short enough to be current. */
 const DEFAULT_DEADLINE_SECONDS = 300
@@ -83,7 +82,7 @@ export interface BuiltSorobanSwap {
  */
 export function sacFor(asset: ClassicAsset): string {
   const sdkAsset = asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
-  return sdkAsset.contractId(stellarTestnet.networkPassphrase)
+  return sdkAsset.contractId(stellarNetwork.networkPassphrase)
 }
 
 async function loadSequence(
@@ -107,9 +106,10 @@ async function loadSequence(
 export async function buildSorobanSwap(
   options: BuildSorobanSwapOptions
 ): Promise<BuiltSorobanSwap> {
+  assertVenueOn('soroswap')
   const { account, from, to, sendAmount, minReceive } = options
-  const routerId = options.routerId ?? ROUTER
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const routerId = options.routerId ?? SOROSWAP_ROUTER
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
   const deadlineSeconds = options.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS
 
@@ -162,7 +162,7 @@ export async function buildSorobanSwap(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -176,7 +176,7 @@ export async function buildSorobanSwap(
     recipient,
     minReceive,
     sendAmount,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -191,7 +191,7 @@ export async function buildSorobanSwap(
  * would allow.
  */
 export function assertSelfInvoke(xdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
@@ -234,7 +234,7 @@ export function assertSelfSoroswapSwap(
 ): void {
   assertSelfInvoke(envelope, account)
 
-  const decoded = TransactionBuilder.fromXDR(envelope, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(envelope, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
   }
@@ -290,7 +290,7 @@ export function assertSelfSoroswapSwap(
  */
 export async function prepareSorobanSwap(
   xdr: string,
-  rpcUrl: string = stellarTestnet.sorobanRpcUrl
+  rpcUrl: string = stellarNetwork.sorobanRpcUrl
 ): Promise<
   | {
       ok: true
@@ -306,7 +306,7 @@ export async function prepareSorobanSwap(
 
   let tx
   try {
-    tx = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+    tx = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
   } catch {
     return { ok: false, reason: 'The transaction could not be read.' }
   }

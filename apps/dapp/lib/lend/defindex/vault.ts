@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   BASE_FEE,
@@ -54,11 +54,11 @@ export async function readVaultAssets(
   options: ReadVaultOptions = {}
 ): Promise<VaultAsset[]> {
   const server =
-    options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarTestnet.sorobanRpcUrl)
+    options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarNetwork.sorobanRpcUrl)
 
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(new Contract(vault).call('get_assets'))
     .setTimeout(60)

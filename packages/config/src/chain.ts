@@ -54,6 +54,13 @@ export const chains: Record<SupportedNetwork, ChainConfig> = {
     blockExplorerUrl: 'https://stellar.expert/explorer/testnet',
     nativeCurrency: { name: 'Lumens', symbol: 'XLM', decimals: 7 },
   },
+  'stellar-mainnet': {
+    id: -1,
+    name: 'Stellar Mainnet',
+    rpcUrl: 'https://horizon.stellar.org',
+    blockExplorerUrl: 'https://stellar.expert/explorer/public',
+    nativeCurrency: { name: 'Lumens', symbol: 'XLM', decimals: 7 },
+  },
 }
 
 /** Decimals for USDC read through the ERC-20 interface, as opposed to natively. */

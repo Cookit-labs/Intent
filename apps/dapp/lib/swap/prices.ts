@@ -1,4 +1,4 @@
-import { STELLAR_USDC, stellarTestnet } from '@intent/config'
+import { STELLAR_USDC, isMainnet, stellarNetwork } from '@intent/config'
 
 import { fetchReflectorPrices } from '../prices/reflector'
 import type { MarketPrice } from './price-types'
@@ -194,7 +194,7 @@ export async function fetchTestnetXlmUsd(
 
   let usd: number | undefined
   try {
-    usd = await fetchXlmUsd(fetchImpl, stellarTestnet.horizonUrl, STELLAR_USDC.issuer)
+    usd = await fetchXlmUsd(fetchImpl, stellarNetwork.horizonUrl, STELLAR_USDC.issuer)
   } catch {
     usd = undefined
   }
@@ -204,7 +204,9 @@ export async function fetchTestnetXlmUsd(
   return {
     symbol: 'XLM',
     usd,
-    source: 'stellar-testnet',
+    // The book this deployment fills on. On mainnet that is the same venue
+    // `fetchMarketPrices` reads, and it is labelled as such.
+    source: isMainnet() ? 'stellar-mainnet' : 'stellar-testnet',
     asOf: new Date().toISOString(),
   }
 }

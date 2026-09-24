@@ -1,4 +1,4 @@
-import { STELLAR_USDC, stellarTestnet } from '@intent/config'
+import { STELLAR_USDC, stellarNetwork } from '@intent/config'
 
 /**
  * Horizon account reads over plain REST.
@@ -45,7 +45,7 @@ export const UNFUNDED_ACCOUNT: StellarBalances = {
 }
 
 export async function fetchStellarBalances(address: string): Promise<StellarBalances> {
-  const res = await fetch(`${stellarTestnet.horizonUrl}/accounts/${address}`, {
+  const res = await fetch(`${stellarNetwork.horizonUrl}/accounts/${address}`, {
     headers: { Accept: 'application/json' },
   })
 
@@ -85,7 +85,14 @@ export async function fetchStellarBalances(address: string): Promise<StellarBala
 
 /** Testnet-only faucet. Funds a new account so it exists on-chain. */
 export async function fundWithFriendbot(address: string): Promise<void> {
-  const res = await fetch(`${stellarTestnet.friendbotUrl}/?addr=${encodeURIComponent(address)}`)
+  // Mainnet has no faucet: an account exists once someone pays its reserve.
+  // Said plainly rather than fetching `undefined/?addr=` and reporting that.
+  if (stellarNetwork.friendbotUrl === undefined) {
+    throw new Error(
+      `There is no friendbot on ${stellarNetwork.name}. Send the account XLM instead.`
+    )
+  }
+  const res = await fetch(`${stellarNetwork.friendbotUrl}/?addr=${encodeURIComponent(address)}`)
   if (!res.ok) throw new Error(`Friendbot failed (${res.status})`)
 }
 

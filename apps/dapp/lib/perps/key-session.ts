@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
 import { buildKeyChallenge, verifyKeyChallenge } from './key-challenge'
@@ -58,7 +58,7 @@ export async function beginKeySession(options: {
     const xdr = buildKeyChallenge({
       address: account,
       challengeHex: challenge.challengeHex,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
     return { ok: true, xdr, challengeHex: challenge.challengeHex, expiresAt: challenge.expiresAt }
   } catch (e) {
@@ -84,7 +84,7 @@ export async function completeKeySession(options: {
     tx = verifyKeyChallenge(signedXdr, {
       address: account,
       challengeHex,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
   } catch (e) {
     return failure(e)
