@@ -4,6 +4,7 @@ import { buildBlendWithdraw, prepareBlendWithdraw } from '../../../../lib/lend/b
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a withdrawal from Blend, ready for signature.
@@ -67,7 +68,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/withdraw', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

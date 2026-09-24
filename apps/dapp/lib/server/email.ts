@@ -1,5 +1,6 @@
 /**
- * Sending email: OTP codes, and word that a standing rule has fired.
+ * Sending email: OTP codes, word that a standing rule has fired, and alerts
+ * to whoever runs the deployment.
  *
  * Two senders behind one interface. Development logs to the server console so
  * everything can be exercised with no API key and no verified domain;
@@ -9,6 +10,16 @@
 export interface EmailSender {
   sendOtp: (to: string, code: string, ttlMinutes: number) => Promise<void>
   sendRuleFired: (to: string, fired: RuleFiredMail) => Promise<void>
+  sendAlert: (to: string, mail: AlertMail) => Promise<void>
+}
+
+/**
+ * An operator alert. Composed by whatever raised it — the watcher knows what
+ * it saw — and carried as given.
+ */
+export interface AlertMail {
+  subject: string
+  text: string
 }
 
 /** What a fired-rule email has to carry. */
@@ -76,6 +87,20 @@ const consoleSender: EmailSender = {
         `\n  ───────────────────────────────────────\n`
     )
   },
+
+  async sendAlert(to, { subject, text }) {
+    // eslint-disable-next-line no-console
+    console.info(
+      `\n  ── Alert ──────────────────────────────\n` +
+        `   to:      ${to}\n` +
+        `   subject: ${subject}\n` +
+        text
+          .split('\n')
+          .map((line) => `   ${line}`)
+          .join('\n') +
+        `\n  ───────────────────────────────────────\n`
+    )
+  },
 }
 
 function resendSender(apiKey: string, from: string): EmailSender {
@@ -112,6 +137,10 @@ function resendSender(apiKey: string, from: string): EmailSender {
 
     async sendRuleFired(to, fired) {
       const { subject, text } = ruleFiredMessage(fired)
+      await send(to, subject, text)
+    },
+
+    async sendAlert(to, { subject, text }) {
       await send(to, subject, text)
     },
   }

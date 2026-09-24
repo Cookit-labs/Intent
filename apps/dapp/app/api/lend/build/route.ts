@@ -4,6 +4,7 @@ import { buildBlendSupply, prepareBlendSupply } from '../../../../lib/lend/blend
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a supply to Blend, ready for signature.
@@ -57,7 +58,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/build', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

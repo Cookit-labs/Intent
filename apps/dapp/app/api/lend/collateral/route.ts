@@ -8,6 +8,7 @@ import {
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Posting collateral, and taking it back.
@@ -68,7 +69,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!accepted.includes(body.asset)) {
       return NextResponse.json({ error: 'Blend has no reserve for this asset.' }, { status: 400 })
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/collateral', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

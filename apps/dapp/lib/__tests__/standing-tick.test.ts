@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { RuleFiredMail } from '../server/email'
+import { createAlertsRepo, type AlertsRepo } from '../server/alerts'
+import type { AlertMail, RuleFiredMail } from '../server/email'
 import { createStandingRulesRepo, type StandingRulesRepo } from '../server/standing-rules'
-import { runTick } from '../server/standing-tick'
+import { runTick, type SponsorWatch } from '../server/standing-tick'
 import type { StandingIntent } from '../standing-intent'
+import { fakeAlertsDb } from './fakes/alerts-db'
 import { fakeStandingRulesDb } from './fakes/standing-rules-db'
 
 /**
@@ -27,8 +29,10 @@ interface Sent {
 
 class FakeMailer {
   sent: Sent[] = []
+  alerts: { to: string; mail: AlertMail }[] = []
   /** Set to make the next send fail, once. */
   failNext = false
+  failNextAlert = false
 
   async sendRuleFired(to: string, fired: RuleFiredMail): Promise<void> {
     if (this.failNext) {
@@ -36,6 +40,14 @@ class FakeMailer {
       throw new Error('Resend failed (503)')
     }
     this.sent.push({ to, fired })
+  }
+
+  async sendAlert(to: string, mail: AlertMail): Promise<void> {
+    if (this.failNextAlert) {
+      this.failNextAlert = false
+      throw new Error('Resend failed (503)')
+    }
+    this.alerts.push({ to, mail })
   }
 }
 
@@ -197,5 +209,146 @@ describe('a cancelled rule', () => {
 
     expect(result).toEqual({ evaluated: 0, fired: 0, notified: 0 })
     expect(mailer.sent).toHaveLength(0)
+  })
+})
+
+describe('the sponsor watch', () => {
+  // The tick is the one thing that runs on a schedule, so it is also where
+  // the fee sponsor's balance is looked at. An operator is told once a day
+  // while it is low — once, because an alert every minute is one that gets
+  // filtered — and never when nobody has asked to be told.
+  const SPONSOR = 'G'.padEnd(56, 'S')
+  const OPS = 'ops@test.com'
+
+  let alerts: AlertsRepo
+  let balanceXlm: string
+  let funded: boolean
+  let reads: number
+
+  beforeEach(() => {
+    alerts = createAlertsRepo(fakeAlertsDb().query)
+    balanceXlm = '5.0000000'
+    funded = true
+    reads = 0
+    // The alert is also reported as an event, which logs a line.
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+
+  function watched(now: string, over: Partial<SponsorWatch> = {}) {
+    return runTick({
+      now: new Date(now),
+      prices: { XLM: 0.19 },
+      repo,
+      mailer,
+      appUrl: APP_URL,
+      sponsor: {
+        account: SPONSOR,
+        balance: async () => {
+          reads += 1
+          return { funded, balanceXlm }
+        },
+        alertBelowXlm: 20,
+        alertEmail: OPS,
+        alerts,
+        ...over,
+      },
+    })
+  }
+
+  it('emails the operator when the balance is below the threshold', async () => {
+    await watched('2026-09-23T11:00:00.000Z')
+
+    expect(mailer.alerts).toHaveLength(1)
+    expect(mailer.alerts[0]?.to).toBe(OPS)
+    expect(mailer.alerts[0]?.mail.subject).toContain('5.0000000 XLM')
+    expect(mailer.alerts[0]?.mail.text).toContain(SPONSOR)
+    expect(mailer.alerts[0]?.mail.text).toContain('20 XLM')
+  })
+
+  it('does not email twice the same day, and stops reading the balance once told', async () => {
+    await watched('2026-09-23T11:00:00.000Z')
+    await watched('2026-09-23T11:01:00.000Z')
+    await watched('2026-09-23T23:59:00.000Z')
+
+    expect(mailer.alerts).toHaveLength(1)
+    expect(reads).toBe(1)
+  })
+
+  it('emails again the next day while the balance stays low', async () => {
+    await watched('2026-09-23T11:00:00.000Z')
+    await watched('2026-09-24T00:01:00.000Z')
+
+    expect(mailer.alerts).toHaveLength(2)
+  })
+
+  it('stays quiet while the sponsor holds at least the threshold', async () => {
+    balanceXlm = '20.0000000'
+
+    await watched('2026-09-23T11:00:00.000Z')
+
+    expect(mailer.alerts).toHaveLength(0)
+  })
+
+  it('treats an unfunded sponsor as holding nothing', async () => {
+    funded = false
+    balanceXlm = '0'
+
+    await watched('2026-09-23T11:00:00.000Z')
+
+    expect(mailer.alerts).toHaveLength(1)
+    expect(mailer.alerts[0]?.mail.subject).toContain('0 XLM')
+  })
+
+  it('sends nothing, and reads nothing, when ALERT_EMAIL is unset', async () => {
+    await watched('2026-09-23T11:00:00.000Z', { alertEmail: undefined })
+
+    expect(mailer.alerts).toHaveLength(0)
+    expect(reads).toBe(0)
+  })
+
+  it('tries again next tick when the send fails', async () => {
+    mailer.failNextAlert = true
+
+    await watched('2026-09-23T11:00:00.000Z')
+    expect(mailer.alerts).toHaveLength(0)
+
+    await watched('2026-09-23T11:01:00.000Z')
+    expect(mailer.alerts).toHaveLength(1)
+  })
+
+  it('neither alerts nor stops the tick when Horizon cannot say', async () => {
+    await repo.createRule({ email: OWNER, wallet: WALLET, rule: rule() })
+
+    const result = await watched('2026-09-23T11:00:00.000Z', {
+      balance: async () => {
+        throw new Error('Horizon 503')
+      },
+    })
+
+    expect(result).toEqual({ evaluated: 1, fired: 0, notified: 0 })
+    expect(mailer.alerts).toHaveLength(0)
+  })
+
+  it('does not change what the rules pass does', async () => {
+    await repo.createRule({ email: OWNER, wallet: WALLET, rule: rule() })
+
+    const result = await runTick({
+      now: new Date('2026-09-23T11:00:00.000Z'),
+      prices: { XLM: 0.155 },
+      repo,
+      mailer,
+      appUrl: APP_URL,
+      sponsor: {
+        account: SPONSOR,
+        balance: async () => ({ funded: true, balanceXlm: '5.0000000' }),
+        alertBelowXlm: 20,
+        alertEmail: OPS,
+        alerts,
+      },
+    })
+
+    expect(result).toEqual({ evaluated: 1, fired: 1, notified: 1 })
+    expect(mailer.sent).toHaveLength(1)
+    expect(mailer.alerts).toHaveLength(1)
   })
 })
