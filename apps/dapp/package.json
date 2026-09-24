@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "agents:eval": "tsx --env-file=.env.local lib/agents/evals/runner.ts",
     "standing:tick": "tsx --env-file=.env.local scripts/standing-tick.ts"
   },
@@ -50,6 +51,7 @@
   "devDependencies": {
     "@intent/eslint-config": "workspace:*",
     "@intent/tsconfig": "workspace:*",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^20.14.9",
     "@types/pg": "^8.23.1",
     "@types/react": "^18.3.3",
