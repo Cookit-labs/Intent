@@ -12,6 +12,7 @@ import {
 import type { AssetRef, ClassicAsset } from './assets'
 import { applySlippage, fromBaseUnits, isNative } from './assets'
 import type { SwapQuote } from './quote'
+import { assertVenueOn } from '../venues'
 
 /**
  * Turns a quoted route into an unsigned transaction.
@@ -78,6 +79,7 @@ function toSdkAsset(asset: AssetRef): Asset {
 }
 
 export async function buildSwapTransaction(options: BuildSwapOptions): Promise<BuiltSwap> {
+  assertVenueOn('stellarx')
   const { account, quote } = options
   const slippageBps = options.slippageBps ?? DEFAULT_SLIPPAGE_BPS
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl

@@ -1,9 +1,14 @@
-import { CHAIN_DESCRIPTORS, isChainSlug } from '@intent/config'
+import {
+  CHAIN_DESCRIPTORS,
+  activeNetwork,
+  isChainSlug,
+  type StellarNetworkName,
+} from '@intent/config'
 
 import type { MarketContext, QuotedRoute } from './brain'
 import type { MarketPrice } from '../swap/price-types'
 import { fromBaseUnits, resolveAsset } from '../swap/assets'
-import type { QuoteSource, SwapQuote } from '../swap/quote'
+import { activeSources, type QuoteSource, type SwapQuote } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
@@ -12,7 +17,7 @@ import { createSoroswapAggregatorQuoter } from '../swap/sources/soroswap-aggrega
 import { fetchMarketPrices, toPriceTable } from '../swap/prices'
 import { REFERENCE_PRICES_USD } from '../parse-intent'
 import { tradeableSymbols, trustSummary, verificationOf } from '../swap/asset-registry'
-import { venues } from '../venues'
+import { isVenueOn, venues } from '../venues'
 import type { Env } from '../lend/defindex/config'
 import { VAULT_KEYS } from '../lend/defindex/contracts'
 import { readDefindexRate, type DefindexRate } from '../lend/defindex/rate'
@@ -146,7 +151,7 @@ export async function quoteRoutes(
   // return outcomes rather than throwing, so one being down cannot take the
   // others with it; an unconfigured one is skipped rather than asked.
   const req = { kind: 'strict_send' as const, from, to, sendAmount: amount }
-  const sources = (options.sources ?? defaultQuoteSources()).filter((s) => s.isConfigured())
+  const sources = activeSources(options.sources ?? defaultQuoteSources())
   const perSource = await Promise.all(sources.map((s) => everyRoute(s, req, signal)))
   const quotes = perSource.flat()
 
@@ -233,6 +238,10 @@ export async function buildMarketContextAsync(chain: string): Promise<MarketCont
  * it or fail with it.
  */
 async function fetchPerpFacts(): Promise<MarketContext['perps']> {
+  // Testnet-only venue: anywhere else its figures are not facts about this
+  // market, and they are left out exactly as when the gateway cannot be read.
+  const noether = venues.find((v) => v.id === 'noether')
+  if (noether === undefined || !isVenueOn(noether)) return undefined
   try {
     return await readPerpFacts(createNoetherClient())
   } catch {
@@ -359,7 +368,11 @@ async function fetchOfframpLimits(): Promise<NonNullable<MarketContext['offramps
   return out
 }
 
-export function buildMarketContext(chain: string, env: Env = process.env): MarketContext {
+export function buildMarketContext(
+  chain: string,
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): MarketContext {
   // An unrecognised slug used to fall through to 'evm', which quietly handed
   // the agents Curve and Uniswap on a Stellar competition — venues that do not
   // exist here and cannot be executed against. A stale client bundle sending
@@ -371,7 +384,7 @@ export function buildMarketContext(chain: string, env: Env = process.env): Marke
   const family = isChainSlug(chain) ? CHAIN_DESCRIPTORS[chain].family : undefined
   // A lending venue this deployment cannot reach is absent, not listed and
   // failing later. DeFindex needs a key; without one it does not exist here.
-  const lendingOffered: string[] = configuredLendingVenues(env)
+  const lendingOffered: string[] = configuredLendingVenues(env, network)
 
   return {
     asOf: new Date().toISOString(),
@@ -393,6 +406,9 @@ export function buildMarketContext(chain: string, env: Env = process.env): Marke
     // rather than validated after the fact.
     venues: venues
       .filter((v) => family !== undefined && v.family === family)
+      // And on this network. A Stellar venue whose mainnet contracts are not
+      // verified is testnet-only, and an agent must not be offered it.
+      .filter((v) => v.family !== 'stellar' || isVenueOn(v, network))
       // Anchors are follow-on destinations, named through `thenVenue` and
       // validated against the anchor registry; they are not places a trade
       // executes and must not be selectable as a swap venue.

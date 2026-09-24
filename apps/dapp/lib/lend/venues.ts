@@ -1,3 +1,6 @@
+import { activeNetwork, type StellarNetworkName } from '@intent/config'
+
+import { venueIdOn } from '../venues'
 import { isDefindexConfigured, type Env } from './defindex/config'
 
 /**
@@ -39,9 +42,20 @@ export function isLendingVenueId(value: string): value is LendingVenueId {
   return Object.prototype.hasOwnProperty.call(LENDING_VENUES, value)
 }
 
-/** The venues this deployment can execute a supply on, Blend first. */
-export function configuredLendingVenues(env: Env = process.env): LendingVenueId[] {
-  return ALL_LENDING_VENUES.filter((id) => LENDING_VENUES[id].isConfigured(env))
+/**
+ * The venues this deployment can execute a supply on, Blend first.
+ *
+ * Configured *and* on the active network: a venue whose mainnet contracts
+ * are unverified is absent here the same way an unkeyed one is, so nothing
+ * downstream — the agents, the parser, the market context — asks twice.
+ */
+export function configuredLendingVenues(
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): LendingVenueId[] {
+  return ALL_LENDING_VENUES.filter(
+    (id) => LENDING_VENUES[id].isConfigured(env) && venueIdOn(id, network)
+  )
 }
 
 /** The venue's name, or the id when it is not one of ours. */

@@ -13,6 +13,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import { BLEND_POOL } from '../swap/contract-registry'
+import { assertVenueOn } from '../venues'
 
 /**
  * Supplying to Blend.
@@ -201,6 +202,7 @@ async function loadSequence(
  * which is a protocol fact rather than a limitation of this code.
  */
 export async function buildBlendSupply(options: BuildSupplyOptions): Promise<BuiltSupply> {
+  assertVenueOn('blend')
   const { account, asset, amount } = options
   const poolId = options.poolId ?? BLEND_POOL
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
@@ -433,6 +435,7 @@ export interface BuiltWithdraw {
  * that before the user is asked to sign.
  */
 export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise<BuiltWithdraw> {
+  assertVenueOn('blend')
   const { account, asset } = options
   const poolId = options.poolId ?? BLEND_POOL
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
@@ -584,6 +587,7 @@ async function buildSinglePoolCall(
 export async function buildBlendCollateralSupply(
   options: BuildCollateralOptions
 ): Promise<BuiltCollateral> {
+  assertVenueOn('blend')
   if (options.amount === undefined) {
     throw new Error('posting collateral needs an amount')
   }
@@ -606,6 +610,7 @@ export async function buildBlendCollateralSupply(
 export async function buildBlendCollateralWithdraw(
   options: BuildCollateralOptions
 ): Promise<BuiltCollateral> {
+  assertVenueOn('blend')
   return buildSinglePoolCall(
     options,
     REQUEST_TYPE_WITHDRAW_COLLATERAL,
@@ -631,6 +636,7 @@ export async function buildBlendCollateralWithdraw(
  * have nothing to do with the borrower. Only the simulation knows.
  */
 export async function buildBlendBorrow(options: BuildCollateralOptions): Promise<BuiltCollateral> {
+  assertVenueOn('blend')
   if (options.amount === undefined) {
     throw new Error('a borrow needs an amount')
   }
@@ -647,6 +653,7 @@ export async function buildBlendBorrow(options: BuildCollateralOptions): Promise
  * sentinel costs nothing and closes the liability exactly.
  */
 export async function buildBlendRepay(options: BuildCollateralOptions): Promise<BuiltCollateral> {
+  assertVenueOn('blend')
   return buildSinglePoolCall(options, REQUEST_TYPE_REPAY, 'repayment', REPAY_EVERYTHING)
 }
 

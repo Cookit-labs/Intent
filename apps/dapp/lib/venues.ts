@@ -1,3 +1,4 @@
+import { activeNetwork, type StellarNetworkName } from '@intent/config'
 import type { Venue } from '@intent/types'
 
 export const venues: Venue[] = [
@@ -94,6 +95,7 @@ export const venues: Venue[] = [
     bestFor: 'Soroban AMM swaps',
     url: 'https://soroswap.finance',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Swaps route through Soroswap’s Soroban router. On the same assets it has quoted several times the classic DEX price.',
   },
@@ -135,6 +137,7 @@ export const venues: Venue[] = [
     bestFor: 'Native SDEX orderbook',
     url: 'https://www.stellarx.com',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Swaps and resting limit orders settle on the network’s own order book, read and written directly.',
   },
@@ -159,6 +162,7 @@ export const venues: Venue[] = [
     bestFor: 'Fee income with no protocol risk',
     url: 'https://developers.stellar.org/docs/build/guides/liquidity-pools',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Deposit both sides of a pair and earn a share of the 0.3% trading fee. Run by the network itself, with no contract to trust.',
   },
@@ -244,7 +248,63 @@ export const venues: Venue[] = [
     bestFor: 'Send to a .xlm name instead of an address',
     url: 'https://sorobandomains.org',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
   },
 ]
+
+/**
+ * Which venues exist on which network.
+ *
+ * A venue is wired in against testnet first; its mainnet contracts are a
+ * separate act of verification, recorded in `networks`. Until then it is
+ * testnet-only everywhere at once — the agents are not offered it, no quote
+ * is asked of it, no builder will produce a transaction for it, and the Apps
+ * page says so quietly. Absent `networks` means testnet only, because
+ * claiming mainnet by omission is the wrong way round.
+ */
+export function venueNetworks(venue: Pick<Venue, 'networks'>): StellarNetworkName[] {
+  return venue.networks ?? ['testnet']
+}
+
+export function isVenueOn(
+  venue: Pick<Venue, 'networks'>,
+  network: StellarNetworkName = activeNetwork()
+): boolean {
+  return venueNetworks(venue).includes(network)
+}
+
+/** Whether the venue with this id is on the network. An id nobody listed is not. */
+export function venueIdOn(id: string, network: StellarNetworkName = activeNetwork()): boolean {
+  const venue = venues.find((v) => v.id === id)
+  return venue !== undefined && isVenueOn(venue, network)
+}
+
+export function venuesOn(network: StellarNetworkName = activeNetwork()): Venue[] {
+  return venues.filter((v) => isVenueOn(v, network))
+}
+
+/**
+ * "Not on mainnet yet", for a Stellar venue that is not, shown on mainnet;
+ * nothing otherwise. An EVM venue lives on another chain entirely, and the
+ * Stellar flag says nothing about it.
+ */
+export function notOnNetworkLabel(
+  venue: Pick<Venue, 'family' | 'networks'>,
+  network: StellarNetworkName = activeNetwork()
+): string | undefined {
+  if (network !== 'mainnet' || venue.family !== 'stellar') return undefined
+  return isVenueOn(venue, network) ? undefined : 'Not on mainnet yet'
+}
+
+/**
+ * Refuses, by name, a venue that is not on the network. Every builder calls
+ * this first, so "unavailable on mainnet" is a property of the code rather
+ * than of which menu a request happened to come through.
+ */
+export function assertVenueOn(id: string, network: StellarNetworkName = activeNetwork()): void {
+  if (venueIdOn(id, network)) return
+  const name = venues.find((v) => v.id === id)?.name ?? id
+  throw new Error(`${name} is not on ${network} yet`)
+}

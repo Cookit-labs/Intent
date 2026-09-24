@@ -16,6 +16,7 @@ import { resolveVerifiedAsset } from './asset-registry'
 import { resolveTradableAsset } from './testnet-assets'
 import type { PriceFraction } from './limit-price'
 import { assertSelfPlan, describePlan, MAX_PLAN_STEPS, type PlanStep } from './plan-validator'
+import { assertVenueOn } from '../venues'
 
 /**
  * Composing several actions into one signature.
@@ -113,6 +114,21 @@ const NEEDS_OWN_TRANSACTION = new Set<PlanAction['kind']>(['lend'])
 /** Whether an action has to be signed by itself. */
 export function needsOwnTransaction(action: PlanAction): boolean {
   return NEEDS_OWN_TRANSACTION.has(action.kind)
+}
+
+/** Which listed venue an action executes on. A trustline is not a venue. */
+function venueOfAction(action: PlanAction): string | undefined {
+  switch (action.kind) {
+    case 'swap':
+    case 'rest':
+      return 'stellarx'
+    case 'pool':
+      return 'stellar-pools'
+    case 'lend':
+      return action.venue
+    case 'trust':
+      return undefined
+  }
 }
 
 export interface BuildPlanOptions {
@@ -244,6 +260,13 @@ export async function buildPlan(options: BuildPlanOptions): Promise<BuiltPlan> {
 
   if (actions.length === 0) {
     throw new Error('a plan needs at least one action')
+  }
+
+  // Every step's venue must exist on this network. Refused whole, by name,
+  // rather than built around the step that cannot be.
+  for (const action of actions) {
+    const venue = venueOfAction(action)
+    if (venue !== undefined) assertVenueOn(venue)
   }
 
   // Checked before anything else, and by name, so the caller learns *which*

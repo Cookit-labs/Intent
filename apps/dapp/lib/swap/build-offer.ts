@@ -12,6 +12,7 @@ import {
 import type { ClassicAsset } from './assets'
 import { isNative, toBaseUnits } from './assets'
 import type { PriceFraction } from './limit-price'
+import { assertVenueOn } from '../venues'
 
 /**
  * Turning a limit price into an order that rests on Stellar's book.
@@ -108,6 +109,7 @@ async function loadSequence(
 }
 
 export async function buildOfferTransaction(options: BuildOfferOptions): Promise<BuiltOffer> {
+  assertVenueOn('stellarx')
   const { account, selling, buying, amount, price } = options
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch

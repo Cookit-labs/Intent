@@ -11,6 +11,7 @@ import { sacFor } from '../../swap/build-soroban'
 import { requestDeposit, type DefindexApiOptions } from './api'
 import { resolveDefindexVault, type ContractsRegistry } from './contracts'
 import { readVaultAssets, type VaultAsset } from './vault'
+import { assertVenueOn } from '../../venues'
 
 /**
  * A deposit into a DeFindex vault: built elsewhere, admitted here.
@@ -180,6 +181,7 @@ export interface BuiltDefindexDeposit {
 export async function buildDefindexDeposit(
   options: BuildDefindexDepositOptions
 ): Promise<BuiltDefindexDeposit> {
+  assertVenueOn('defindex')
   const { account, symbol, amount } = options
 
   const asset = resolveAsset(symbol)

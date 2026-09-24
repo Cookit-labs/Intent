@@ -19,6 +19,7 @@ import type { ClassicAsset } from './assets'
 import { SOROSWAP_ROUTER } from './contract-registry'
 import { plain } from './preview'
 import { resolveVerifiedAsset } from './asset-registry'
+import { assertVenueOn } from '../venues'
 
 /**
  * Swapping through Soroswap's router.
@@ -105,6 +106,7 @@ async function loadSequence(
 export async function buildSorobanSwap(
   options: BuildSorobanSwapOptions
 ): Promise<BuiltSorobanSwap> {
+  assertVenueOn('soroswap')
   const { account, from, to, sendAmount, minReceive } = options
   const routerId = options.routerId ?? SOROSWAP_ROUTER
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl

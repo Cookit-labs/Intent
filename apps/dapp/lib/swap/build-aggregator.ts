@@ -12,6 +12,7 @@ import { applySlippage, isNative, toBaseUnits, type ClassicAsset } from './asset
 import { labelForCall, lookupContract } from './contract-registry'
 import type { AggregatorPlatform, SoroswapApi } from './soroswap-api'
 import type { AggregatorQuoted } from './sources/soroswap-aggregator-quoter'
+import { assertVenueOn } from '../venues'
 
 /**
  * Admitting a transaction somebody else built.
@@ -375,6 +376,7 @@ export interface BuiltAggregatorSwap {
 export async function buildAggregatorSwap(
   options: BuildAggregatorSwapOptions
 ): Promise<BuiltAggregatorSwap> {
+  assertVenueOn('soroswap-aggregator')
   const { account, quoted, api } = options
   const platform = quoted.raw.platform
 

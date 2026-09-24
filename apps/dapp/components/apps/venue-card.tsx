@@ -6,6 +6,8 @@ import { ArrowUpRight, Check } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
 
+import { notOnNetworkLabel } from '../../lib/venues'
+
 const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
   aggregator: 'Aggregator',
@@ -74,6 +76,9 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
   // Absent means listed. A venue nobody wired in is exactly that, and
   // defaulting the other way would claim integrations that do not exist.
   const integration = venue.integration ?? 'listed'
+  // Quiet, and only where it is true: a venue wired in against testnet whose
+  // mainnet contracts are not yet verified is not "Integrated" on mainnet.
+  const notHere = notOnNetworkLabel(venue)
 
   return (
     <a href={venue.url} target="_blank" rel="noopener noreferrer" className="block">
@@ -89,7 +94,11 @@ export function VenueCard({ venue }: { venue: Venue }): JSX.Element {
                     only prices. A venue it merely links to gets no badge at
                     all — absence is the honest signal, and a third label would
                     imply a relationship that does not exist. */}
-                {integration === 'executes' ? (
+                {notHere !== undefined ? (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    {notHere}
+                  </Badge>
+                ) : integration === 'executes' ? (
                   <Badge className="gap-1">
                     <Check className="h-3 w-3" />
                     {integrationLabel.executes}

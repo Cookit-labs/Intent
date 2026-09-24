@@ -1,4 +1,5 @@
 import type { AssetRef, ClassicAsset } from './assets'
+import { venueIdOn } from '../venues'
 
 /**
  * The seam between "what would this swap cost" and where the answer comes from.
@@ -189,6 +190,27 @@ export function bestQuote(quotes: SwapQuote[]): SwapQuote | undefined {
 }
 
 /**
+ * The venue each source quotes, by the id `venues.ts` lists it under, so a
+ * source exists on exactly the networks its venue does.
+ */
+const VENUE_OF_SOURCE: Record<QuoteSourceId, string> = {
+  horizon: 'stellarx',
+  soroswap: 'soroswap',
+  aquarius: 'aquarius',
+  'soroswap-aggregator': 'soroswap-aggregator',
+}
+
+/**
+ * The sources worth asking: configured, and quoting a venue that exists on
+ * the active network. A venue that is not here is skipped rather than asked
+ * — it has no answer to report, and a failure line for it would read as an
+ * outage.
+ */
+export function activeSources(sources: QuoteSource[]): QuoteSource[] {
+  return sources.filter((s) => s.isConfigured() && venueIdOn(VENUE_OF_SOURCE[s.id]))
+}
+
+/**
  * Collects quotes from every configured source concurrently.
  *
  * `allSettled` semantics by construction: sources return outcomes rather than
@@ -199,9 +221,7 @@ export async function collectQuotes(
   req: QuoteRequest,
   signal?: AbortSignal
 ): Promise<{ quotes: SwapQuote[]; failures: QuoteFailure[] }> {
-  const outcomes = await Promise.all(
-    sources.filter((s) => s.isConfigured()).map((s) => s.quote(req, signal))
-  )
+  const outcomes = await Promise.all(activeSources(sources).map((s) => s.quote(req, signal)))
 
   const quotes: SwapQuote[] = []
   const failures: QuoteFailure[] = []

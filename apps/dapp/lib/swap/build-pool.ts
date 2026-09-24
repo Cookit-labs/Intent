@@ -16,6 +16,7 @@ import { isNative } from './assets'
 import { resolveVerifiedAsset } from './asset-registry'
 import { resolveTradableAsset } from './testnet-assets'
 import type { PriceFraction } from './limit-price'
+import { assertVenueOn } from '../venues'
 
 /**
  * Depositing into and withdrawing from Stellar's built-in liquidity pools.
@@ -128,6 +129,7 @@ export interface BuiltPoolDeposit extends BuiltPoolOp {
 export async function buildPoolDeposit(
   options: BuildPoolDepositOptions
 ): Promise<BuiltPoolDeposit> {
+  assertVenueOn('stellar-pools')
   const { account, assetA, assetB, maxAmountA, maxAmountB, minPrice, maxPrice } = options
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
@@ -200,6 +202,7 @@ export interface BuiltPoolWithdraw extends BuiltPoolOp {
 export async function buildPoolWithdraw(
   options: BuildPoolWithdrawOptions
 ): Promise<BuiltPoolWithdraw> {
+  assertVenueOn('stellar-pools')
   const { account, assetA, assetB, shares, minAmountA, minAmountB } = options
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
