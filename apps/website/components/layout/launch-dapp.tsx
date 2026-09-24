@@ -4,15 +4,15 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUpRight, ChevronDown } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { chainOptions, type ChainOption } from '@/lib/launch-dapp-options'
+
 const EASE = [0.25, 0.46, 0.45, 0.94] as const
 
 /**
- * Deliberately has no fallback. A default like `http://localhost:3001` names a
- * port, not an app — any other project started first owns that port, and the
- * Arc option would hand users someone else's site with no visible error. An
- * unset value means "not configured", and the menu says so instead of guessing.
+ * Read at build time. What an unset value means, and why there is no fallback,
+ * is decided in `lib/launch-dapp-options`.
  */
-const DAPP_URL = process.env['NEXT_PUBLIC_DAPP_URL']?.trim() ?? ''
+const CHAINS = chainOptions(process.env['NEXT_PUBLIC_DAPP_URL'])
 
 /**
  * Chain marks are inline SVG rather than image files: they render at 20px in
@@ -48,37 +48,18 @@ function StellarMark({ className }: { className?: string }) {
   )
 }
 
-interface ChainOption {
-  name: string
-  tagline: string
-  Mark: (props: { className?: string }) => JSX.Element
-  href: string | null
+const MARKS: Record<ChainOption['chain'], (props: { className?: string }) => JSX.Element> = {
+  arc: ArcMark,
+  stellar: StellarMark,
 }
 
-/**
- * Both chains deep-link into the dApp's chain segment (`/arc/...`,
- * `/stellar/...`) so the choice made here survives the navigation — landing on
- * the dApp root would just bounce the user to the default chain.
- */
-const CHAINS: ChainOption[] = [
-  {
-    name: 'Arc',
-    tagline: DAPP_URL === '' ? 'Set NEXT_PUBLIC_DAPP_URL' : 'Arc testnet · live',
-    Mark: ArcMark,
-    href: DAPP_URL === '' ? null : `${DAPP_URL}/arc/intents`,
-  },
-  {
-    name: 'Stellar',
-    tagline: DAPP_URL === '' ? 'Set NEXT_PUBLIC_DAPP_URL' : 'Stellar testnet · live',
-    Mark: StellarMark,
-    href: DAPP_URL === '' ? null : `${DAPP_URL}/stellar/intents`,
-  },
-]
-
-if (DAPP_URL === '' && typeof window !== 'undefined') {
+// For whoever deploys the site, in the console; the menu itself never names
+// the variable to a visitor.
+if (CHAINS.every((chain) => chain.href === null) && typeof window !== 'undefined') {
   console.warn(
     '[launch-dapp] NEXT_PUBLIC_DAPP_URL is unset, so every chain option is disabled. ' +
-      'Set it to the dApp origin (e.g. http://localhost:3001) in apps/website/.env.local. ' +
+      'Set it to the dApp origin (e.g. http://localhost:3001 in apps/website/.env.local, ' +
+      'or, for a deployed site, the dApp URL in the environment settings of the host that builds it). ' +
       'It has no default on purpose: a hardcoded port can be served by an unrelated app.'
   )
 }
@@ -124,13 +105,11 @@ export function LaunchDapp({
     }
   }, [open])
 
-  const trigger =
-    size === 'lg'
-      ? 'px-6 py-3 text-sm gap-1.5'
-      : 'px-4 py-2 text-sm gap-1.5'
+  const trigger = size === 'lg' ? 'px-6 py-3 text-sm gap-1.5' : 'px-4 py-2 text-sm gap-1.5'
 
   function renderOption(chain: ChainOption) {
-    const { name, tagline, Mark, href } = chain
+    const { name, tagline, href } = chain
+    const Mark = MARKS[chain.chain]
 
     const body = (
       <>
