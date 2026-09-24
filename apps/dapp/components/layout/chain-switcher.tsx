@@ -1,11 +1,11 @@
 'use client'
 
 import { CHAIN_DESCRIPTORS, CHAIN_ORDER } from '@intent/config'
+import { ChainMark, type ChainLogoId } from '@intent/ui'
 import { ChevronDown } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
-import { ArcMark, StellarMark } from './chain-marks'
 import { useChain } from '../../providers/chain-provider'
 
 /**
@@ -15,6 +15,12 @@ import { useChain } from '../../providers/chain-provider'
  * `/arc/vault` becomes `/stellar/vault`. Rewriting rather than navigating home
  * means the user keeps their place, which is the whole point of the control.
  */
+/** Planned, not built. Listed so the roadmap is visible; never selectable. */
+const COMING_SOON: { id: ChainLogoId; name: string }[] = [
+  { id: 'solana', name: 'Solana' },
+  { id: 'avalanche', name: 'Avalanche' },
+]
+
 export function ChainSwitcher(): JSX.Element {
   const { slug, descriptor } = useChain()
   const router = useRouter()
@@ -56,7 +62,7 @@ export function ChainSwitcher(): JSX.Element {
         aria-label={`Chain: ${descriptor.name}. Switch chain`}
         className="border-border hover:bg-muted/60 inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors"
       >
-        {slug === 'arc' ? <ArcMark className="h-4 w-4" /> : <StellarMark className="h-4 w-4" />}
+        <ChainMark chain={slug} className="h-4 w-4" />
         {descriptor.name}
         <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -80,11 +86,7 @@ export function ChainSwitcher(): JSX.Element {
                   active ? 'bg-muted font-medium' : 'hover:bg-muted/60'
                 }`}
               >
-                {option === 'arc' ? (
-                  <ArcMark className="h-4 w-4 shrink-0" />
-                ) : (
-                  <StellarMark className="h-4 w-4 shrink-0" />
-                )}
+                <ChainMark chain={option} className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col leading-tight">
                   <span>{d.name}</span>
                   <span className="text-muted-foreground text-xs">{d.networkLabel}</span>
@@ -92,6 +94,20 @@ export function ChainSwitcher(): JSX.Element {
               </button>
             )
           })}
+          {COMING_SOON.map((c) => (
+            <div
+              key={c.id}
+              role="menuitem"
+              aria-disabled="true"
+              className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm"
+            >
+              <ChainMark chain={c.id} className="h-4 w-4 shrink-0" />
+              <span className="flex flex-col leading-tight">
+                <span>{c.name}</span>
+                <span className="text-xs">Coming soon</span>
+              </span>
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

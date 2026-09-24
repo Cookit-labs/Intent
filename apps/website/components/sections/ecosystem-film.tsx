@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
+import { ChainMark } from '@intent/ui'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   ArrowUp,
@@ -609,13 +610,7 @@ export function EcosystemFilm() {
             animate={{ opacity: progress >= 1 ? 1 : 0.7, scale: progress >= 1 ? 1.05 : 1 }}
             transition={{ duration: 0.4 }}
           >
-            <Image
-              src="/images/Arc.png"
-              alt="Arc L1"
-              fill
-              sizes="128px"
-              className="object-contain"
-            />
+            <ChainMark chain="arc" className="h-full w-full object-contain" />
           </motion.div>
         </div>
 

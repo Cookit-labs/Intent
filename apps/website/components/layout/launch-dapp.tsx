@@ -4,6 +4,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowUpRight, ChevronDown } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { ChainMark } from '@intent/ui'
+
 import { chainOptions, type ChainOption } from '@/lib/launch-dapp-options'
 
 const EASE = [0.25, 0.46, 0.45, 0.94] as const
@@ -13,45 +15,6 @@ const EASE = [0.25, 0.46, 0.45, 0.94] as const
  * is decided in `lib/launch-dapp-options`.
  */
 const CHAINS = chainOptions(process.env['NEXT_PUBLIC_DAPP_URL'])
-
-/**
- * Chain marks are inline SVG rather than image files: they render at 20px in
- * the menu, where the 1024x1024 Arc.png in /public would be a 1.4MB download
- * for a handful of pixels. Inline also means they inherit `currentColor` and
- * stay legible when the site flips to dark.
- */
-function ArcMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
-      <circle cx="12" cy="12" r="11" fill="#6366f1" />
-      <path
-        d="M12 5.5 18.2 17.4a.7.7 0 0 1-.62 1.03H6.42a.7.7 0 0 1-.62-1.03L12 5.5Z"
-        fill="#fff"
-      />
-      <circle cx="12" cy="14.6" r="1.85" fill="#6366f1" />
-    </svg>
-  )
-}
-
-function StellarMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
-      <circle cx="12" cy="12" r="11" fill="#0f0f14" />
-      <path
-        d="M5.2 8.7 18.8 15.3M5.2 15.3 18.8 8.7"
-        stroke="#fff"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="12" r="3.4" fill="#0f0f14" stroke="#fff" strokeWidth="1.6" />
-    </svg>
-  )
-}
-
-const MARKS: Record<ChainOption['chain'], (props: { className?: string }) => JSX.Element> = {
-  arc: ArcMark,
-  stellar: StellarMark,
-}
 
 // For whoever deploys the site, in the console; the menu itself never names
 // the variable to a visitor.
@@ -109,11 +72,10 @@ export function LaunchDapp({
 
   function renderOption(chain: ChainOption) {
     const { name, tagline, href } = chain
-    const Mark = MARKS[chain.chain]
 
     const body = (
       <>
-        <Mark className="h-5 w-5 shrink-0" />
+        <ChainMark chain={chain.chain} className="h-5 w-5 shrink-0" />
         <span className="flex flex-col items-start leading-tight">
           <span className="font-medium">{name}</span>
           <span className="text-muted-foreground text-xs">{tagline}</span>
