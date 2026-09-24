@@ -14,6 +14,7 @@ import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { derivePreview } from '../../../../lib/swap/preview'
 import { fetchMarketPrices } from '../../../../lib/swap/prices'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 
 /**
  * Builds the payment a user is about to sign, to whoever the recipient
@@ -90,6 +91,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
+  }
+
+  // Against the mainnet cap, sized from the same table as the amount above.
+  try {
+    await assertTradeWithinCap(symbol, amount)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
   }
 
   let expectation

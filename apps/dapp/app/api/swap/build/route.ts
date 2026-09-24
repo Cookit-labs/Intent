@@ -16,7 +16,8 @@ import { buildSorobanSwap, prepareSorobanSwap } from '../../../../lib/swap/build
 import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
 import { createSoroswapAggregatorQuoter } from '../../../../lib/swap/sources/soroswap-aggregator-quoter'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
-import { applySlippage } from '../../../../lib/swap/assets'
+import { applySlippage, fromBaseUnits } from '../../../../lib/swap/assets'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 
 /**
@@ -80,6 +81,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'unsupported venue' },
+      { status: 400 }
+    )
+  }
+
+  // What leaves the account, against the mainnet cap. A no-op on testnet.
+  try {
+    await assertTradeWithinCap(submitted.from.code, fromBaseUnits(submitted.sendAmount))
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
       { status: 400 }
     )
   }

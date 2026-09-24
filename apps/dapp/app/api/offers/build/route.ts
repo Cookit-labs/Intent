@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { buildOfferTransaction } from '../../../../lib/swap/build-offer'
 import { fetchOrderBookTop, offerPriceFromUsd } from '../../../../lib/swap/limit-price'
+import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 
 /**
  * Builds the transaction that places a resting order.
@@ -90,6 +91,16 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   if (typeof limitPriceUsd !== 'number' || !Number.isFinite(limitPriceUsd)) {
     return NextResponse.json({ error: 'limit_price_required' }, { status: 400 })
+  }
+
+  // What the order gives up, against the mainnet cap.
+  try {
+    await assertTradeWithinCap(sellSymbol, amount)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
   }
 
   // The book is read for the pair in its quoted orientation — XLM against
