@@ -1,5 +1,5 @@
 import type { StandingIntent, StandingStatus } from '../standing-intent'
-import { getPool } from './db'
+import { getPool, type QueryFn } from './db'
 
 /**
  * Where standing rules live now: Postgres, so a scheduled tick can evaluate
@@ -17,10 +17,7 @@ import { getPool } from './db'
  * production wiring.
  */
 
-export type QueryFn = (
-  sql: string,
-  params?: unknown[]
-) => Promise<{ rows: Record<string, unknown>[] }>
+export type { QueryFn }
 
 /** A rule as the server holds it. Timestamps are ISO strings; absent ones are null. */
 export interface StoredStandingRule {

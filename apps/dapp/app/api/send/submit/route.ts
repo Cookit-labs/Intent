@@ -6,6 +6,7 @@ import { assertSendPayment } from '../../../../lib/send/build-payment'
 import { expectationFor, resolutionFailure } from '../../../../lib/send/prepare'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Submits a signed payment to a recipient.
@@ -34,6 +35,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'submit')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createNoetherClient } from '../../../../lib/perps/noether-client'
 import { prepareOrder, validateOrderRequest } from '../../../../lib/perps/order-flow'
 import { createRpcSimulate } from '../../../../lib/perps/simulate-order'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Prepares a Noether position, ready for review and signature.
@@ -31,6 +32,9 @@ const STATUS_FOR: Record<string, number> = {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: Record<string, unknown>
   try {
     body = (await request.json()) as Record<string, unknown>

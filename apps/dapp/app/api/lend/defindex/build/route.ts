@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { isDefindexConfigured } from '../../../../../lib/lend/defindex/config'
 import { buildDefindexDeposit } from '../../../../../lib/lend/defindex/deposit'
+import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
 
 /**
  * Builds a deposit into a DeFindex vault, ready for signature.
@@ -29,6 +30,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

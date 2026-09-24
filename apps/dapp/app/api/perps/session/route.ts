@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { beginKeySession, completeKeySession } from '../../../../lib/perps/key-session'
 import { createNoetherClient } from '../../../../lib/perps/noether-client'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * The Noether API-key handshake, in two halves around the wallet prompt.
@@ -49,6 +50,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'auth')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildBlendBorrow, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError, isTransientPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
 
 /**
@@ -36,6 +37,9 @@ interface BorrowBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: BorrowBody
   try {
     body = (await request.json()) as BorrowBody

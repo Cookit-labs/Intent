@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
 import { assertSelfSubmission } from '../../../../lib/swap/venue-routing'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Submits a signed swap to the network.
@@ -16,6 +17,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'submit')
+  if (limited !== undefined) return limited
+
   let body: { signedXdr?: unknown; account?: unknown }
   try {
     body = (await request.json()) as typeof body

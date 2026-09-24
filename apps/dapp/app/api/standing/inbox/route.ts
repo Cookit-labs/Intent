@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { readSessionFromRequest } from '../../../../lib/server/session'
 import { getStandingRulesRepo } from '../../../../lib/server/standing-rules'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * The in-app half of "notify both ways".
@@ -35,6 +36,9 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'standing')
+  if (limited !== undefined) return limited
+
   const session = readSessionFromRequest(request)
   if (session === undefined) return unauthorised()
 
