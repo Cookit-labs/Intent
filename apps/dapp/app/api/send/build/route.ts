@@ -3,7 +3,13 @@ import { NextResponse } from 'next/server'
 
 import { resolveRecipient } from '../../../../lib/names/resolve'
 import { buildSendPayment } from '../../../../lib/send/build-payment'
-import { expectationFor, resolutionFailure, unitsForUsd } from '../../../../lib/send/prepare'
+import {
+  CannotReceive,
+  assertCanReceive,
+  expectationFor,
+  resolutionFailure,
+  unitsForUsd,
+} from '../../../../lib/send/prepare'
 import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { resolveAsset } from '../../../../lib/swap/assets'
 import { derivePreview } from '../../../../lib/swap/preview'
@@ -86,8 +92,33 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
+  let expectation
   try {
-    const expectation = expectationFor(resolved, symbol, amount, memo)
+    expectation = expectationFor(resolved, symbol, amount, memo)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'could not build the payment' },
+      { status: 400 }
+    )
+  }
+
+  // Asked before the envelope exists. The network would refuse a payment to
+  // an account it has never seen, or one without the trustline, only after
+  // the signature and with a code that blames the sender.
+  try {
+    await assertCanReceive(resolved, expectation.asset)
+  } catch (e) {
+    if (e instanceof CannotReceive) {
+      const { status, ...failure } = resolutionFailure(e)
+      return NextResponse.json(failure, { status })
+    }
+    return NextResponse.json(
+      { error: "the recipient's account could not be checked on testnet" },
+      { status: 502 }
+    )
+  }
+
+  try {
     const built = await buildSendPayment({ account, expectation })
     return NextResponse.json({
       xdr: built.xdr,

@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest'
 
 import { NameLookupFailed, NameNotFound, UnsupportedRecipient } from '../names/errors'
 import type { ResolvedRecipient } from '../names/resolve'
-import { expectationFor, resolutionFailure, unitsForUsd } from '../send/prepare'
+import {
+  CannotReceive,
+  assertCanReceive,
+  expectationFor,
+  resolutionFailure,
+  unitsForUsd,
+} from '../send/prepare'
 import { USDC } from '../swap/assets'
 
 /**
@@ -102,6 +108,82 @@ describe('expectationFor', () => {
     expect(() => expectationFor(NAME, 'XLM', '0')).toThrow(/amount/)
     expect(() => expectationFor(NAME, 'XLM', '-1')).toThrow(/amount/)
     expect(() => expectationFor(NAME, 'XLM', '1.00000001')).toThrow(/decimal/)
+  })
+})
+
+describe('assertCanReceive', () => {
+  // A `.xlm` name resolves on mainnet to an account that need not exist on
+  // testnet, and a testnet account need not hold a USDC trustline. Either
+  // way the network refuses after the signature, with a code that blames the
+  // sender. Asked before, the answer names the recipient.
+  const horizon = (body: unknown, status = 200) =>
+    (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch
+  const funded = { balances: [{ asset_type: 'native', balance: '10.0000000' }] }
+  const withUsdc = {
+    balances: [
+      { asset_type: 'native', balance: '10.0000000' },
+      {
+        asset_type: 'credit_alphanum4',
+        asset_code: 'USDC',
+        asset_issuer: USDC.issuer,
+        balance: '1',
+      },
+    ],
+  }
+
+  it('accepts a funded account for XLM', async () => {
+    await expect(
+      assertCanReceive(NAME, { code: 'XLM' }, { fetchImpl: horizon(funded) })
+    ).resolves.toBeUndefined()
+  })
+
+  it('refuses an account that does not exist on testnet, naming the recipient', async () => {
+    const check = assertCanReceive(NAME, { code: 'XLM' }, { fetchImpl: horizon({}, 404) })
+    await expect(check).rejects.toThrow(CannotReceive)
+    await expect(
+      assertCanReceive(NAME, { code: 'XLM' }, { fetchImpl: horizon({}, 404) })
+    ).rejects.toThrow(/deon\.xlm.*does not exist on testnet/)
+  })
+
+  it('refuses an issued asset the account has no trustline for', async () => {
+    await expect(
+      assertCanReceive(
+        NAME,
+        { code: 'USDC', issuer: USDC.issuer as string },
+        { fetchImpl: horizon(funded) }
+      )
+    ).rejects.toThrow(/trustline/)
+  })
+
+  it('accepts an issued asset the account holds a trustline for', async () => {
+    await expect(
+      assertCanReceive(
+        NAME,
+        { code: 'USDC', issuer: USDC.issuer as string },
+        { fetchImpl: horizon(withUsdc) }
+      )
+    ).resolves.toBeUndefined()
+  })
+
+  it('does not mistake a same-code trustline from another issuer', async () => {
+    const other = {
+      balances: [
+        { asset_type: 'credit_alphanum4', asset_code: 'USDC', asset_issuer: G, balance: '1' },
+      ],
+    }
+    await expect(
+      assertCanReceive(
+        NAME,
+        { code: 'USDC', issuer: USDC.issuer as string },
+        { fetchImpl: horizon(other) }
+      )
+    ).rejects.toThrow(/trustline/)
+  })
+
+  it('reports a Horizon failure as an ordinary error, not a refusal', async () => {
+    await expect(
+      assertCanReceive(NAME, { code: 'XLM' }, { fetchImpl: horizon({}, 503) })
+    ).rejects.not.toThrow(CannotReceive)
   })
 })
 

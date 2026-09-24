@@ -77,6 +77,38 @@ describe('pinRecipient', () => {
   })
 })
 
+describe('the memo counts as much as the address', () => {
+  // An exchange's federation answer is one pooled account for everybody and a
+  // memo saying whose deposit this is. A changed memo with the same address
+  // is a redirect, and "same address as last time" would be reassurance at
+  // exactly the wrong moment.
+  it('calls a same-address, different-memo answer changed, and says it was the memo', () => {
+    pinRecipient('alice*lobstr.co', G1, '4242')
+    const status = checkRecipient('alice*lobstr.co', G1, '9999')
+    expect(status.status).toBe('changed')
+    if (status.status !== 'changed') return
+    expect(status.what).toBe('memo')
+    expect(status.previous).toBe(G1)
+    expect(status.previousMemo).toBe('4242')
+  })
+
+  it('calls the same address and memo known', () => {
+    pinRecipient('alice*lobstr.co', G1, '4242')
+    expect(checkRecipient('alice*lobstr.co', G1, '4242')).toEqual({ status: 'known' })
+  })
+
+  it('calls a memo appearing where there was none changed', () => {
+    pinRecipient('alice*lobstr.co', G1)
+    expect(checkRecipient('alice*lobstr.co', G1, '4242').status).toBe('changed')
+  })
+
+  it('says the address moved when it did, whatever the memo', () => {
+    pinRecipient('alice*lobstr.co', G1, '4242')
+    const status = checkRecipient('alice*lobstr.co', G2, '4242')
+    expect(status.status === 'changed' && status.what).toBe('address')
+  })
+})
+
 describe('when storage cannot be used', () => {
   it('answers new rather than throwing when the store is unreadable', () => {
     vi.stubGlobal('window', {

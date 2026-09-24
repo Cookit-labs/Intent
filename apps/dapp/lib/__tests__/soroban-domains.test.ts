@@ -30,6 +30,7 @@ import {
  */
 
 const TARGET = Keypair.random().publicKey()
+const PARENT = Keypair.random().publicKey()
 
 type Sim = Pick<rpc.Server, 'simulateTransaction'>
 
@@ -159,14 +160,20 @@ describe('domainNode', () => {
   })
 })
 
+/**
+ * What the registry actually returns: the tuple `(Domain, Option<SubDomain>)`,
+ * decoded to `[domainStruct, subStruct | null]`. Verified against mainnet on
+ * 2026-09-24 for `sorobandomains.xlm`, which decodes to `[{address, …}, null]`.
+ * The first slot is the parent for a subdomain lookup, and the parent's
+ * address is the wrong account to pay.
+ */
+function tuple(domain: xdr.ScVal, sub?: xdr.ScVal): xdr.ScVal {
+  return xdr.ScVal.scvVec([domain, sub ?? xdr.ScVal.scvVoid()])
+}
+
 describe('resolveSorobanDomain', () => {
   it('asks the registry for record(Domain(node)) and reads the address', async () => {
-    const registry = fakeRegistry({
-      retval: xdr.ScVal.scvVec([
-        nativeToScVal('Domain', { type: 'symbol' }),
-        domainRecord(TARGET, 1_800_000_000),
-      ]),
-    })
+    const registry = fakeRegistry({ retval: tuple(domainRecord(TARGET, 1_800_000_000)) })
 
     const resolved = await resolveSorobanDomain('deon.xlm', { serverImpl: registry })
 
@@ -181,20 +188,26 @@ describe('resolveSorobanDomain', () => {
     expect(hex(key[1])).toBe(hex(domainNode('deon.xlm')))
   })
 
-  it('keys a subdomain lookup as SubDomain', async () => {
+  it('keys a subdomain lookup as SubDomain and reads the subdomain’s address, not the parent’s', async () => {
     const registry = fakeRegistry({
-      retval: xdr.ScVal.scvVec([
-        nativeToScVal('SubDomain', { type: 'symbol' }),
-        domainRecord(TARGET, 0),
-      ]),
+      retval: tuple(domainRecord(PARENT, 1_800_000_000), domainRecord(TARGET, 0)),
     })
 
     const resolved = await resolveSorobanDomain('pay.deon.xlm', { serverImpl: registry })
 
     expect(resolved.address).toBe(TARGET)
+    expect(resolved.address).not.toBe(PARENT)
     const key = scValToNative(registry.seen[0]?.args[0] as xdr.ScVal) as [string, Uint8Array]
     expect(key[0]).toBe('SubDomain')
     expect(hex(key[1])).toBe(hex(domainNode('pay.deon.xlm')))
+  })
+
+  it('refuses a subdomain answer that carries no subdomain record', async () => {
+    // Paying the parent instead would be paying the wrong account quietly.
+    const registry = fakeRegistry({ retval: tuple(domainRecord(PARENT, 1_800_000_000)) })
+    await expect(resolveSorobanDomain('pay.deon.xlm', { serverImpl: registry })).rejects.toThrow(
+      NameLookupFailed
+    )
   })
 
   it('reports a missing name as NameNotFound', async () => {

@@ -188,3 +188,21 @@ export const FAILURE_MESSAGES: Record<SubmitFailure['reason'], string> = {
     'Not enough XLM to hold another open order. Each one reserves 0.5 XLM until it is cancelled.',
   offer_not_found: 'That order is no longer on the book — it has already filled or been cancelled.',
 }
+
+/**
+ * What a step's failure says to the user.
+ *
+ * A submit route answers in one of two shapes: the network's refusal, with a
+ * `reason` the table above translates, or the route's own refusal, with an
+ * `error` already written for a person — a name that moved between build and
+ * submit, say, naming both addresses. Dropping the second showed "That step
+ * did not go through" for exactly the refusal the user most needed to read.
+ */
+export function failureMessage(
+  result: { reason?: SubmitFailure['reason']; error?: string },
+  fallback = 'That step did not go through.'
+): string {
+  if (result.reason !== undefined) return FAILURE_MESSAGES[result.reason]
+  if (result.error !== undefined && result.error !== '') return result.error
+  return fallback
+}

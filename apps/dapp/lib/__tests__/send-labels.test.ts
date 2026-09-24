@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { pinStatusLine, resolvedOnLabel, sendStepLabel, sentLabel } from '../send/labels'
+import {
+  pinStatusLine,
+  resolvedOnLabel,
+  sendFailureMessage,
+  sendStepLabel,
+  sentLabel,
+} from '../send/labels'
 
 /**
  * The sentences on the send card and in history.
@@ -63,11 +69,46 @@ describe('pinStatusLine', () => {
   it('names the previous address and when it was pinned on a change', () => {
     const line = pinStatusLine({
       status: 'changed',
+      what: 'address',
       previous: G1,
       pinnedAt: '2026-09-01T10:00:00.000Z',
     })
     expect(line).toContain(G1)
     expect(line).toContain('2026-09-01')
     expect(line).toMatch(/somewhere new/)
+  })
+
+  it('says the memo changed when the address did not', () => {
+    const line = pinStatusLine({
+      status: 'changed',
+      what: 'memo',
+      previous: G1,
+      previousMemo: '4242',
+      pinnedAt: '2026-09-01T10:00:00.000Z',
+    })
+    expect(line).toContain('4242')
+    expect(line).toMatch(/memo/)
+    expect(line).not.toMatch(/somewhere new/)
+  })
+})
+
+describe('sendFailureMessage', () => {
+  // The network's codes for a missing destination and a missing trustline are
+  // the recipient's problem, and the generic swap messages blame the sender.
+  it('names the recipient for a destination that does not exist', () => {
+    expect(sendFailureMessage('no_path', 'deon.xlm', 'XLM')).toMatch(
+      /deon\.xlm.*does not exist on testnet/
+    )
+  })
+
+  it('names the asset for a missing trustline', () => {
+    expect(sendFailureMessage('no_trustline', 'deon.xlm', 'USDC')).toMatch(
+      /deon\.xlm.*USDC.*trustline/
+    )
+  })
+
+  it('leaves every other failure to the general messages', () => {
+    expect(sendFailureMessage('underfunded', 'deon.xlm', 'XLM')).toBeUndefined()
+    expect(sendFailureMessage(undefined, 'deon.xlm', 'XLM')).toBeUndefined()
   })
 })

@@ -188,11 +188,18 @@ export interface CompoundIntent {
 /**
  * Words that name paying the proceeds to somebody, and who.
  *
+ * What is sent has to be the proceeds — "it", "everything", "the XLM" — and
+ * nothing else. A send follow-on pays whatever the swap delivered, so "send
+ * 50 XLM to bob.xlm" and "send half to bob.xlm" name a different amount, and
+ * reading either as "send it" would pay everything the user asked to keep.
+ * They are left unread, like any other second clause this app cannot do.
+ *
  * The recipient is whatever single token follows "to", and it only counts
  * when it is one of the forms the resolver reads. That check is what keeps
  * "send it to my friend" from becoming a payment to an account called "my".
  */
-const SEND_PHRASING = /\b(?:send|pay|transfer)\b.*?\bto\s+(\S+?)[.,;!]?\s*$/i
+const SEND_PHRASING =
+  /\b(?:send|pay|transfer)\s+(?:it|them|that|everything|all(?:\s+of\s+(?:it|them))?|the\s+(?:result|proceeds|rest|[a-z]{2,12}))\s+to\s+(\S+?)[.,;!]?\s*$/i
 
 function sendRecipientOf(clause: string): string | undefined {
   const token = SEND_PHRASING.exec(clause)?.[1]

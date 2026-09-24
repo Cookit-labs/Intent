@@ -54,9 +54,13 @@ export function SendConfirm({
       <span className="text-foreground font-medium">Payment to {send.recipient}</span>
       <span className="text-muted-foreground">
         Amount:{' '}
-        <span className="text-foreground font-mono">
-          {plainAmount(send.amount)} {send.asset}
-        </span>
+        {send.amount !== undefined ? (
+          <span className="text-foreground font-mono">
+            {plainAmount(send.amount)} {send.asset}
+          </span>
+        ) : (
+          <span>whatever the swap delivers, in {send.asset}, sized once it has settled</span>
+        )}
       </span>
       <span className="text-muted-foreground break-all">
         To: <span className="text-foreground font-mono">{send.address}</span>

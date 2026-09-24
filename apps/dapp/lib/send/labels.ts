@@ -46,7 +46,35 @@ export function pinStatusLine(pin: PinStatus): string {
       return 'First payment to this name. Check the address.'
     case 'known':
       return 'Same address as last time.'
-    case 'changed':
-      return `When you last paid this name (${pin.pinnedAt.slice(0, 10)}) it pointed at ${pin.previous}. It points somewhere new now.`
+    case 'changed': {
+      const when = pin.pinnedAt.slice(0, 10)
+      if (pin.what === 'memo') {
+        const before =
+          pin.previousMemo !== undefined ? `its memo was ${pin.previousMemo}` : 'it had no memo'
+        return `When you last paid this name (${when}) ${before}. The address is the same but the memo is different now.`
+      }
+      return `When you last paid this name (${when}) it pointed at ${pin.previous}. It points somewhere new now.`
+    }
   }
+}
+
+/**
+ * The network's refusal, said for a payment.
+ *
+ * `op_no_destination` and `op_no_trust` are the recipient's problems — the
+ * account is not on testnet, or cannot hold the asset — and the general swap
+ * messages blame the sender for both. Anything else is left to those.
+ */
+export function sendFailureMessage(
+  reason: string | undefined,
+  recipient: string,
+  asset: string
+): string | undefined {
+  if (reason === 'no_path') {
+    return `${recipient} points at an account that does not exist on testnet. Nothing was sent.`
+  }
+  if (reason === 'no_trustline') {
+    return `${recipient} cannot receive ${asset}: its account has no ${asset} trustline. Nothing was sent.`
+  }
+  return undefined
 }

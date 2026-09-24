@@ -10,6 +10,11 @@ import { recipientKind } from './kind'
  * the one sentence that turns a redirected name from a silent loss into a
  * question.
  *
+ * The memo counts as much as the address. An exchange's federation answer is
+ * one pooled account for everybody and a memo saying whose deposit this is;
+ * a changed memo with the same address is a redirect, and "same address as
+ * last time" would be reassurance at exactly the wrong moment.
+ *
  * **It decides nothing.** The server resolves every payment fresh, at build
  * and again at submit; the book is never a substitute for that answer, only
  * a comparison against it. Raw addresses are not pinned — a key is its own
@@ -19,11 +24,24 @@ import { recipientKind } from './kind'
 export type PinStatus =
   | { status: 'new' }
   | { status: 'known' }
-  | { status: 'changed'; previous: string; pinnedAt: string }
+  | {
+      status: 'changed'
+      /** Which of the two moved. The address takes precedence when both did. */
+      what: 'address' | 'memo'
+      previous: string
+      previousMemo?: string
+      pinnedAt: string
+    }
 
 const STORAGE_KEY = 'intent.addressbook.v1'
 
-type Book = Record<string, { address: string; pinnedAt: string }>
+interface Entry {
+  address: string
+  memo?: string
+  pinnedAt: string
+}
+
+type Book = Record<string, Entry>
 
 function read(): Book {
   if (typeof window === 'undefined') return {}
@@ -58,17 +76,31 @@ function isName(input: string): boolean {
   return kind === 'soroban-domain' || kind === 'federation'
 }
 
-export function checkRecipient(name: string, address: string): PinStatus {
+export function checkRecipient(name: string, address: string, memo?: string): PinStatus {
   const entry = read()[keyOf(name)]
   if (entry === undefined || typeof entry.address !== 'string') return { status: 'new' }
-  if (entry.address === address) return { status: 'known' }
-  return { status: 'changed', previous: entry.address, pinnedAt: entry.pinnedAt }
+
+  const changed = (what: 'address' | 'memo'): PinStatus => ({
+    status: 'changed',
+    what,
+    previous: entry.address,
+    ...(entry.memo !== undefined ? { previousMemo: entry.memo } : {}),
+    pinnedAt: entry.pinnedAt,
+  })
+
+  if (entry.address !== address) return changed('address')
+  if ((entry.memo ?? '') !== (memo ?? '')) return changed('memo')
+  return { status: 'known' }
 }
 
 /** Records where a name pointed, after a payment to it settled. Overwrites. */
-export function pinRecipient(name: string, address: string): void {
+export function pinRecipient(name: string, address: string, memo?: string): void {
   if (!isName(name)) return
   const book = read()
-  book[keyOf(name)] = { address, pinnedAt: new Date().toISOString() }
+  book[keyOf(name)] = {
+    address,
+    ...(memo !== undefined && memo !== '' ? { memo } : {}),
+    pinnedAt: new Date().toISOString(),
+  }
   write(book)
 }

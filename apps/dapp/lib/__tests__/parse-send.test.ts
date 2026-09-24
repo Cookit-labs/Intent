@@ -134,6 +134,29 @@ describe('a send as the second half of a swap', () => {
     expect(parseCompoundIntent('swap 50 USDC to XLM then send it to my friend', PRICES)).toBeNull()
   })
 
+  it('reads the ways of saying "what the swap delivers"', () => {
+    for (const clause of [
+      'send everything to bob.xlm',
+      'send all of it to bob.xlm',
+      'send the XLM to bob.xlm',
+      'send the proceeds to bob.xlm',
+      'pay them to bob.xlm',
+    ]) {
+      const compound = parseCompoundIntent(`swap 50 USDC to XLM then ${clause}`, PRICES)
+      expect(compound?.followOn.kind, clause).toBe('send')
+    }
+  })
+
+  it('declines a stated amount or a fraction in the follow-on', () => {
+    // A send follow-on pays whatever the swap delivered. "Send 50 XLM" and
+    // "send half" name a different amount, and reading them as "send it"
+    // would pay everything the user asked to keep.
+    expect(
+      parseCompoundIntent('swap 100 USDC to XLM then send 50 XLM to bob.xlm', PRICES)
+    ).toBeNull()
+    expect(parseCompoundIntent('swap 100 USDC to XLM then send half to bob.xlm', PRICES)).toBeNull()
+  })
+
   it('still reads "send the dollars to my bank" as an offramp', () => {
     const compound = parseCompoundIntent(
       'sell XLM for USDC and send the dollars to my bank',

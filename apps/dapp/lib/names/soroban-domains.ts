@@ -71,42 +71,46 @@ export interface ResolveDomainOptions {
   rpcUrl?: string
 }
 
-function recordKey(name: string): xdr.ScVal {
-  const kind = domainLabels(name).length > 2 ? 'SubDomain' : 'Domain'
+type RecordKind = 'Domain' | 'SubDomain'
+
+function recordKindOf(name: string): RecordKind {
+  return domainLabels(name).length > 2 ? 'SubDomain' : 'Domain'
+}
+
+function recordKey(name: string, kind: RecordKind): xdr.ScVal {
   return xdr.ScVal.scvVec([
     nativeToScVal(kind, { type: 'symbol' }),
     xdr.ScVal.scvBytes(Buffer.from(domainNode(name))),
   ])
 }
 
-function lookupTransaction(name: string) {
+function lookupTransaction(name: string, kind: RecordKind) {
   return new TransactionBuilder(new Account(SOROBAN_DOMAINS_SIMULATION_ACCOUNT, '0'), {
     fee: BASE_FEE,
     networkPassphrase: Networks.PUBLIC,
   })
-    .addOperation(new Contract(SOROBAN_DOMAINS_REGISTRY).call('record', recordKey(name)))
+    .addOperation(new Contract(SOROBAN_DOMAINS_REGISTRY).call('record', recordKey(name, kind)))
     .setTimeout(60)
     .build()
 }
 
 /**
- * The record's address, wherever the decoded answer puts it.
+ * The address a record names, read from the registry's tuple.
  *
- * The registry returns an enum — `Domain(record)` or `SubDomain(record)` —
- * which decodes to a symbol and a struct. Rather than pin the exact nesting,
- * the struct with an `address` is found by walking the value, which reads
- * both variants and would survive an `Option` wrapper too.
+ * `record` returns `(Domain, Option<SubDomain>)`, which decodes to a
+ * two-element array. For a root name the first slot is the answer. For a
+ * subdomain the first slot is the *parent* — a real account, and the wrong
+ * one to pay — so the second slot is required, and a missing one is a
+ * refusal rather than a fall back to the parent.
  */
-function recordOf(native: unknown): { address: string; expiresAt: number } | undefined {
-  if (Array.isArray(native)) {
-    for (const item of native) {
-      const found = recordOf(item)
-      if (found !== undefined) return found
-    }
-    return undefined
-  }
-  if (typeof native !== 'object' || native === null) return undefined
-  const struct = native as { address?: unknown; exp_date?: unknown }
+function recordOf(
+  native: unknown,
+  kind: RecordKind
+): { address: string; expiresAt: number } | undefined {
+  if (!Array.isArray(native)) return undefined
+  const slot: unknown = kind === 'Domain' ? native[0] : native[1]
+  if (typeof slot !== 'object' || slot === null) return undefined
+  const struct = slot as { address?: unknown; exp_date?: unknown }
   if (typeof struct.address !== 'string') return undefined
   return {
     address: struct.address,
@@ -116,9 +120,10 @@ function recordOf(native: unknown): { address: string; expiresAt: number } | und
 
 async function simulate(
   name: string,
+  kind: RecordKind,
   server: Pick<rpc.Server, 'simulateTransaction'>
 ): Promise<rpc.Api.SimulateTransactionResponse> {
-  return server.simulateTransaction(lookupTransaction(name))
+  return server.simulateTransaction(lookupTransaction(name, kind))
 }
 
 export async function resolveSorobanDomain(
@@ -129,20 +134,21 @@ export async function resolveSorobanDomain(
     throw new NameLookupFailed(`${name} is not a .xlm name`)
   }
 
+  const kind = recordKindOf(name)
   let sim: rpc.Api.SimulateTransactionResponse
   try {
     if (options.serverImpl !== undefined) {
-      sim = await simulate(name, options.serverImpl)
+      sim = await simulate(name, kind, options.serverImpl)
     } else if (options.rpcUrl !== undefined) {
-      sim = await simulate(name, new rpc.Server(options.rpcUrl))
+      sim = await simulate(name, kind, new rpc.Server(options.rpcUrl))
     } else {
       // One public RPC, then another. A registry read that fails on transport
       // is not an answer about the name, so a second provider is asked before
       // giving up.
       try {
-        sim = await simulate(name, new rpc.Server(SOROBAN_DOMAINS_RPC))
+        sim = await simulate(name, kind, new rpc.Server(SOROBAN_DOMAINS_RPC))
       } catch {
-        sim = await simulate(name, new rpc.Server(SOROBAN_DOMAINS_RPC_FALLBACK))
+        sim = await simulate(name, kind, new rpc.Server(SOROBAN_DOMAINS_RPC_FALLBACK))
       }
     }
   } catch (e) {
@@ -161,9 +167,13 @@ export async function resolveSorobanDomain(
     throw new NameLookupFailed('the name registry returned nothing')
   }
 
-  const record = recordOf(scValToNative(sim.result.retval))
+  const record = recordOf(scValToNative(sim.result.retval), kind)
   if (record === undefined) {
-    throw new NameLookupFailed(`the record for ${name} names no address`)
+    throw new NameLookupFailed(
+      kind === 'SubDomain'
+        ? `the registry holds no subdomain record for ${name}`
+        : `the record for ${name} names no address`
+    )
   }
   return record
 }

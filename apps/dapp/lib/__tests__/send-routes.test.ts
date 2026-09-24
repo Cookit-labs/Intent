@@ -83,6 +83,35 @@ describe('POST /api/send/resolve', () => {
     expect(await res.json()).toEqual(resolvedTo(THEM))
   })
 
+  it('checks the account can receive the asset on testnet when asked to', async () => {
+    const { POST } = await import('../../app/api/send/resolve/route')
+    resolve.mockResolvedValue(resolvedTo(THEM))
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 404 }))
+
+    const res = await POST(post({ recipient: 'deon.xlm', asset: 'XLM' }))
+
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ code: 'cannot_receive' })
+    expect((await POST(post({ recipient: 'deon.xlm', asset: 'XLM' }))).status).toBe(409)
+  })
+
+  it('answers with the resolution when the account can receive', async () => {
+    const { POST } = await import('../../app/api/send/resolve/route')
+    resolve.mockResolvedValue(resolvedTo(THEM))
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ balances: [{ asset_type: 'native', balance: '1' }] }), {
+          status: 200,
+        })
+    )
+
+    const res = await POST(post({ recipient: 'deon.xlm', asset: 'XLM' }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(resolvedTo(THEM))
+  })
+
   it('maps not found, lookup failed and unsupported to their statuses', async () => {
     const { POST } = await import('../../app/api/send/resolve/route')
 
@@ -117,11 +146,17 @@ describe('POST /api/send/build', () => {
   it('resolves on the server and returns the envelope with what it was built from', async () => {
     const { POST } = await import('../../app/api/send/build/route')
     resolve.mockResolvedValue(resolvedTo(THEM))
-    // Horizon, answering the sequence lookup only.
+    // Horizon, answering the sequence lookup and the recipient's account.
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes(`/accounts/${ME}`)) {
-        return new Response(JSON.stringify({ sequence: '100' }), { status: 200 })
+      if (url.includes(`/accounts/${ME}`) || url.includes(`/accounts/${THEM}`)) {
+        return new Response(
+          JSON.stringify({
+            sequence: '100',
+            balances: [{ asset_type: 'native', balance: '10.0000000' }],
+          }),
+          { status: 200 }
+        )
       }
       return new Response('{}', { status: 404 })
     })
@@ -147,6 +182,29 @@ describe('POST /api/send/build', () => {
     // The envelope pays the resolved address, not anything the client said.
     const tx = TransactionBuilder.fromXDR(body.xdr as string, stellarTestnet.networkPassphrase)
     expect((tx.operations[0] as { destination: string }).destination).toBe(THEM)
+  })
+
+  it('refuses, before building, a recipient whose account does not exist on testnet', async () => {
+    // The common case for a `.xlm` name: it resolves on mainnet to an account
+    // testnet has never seen. Refused here with the recipient named, rather
+    // than after the signature as "no route could fill this swap".
+    const { POST } = await import('../../app/api/send/build/route')
+    resolve.mockResolvedValue(resolvedTo(THEM))
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(`/accounts/${ME}`)) {
+        return new Response(JSON.stringify({ sequence: '100' }), { status: 200 })
+      }
+      return new Response('{}', { status: 404 })
+    })
+
+    const res = await POST(post({ account: ME, asset: 'XLM', amount: '5', recipient: 'deon.xlm' }))
+
+    expect(res.status).toBe(409)
+    expect((await res.json()) as { error: string }).toMatchObject({
+      code: 'cannot_receive',
+      error: expect.stringMatching(/deon\.xlm.*does not exist on testnet/),
+    })
   })
 
   it('reports a name that cannot be resolved with its status', async () => {

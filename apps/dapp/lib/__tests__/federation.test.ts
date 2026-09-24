@@ -21,12 +21,16 @@ interface Stub {
   server?: string
 }
 
-function stubbedFetch(stub: Stub): typeof fetch & { urls: string[] } {
+function stubbedFetch(
+  stub: Stub
+): typeof fetch & { urls: string[]; inits: (RequestInit | undefined)[] } {
   const server = stub.server ?? 'https://lobstr.co/federation'
   const urls: string[] = []
-  const impl = (async (input: RequestInfo | URL) => {
+  const inits: (RequestInit | undefined)[] = []
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     urls.push(url)
+    inits.push(init)
     if (url.endsWith('/.well-known/stellar.toml')) {
       const toml = stub.toml ?? `NETWORK_PASSPHRASE="x"\nFEDERATION_SERVER="${server}"\n`
       if (typeof toml === 'object') return new Response('', { status: toml.status })
@@ -40,8 +44,9 @@ function stubbedFetch(stub: Stub): typeof fetch & { urls: string[] } {
       return new Response(JSON.stringify(answer), { status: 200 })
     }
     return new Response('', { status: 500 })
-  }) as unknown as typeof fetch & { urls: string[] }
+  }) as unknown as typeof fetch & { urls: string[]; inits: (RequestInit | undefined)[] }
   impl.urls = urls
+  impl.inits = inits
   return impl
 }
 
@@ -137,5 +142,61 @@ describe('resolveFederation', () => {
     await expect(resolveFederation('alice*lobstr.co', { fetchImpl })).rejects.toThrow(
       NameLookupFailed
     )
+  })
+
+  it('refuses a memo that is not a string', async () => {
+    // SEP-2 says the memo is a string. A number would be read through
+    // JavaScript's float and, past 2^53, land on a different sub-account.
+    const fetchImpl = stubbedFetch({
+      answer: { account_id: TARGET, memo_type: 'id', memo: 9007199254740993 },
+    })
+    await expect(resolveFederation('alice*lobstr.co', { fetchImpl })).rejects.toThrow(
+      NameLookupFailed
+    )
+  })
+})
+
+describe('the server is not a proxy for whoever types a domain', () => {
+  it('bounds both fetches in time and never follows a redirect', async () => {
+    const fetchImpl = stubbedFetch({})
+    await resolveFederation('alice*lobstr.co', { fetchImpl })
+
+    expect(fetchImpl.inits).toHaveLength(2)
+    for (const init of fetchImpl.inits) {
+      expect(init?.redirect).toBe('error')
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
+    }
+  })
+
+  it('refuses a federation server on a loopback, private or unqualified host', async () => {
+    for (const server of [
+      'https://127.0.0.1/federation',
+      'https://10.0.0.1/federation',
+      'https://[::1]/federation',
+      'https://localhost/federation',
+      'https://fed.localhost/federation',
+      'https://fed.internal/federation',
+      'https://fed.local/federation',
+      'https://intranet/federation',
+    ]) {
+      const fetchImpl = stubbedFetch({ server })
+      await expect(resolveFederation('alice*lobstr.co', { fetchImpl }), server).rejects.toThrow(
+        NameLookupFailed
+      )
+      expect(fetchImpl.urls, server).toHaveLength(1)
+    }
+  })
+
+  it('refuses a typed domain on a reserved suffix before fetching anything', async () => {
+    const fetchImpl = stubbedFetch({})
+    await expect(resolveFederation('alice*intranet.internal', { fetchImpl })).rejects.toThrow(
+      NameLookupFailed
+    )
+    expect(fetchImpl.urls).toHaveLength(0)
+  })
+
+  it('does not echo the upstream status code', async () => {
+    const fetchImpl = stubbedFetch({ toml: { status: 503 } })
+    await expect(resolveFederation('alice*lobstr.co', { fetchImpl })).rejects.not.toThrow(/503/)
   })
 })

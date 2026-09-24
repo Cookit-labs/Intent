@@ -12,12 +12,12 @@ import type { AnchorId } from '../lib/offramp/anchors'
 import { ANCHORS } from '../lib/offramp/anchors'
 import { capToLimits, offrampSizeWarning, withdrawStepLabel } from '../lib/offramp/labels'
 import type { WithdrawLimits } from '../lib/offramp/sep24'
-import { sendStepLabel, sentLabel } from '../lib/send/labels'
+import { sendFailureMessage, sendStepLabel, sentLabel } from '../lib/send/labels'
 import { fromBaseUnits } from '../lib/swap/assets'
 import { blendPositionUrl } from '../lib/swap/contract-registry'
 import { balanceOf, deliveredByBalanceChange } from '../lib/swap/delivered-balance'
 import type { LedgerPreview } from '../lib/swap/preview'
-import { FAILURE_MESSAGES } from '../lib/swap/submit'
+import { FAILURE_MESSAGES, failureMessage } from '../lib/swap/submit'
 import { useOfframpSession } from './use-offramp-session'
 
 /**
@@ -161,8 +161,13 @@ export interface SendReview {
   /** What the server resolved it to. */
   address: string
   resolvedOn?: ResolvedRecipient['resolvedOn']
-  /** Display units, as built — a dollar amount has been sized by now. */
-  amount: string
+  /**
+   * Display units, as built — a dollar amount has been sized by now.
+   *
+   * Absent before a swap has delivered: the recipient is shown ahead of the
+   * first signature, but the amount is not knowable until step one settles.
+   */
+  amount?: string
   asset: string
   memo?: string
   memoType?: string
@@ -424,7 +429,7 @@ export function useSequence(): Sequence {
         ...(built.preview !== undefined ? { preview: built.preview } : {}),
         // Compared against this browser's record, never used in place of the
         // server's answer: the card says whether the name moved, that is all.
-        pin: checkRecipient(req.recipient, resolved.address),
+        pin: checkRecipient(req.recipient, resolved.address, expectation.memo),
       }
 
       setState((s) => ({
@@ -476,6 +481,44 @@ export function useSequence(): Sequence {
         }
 
         setState({ ...EMPTY, kind: req.kind, phase: 'building' })
+
+        // The recipient is resolved before the swap, not only after it. A
+        // typo, a contract address, a federation outage or an account testnet
+        // has never seen, found once the swap has settled, leaves the user
+        // holding an asset they did not want; found here, nothing has been
+        // signed and the first card shows where the money will go. The
+        // payment itself is resolved again when it is built and again when it
+        // is submitted; this answer decides nothing about the destination.
+        let resolvedAhead: ResolvedRecipient | undefined
+        if (req.kind === 'swap-then-send') {
+          let answer: Partial<ResolvedRecipient> & { error?: string }
+          try {
+            const res = await fetch('/api/send/resolve', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ recipient: req.recipient, asset: req.receiveSymbol }),
+            })
+            answer = (await res.json()) as typeof answer
+            if (!res.ok || typeof answer.address !== 'string') {
+              setState({
+                ...EMPTY,
+                kind: req.kind,
+                phase: 'failed',
+                error: `${answer.error ?? `${req.recipient} could not be resolved.`} Nothing was signed.`,
+              })
+              return
+            }
+          } catch {
+            setState({
+              ...EMPTY,
+              kind: req.kind,
+              phase: 'failed',
+              error: `${req.recipient} could not be resolved: the network did not answer. Nothing was signed.`,
+            })
+            return
+          }
+          resolvedAhead = answer as ResolvedRecipient
+        }
 
         try {
           // What step two is depends on where the proceeds are going: a
@@ -549,6 +592,26 @@ export function useSequence(): Sequence {
             xdr: built.xdr,
             steps: [{ label: req.swapLabel ?? 'Swap' }, second],
             ...(req.kind === 'swap-then-lend' ? { lendVenue: req.venue } : {}),
+            // Where the proceeds will go, shown before the first signature,
+            // with no amount yet: that is what the swap decides.
+            ...(req.kind === 'swap-then-send' && resolvedAhead !== undefined
+              ? {
+                  send: {
+                    recipient: req.recipient,
+                    kind: resolvedAhead.kind,
+                    address: resolvedAhead.address,
+                    ...(resolvedAhead.resolvedOn !== undefined
+                      ? { resolvedOn: resolvedAhead.resolvedOn }
+                      : {}),
+                    asset: req.receiveSymbol,
+                    ...(resolvedAhead.memo !== undefined ? { memo: resolvedAhead.memo } : {}),
+                    ...(resolvedAhead.memoType !== undefined
+                      ? { memoType: resolvedAhead.memoType }
+                      : {}),
+                    pin: checkRecipient(req.recipient, resolvedAhead.address, resolvedAhead.memo),
+                  },
+                }
+              : {}),
           })
 
           // Said before the first signature rather than after the swap
@@ -930,17 +993,23 @@ export function useSequence(): Sequence {
         explorerUrl?: string
         delivered?: string
         reason?: keyof typeof FAILURE_MESSAGES
+        error?: string
       }
 
       if (result.ok !== true) {
-        setState((s) => ({
-          ...s,
-          phase: 'failed',
-          error:
-            result.reason !== undefined
-              ? FAILURE_MESSAGES[result.reason]
-              : 'That step did not go through.',
-        }))
+        // A route's own refusal — a name that moved between build and
+        // submit, naming both addresses — is written for a person and shown
+        // as it is; the network's codes are translated, and for a payment
+        // the two that are the recipient's fault are said as such.
+        const message =
+          (isSendStep && sendPlan.current !== undefined
+            ? sendFailureMessage(
+                result.reason,
+                (req as SendOnly | SwapThenSend).recipient,
+                sendPlan.current.asset
+              )
+            : undefined) ?? failureMessage(result)
+        setState((s) => ({ ...s, phase: 'failed', error: message }))
         return
       }
 
@@ -1032,7 +1101,11 @@ export function useSequence(): Sequence {
       // Pinned only once the payment settled, so the book records where a name
       // pointed when money actually went there.
       if (isSendStep && sendPlan.current !== undefined) {
-        pinRecipient((req as SendOnly | SwapThenSend).recipient, sendPlan.current.address)
+        pinRecipient(
+          (req as SendOnly | SwapThenSend).recipient,
+          sendPlan.current.address,
+          sendPlan.current.memo
+        )
       }
 
       if (stepIndex === 0 && req.kind !== 'offramp-only' && req.kind !== 'send-only') {
