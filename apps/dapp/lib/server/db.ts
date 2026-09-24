@@ -38,6 +38,31 @@ export type QueryFn = (
   params?: unknown[]
 ) => Promise<{ rows: Record<string, unknown>[] }>
 
+/**
+ * Rejects when `work` has not settled within `ms`.
+ *
+ * The pool has no connect timeout of its own, and a host that drops packets
+ * would otherwise hold a request for as long as the OS takes to give up. For
+ * the stores that must never block — the limiter, the sponsor ledger — that
+ * is the difference between a slow database and a down app. The work itself
+ * is not cancelled; the caller has simply moved on.
+ */
+export function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no answer after ${ms}ms`)), ms)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (e: unknown) => {
+        clearTimeout(timer)
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    )
+  })
+}
+
 export type WaitlistStatus = 'pending' | 'accepted' | 'rejected'
 
 export interface WaitlistEntry {

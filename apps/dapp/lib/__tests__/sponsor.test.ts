@@ -8,9 +8,11 @@ import {
   Operation,
   TransactionBuilder,
 } from '@stellar/stellar-sdk'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { createSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
 import { sponsorConfigured, sponsorForSubmission } from '../sponsor/sponsor'
+import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
 
 /**
  * The server-side half: whether a sponsor is configured, whether its account
@@ -35,6 +37,11 @@ function signedByUser(): string {
     .build()
   tx.sign(user)
   return tx.toXDR()
+}
+
+/** A ledger with nothing spent today. */
+function emptyLedger(): SponsorLedger {
+  return createSponsorLedger(fakeSponsorLedgerDb().query)
 }
 
 /** Horizon that knows the sponsor account, or says it does not exist. */
@@ -79,6 +86,7 @@ describe('sponsorForSubmission', () => {
     const out = await sponsorForSubmission(signedByUser(), user.publicKey(), {
       env: { SPONSOR_SECRET_KEY: sponsor.secret() },
       fetchImpl: horizon(true, calls),
+      ledger: emptyLedger(),
     })
     expect(out.sponsored).toBe(true)
     const tx = TransactionBuilder.fromXDR(out.xdr, Networks.TESTNET)
@@ -94,6 +102,7 @@ describe('sponsorForSubmission', () => {
     const out = await sponsorForSubmission(signedByUser(), user.publicKey(), {
       env: { SPONSOR_SECRET_KEY: sponsor.secret() },
       fetchImpl: horizon(false, calls),
+      ledger: emptyLedger(),
     })
     expect(out.sponsored).toBe(true)
     expect(calls.some((u) => u.includes('friendbot') && u.includes(sponsor.publicKey()))).toBe(true)
@@ -126,5 +135,121 @@ describe('sponsorForSubmission', () => {
       fetchImpl: horizon(true, []),
     })
     expect(out).toEqual({ xdr, sponsored: false, reason: 'invalid_sponsor_key' })
+  })
+})
+
+/**
+ * The daily budget. A sponsor key is a balance anyone can drain by
+ * submitting, so what it will pay in a day is capped, and so is what it
+ * pays for any one account. A refusal is the same fallback as every other:
+ * the user's own transaction, paying its own fee, with the reason named.
+ */
+describe('the daily budget', () => {
+  const NOW = new Date('2026-09-24T12:00:00.000Z')
+  const DAY = '2026-09-24'
+  const env = { SPONSOR_SECRET_KEY: sponsor.secret() }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('records the fee it commits to, for the account and for the day', async () => {
+    const ledger = emptyLedger()
+    const out = await sponsorForSubmission(signedByUser(), user.publicKey(), {
+      env,
+      fetchImpl: horizon(true, []),
+      ledger,
+      now: NOW,
+    })
+    expect(out.sponsored).toBe(true)
+    // One operation at the base fee, plus the bump itself: 200 stroops.
+    expect(await ledger.usage(DAY, user.publicKey())).toEqual({
+      totalStroops: BigInt(200),
+      totalCount: 1,
+      accountStroops: BigInt(200),
+      accountCount: 1,
+    })
+  })
+
+  it('falls back to unsponsored when the day would go over budget', async () => {
+    const ledger = emptyLedger()
+    // Fifty XLM less a hundred stroops: the next 200-stroop fee tips it.
+    await ledger.record(DAY, Keypair.random().publicKey(), BigInt(500_000_000 - 100))
+
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      env,
+      fetchImpl: horizon(true, []),
+      ledger,
+      now: NOW,
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'budget' })
+    // A refusal costs nothing, so nothing is written.
+    expect((await ledger.usage(DAY)).totalCount).toBe(1)
+  })
+
+  it('falls back when this account has had its share for the day', async () => {
+    const ledger = emptyLedger()
+    await ledger.record(DAY, user.publicKey(), BigInt(200))
+    await ledger.record(DAY, user.publicKey(), BigInt(200))
+
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      env: { ...env, SPONSOR_DAILY_PER_ACCOUNT: '2' },
+      fetchImpl: horizon(true, []),
+      ledger,
+      now: NOW,
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'budget' })
+  })
+
+  it('reads the budget from the environment', async () => {
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      // A hundred stroops a day; the fee is two hundred.
+      env: { ...env, SPONSOR_DAILY_BUDGET_XLM: '0.00001' },
+      fetchImpl: horizon(true, []),
+      ledger: emptyLedger(),
+      now: NOW,
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'budget' })
+  })
+
+  it('counts yesterday against nothing', async () => {
+    const ledger = emptyLedger()
+    await ledger.record('2026-09-23', user.publicKey(), BigInt(500_000_000))
+
+    const out = await sponsorForSubmission(signedByUser(), user.publicKey(), {
+      env,
+      fetchImpl: horizon(true, []),
+      ledger,
+      now: NOW,
+    })
+    expect(out.sponsored).toBe(true)
+  })
+
+  it('still sponsors, and warns once, when the ledger cannot be reached', async () => {
+    // A fresh module, so the once-per-process flag starts clear here.
+    vi.resetModules()
+    const fresh = await import('../sponsor/sponsor')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    const db = fakeSponsorLedgerDb()
+    db.down = new Error('connect ECONNREFUSED 127.0.0.1:55432')
+    const ledger = createSponsorLedger(db.query)
+
+    for (let i = 0; i < 2; i += 1) {
+      const out = await fresh.sponsorForSubmission(signedByUser(), user.publicKey(), {
+        env,
+        fetchImpl: horizon(true, []),
+        ledger,
+        now: NOW,
+      })
+      expect(out.sponsored).toBe(true)
+    }
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('[sponsor-ledger]')
+    expect(String(warn.mock.calls[0]?.[0])).toContain('ECONNREFUSED')
   })
 })

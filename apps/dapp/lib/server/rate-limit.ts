@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { getPool, type QueryFn } from './db'
+import { getPool, withTimeout, type QueryFn } from './db'
 
 /**
  * Fixed-window rate limits, counted in Postgres.
@@ -167,11 +167,7 @@ export interface RateLimitDeps {
   env?: Env
 }
 
-/**
- * A check that has not answered in this long is treated as unreachable. The
- * pool has no connect timeout of its own, and a host that drops packets
- * would otherwise hold every request for as long as the OS takes to give up.
- */
+/** A check that has not answered in this long is treated as unreachable. */
 const CHECK_TIMEOUT_MS = 2_000
 /** Windows older than this are dropped, at most hourly per process. */
 const PURGE_OLDER_THAN_MS = 24 * 3_600_000
@@ -179,22 +175,6 @@ const PURGE_EVERY_MS = 3_600_000
 
 let warnedUnreachable = false
 let nextPurgeAt = 0
-
-function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no answer after ${ms}ms`)), ms)
-    work.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (e: unknown) => {
-        clearTimeout(timer)
-        reject(e instanceof Error ? e : new Error(String(e)))
-      }
-    )
-  })
-}
 
 export async function checkRateLimit(
   input: RateLimitInput,
