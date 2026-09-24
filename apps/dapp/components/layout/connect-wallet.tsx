@@ -2,6 +2,7 @@
 
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { Button } from '@intent/ui'
+import { Wallet } from 'lucide-react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useWallet } from '../../hooks/use-wallet'
@@ -41,7 +42,8 @@ function StellarConnect(): JSX.Element {
       <div className="flex items-center gap-2">
         {balance !== undefined ? (
           <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
-            {Number(balance).toLocaleString(undefined, { maximumFractionDigits: 2 })} {balanceSymbol}
+            {Number(balance).toLocaleString(undefined, { maximumFractionDigits: 2 })}{' '}
+            {balanceSymbol}
           </span>
         ) : null}
         <span className="border-border rounded-md border px-2 py-1 font-mono text-xs">
@@ -57,11 +59,15 @@ function StellarConnect(): JSX.Element {
   return (
     <div className="flex items-center gap-2">
       {error !== undefined ? (
-        <span className="text-warning hidden max-w-[16rem] truncate text-xs sm:inline" title={error}>
+        <span
+          className="text-warning hidden max-w-[16rem] truncate text-xs sm:inline"
+          title={error}
+        >
           {error}
         </span>
       ) : null}
-      <Button size="sm" onClick={connect} disabled={isConnecting}>
+      <Button size="sm" onClick={connect} disabled={isConnecting} className="gap-1.5">
+        <Wallet className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
         {isConnecting ? 'Connecting…' : 'Connect wallet'}
       </Button>
     </div>
