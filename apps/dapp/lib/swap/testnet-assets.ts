@@ -1,3 +1,5 @@
+import { isMainnet } from '@intent/config'
+
 import { resolveVerifiedAsset, type VerifiedAsset } from './asset-registry'
 
 /**
@@ -42,10 +44,6 @@ export interface TradableAsset {
  * are discovered from Horizon and registered by the caller.
  */
 const registered = new Map<string, TestnetAsset>()
-
-function isMainnet(): boolean {
-  return process.env['NEXT_PUBLIC_STELLAR_NETWORK'] === 'mainnet'
-}
 
 const ACCOUNT_ID = /^G[A-Z2-7]{55}$/
 

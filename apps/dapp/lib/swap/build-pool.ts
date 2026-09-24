@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -129,7 +129,7 @@ export async function buildPoolDeposit(
   options: BuildPoolDepositOptions
 ): Promise<BuiltPoolDeposit> {
   const { account, assetA, assetB, maxAmountA, maxAmountB, minPrice, maxPrice } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   if (Number(maxAmountA) <= 0 || Number(maxAmountB) <= 0) {
@@ -149,7 +149,7 @@ export async function buildPoolDeposit(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(
       Operation.liquidityPoolDeposit({
@@ -175,7 +175,7 @@ export async function buildPoolDeposit(
     poolId: pool.id,
     minPrice,
     maxPrice,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -201,7 +201,7 @@ export async function buildPoolWithdraw(
   options: BuildPoolWithdrawOptions
 ): Promise<BuiltPoolWithdraw> {
   const { account, assetA, assetB, shares, minAmountA, minAmountB } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   if (Number(shares) <= 0) {
@@ -213,7 +213,7 @@ export async function buildPoolWithdraw(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(
       // The floors are the same protection `destMin` gives a swap: shares are
@@ -238,7 +238,7 @@ export async function buildPoolWithdraw(
     poolId: pool.id,
     minAmountA,
     minAmountB,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -252,7 +252,7 @@ export async function buildPoolWithdraw(
  * makes that impossible rather than merely unlikely.
  */
 export function assertSelfPoolOp(xdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')

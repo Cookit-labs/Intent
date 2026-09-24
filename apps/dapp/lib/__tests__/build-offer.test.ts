@@ -1,5 +1,5 @@
 import { Asset, BASE_FEE, Memo, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { describe, expect, it } from 'vitest'
 
 import { assertSelfOffer, buildOfferTransaction, OFFER_MEMO } from '../swap/build-offer'
@@ -53,7 +53,7 @@ describe('building an offer', () => {
   it('produces a signable transaction', async () => {
     const built = await build()
     expect(built.xdr).toMatch(/^[A-Za-z0-9+/=]+$/)
-    expect(built.networkPassphrase).toBe(stellarTestnet.networkPassphrase)
+    expect(built.networkPassphrase).toBe(stellarNetwork.networkPassphrase)
   })
 
   it('places a new offer rather than editing one', async () => {
@@ -64,7 +64,7 @@ describe('building an offer', () => {
 
   it('stamps the transaction so history can find it', async () => {
     const built = await build()
-    const tx = TransactionBuilder.fromXDR(built.xdr, stellarTestnet.networkPassphrase)
+    const tx = TransactionBuilder.fromXDR(built.xdr, stellarNetwork.networkPassphrase)
     // The memo is stored as bytes; decode them rather than stringifying the
     // buffer, which yields a comma-separated list of byte values.
     const memo = (tx as { memo: Memo }).memo.value as Buffer
@@ -78,7 +78,7 @@ describe('building an offer', () => {
     const built = await build({ price: { n: 1234567, d: 10_000_000 } })
     expect(built.price).toEqual({ n: 1234567, d: 10_000_000 })
 
-    const tx = TransactionBuilder.fromXDR(built.xdr, stellarTestnet.networkPassphrase)
+    const tx = TransactionBuilder.fromXDR(built.xdr, stellarNetwork.networkPassphrase)
     const op = (tx as { operations: { price?: string }[] }).operations[0]
     expect(Number(op?.price)).toBe(1234567 / 10_000_000)
   })
@@ -88,7 +88,7 @@ describe('building an offer', () => {
     const built = await build({ amount: '0', offerId: '8224' })
     expect(built.offerId).toBe('8224')
 
-    const tx = TransactionBuilder.fromXDR(built.xdr, stellarTestnet.networkPassphrase)
+    const tx = TransactionBuilder.fromXDR(built.xdr, stellarNetwork.networkPassphrase)
     const op = (tx as { operations: { amount?: string }[] }).operations[0]
     expect(op?.amount).toBe('0.0000000')
   })
@@ -107,7 +107,7 @@ describe('the envelope is checked, not just the inputs', () => {
     }
     const builder = new TransactionBuilder(account as never, {
       fee: BASE_FEE,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
     for (const op of ops) builder.addOperation(op)
     return builder.setTimeout(180).build().toXDR()

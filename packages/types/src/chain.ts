@@ -19,7 +19,12 @@ export interface ContractAddresses {
   usdc: `0x${string}`
 }
 
-export type SupportedNetwork = 'arc-testnet' | 'arc-mainnet' | 'local' | 'stellar-testnet'
+export type SupportedNetwork =
+  | 'arc-testnet'
+  | 'arc-mainnet'
+  | 'local'
+  | 'stellar-testnet'
+  | 'stellar-mainnet'
 
 /**
  * Which execution environment a chain belongs to. This is not cosmetic: EVM

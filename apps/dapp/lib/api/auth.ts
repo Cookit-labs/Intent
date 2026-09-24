@@ -1,5 +1,5 @@
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { apiRequest } from './http-client'
 
@@ -183,7 +183,7 @@ export async function signIn(address: string): Promise<string> {
 
   const signed = await StellarWalletsKit.signMessage(challenge.message, {
     address,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
 
   if (signed.signedMessage === null || signed.signedMessage === undefined) {

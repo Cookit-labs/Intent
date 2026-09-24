@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Asset,
   BASE_FEE,
@@ -80,7 +80,7 @@ function toSdkAsset(asset: AssetRef): Asset {
 export async function buildSwapTransaction(options: BuildSwapOptions): Promise<BuiltSwap> {
   const { account, quote } = options
   const slippageBps = options.slippageBps ?? DEFAULT_SLIPPAGE_BPS
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
 
   if (quote.source !== 'horizon') {
     throw new Error(`quote from ${quote.source} needs its own builder`)
@@ -130,7 +130,7 @@ export async function buildSwapTransaction(options: BuildSwapOptions): Promise<B
 
   const tx = new TransactionBuilder(source, {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     // Stamped so history can tell this app's trades from the rest of the
@@ -146,7 +146,7 @@ export async function buildSwapTransaction(options: BuildSwapOptions): Promise<B
     destMin,
     sendAmount: quote.sendAmount,
     slippageBps,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -164,7 +164,7 @@ function widen(baseAmount: string, toleranceBps: number): string {
  * adds an operation without noticing what it allows.
  */
 export function assertSelfSwap(xdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   // A fee-bump wraps another transaction, so its operations are not the ones
   // that would execute. Refusing outright beats inspecting the wrong envelope.

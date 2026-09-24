@@ -4,7 +4,7 @@ import type { Intent, IntentStatus } from '@intent/types'
 import { Card, cn } from '@intent/ui'
 import { ArrowRight, ChevronDown, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { intentTypeLabel } from '../../lib/intent-format'
 import { useCancelIntent } from '../../hooks/use-intent'
@@ -76,7 +76,7 @@ export function IntentCard({ intent }: { intent: Intent }): JSX.Element {
   const open = intent.status === 'pending' && intent.limitPriceUsd !== undefined
   const explorerUrl =
     intent.settlementTxHash !== undefined && intent.settlementTxHash !== ''
-      ? `${stellarTestnet.blockExplorerUrl}/tx/${intent.settlementTxHash}`
+      ? `${stellarNetwork.blockExplorerUrl}/tx/${intent.settlementTxHash}`
       : undefined
 
   return (

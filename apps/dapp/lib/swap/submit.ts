@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { deliveredFromResultXdr } from './delivered'
 
@@ -107,7 +107,7 @@ export async function submitSignedSwap(
   signedXdr: string,
   options: SubmitOptions = {}
 ): Promise<SubmitResult> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
 
   let res: Response
@@ -166,7 +166,7 @@ export async function submitSignedSwap(
     ok: true,
     hash: body.hash,
     ledger: body.ledger ?? 0,
-    explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${body.hash}`,
+    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${body.hash}`,
     ...(delivered !== undefined ? { delivered } : {}),
   }
 }

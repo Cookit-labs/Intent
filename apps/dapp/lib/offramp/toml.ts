@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import type { AnchorEntry } from './anchors'
 
@@ -68,7 +68,7 @@ export async function readAnchorToml(
       `refusing anchor ${anchor.id}: its signing key ${parsed.signingKey ?? '(none)'} is not the pinned one`
     )
   }
-  if (parsed.networkPassphrase !== stellarTestnet.networkPassphrase) {
+  if (parsed.networkPassphrase !== stellarNetwork.networkPassphrase) {
     throw new Error(`refusing anchor ${anchor.id}: it is on another network`)
   }
   if (parsed.transferServerSep24 === undefined || parsed.transferServerSep24 === '') {

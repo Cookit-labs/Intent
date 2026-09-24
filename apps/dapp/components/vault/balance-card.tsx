@@ -1,6 +1,6 @@
 'use client'
 
-import { STELLAR_USDC } from '@intent/config'
+import { STELLAR_USDC, stellarNetwork } from '@intent/config'
 import { Badge, Button, Card, Skeleton } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 
@@ -104,7 +104,7 @@ function StellarUsdcRow({ address }: { address: string }): JSX.Element {
           className="w-fit text-xs"
           onClick={() => {
             window.open(
-              `https://stellar.expert/explorer/testnet/asset/${STELLAR_USDC.code}-${STELLAR_USDC.issuer}`,
+              `${stellarNetwork.blockExplorerUrl}/asset/${STELLAR_USDC.code}-${STELLAR_USDC.issuer}`,
               '_blank',
               'noopener,noreferrer'
             )

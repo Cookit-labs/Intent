@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 /**
  * Stellar's built-in liquidity pools.
@@ -127,7 +127,7 @@ export interface PoolOptions {
  * user a market they cannot trade into, and an agent a route that cannot fill.
  */
 export async function fetchPools(options: PoolOptions = {}): Promise<Pool[]> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
   const limit = options.limit ?? 200
 
@@ -155,7 +155,7 @@ export async function fetchPoolPositions(
   account: string,
   options: PoolOptions = {}
 ): Promise<{ poolId: string; shares: string }[]> {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
 
   const res = await doFetch(`${horizonUrl}/accounts/${account}`, {

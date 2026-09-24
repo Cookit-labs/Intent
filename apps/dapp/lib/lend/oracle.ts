@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -92,7 +92,7 @@ export interface OracleOptions {
 }
 
 function serverFor(options: OracleOptions): Pick<rpc.Server, 'simulateTransaction'> {
-  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarTestnet.sorobanRpcUrl)
+  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarNetwork.sorobanRpcUrl)
 }
 
 async function call(
@@ -103,7 +103,7 @@ async function call(
 ): Promise<unknown> {
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(new Contract(contractId).call(fn, ...args))
     .setTimeout(60)

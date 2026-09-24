@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { sacFor } from '../../../../lib/swap/build-soroban'
@@ -128,7 +128,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       // Read from the operations, not from the quote: the floor the network
       // will enforce is what the user is actually promised.
       preview: {
-        ...derivePreview(built.xdr, body.account, stellarTestnet.networkPassphrase),
+        ...derivePreview(built.xdr, body.account, stellarNetwork.networkPassphrase),
         feePaidBy: feePaidBy(),
       },
       destMin: built.destMin,

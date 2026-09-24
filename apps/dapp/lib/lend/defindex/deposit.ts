@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   FeeBumpTransaction,
@@ -73,7 +73,7 @@ export function assertDefindexDeposit(
   account: string,
   expectation: DepositExpectation
 ): void {
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction) {
     refuse('shape', 'fee-bump transactions are not signed here; the relay adds its own')
   }
@@ -212,6 +212,6 @@ export async function buildDefindexDeposit(
     assetContract,
     amount,
     recipient: account,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }

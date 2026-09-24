@@ -1,5 +1,6 @@
 'use client'
 
+import { isMainnet, stellarNetwork } from '@intent/config'
 import { Badge, Button } from '@intent/ui'
 
 import { useChain } from '../../providers/chain-provider'
@@ -57,7 +58,13 @@ export function NetworkStatus(): JSX.Element {
 
       {needsFunding ? (
         slug === 'stellar' ? (
-          <FriendbotButton address={address} />
+          // No faucet on mainnet: the account exists once someone pays its
+          // reserve, and a button that pretends otherwise would only fail.
+          stellarNetwork.friendbotUrl !== undefined ? (
+            <FriendbotButton address={address} />
+          ) : (
+            <span className="text-muted-foreground text-xs">Send XLM to activate</span>
+          )
         ) : (
           <a
             href={ARC_FAUCET_URL}
@@ -68,7 +75,7 @@ export function NetworkStatus(): JSX.Element {
             {FAUCET_LABEL[slug]}
           </a>
         )
-      ) : (
+      ) : isMainnet() ? null : (
         <span className="text-muted-foreground hidden text-xs sm:inline">
           pre-mainnet · rails may change
         </span>

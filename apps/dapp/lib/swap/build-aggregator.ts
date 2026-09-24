@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   Asset,
@@ -314,7 +314,7 @@ export function assertAggregatorSwap(
 ): CheckedAggregatorSwap {
   const nowSeconds = clock.nowSeconds ?? (() => Math.floor(Date.now() / 1000))
 
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   // A fee bump wraps another transaction, so the operations visible here are
   // not the ones that would execute. The API's sponsored flows produce one;
   // this app never asks for those, and refuses the shape outright.
@@ -426,7 +426,7 @@ export async function buildAggregatorSwap(
     sendAmount: quoted.raw.amountIn,
     platform,
     label: checked.label,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
     expectation,
   }
 }

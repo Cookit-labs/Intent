@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -115,7 +115,7 @@ function failure(reason: QuoteFailure['reason'], detail?: string): QuoteOutcome 
 }
 
 export function createAquariusQuoter(options: AquariusQuoterOptions = {}): QuoteSource {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
   const routerId = options.routerId ?? AQUARIUS_ROUTER
   const enabled = options.enabled ?? true
 
@@ -126,7 +126,7 @@ export function createAquariusQuoter(options: AquariusQuoterOptions = {}): Quote
   async function simulate(fn: string, args: xdr.ScVal[]): Promise<unknown> {
     const tx = new TransactionBuilder(new Account(SIMULATION_SOURCE, '0'), {
       fee: BASE_FEE,
-      networkPassphrase: stellarTestnet.networkPassphrase,
+      networkPassphrase: stellarNetwork.networkPassphrase,
     })
       .addOperation(new Contract(routerId).call(fn, ...args))
       .setTimeout(30)

@@ -3,7 +3,7 @@
 import { Button, Card } from '@intent/ui'
 import { Bell, Clock, ExternalLink, X } from 'lucide-react'
 
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { describeTrigger, evaluateTrigger } from '../../lib/standing-intent'
 import type { StoredRule } from '../../lib/standing-store'
 
@@ -102,7 +102,7 @@ export function StandingRulesPanel({
 
                     {rule.lastTxHash !== undefined ? (
                       <a
-                        href={`${stellarTestnet.blockExplorerUrl}/tx/${rule.lastTxHash}`}
+                        href={`${stellarNetwork.blockExplorerUrl}/tx/${rule.lastTxHash}`}
                         target="_blank"
                         rel="noreferrer"
                         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-start text-xs underline underline-offset-2"

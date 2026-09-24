@@ -1,9 +1,8 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   BASE_FEE,
   Contract,
-  Networks,
   TransactionBuilder,
   rpc,
   scValToNative,
@@ -130,8 +129,8 @@ export async function readBlendPositions(
   account: string,
   options: ReadPositionOptions = {}
 ): Promise<BlendPositions> {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
-  const passphrase = options.networkPassphrase ?? Networks.TESTNET
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
+  const passphrase = options.networkPassphrase ?? stellarNetwork.networkPassphrase
   const server = new rpc.Server(rpcUrl)
 
   const raw = (await simulate(server, account, passphrase)) as RawPositions | undefined

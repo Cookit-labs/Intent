@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -83,7 +83,7 @@ export interface BuiltSorobanSwap {
  */
 export function sacFor(asset: ClassicAsset): string {
   const sdkAsset = asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
-  return sdkAsset.contractId(stellarTestnet.networkPassphrase)
+  return sdkAsset.contractId(stellarNetwork.networkPassphrase)
 }
 
 async function loadSequence(
@@ -109,7 +109,7 @@ export async function buildSorobanSwap(
 ): Promise<BuiltSorobanSwap> {
   const { account, from, to, sendAmount, minReceive } = options
   const routerId = options.routerId ?? ROUTER
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
   const deadlineSeconds = options.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS
 
@@ -162,7 +162,7 @@ export async function buildSorobanSwap(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -176,7 +176,7 @@ export async function buildSorobanSwap(
     recipient,
     minReceive,
     sendAmount,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -191,7 +191,7 @@ export async function buildSorobanSwap(
  * would allow.
  */
 export function assertSelfInvoke(xdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
@@ -234,7 +234,7 @@ export function assertSelfSoroswapSwap(
 ): void {
   assertSelfInvoke(envelope, account)
 
-  const decoded = TransactionBuilder.fromXDR(envelope, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(envelope, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
   }
@@ -290,7 +290,7 @@ export function assertSelfSoroswapSwap(
  */
 export async function prepareSorobanSwap(
   xdr: string,
-  rpcUrl: string = stellarTestnet.sorobanRpcUrl
+  rpcUrl: string = stellarNetwork.sorobanRpcUrl
 ): Promise<
   | {
       ok: true
@@ -306,7 +306,7 @@ export async function prepareSorobanSwap(
 
   let tx
   try {
-    tx = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+    tx = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
   } catch {
     return { ok: false, reason: 'The transaction could not be read.' }
   }

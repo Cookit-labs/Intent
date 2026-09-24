@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -171,7 +171,7 @@ export interface PoolRates {
 }
 
 function serverFor(options: ReadReserveOptions): Pick<rpc.Server, 'simulateTransaction'> {
-  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarTestnet.sorobanRpcUrl)
+  return options.serverImpl ?? new rpc.Server(options.rpcUrl ?? stellarNetwork.sorobanRpcUrl)
 }
 
 async function simulate(
@@ -183,7 +183,7 @@ async function simulate(
 
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(new Contract(poolId).call(fn, ...args))
     .setTimeout(60)

@@ -1,5 +1,5 @@
 // apps/dapp/lib/__tests__/offramp-build-payment.test.ts
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -31,7 +31,7 @@ import { USDC } from '../swap/assets'
 const ME = Keypair.random().publicKey()
 const ANCHOR_ACCOUNT = Keypair.random().publicKey()
 const HASH_B64 = Buffer.alloc(32, 5).toString('base64')
-const NET = stellarTestnet.networkPassphrase
+const NET = stellarNetwork.networkPassphrase
 const USDC_ASSET = new Asset(USDC.code, USDC.issuer as string)
 
 const READY: AnchorTransaction = {

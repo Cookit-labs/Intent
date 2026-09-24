@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { FeeBumpTransaction, TransactionBuilder } from '@stellar/stellar-sdk'
 
 import { assertSelfAquariusSwap } from './build-aquarius'
@@ -102,7 +102,7 @@ export function builderFor(quote: SwapQuote): VenueKind {
  * swap has always produced.
  */
 export function assertSelfSubmission(signedXdr: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(signedXdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(signedXdr, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
   }

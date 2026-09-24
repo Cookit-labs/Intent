@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { StrKey } from '@stellar/stellar-sdk'
 
 import { toBaseUnits } from '../swap/assets'
@@ -243,7 +243,7 @@ export async function submitOrder(options: {
       ok: true,
       hash: result.hash,
       ...(result.ledger !== undefined ? { ledger: result.ledger } : {}),
-      explorerUrl: `${stellarTestnet.blockExplorerUrl}/tx/${result.hash}`,
+      explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${result.hash}`,
     }
   }
   if (result.status === 'PENDING') {

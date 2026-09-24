@@ -1,6 +1,6 @@
 'use client'
 
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { useCallback, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
@@ -149,7 +149,7 @@ export function usePerp(): Perp {
           verifyKeyChallenge(begun.xdr, {
             address: signer,
             challengeHex: begun.challengeHex,
-            networkPassphrase: stellarTestnet.networkPassphrase,
+            networkPassphrase: stellarNetwork.networkPassphrase,
           })
         } catch (e) {
           setState({

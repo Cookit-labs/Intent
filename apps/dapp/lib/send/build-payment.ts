@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -78,7 +78,7 @@ export async function buildSendPayment(
   options: BuildSendOptions
 ): Promise<{ xdr: string; networkPassphrase: string }> {
   const { account, expectation } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   // Refused before Horizon is asked: a payment to oneself is never what
@@ -91,7 +91,7 @@ export async function buildSendPayment(
 
   const builder = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }).addOperation(
     Operation.payment({
       destination: expectation.destination,
@@ -108,7 +108,7 @@ export async function buildSendPayment(
   // be, as every builder in this app does.
   assertSendPayment(xdr, account, expectation)
 
-  return { xdr, networkPassphrase: stellarTestnet.networkPassphrase }
+  return { xdr, networkPassphrase: stellarNetwork.networkPassphrase }
 }
 
 function refuse(field: string, detail: string): never {
@@ -135,7 +135,7 @@ export function assertSendPayment(
   account: string,
   expectation: SendExpectation
 ): void {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction)
     refuse('shape', 'fee-bump transactions are not built here')
   const tx = decoded

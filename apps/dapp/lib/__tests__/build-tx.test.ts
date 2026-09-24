@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { Asset, BASE_FEE, Keypair, Operation, TransactionBuilder, Account } from '@stellar/stellar-sdk'
-import { stellarTestnet } from '@intent/config'
+import {
+  Asset,
+  BASE_FEE,
+  Keypair,
+  Operation,
+  TransactionBuilder,
+  Account,
+} from '@stellar/stellar-sdk'
+import { stellarNetwork } from '@intent/config'
 
 import { assertSelfSwap } from '../swap/build-tx'
 import { FAILURE_MESSAGES, submitSignedSwap } from '../swap/submit'
@@ -12,7 +19,7 @@ function tx(build: (b: TransactionBuilder) => TransactionBuilder): string {
   const account = new Account(me, '1')
   const b = new TransactionBuilder(account, {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
   return build(b).setTimeout(120).build().toXDR()
 }
@@ -56,7 +63,9 @@ describe('assertSelfSwap', () => {
 
   it('refuses a plain payment operation, swap or not', () => {
     const xdr = tx((b) =>
-      b.addOperation(Operation.payment({ destination: stranger, asset: Asset.native(), amount: '30' }))
+      b.addOperation(
+        Operation.payment({ destination: stranger, asset: Asset.native(), amount: '30' })
+      )
     )
     expect(() => assertSelfSwap(xdr, me)).toThrow(/is not a swap/)
   })
@@ -75,7 +84,9 @@ describe('assertSelfSwap', () => {
             path: [],
           })
         )
-        .addOperation(Operation.payment({ destination: stranger, asset: Asset.native(), amount: '1' }))
+        .addOperation(
+          Operation.payment({ destination: stranger, asset: Asset.native(), amount: '1' })
+        )
     )
     expect(() => assertSelfSwap(xdr, me)).toThrow(/exactly one operation/)
   })

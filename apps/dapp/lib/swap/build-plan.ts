@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Asset,
@@ -239,7 +239,7 @@ async function loadSequence(
 
 export async function buildPlan(options: BuildPlanOptions): Promise<BuiltPlan> {
   const { account, actions } = options
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   if (actions.length === 0) {
@@ -269,7 +269,7 @@ export async function buildPlan(options: BuildPlanOptions): Promise<BuiltPlan> {
 
   const builder = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
   for (const op of operations) builder.addOperation(op)
 
@@ -286,6 +286,6 @@ export async function buildPlan(options: BuildPlanOptions): Promise<BuiltPlan> {
     xdr: xdrString,
     steps,
     description: describePlan(steps),
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }

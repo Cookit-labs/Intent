@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { resolveRecipient } from '../../../../lib/names/resolve'
@@ -128,7 +128,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       expectation,
       resolved,
       preview: {
-        ...derivePreview(built.xdr, account, stellarTestnet.networkPassphrase),
+        ...derivePreview(built.xdr, account, stellarNetwork.networkPassphrase),
         feePaidBy: feePaidBy(),
       },
     })

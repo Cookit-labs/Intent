@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import type { AssetRef } from '../assets'
 import { fromCanonical, toBaseUnits, toCanonical, toHorizonParams } from '../assets'
@@ -48,7 +48,7 @@ export interface HorizonQuoterOptions {
 }
 
 export function createHorizonQuoter(options: HorizonQuoterOptions = {}): QuoteSource {
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const doFetch = options.fetchImpl ?? fetch
 
   return {

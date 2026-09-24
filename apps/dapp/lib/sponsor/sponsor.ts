@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork, stellarTestnet } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
 import { sponsorFee } from './fee-bump'
@@ -96,7 +96,7 @@ export async function sponsorForSubmission(
     await ensureFunded(
       sponsor.publicKey(),
       options.fetchImpl ?? fetch,
-      options.horizonUrl ?? stellarTestnet.horizonUrl,
+      options.horizonUrl ?? stellarNetwork.horizonUrl,
       options.friendbotUrl ?? stellarTestnet.friendbotUrl
     )
   } catch {
@@ -105,7 +105,7 @@ export async function sponsorForSubmission(
 
   const bumped = sponsorFee(signedXdr, account, {
     sponsor,
-    passphrase: stellarTestnet.networkPassphrase,
+    passphrase: stellarNetwork.networkPassphrase,
     ...(options.maxFeeStroops !== undefined ? { maxFeeStroops: options.maxFeeStroops } : {}),
   })
   if (!bumped.ok) return { xdr: signedXdr, sponsored: false, reason: bumped.reason }

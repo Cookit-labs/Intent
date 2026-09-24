@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { FeeBumpTransaction, TransactionBuilder, rpc, scValToNative } from '@stellar/stellar-sdk'
 import type { xdr } from '@stellar/stellar-sdk'
 
@@ -32,10 +32,10 @@ export type SimulateOutcome = { ok: true; retval?: xdr.ScVal } | { ok: false; er
 /** Injected in tests; the RPC one below in routes. */
 export type Simulate = (xdr: string) => Promise<SimulateOutcome>
 
-export function createRpcSimulate(rpcUrl: string = stellarTestnet.sorobanRpcUrl): Simulate {
+export function createRpcSimulate(rpcUrl: string = stellarNetwork.sorobanRpcUrl): Simulate {
   const server = new rpc.Server(rpcUrl)
   return async (envelope) => {
-    const tx = TransactionBuilder.fromXDR(envelope, stellarTestnet.networkPassphrase)
+    const tx = TransactionBuilder.fromXDR(envelope, stellarNetwork.networkPassphrase)
     if (tx instanceof FeeBumpTransaction) return { ok: false, error: 'fee bump' }
     const sim = await server.simulateTransaction(tx)
     if (rpc.Api.isSimulationError(sim)) return { ok: false, error: sim.error }

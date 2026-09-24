@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -103,7 +103,7 @@ export async function buildAquariusSwap(
 ): Promise<BuiltAquariusSwap> {
   const { account, from, to, sendAmount, minReceive, poolIndex } = options
   const routerId = options.routerId ?? AQUARIUS_ROUTER
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   if (BigInt(sendAmount) <= BigInt(0)) {
@@ -154,7 +154,7 @@ export async function buildAquariusSwap(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -169,7 +169,7 @@ export async function buildAquariusSwap(
     minReceive,
     sendAmount,
     poolIndex,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -184,7 +184,7 @@ export async function buildAquariusSwap(
  * must be the signer, since that is who the router pays.
  */
 export function assertSelfAquariusSwap(built: string, account: string): void {
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')

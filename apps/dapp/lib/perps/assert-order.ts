@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Address,
   FeeBumpTransaction,
@@ -124,7 +124,7 @@ function checkCommon(
 }
 
 export function assertPerpOrder(xdr: string, expect: PerpOrderExpectation): PerpOrderRead {
-  const decoded = TransactionBuilder.fromXDR(xdr, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
   if (decoded instanceof FeeBumpTransaction)
     refuse('shape', 'fee bump transactions are not built here')
   const tx = decoded

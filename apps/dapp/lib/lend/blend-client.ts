@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import {
   Account,
   Address,
@@ -203,7 +203,7 @@ async function loadSequence(
 export async function buildBlendSupply(options: BuildSupplyOptions): Promise<BuiltSupply> {
   const { account, asset, amount } = options
   const poolId = options.poolId ?? BLEND_POOL
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   if (BigInt(amount) <= BigInt(0)) {
@@ -227,7 +227,7 @@ export async function buildBlendSupply(options: BuildSupplyOptions): Promise<Bui
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -241,7 +241,7 @@ export async function buildBlendSupply(options: BuildSupplyOptions): Promise<Bui
     recipient,
     asset,
     amount,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -327,7 +327,7 @@ type PoolCallNoun =
   | 'repayment'
 
 function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun): void {
-  const decoded = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+  const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
 
   if (decoded instanceof FeeBumpTransaction) {
     throw new Error('fee-bump transactions are not supported here')
@@ -435,7 +435,7 @@ export interface BuiltWithdraw {
 export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise<BuiltWithdraw> {
   const { account, asset } = options
   const poolId = options.poolId ?? BLEND_POOL
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   const everything = options.amount === undefined
@@ -461,7 +461,7 @@ export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -476,7 +476,7 @@ export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise
     asset,
     amount,
     everything,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -526,7 +526,7 @@ async function buildSinglePoolCall(
 ): Promise<BuiltCollateral> {
   const { account, asset } = options
   const poolId = options.poolId ?? BLEND_POOL
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
   const everything = options.amount === undefined && everythingSentinel !== undefined
@@ -554,7 +554,7 @@ async function buildSinglePoolCall(
 
   const tx = new TransactionBuilder(new Account(account, sequence), {
     fee: BASE_FEE,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   })
     .addOperation(operation)
     .setTimeout(TIMEOUT_SECONDS)
@@ -569,7 +569,7 @@ async function buildSinglePoolCall(
     asset,
     amount,
     everything,
-    networkPassphrase: stellarTestnet.networkPassphrase,
+    networkPassphrase: stellarNetwork.networkPassphrase,
   }
 }
 
@@ -688,13 +688,13 @@ function readRemainingTokens(sim: rpc.Api.SimulateTransactionSuccessResponse): s
  */
 export async function prepareBlendWithdraw(
   built: string,
-  rpcUrl: string = stellarTestnet.sorobanRpcUrl
+  rpcUrl: string = stellarNetwork.sorobanRpcUrl
 ): Promise<{ ok: true; xdr: string; remaining?: string } | { ok: false; reason: string }> {
   const server = new rpc.Server(rpcUrl)
 
   let tx
   try {
-    tx = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+    tx = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   } catch {
     return { ok: false, reason: 'The transaction could not be read.' }
   }
@@ -735,13 +735,13 @@ export async function prepareBlendWithdraw(
  */
 export async function prepareBlendSupply(
   built: string,
-  rpcUrl: string = stellarTestnet.sorobanRpcUrl
+  rpcUrl: string = stellarNetwork.sorobanRpcUrl
 ): Promise<{ ok: true; xdr: string; bTokens?: string } | { ok: false; reason: string }> {
   const server = new rpc.Server(rpcUrl)
 
   let tx
   try {
-    tx = TransactionBuilder.fromXDR(built, stellarTestnet.networkPassphrase)
+    tx = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
   } catch {
     return { ok: false, reason: 'The transaction could not be read.' }
   }

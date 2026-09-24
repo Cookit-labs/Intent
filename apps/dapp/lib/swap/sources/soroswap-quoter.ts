@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 import { Asset } from '@stellar/stellar-sdk'
 import {
   Account,
@@ -75,7 +75,7 @@ function contractFor(asset: ClassicAsset): string | undefined {
 }
 
 export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): QuoteSource {
-  const rpcUrl = options.rpcUrl ?? stellarTestnet.sorobanRpcUrl
+  const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
   const routerId = options.routerId ?? ROUTER
   const enabled = options.enabled ?? true
 
@@ -115,7 +115,7 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
 
         const tx = new TransactionBuilder(source, {
           fee: BASE_FEE,
-          networkPassphrase: stellarTestnet.networkPassphrase,
+          networkPassphrase: stellarNetwork.networkPassphrase,
         })
           .addOperation(
             contract.call(
@@ -217,7 +217,7 @@ function isCanonicalSac(asset: ClassicAsset, contractId: string): boolean {
   try {
     const sdkAsset =
       asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
-    return sdkAsset.contractId(stellarTestnet.networkPassphrase) === contractId
+    return sdkAsset.contractId(stellarNetwork.networkPassphrase) === contractId
   } catch {
     // An asset we cannot construct cannot be matched, and guessing would
     // defeat the point of the check.
