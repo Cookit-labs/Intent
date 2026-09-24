@@ -8,6 +8,7 @@ import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../cha
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
 import { clearSession, ensureSession } from '../api/auth'
+import { isWrongStellarNetwork, switchNetworkMessage } from '../wallet-network'
 
 /**
  * Remembers that a session was established, so a reload can restore it.
@@ -256,8 +257,7 @@ function useStellarWallet(): ChainWallet {
     void run()
   }, [])
 
-  const isWrongNetwork =
-    address !== undefined && network !== undefined && network !== stellarNetwork.networkPassphrase
+  const isWrongNetwork = address !== undefined && isWrongStellarNetwork(network)
 
   const { data: balances } = useQuery({
     queryKey: ['stellar-balances', address],
@@ -269,7 +269,7 @@ function useStellarWallet(): ChainWallet {
   const switchNetwork = useCallback(() => {
     // Stellar wallets expose no programmatic network switch; the user changes
     // it in the wallet. Saying so beats a button that silently does nothing.
-    setError(`Switch your wallet to ${stellarNetwork.name}, then reconnect.`)
+    setError(switchNetworkMessage())
   }, [])
 
   return {
