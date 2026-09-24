@@ -14,7 +14,7 @@ import {
 import { resolveVerifiedAsset } from './asset-registry'
 import type { ClassicAsset } from './assets'
 import { sacFor } from './build-soroban'
-import { AQUARIUS_ROUTER } from './sources/aquarius-quoter'
+import { AQUARIUS_ROUTER } from './contract-registry'
 
 /**
  * Swapping through Aquarius's router.

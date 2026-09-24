@@ -1,3 +1,5 @@
+import { activeNetwork } from '@intent/config'
+
 /**
  * Which Soroban contracts a plan may call, and what each one is named on the
  * confirmation screen.
@@ -38,21 +40,71 @@ export interface ContractEntry {
   functions: Record<string, string>
 }
 
-/** Soroswap's testnet router. Mirrors the id in [build-soroban.ts]. */
-export const SOROSWAP_ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
+/**
+ * Which network's ids this module hands out, decided once at import like the
+ * config it reads. Every constant below is a `{ testnet, mainnet }` pair, and
+ * `mainnet` is `undefined` wherever no id could be verified from the venue's
+ * own documentation or deployment repository — an unverified venue is absent
+ * from the allowlist there rather than guessed at. A testnet id is never on
+ * the mainnet allowlist, nor the reverse: a signature is only handed to a
+ * contract this app has reviewed on the network it is about to be broadcast to.
+ */
+const NETWORK = activeNetwork()
 
-/** Blend's testnet lending pool, verified against `get_reserve_list`. */
-export const BLEND_POOL = 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF'
+function onActiveNetwork<M extends string | undefined>(ids: {
+  testnet: string
+  mainnet: M
+}): string | M {
+  return NETWORK === 'mainnet' ? ids.mainnet : ids.testnet
+}
 
 /**
- * Aquarius's testnet router. Mirrors the id in `sources/aquarius-quoter.ts`.
+ * Soroswap's router. The builder and the quoter read this rather than
+ * carrying their own copy.
  *
- * Confirmed live by reading its contract instance on 2026-09-17. Testnet
- * resets remove contracts — three officially documented oracle addresses
- * were found already gone that way — so a live test asserts this one still
- * exists rather than trusting the constant.
+ * Mainnet from `public/mainnet.contracts.json` in Soroswap's core repository,
+ * https://github.com/soroswap/core/blob/main/public/mainnet.contracts.json
+ * (`ids.router`, read 2026-09-24); the same file's testnet entry is the id
+ * below. Its instance was read on the public network the same day.
  */
-export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
+export const SOROSWAP_ROUTER = onActiveNetwork({
+  testnet: 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD',
+  mainnet: 'CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH',
+})
+
+/**
+ * Blend's lending pool, verified against `get_reserve_list` on each network.
+ *
+ * Testnet is the v2 pool Blend's own deployment file names `TestnetV2`.
+ * Mainnet is its v2 `Fixed` pool — XLM and USDC, the main USDC pool — from
+ * https://github.com/blend-capital/blend-utils/blob/main/mainnet.contracts.json
+ * (`ids.FixedV2`, read 2026-09-24). Its reserve list on the public network
+ * answered XLM and USDC that day.
+ */
+export const BLEND_POOL = onActiveNetwork({
+  testnet: 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF',
+  mainnet: 'CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD',
+})
+
+/**
+ * Aquarius's router. The quoter and the builder read this rather than
+ * carrying their own copy.
+ *
+ * Testnet confirmed live by reading its contract instance on 2026-09-17.
+ * Testnet resets remove contracts — three officially documented oracle
+ * addresses were found already gone that way — so a live test asserts this
+ * one still exists rather than trusting the constant.
+ *
+ * Mainnet from Aquarius's own developer documentation, "Soroban Contract
+ * Addresses" at
+ * https://docs.aqua.network/developers/code-examples/prerequisites-and-basics
+ * (read 2026-09-24), whose testnet entry is the id below. Its instance was
+ * read on the public network the same day.
+ */
+export const AQUARIUS_ROUTER = onActiveNetwork({
+  testnet: 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD',
+  mainnet: 'CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK',
+})
 
 /**
  * Soroswap's testnet aggregator: a different contract from the router above,
@@ -64,8 +116,17 @@ export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADR
  * a signature may be given to. If the API ever hands back a different one,
  * the builder refuses rather than following it, because a contract this app
  * has not reviewed is not one it should narrate as "Swap".
+ *
+ * Mainnet from `public/mainnet.contracts.json` in Soroswap's aggregator
+ * repository,
+ * https://github.com/soroswap/aggregator/blob/main/public/mainnet.contracts.json
+ * (`ids.aggregator`, read 2026-09-24). Its `get_adapters()` on the public
+ * network that day listed the Soroswap and Aquarius routers above.
  */
-export const SOROSWAP_AGGREGATOR = 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA'
+export const SOROSWAP_AGGREGATOR = onActiveNetwork({
+  testnet: 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA',
+  mainnet: 'CAYP3UWLJM7ZPTUKL6R6BFGTRWLZ46LRKOXTERI2K6BIJAWGYY62TXTO',
+})
 
 /**
  * Noether's testnet market and router, as its gateway listed them on
@@ -76,9 +137,18 @@ export const SOROSWAP_AGGREGATOR = 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO7
  * request time (`perps/assert-order.ts`), never against these — a testnet
  * reset or a redeploy would otherwise leave this app narrating a call to a
  * contract that no longer exists as a Noether order.
+ *
+ * No mainnet ids: Noether has not launched there (see `noether-client.ts`),
+ * so on mainnet both are `undefined` and the venue is off the allowlist.
  */
-export const NOETHER_MARKET = 'CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN'
-export const NOETHER_ROUTER = 'CBDVQKYEN6QMRGQZC77DFYEQXQHDMCVJ3TPBJKNERJVMIESA6GQT44LG'
+export const NOETHER_MARKET = onActiveNetwork({
+  testnet: 'CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN',
+  mainnet: undefined,
+})
+export const NOETHER_ROUTER = onActiveNetwork({
+  testnet: 'CBDVQKYEN6QMRGQZC77DFYEQXQHDMCVJ3TPBJKNERJVMIESA6GQT44LG',
+  mainnet: undefined,
+})
 
 /**
  * Where to see a Blend position, as opposed to the transaction that made it.
@@ -89,10 +159,12 @@ export const NOETHER_ROUTER = 'CBDVQKYEN6QMRGQZC77DFYEQXQHDMCVJ3TPBJKNERJVMIESA6
  * receipt.
  */
 export function blendPositionUrl(poolId: string = BLEND_POOL): string {
-  return `https://testnet.blend.capital/dashboard/?poolId=${poolId}`
+  const host = NETWORK === 'mainnet' ? 'mainnet' : 'testnet'
+  return `https://${host}.blend.capital/dashboard/?poolId=${poolId}`
 }
 
-const ENTRIES: ContractEntry[] = [
+/** Every contract the app knows, on this network or not; see `ENTRIES`. */
+const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined })[] = [
   {
     id: SOROSWAP_ROUTER,
     label: 'Swap via Soroswap',
@@ -164,6 +236,12 @@ const ENTRIES: ContractEntry[] = [
     },
   },
 ]
+
+/**
+ * The candidates that exist on this network. One whose id is `undefined`
+ * has no verified contract here, and a venue with no contract has no entry.
+ */
+const ENTRIES: ContractEntry[] = CANDIDATES.filter((e): e is ContractEntry => e.id !== undefined)
 
 const BY_ID = new Map(ENTRIES.map((e) => [e.id, e]))
 

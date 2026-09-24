@@ -16,6 +16,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
+import { SOROSWAP_ROUTER } from './contract-registry'
 import { plain } from './preview'
 import { resolveVerifiedAsset } from './asset-registry'
 
@@ -38,9 +39,6 @@ import { resolveVerifiedAsset } from './asset-registry'
  * 473 XLM for 50 USDC against Horizon's 128. That is not a rounding
  * difference, and until now it was unreachable.
  */
-
-/** Soroswap's testnet router. */
-const ROUTER = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
 
 /** How long the router will accept the swap. Long enough to sign, short enough to be current. */
 const DEFAULT_DEADLINE_SECONDS = 300
@@ -108,7 +106,7 @@ export async function buildSorobanSwap(
   options: BuildSorobanSwapOptions
 ): Promise<BuiltSorobanSwap> {
   const { account, from, to, sendAmount, minReceive } = options
-  const routerId = options.routerId ?? ROUTER
+  const routerId = options.routerId ?? SOROSWAP_ROUTER
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
   const deadlineSeconds = options.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS

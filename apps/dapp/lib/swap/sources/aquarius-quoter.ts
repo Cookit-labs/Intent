@@ -13,6 +13,7 @@ import {
 
 import type { ClassicAsset } from '../assets'
 import { sacFor } from '../build-soroban'
+import { AQUARIUS_ROUTER } from '../contract-registry'
 import type {
   MultiQuoteOutcome,
   QuoteFailure,
@@ -51,8 +52,8 @@ import type {
  * its spec and simulating each pool.
  */
 
-/** Aquarius's testnet router. Confirmed live on 2026-09-17; a reset can remove it. */
-export const AQUARIUS_ROUTER = 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD'
+/** The router for the active network, from the registry; re-exported for the builder. */
+export { AQUARIUS_ROUTER }
 
 /**
  * Simulation needs a source account but never submits, so any well-formed
