@@ -86,7 +86,10 @@ describe('the inbox route', () => {
   })
 })
 
-describe('the tick route', () => {
+// The first case imports the route, and with it the SDK-backed price
+// modules, from scratch; with the whole suite running that alone can take
+// most of the default budget.
+describe('the tick route', { timeout: 20_000 }, () => {
   it('refuses to run when no secret is configured', async () => {
     const { POST } = await import('../../app/api/standing/tick/route')
 

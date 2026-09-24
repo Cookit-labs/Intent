@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 /**
  * The allowlist follows the network.
@@ -38,7 +38,14 @@ const MAINNET = {
   usdcSac: 'CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75',
 }
 
-async function on(network: 'testnet' | 'mainnet') {
+type Loaded = {
+  registry: typeof import('../swap/contract-registry')
+  reflector: typeof import('../prices/reflector')
+  reserves: typeof import('../lend/reserves')
+  soroswap: typeof import('../swap/sources/soroswap-quoter')
+}
+
+async function load(network: 'testnet' | 'mainnet'): Promise<Loaded> {
   vi.resetModules()
   vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', network)
   const [registry, reflector, reserves, soroswap] = await Promise.all([
@@ -50,8 +57,20 @@ async function on(network: 'testnet' | 'mainnet') {
   return { registry, reflector, reserves, soroswap }
 }
 
-afterEach(() => {
+// Loaded once per network rather than per test: each load re-imports the
+// SDK-backed modules from scratch, which is slow with the whole suite running.
+let loaded: Record<'testnet' | 'mainnet', Loaded>
+
+beforeAll(async () => {
+  loaded = { testnet: await load('testnet'), mainnet: await load('mainnet') }
   vi.unstubAllEnvs()
+}, 60_000)
+
+function on(network: 'testnet' | 'mainnet'): Promise<Loaded> {
+  return Promise.resolve(loaded[network])
+}
+
+afterAll(() => {
   vi.resetModules()
 })
 
