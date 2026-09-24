@@ -60,6 +60,7 @@ export function ChatHistoryPanel({
             <button
               type="button"
               onClick={onClear}
+              title="Hides these on this device. Your record stays saved."
               className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
             >
               Clear

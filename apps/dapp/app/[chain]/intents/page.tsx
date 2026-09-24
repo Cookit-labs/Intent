@@ -1,72 +1,25 @@
 'use client'
 
-import { cn } from '@intent/ui'
-import { useState } from 'react'
-
-import { IntentActivity } from '../../../components/intents/intent-activity'
-import { OpenPositions } from '../../../components/intents/open-positions'
-import { SwapHistory } from '../../../components/intents/swap-history'
 import { IntentChat } from '../../../components/intents/intent-chat'
 
-type Tab = 'compose' | 'activity'
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'compose', label: 'Compose' },
-  { id: 'activity', label: 'History' },
-]
-
+/**
+ * The composer, and only the composer.
+ *
+ * History used to sit behind a second tab here, which hid a whole page of
+ * settled trades and open positions behind a label most people never
+ * clicked. It has its own page now, one step away in the sidebar.
+ */
 export default function IntentsPage(): JSX.Element {
-  const [tab, setTab] = useState<Tab>('compose')
-
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6">
         <h1 className="font-display text-3xl font-semibold tracking-tight">Intents</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Say what you want. Agents compete to deliver it — track every one here.
+          Say what you want. Agents compete to deliver it.
         </p>
       </div>
 
-      <div className="border-border mb-8 flex items-center gap-6 border-b">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={cn(
-              '-mb-px border-b-2 px-1 pb-3 text-sm transition-colors',
-              tab === t.id
-                ? 'border-foreground text-foreground font-semibold'
-                : 'text-muted-foreground hover:text-foreground border-transparent'
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Hidden rather than unmounted. A competition takes 25-65 seconds and
-          lives in component state, so switching tabs mid-race destroyed it —
-          the user came back to an empty composer and assumed their intent had
-          been thrown away, which it had. Keeping it mounted costs a hidden
-          subtree and preserves the run. */}
-      <div hidden={tab !== 'compose'}>
-        <IntentChat />
-      </div>
-
-      {tab !== 'compose' ? (
-        <div className="flex flex-col gap-8">
-          {/* Anything still live comes first. A settled swap is a record and
-              needs no decision; a resting order or a lending position is money
-              still committed. Ordering both by timestamp in one list buried the
-              second kind among the first. */}
-          <OpenPositions />
-          {/* On-chain swaps first: they are the trades that actually happened,
-              as opposed to intents the app is tracking locally. */}
-          <SwapHistory />
-          <IntentActivity onCompose={() => setTab('compose')} />
-        </div>
-      ) : null}
+      <IntentChat />
     </div>
   )
 }
