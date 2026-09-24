@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { findByEmail, normalizeEmail } from '../../../../lib/server/db'
 import { getEmailSender } from '../../../../lib/server/email'
 import { CODE_TTL_SECONDS, checkSendRateLimit, issueCode } from '../../../../lib/server/otp'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -19,6 +20,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
  * signup flow.
  */
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'auth')
+  if (limited !== undefined) return limited
+
   let email: string
   try {
     const body = (await request.json()) as { email?: unknown }

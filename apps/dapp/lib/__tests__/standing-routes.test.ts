@@ -86,24 +86,30 @@ describe('the inbox route', () => {
   })
 })
 
-// The first case imports the route, and with it the SDK-backed price
-// modules, from scratch; with the whole suite running that alone can take
-// most of the default budget.
-describe('the tick route', { timeout: 20_000 }, () => {
-  it('refuses to run when no secret is configured', async () => {
-    const { POST } = await import('../../app/api/standing/tick/route')
+describe('the tick route', () => {
+  // The first import of the route pays for its whole graph, and that graph
+  // carries the Stellar SDK through the price readers — several seconds
+  // under vitest on a cold cache, which is most of the default budget.
+  const COLD_IMPORT_MS = 30_000
 
-    const res = await POST(
-      new Request('http://localhost/api/standing/tick', {
-        method: 'POST',
-        headers: { 'x-tick-secret': 'anything' },
-      })
-    )
+  it(
+    'refuses to run when no secret is configured',
+    async () => {
+      const { POST } = await import('../../app/api/standing/tick/route')
 
-    expect(res.status).toBe(503)
-    const body = (await res.json()) as { error?: string }
-    expect(body.error).toMatch(/STANDING_TICK_SECRET/)
-  })
+      const res = await POST(
+        new Request('http://localhost/api/standing/tick', {
+          method: 'POST',
+          headers: { 'x-tick-secret': 'anything' },
+        })
+      )
+
+      expect(res.status).toBe(503)
+      const body = (await res.json()) as { error?: string }
+      expect(body.error).toMatch(/STANDING_TICK_SECRET/)
+    },
+    COLD_IMPORT_MS
+  )
 
   it('answers 403 to the wrong secret', async () => {
     process.env['STANDING_TICK_SECRET'] = TICK_SECRET

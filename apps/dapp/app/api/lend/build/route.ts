@@ -5,6 +5,8 @@ import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { BLEND_XLM, readReserveList } from '../../../../lib/lend/reserves'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { fromBaseUnits } from '../../../../lib/swap/assets'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a supply to Blend, ready for signature.
@@ -27,6 +29,9 @@ interface LendBody {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: LendBody
   try {
     body = (await request.json()) as LendBody
@@ -55,7 +60,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/build', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

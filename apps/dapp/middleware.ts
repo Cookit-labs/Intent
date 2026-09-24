@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+import { gateEnabled } from './lib/server/access-gate'
 import { SESSION_COOKIE } from './lib/server/session-constants'
 
 /**
@@ -9,6 +10,11 @@ import { SESSION_COOKIE } from './lib/server/session-constants'
  * Runs in middleware rather than a client-side check so that routes are
  * genuinely unreachable without a valid session — a component-level guard is
  * only a rendering decision and can be stepped around.
+ *
+ * Whether it runs at all is `ACCESS_GATE` (see `lib/server/access-gate.ts`):
+ * on by default for mainnet, off for testnet. `matcher` is static, so the
+ * switch is the first thing the handler checks rather than a change to the
+ * config below.
  *
  * This file runs on the edge runtime, which has no `node:crypto`, so signature
  * verification uses Web Crypto here instead of the Node helpers in
@@ -64,6 +70,8 @@ async function isValidSession(token: string | undefined, secret: string): Promis
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  if (!gateEnabled(process.env)) return NextResponse.next()
+
   const secret = process.env['AUTH_SECRET']
 
   // Without a secret the gate cannot verify anything. Failing closed would make
@@ -87,23 +95,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * ─────────────────────────────────────────────────────────────────────────────
- * ACCESS GATE DISABLED
- *
- * The waitlist/OTP gate was built from a prompt intended for a different
- * project, so nothing in the dApp is gated. The implementation is kept intact
- * rather than deleted, in case Intent wants it later.
- *
- * To switch it back on, restore the matcher below. Nothing else needs changing —
- * the routes, API handlers and datastores are all still here.
- *
- *   matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icon|verify|waitlist|admin).*)'],
- *
- * An empty matcher means middleware runs on no path at all, so every route is
- * open. `/verify`, `/waitlist` and `/admin/waitlist` still render if visited
- * directly; they are simply unreachable by redirect.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Every app page, and none of the gate's own: the API answers with its own
+ * checks, and `/verify`, `/waitlist` and `/admin/waitlist` are where an
+ * unverified visitor is sent, so they cannot themselves redirect. When the
+ * gate is off the handler returns before looking at any of this.
  */
 export const config = {
-  matcher: [],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icon|verify|waitlist|admin).*)'],
 }

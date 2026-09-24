@@ -5,6 +5,7 @@ import { sendSigned } from '../../../../../lib/lend/defindex/api'
 import { isDefindexConfigured } from '../../../../../lib/lend/defindex/config'
 import { resolveDefindexVault } from '../../../../../lib/lend/defindex/contracts'
 import { assertDefindexDeposit } from '../../../../../lib/lend/defindex/deposit'
+import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
 
 /**
  * Submits a signed DeFindex deposit through DeFindex's relay.
@@ -31,6 +32,9 @@ interface Body {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'submit')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

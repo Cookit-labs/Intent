@@ -19,6 +19,7 @@ import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
 import { applySlippage, fromBaseUnits } from '../../../../lib/swap/assets'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds the transaction a user is about to sign.
@@ -52,6 +53,9 @@ export const dynamic = 'force-dynamic'
 const MAX_QUOTE_AGE_MS = 900_000
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: { account?: unknown; quote?: unknown; slippageBps?: unknown }
   try {
     body = (await request.json()) as typeof body

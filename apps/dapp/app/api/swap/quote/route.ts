@@ -6,6 +6,7 @@ import type { QuoteRequest } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
 import { createAquariusQuoter } from '../../../../lib/swap/sources/aquarius-quoter'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Prices a swap across every configured liquidity source.
@@ -30,6 +31,9 @@ const QUOTE_TIMEOUT_MS = 15_000
 const sources = [createHorizonQuoter(), createSoroswapQuoter(), createAquariusQuoter()]
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: {
     from?: unknown
     to?: unknown

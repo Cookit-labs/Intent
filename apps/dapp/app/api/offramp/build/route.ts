@@ -5,6 +5,7 @@ import { readExpectation } from '../../../../lib/offramp/read-expectation'
 import { USDC, fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Builds the offramp payment, ready for signature.
@@ -37,6 +38,9 @@ const STATUS_FOR: Record<string, number> = {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: Body
   try {
     body = (await request.json()) as Body

@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { buildBlendRepay, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a repayment, in whole or in part.
@@ -32,6 +34,9 @@ interface RepayBody {
 // spent on mainnet through this route. Give it `assertTradeWithinCap` before
 // the venue gains `networks: ['mainnet']`.
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: RepayBody
   try {
     body = (await request.json()) as RepayBody
@@ -57,7 +62,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/repay', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

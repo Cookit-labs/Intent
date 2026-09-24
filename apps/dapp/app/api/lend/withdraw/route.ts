@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { buildBlendWithdraw, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { reportError } from '../../../../lib/server/report'
 
 /**
  * Builds a withdrawal from Blend, ready for signature.
@@ -40,6 +42,9 @@ interface WithdrawBody {
 // spent on mainnet through this route. Give it `assertTradeWithinCap` before
 // the venue gains `networks: ['mainnet']`.
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'build')
+  if (limited !== undefined) return limited
+
   let body: WithdrawBody
   try {
     body = (await request.json()) as WithdrawBody
@@ -67,7 +72,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 400 }
       )
     }
-  } catch {
+  } catch (e) {
+    reportError('lend/withdraw', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
   }
 

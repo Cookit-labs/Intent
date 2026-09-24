@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 
 import { listSignups, normalizeEmail, setStatus } from '../../../../lib/server/db'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Waitlist administration.
@@ -27,6 +28,9 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'auth')
+  if (limited !== undefined) return limited
+
   if (!isAuthorised(request)) return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
 
   try {

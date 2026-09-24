@@ -1,6 +1,8 @@
 import { stellarNetwork } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
+import { getSponsorLedger, type DayUsage, type SponsorLedger } from '../server/sponsor-ledger'
+import { budgetLimits, dayOf, describeBudget, withinBudget, type BudgetReport } from './budget'
 import { sponsorFee } from './fee-bump'
 
 /**
@@ -10,9 +12,15 @@ import { sponsorFee } from './fee-bump'
  * signed transaction that reaches a submit route is wrapped in a fee-bump
  * the sponsor pays for; when none is set, nothing changes. The rule for
  * anything in between — a key that will not parse, an account that cannot
- * be funded, a bump that cannot be made — is that the user's transaction
- * still goes out paying its own fee, exactly as before sponsorship existed.
- * Sponsorship removes a cost; it must never add a failure.
+ * be funded, a bump that cannot be made, a day's budget already spent — is
+ * that the user's transaction still goes out paying its own fee, exactly as
+ * before sponsorship existed. Sponsorship removes a cost; it must never add
+ * a failure.
+ *
+ * The budget is what bounds the key. Each fee is capped in `fee-bump.ts`,
+ * but a thousand small fees drain an account as surely as one large one, so
+ * a day's total and any one account's count are capped too, in a ledger
+ * the submit routes share through Postgres.
  *
  * Testnet only in one respect: an unfunded sponsor account is created
  * through friendbot on first use, so a fresh deployment does not need a
@@ -52,11 +60,70 @@ export interface SponsorForSubmissionOptions {
   horizonUrl?: string
   friendbotUrl?: string
   maxFeeStroops?: bigint
+  /** The day's ledger; the Postgres one when absent. */
+  ledger?: SponsorLedger
+  now?: Date
 }
 
 export type SponsoredSubmission =
   | { xdr: string; sponsored: true; feeStroops: string }
   | { xdr: string; sponsored: false; reason?: string }
+
+let warnedLedgerUnreachable = false
+
+/** Said once in the log, then quiet until the process restarts. */
+function warnLedgerUnreachable(e: unknown): void {
+  if (warnedLedgerUnreachable) return
+  warnedLedgerUnreachable = true
+  console.warn(
+    `[sponsor-ledger] database unreachable, sponsoring without a budget: ${
+      e instanceof Error ? e.message : String(e)
+    }`
+  )
+}
+
+/**
+ * Whether today has room for this fee, keeping it on the books when it does.
+ *
+ * Reserved first and judged on the result, rather than checked and then
+ * recorded: two submissions racing for the last of the budget would each
+ * pass a check, but each sees the total its own reservation produced, and
+ * the one that went over gives it back.
+ *
+ * A ledger that cannot be reached is an allow. Sponsorship must never add a
+ * failure, and that includes its own bookkeeping failing; a database blip
+ * should cost the budget its accuracy for a moment, not cost users their
+ * fees. The one exception is a release that fails after a reservation went
+ * over: the day stays over-counted, which is the safe direction for a cap,
+ * and the refusal stands.
+ */
+async function commitToBudget(
+  account: string,
+  feeStroops: bigint,
+  env: Env,
+  now: Date,
+  ledger: SponsorLedger | undefined
+): Promise<boolean> {
+  const day = dayOf(now)
+  let book: SponsorLedger
+  let after: DayUsage
+  try {
+    book = ledger ?? (await getSponsorLedger())
+    after = await book.record(day, account, feeStroops)
+  } catch (e) {
+    warnLedgerUnreachable(e)
+    return true
+  }
+
+  if (withinBudget(after, budgetLimits(env))) return true
+
+  try {
+    await book.release(day, account, feeStroops)
+  } catch (e) {
+    warnLedgerUnreachable(e)
+  }
+  return false
+}
 
 /**
  * Makes sure the sponsor account exists on the ledger, funding it from
@@ -114,5 +181,34 @@ export async function sponsorForSubmission(
   })
   if (!bumped.ok) return { xdr: signedXdr, sponsored: false, reason: bumped.reason }
 
+  // Checked after the bump is built rather than before, because the fee the
+  // budget has to hold is the one the bump names, and the bump is the only
+  // place it is computed. Building one is local and costs nothing.
+  const room = await commitToBudget(
+    account,
+    BigInt(bumped.feeStroops),
+    env,
+    options.now ?? new Date(),
+    options.ledger
+  )
+  if (!room) return { xdr: signedXdr, sponsored: false, reason: 'budget' }
+
   return { xdr: bumped.xdr, sponsored: true, feeStroops: bumped.feeStroops }
+}
+
+/**
+ * Today's budget and how much of it is spent, for `GET /api/sponsor`.
+ * Undefined when the ledger cannot be reached: the route answers what it
+ * can rather than failing over a number that is only informational.
+ */
+export async function sponsorBudgetToday(
+  options: { env?: Env; ledger?: SponsorLedger; now?: Date } = {}
+): Promise<BudgetReport | undefined> {
+  const day = dayOf(options.now ?? new Date())
+  try {
+    const book = options.ledger ?? (await getSponsorLedger())
+    return describeBudget(day, await book.usage(day), budgetLimits(options.env ?? process.env))
+  } catch {
+    return undefined
+  }
 }

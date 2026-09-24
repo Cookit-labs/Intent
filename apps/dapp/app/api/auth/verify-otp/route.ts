@@ -3,8 +3,12 @@ import { NextResponse } from 'next/server'
 import { findByEmail, markFirstLogin, normalizeEmail } from '../../../../lib/server/db'
 import { SESSION_COOKIE, createSession, sessionCookieOptions } from '../../../../lib/server/session'
 import { verifyCode } from '../../../../lib/server/otp'
+import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'auth')
+  if (limited !== undefined) return limited
+
   let email: string
   let code: string
   try {

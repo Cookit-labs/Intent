@@ -2,9 +2,12 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import { fetchFxPrices } from '../../../../lib/prices/reflector'
+import { alertRecipient, getAlertsRepo, sponsorAlertThreshold } from '../../../../lib/server/alerts'
 import { getEmailSender } from '../../../../lib/server/email'
 import { getStandingRulesRepo } from '../../../../lib/server/standing-rules'
-import { runTick } from '../../../../lib/server/standing-tick'
+import { runTick, type SponsorWatch } from '../../../../lib/server/standing-tick'
+import { readSponsorBalance } from '../../../../lib/sponsor/balance'
+import { sponsorAccount } from '../../../../lib/sponsor/sponsor'
 import { fetchMarketPrices, toPriceTable } from '../../../../lib/swap/prices'
 
 /**
@@ -41,6 +44,21 @@ function appUrl(request: Request): string {
   return new URL(request.url).origin
 }
 
+/** The sponsor watch, when there is a sponsor to watch and someone to tell. */
+async function sponsorWatch(): Promise<SponsorWatch | undefined> {
+  const account = sponsorAccount()
+  const alertEmail = alertRecipient()
+  if (account === undefined || alertEmail === undefined) return undefined
+
+  return {
+    account,
+    balance: () => readSponsorBalance(account),
+    alertBelowXlm: sponsorAlertThreshold(),
+    alertEmail,
+    alerts: await getAlertsRepo(),
+  }
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   const expected = process.env['STANDING_TICK_SECRET']
   if (expected === undefined || expected.length < MIN_SECRET_LENGTH) {
@@ -61,12 +79,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   const [market, fx] = await Promise.all([fetchMarketPrices(), fetchFxPrices()])
   const prices = { ...toPriceTable(fx), ...toPriceTable(market) }
 
+  const sponsor = await sponsorWatch()
   const result = await runTick({
     now: new Date(),
     prices,
     repo: await getStandingRulesRepo(),
     mailer: getEmailSender(),
     appUrl: appUrl(request),
+    ...(sponsor !== undefined ? { sponsor } : {}),
   })
 
   return NextResponse.json(result)
