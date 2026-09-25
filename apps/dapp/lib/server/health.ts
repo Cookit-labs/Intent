@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 import { readSponsorBalance, type SponsorBalance } from '../sponsor/balance'
 import { sponsorAccount } from '../sponsor/sponsor'
@@ -175,7 +175,7 @@ export function defaultProbes(options: DefaultProbeOptions = {}): HealthProbes {
     },
 
     async horizon(signal) {
-      const res = await doFetch(`${stellarTestnet.horizonUrl}/`, {
+      const res = await doFetch(`${stellarNetwork.horizonUrl}/`, {
         headers: { Accept: 'application/json' },
         signal,
       })
@@ -183,7 +183,7 @@ export function defaultProbes(options: DefaultProbeOptions = {}): HealthProbes {
     },
 
     async rpc(signal) {
-      const res = await doFetch(stellarTestnet.sorobanRpcUrl, {
+      const res = await doFetch(stellarNetwork.sorobanRpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),

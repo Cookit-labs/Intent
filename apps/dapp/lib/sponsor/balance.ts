@@ -1,4 +1,4 @@
-import { stellarTestnet } from '@intent/config'
+import { stellarNetwork } from '@intent/config'
 
 /**
  * What the sponsor holds, as Horizon states it.
@@ -36,7 +36,7 @@ export async function readSponsorBalance(
   options: ReadSponsorBalanceOptions = {}
 ): Promise<SponsorBalance> {
   const doFetch = options.fetchImpl ?? fetch
-  const horizonUrl = options.horizonUrl ?? stellarTestnet.horizonUrl
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
 
   const res = await doFetch(`${horizonUrl}/accounts/${account}`, {
     headers: { Accept: 'application/json' },
