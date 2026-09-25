@@ -27,5 +27,12 @@
     "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
   },
-  "packageManager": "pnpm@9.4.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-2xp9-vwfh-vxw4"
+      ]
+    }
+  }
 }

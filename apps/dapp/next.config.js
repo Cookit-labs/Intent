@@ -34,6 +34,13 @@ const config = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion', 'recharts'],
   },
+  // The image optimizer (`/_next/image`) is off: the 14.2 line carries an
+  // unauthenticated RCE in it (GHSA-2xp9-vwfh-vxw4) that is fixed only from
+  // 15.5.24, and the server behind that route holds the sponsor key.
+  // `next/image` still renders; it serves the source file as it is. Remove
+  // this, and the matching audit ignore in the root package.json, once the
+  // app is on a patched line.
+  images: { unoptimized: true },
 }
 
 /**
