@@ -71,22 +71,24 @@ const trustline = () => Operation.changeTrust({ asset: USDC })
 /** A contract this app does not integrate. Well-formed, and not on the list. */
 const UNKNOWN_CONTRACT = 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA'
 
-const routerSwap = (contractId = SOROSWAP_ROUTER) =>
+/** The Soroswap router's swap; `to` is who receives the output. */
+const routerSwap = (contractId = SOROSWAP_ROUTER, to = ME) =>
   new Contract(contractId).call(
     'swap_exact_tokens_for_tokens',
     nativeToScVal(BigInt(10), { type: 'i128' }),
     nativeToScVal(BigInt(1), { type: 'i128' }),
     nativeToScVal([]),
-    new Address(ME).toScVal(),
+    new Address(to).toScVal(),
     nativeToScVal(BigInt(9_999_999_999), { type: 'u64' })
   )
 
-const blendSupply = (fn = 'submit') =>
+/** Blend's `submit(from, spender, to, requests)`; `to` is whose position the requests act on. */
+const blendSupply = (fn = 'submit', to = ME) =>
   new Contract(BLEND_POOL).call(
     fn,
     new Address(ME).toScVal(),
     new Address(ME).toScVal(),
-    new Address(ME).toScVal(),
+    new Address(to).toScVal(),
     nativeToScVal([])
   )
 
@@ -183,42 +185,45 @@ describe('every operation is checked, not just the first', () => {
   })
 })
 
-describe('a contract call is checked by contract, not by operation type', () => {
-  it('accepts a call to a contract the app integrates', () => {
-    expect(() => assertSelfPlan(envelope([routerSwap()]), ME)).not.toThrow()
+describe('a contract call may not pay a stranger', () => {
+  // The per-shape assertions on the swap and lend routes read the recipient
+  // argument out of the call. A plan step was checked by contract id and
+  // function name only, so the same bytes those routes refuse passed here —
+  // a hole in the one route whose guarantee the builders all repeat.
+  it('refuses a Soroswap router swap whose output goes to a stranger', () => {
+    expect(() => assertSelfPlan(envelope([routerSwap(SOROSWAP_ROUTER, STRANGER)]), ME)).toThrow()
+  })
+
+  it("refuses a Blend submit that acts on a stranger's position", () => {
+    // The request vector is what would make this a withdrawal of the whole
+    // position; it is empty here because nothing in the plan check reads it,
+    // which is the point.
+    expect(() => assertSelfPlan(envelope([blendSupply('submit', STRANGER)]), ME)).toThrow()
+  })
+})
+
+describe('a contract call is not something a plan may contain', () => {
+  // No plan builder emits one, so the type is refused outright rather than
+  // admitted by contract and function: a call's arguments decide who it
+  // pays, and the assertion that reads them lives on the route built for
+  // that shape (`assertSelfSubmission`, `assertSelfPoolCall`), not here.
+  it('refuses a call even to a contract the app integrates, paying the signer', () => {
+    expect(() => assertSelfPlan(envelope([routerSwap()]), ME)).toThrow(/invokeHostFunction/)
+    expect(() => assertSelfPlan(envelope([blendSupply()]), ME)).toThrow(/invokeHostFunction/)
   })
 
   it('refuses a call to a contract the app does not integrate', () => {
-    // The gap this closes. Before, *any* contract on the network passed here,
-    // because only the operation type was checked. A user reviewing the plan
-    // would have read "Swap via router" over a call to a stranger's contract.
     expect(() => assertSelfPlan(envelope([routerSwap(UNKNOWN_CONTRACT)]), ME)).toThrow(
-      /not a contract this app calls/
+      /invokeHostFunction/
     )
   })
 
-  it('refuses a function the contract is not integrated for', () => {
-    // Allowing the contract but not the function matters because a lending
-    // pool that supplies also borrows. "Supply to Blend" over a `borrow` call
-    // would be the safety mechanism itself telling the lie.
-    expect(() => assertSelfPlan(envelope([blendSupply('borrow')]), ME)).toThrow(
-      /does not accept borrow/
-    )
-  })
-
-  it('refuses an unknown contract hidden behind a legitimate one', () => {
+  it('refuses a contract call hidden behind a legitimate swap', () => {
     // Position must not matter here either.
-    expect(() =>
-      assertSelfPlan(envelope([routerSwap(), routerSwap(UNKNOWN_CONTRACT)]), ME)
-    ).toThrow(/step 2/)
+    expect(() => assertSelfPlan(envelope([selfSwap(), routerSwap()]), ME)).toThrow(/step 2/)
   })
 
-  it('names the contract in review rather than the operation type', () => {
-    const steps = assertSelfPlan(envelope([routerSwap(), blendSupply()]), ME)
-    expect(describePlan(steps)).toEqual(['1. Swap via Soroswap', '2. Supply to Blend'])
-  })
-
-  it('still describes classic operations by type', () => {
+  it('describes each step by its operation type', () => {
     const steps = assertSelfPlan(envelope([trustline(), selfSwap()]), ME)
     expect(describePlan(steps)).toEqual(['1. Allow asset', '2. Swap'])
   })

@@ -7,8 +7,6 @@ import {
   type Operation,
 } from '@stellar/stellar-sdk'
 
-import { labelForCall } from './contract-registry'
-
 /**
  * Validating a transaction that does several things at once.
  *
@@ -50,6 +48,13 @@ export const MAX_PLAN_STEPS = 10
  *   trade in the plan.
  * - `createAccount`, `clawback`, `beginSponsoringFutureReserves` — none are
  *   produced by any builder, and all have consequences beyond a trade.
+ * - `invokeHostFunction` — a contract call's type says nothing about what it
+ *   does, and no plan builder emits one (`build-plan` composes path payments,
+ *   offers, trustlines and pool deposits). It was once admitted by contract
+ *   id and function name, which let a Soroswap router swap or a Blend
+ *   `submit` through with a stranger in its recipient argument: the
+ *   per-shape assertions on the swap and lend routes read that argument,
+ *   this one did not. A contract call belongs on the route that asserts it.
  */
 const ALLOWED_OPERATIONS = new Set([
   'pathPaymentStrictSend',
@@ -59,10 +64,6 @@ const ALLOWED_OPERATIONS = new Set([
   'createPassiveSellOffer',
   'liquidityPoolDeposit',
   'liquidityPoolWithdraw',
-  // Permitted by type, but not on that alone: the contract and function are
-  // checked against the registry below. Allowing the type by itself would admit
-  // a call to any contract on the network and narrate it as a swap.
-  'invokeHostFunction',
   // Buying an asset the account cannot yet hold requires this first, and
   // splitting it into a separate signature is exactly what multi-step exists
   // to avoid. It grants nothing to anyone else.
@@ -75,15 +76,6 @@ const DELIVERS_TO_DESTINATION = new Set(['pathPaymentStrictSend', 'pathPaymentSt
 export interface PlanStep {
   index: number
   type: string
-  /**
-   * For a contract call, what it does in words — resolved from the contract
-   * rather than the operation type.
-   *
-   * Carried on the step because `describePlan` sees only steps, and a step
-   * that knows only "invokeHostFunction" cannot tell a Soroswap swap from a
-   * Blend supply. Absent for classic operations, whose type is enough.
-   */
-  label?: string
 }
 
 /**
@@ -188,7 +180,7 @@ export function assertSelfPlan(xdr: string, account: string): PlanStep[] {
       // nothing, and this failure should be diagnosable from a screenshot.
       throw new Error(
         `refusing to sign step ${index + 1}: ${type} is not an operation this app builds. ` +
-          'Only swaps, offers, pool deposits, trustlines and router calls may appear in a plan.'
+          'Only swaps, offers, pool deposits and trustlines may appear in a plan.'
       )
     }
 
@@ -215,30 +207,17 @@ export function assertSelfPlan(xdr: string, account: string): PlanStep[] {
       }
     }
 
-    // A contract call is the one operation whose type says nothing about what
-    // it does. Every other entry in the allowlist is self-describing;
-    // `invokeHostFunction` could be a swap, a supply, a borrow, or a transfer
-    // of the whole balance to somebody else's contract.
-    if (type === 'invokeHostFunction') {
-      const { contractId, functionName } = readContractCall(op)
-      const resolved = labelForCall(contractId, functionName)
-      if (!resolved.ok) {
-        throw new Error(
-          `refusing to sign step ${index + 1}: ${resolved.reason}. ` +
-            'A plan may only call contracts this app integrates.'
-        )
-      }
-      steps.push({ index, type, label: resolved.label })
-      return
-    }
-
     steps.push({ index, type })
   })
 
   return steps
 }
 
-/** Human-readable names for the confirmation screen. */
+/**
+ * Human-readable names for the confirmation screen. Every allowed type is
+ * self-describing, which is what lets a label be looked up by type at all: a
+ * contract call would need naming by its contract, and none may appear.
+ */
 const STEP_LABELS: Record<string, string> = {
   pathPaymentStrictSend: 'Swap',
   pathPaymentStrictReceive: 'Swap',
@@ -248,10 +227,6 @@ const STEP_LABELS: Record<string, string> = {
   liquidityPoolDeposit: 'Add liquidity',
   liquidityPoolWithdraw: 'Withdraw liquidity',
   changeTrust: 'Allow asset',
-  // Deliberately absent: `invokeHostFunction`. There is no honest label for a
-  // contract call that does not name the contract, and the previous entry
-  // ("Swap via router") described a Blend supply as a swap. A step of this type
-  // always carries its own label, resolved from the registry.
 }
 
 /**
@@ -262,8 +237,5 @@ const STEP_LABELS: Record<string, string> = {
  * operations, not more.
  */
 export function describePlan(steps: PlanStep[]): string[] {
-  // The step's own label wins where it has one: only the step knows which
-  // contract a call went to, and that is the difference between "Supply to
-  // Blend" and "Swap via Soroswap".
-  return steps.map((s, i) => `${i + 1}. ${s.label ?? STEP_LABELS[s.type] ?? s.type}`)
+  return steps.map((s, i) => `${i + 1}. ${STEP_LABELS[s.type] ?? s.type}`)
 }

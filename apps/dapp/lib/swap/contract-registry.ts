@@ -3,23 +3,25 @@ import { activeNetwork } from '@intent/config'
 import { venueIdOn } from '../venues'
 
 /**
- * Which Soroban contracts a plan may call, and what each one is named on the
+ * Which Soroban contracts the app calls, and what each one is named on the
  * confirmation screen.
  *
- * The gap this closes: `assertSelfPlan` allowed `invokeHostFunction` by
- * operation type and labelled every one of them "Swap via router". A call to
- * *any* contract on the network passed validation and was described to the user
- * as a swap. The numbered review list is the entire reason one signature over
- * several operations is acceptable, so a list that names the wrong action is
- * worse than no list.
+ * This began as the allowlist for contract calls inside a plan, where
+ * `assertSelfPlan` once admitted `invokeHostFunction` by operation type and
+ * labelled every one "Swap via router". A plan now admits no contract call at
+ * all — a call's arguments decide who it pays, and only the route built for
+ * that shape reads them — so what remains here is the registry the other
+ * paths consult: `lookupContract` is the per-network allowlist the aggregator
+ * check and the mainnet venue gate read, and `labelForCall` names the route
+ * the aggregator's envelope took.
  *
  * Two properties follow from an allowlist keyed by contract id:
  *
- * - An unrecognised contract fails the envelope rather than being narrated as
- *   something familiar.
+ * - An unrecognised contract is refused rather than narrated as something
+ *   familiar.
  * - The label comes from the contract, so "Supply to Blend" and "Swap via
- *   Soroswap" are distinguishable in review even though both are the same
- *   operation type.
+ *   Soroswap" are distinguishable even though both are the same operation
+ *   type.
  *
  * Function names are part of the entry, not decoration. A pool contract that
  * supplies also withdraws and borrows, and "Supply to Blend" over a `borrow`
@@ -210,13 +212,14 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined; venue: 
     functions: {
       // `submit` carries a request vector whose type decides whether this is
       // a supply, a withdrawal, collateral, a borrow or a repayment, and this
-      // registry labels by function name alone. The label is accurate here
-      // because the only path that reaches this table is a *plan* step, and
-      // `build-plan` builds supplies only. The direct lend routes never
-      // consult it — each asserts its own shape and names its own noun in a
-      // refusal (see `assertSelfPoolCall` in lend/blend-client.ts). If a
-      // plan step ever carries another request type, this label must learn
-      // to read the vector rather than stay a constant.
+      // registry labels by function name alone. Nothing labels a Blend call
+      // through it today: a plan admits no contract call, and the direct lend
+      // routes never consult the registry — each asserts its own shape and
+      // names its own noun in a refusal (see `assertSelfPoolCall` in
+      // lend/blend-client.ts). The entry stays so this remains the one list
+      // of contracts the app calls; if anything ever labels a Blend call
+      // from here, it must learn to read the vector rather than stay a
+      // constant.
       submit: 'Supply to Blend',
     },
   },
