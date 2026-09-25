@@ -47,7 +47,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'signedXdr is required' }, { status: 400 })
   }
 
-  // Required rather than optional, unlike the plan route. A supply has no
+  // Required rather than optional. A supply has no
   // meaningful validation without knowing who it should credit, so submitting
   // one without an account to check against would skip the only check that
   // matters.
