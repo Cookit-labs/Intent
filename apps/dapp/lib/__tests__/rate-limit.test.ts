@@ -192,7 +192,25 @@ describe('enforceRateLimit', () => {
     expect(await res?.json()).toEqual({ error: 'rate_limited', retryAfter: retry })
   })
 
-  it('keys on the first hop of x-forwarded-for, then x-real-ip, then unknown', async () => {
+  it('keys on x-nf-client-connection-ip before anything the request may carry', async () => {
+    // Netlify sets it at its edge from the connection; x-forwarded-for behind
+    // it can begin with a hop the client chose. The deploy is Netlify, so the
+    // platform's own header wins over the ones a client can send.
+    await enforceRateLimit(
+      post({
+        'x-nf-client-connection-ip': '203.0.113.9',
+        'x-forwarded-for': '10.0.0.1, 198.51.100.7',
+        'x-real-ip': '8.8.8.8',
+      }),
+      'build',
+      undefined,
+      deps()
+    )
+
+    expect([...db.counts.keys()].map((k) => k.split('|')[0])).toEqual(['ip:203.0.113.9:build'])
+  })
+
+  it('falls back to the first hop of x-forwarded-for, then x-real-ip, then unknown', async () => {
     await enforceRateLimit(
       post({ 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }),
       'build',
