@@ -23,7 +23,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * is pinned is that it is never asked to be.
  */
 
-const submit = vi.fn(async () => ({ ok: true, hash: 'h' }))
+const submit = vi.fn<(xdr: string) => Promise<{ ok: boolean; hash: string }>>(async () => ({
+  ok: true,
+  hash: 'h',
+}))
 
 vi.mock('../swap/submit', () => ({
   submitSignedSwap: (xdr: string) => submit(xdr),
