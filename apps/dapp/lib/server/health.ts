@@ -2,7 +2,7 @@ import { stellarNetwork } from '@intent/config'
 
 import { readSponsorBalance, type SponsorBalance } from '../sponsor/balance'
 import { sponsorAccount } from '../sponsor/sponsor'
-import { getPool } from './db'
+import { databaseConfigured, getPool } from './db'
 
 /**
  * What GET /api/health answers.
@@ -11,8 +11,11 @@ import { getPool } from './db'
  * Soroban RPC — and one it can: the sponsor. A sponsor that is unfunded or
  * unreadable means users pay their own fees, which is the state the app was
  * in before sponsorship existed, so it is reported but does not turn the
- * endpoint red. The database, by contrast, is where sessions, rules and the
- * waitlist live; without it most routes answer 500.
+ * endpoint red. The database, by contrast, is where sessions, rules, limits,
+ * the sponsor's ledger and the waitlist live; without it most routes answer
+ * 500 and the sponsor refuses to pay. A database that is not configured at
+ * all is reported as that, distinct from one that is down: the first is a
+ * deployment to fix, the second a blip to page about.
  *
  * Every probe is bounded. A monitor that asks and never hears back marks the
  * deployment down anyway, and a hung upstream should produce a 503 with a
@@ -33,6 +36,11 @@ export interface Check {
   detail?: string
 }
 
+export interface DatabaseCheck extends Check {
+  /** Whether a DATABASE_URL is set at all. False is never ok, and never a blip. */
+  configured: boolean
+}
+
 export interface SponsorCheck extends Check {
   configured: boolean
   funded: boolean
@@ -44,14 +52,18 @@ export interface SponsorCheck extends Check {
 export interface HealthReport {
   ok: boolean
   network: string
-  checks: { database: Check; horizon: Check; rpc: Check; sponsor: SponsorCheck }
+  checks: { database: DatabaseCheck; horizon: Check; rpc: Check; sponsor: SponsorCheck }
 }
 
 /** Resolves when the thing is up; throws with the reason when it is not. */
 export type Probe = (signal: AbortSignal) => Promise<void>
 
 export interface HealthProbes {
-  database: Probe
+  database: {
+    /** Whether a DATABASE_URL is set. When it is not, the probe is never run. */
+    configured: boolean
+    probe: Probe
+  }
   horizon: Probe
   rpc: Probe
   sponsor: {
@@ -109,6 +121,18 @@ async function checkOne(probe: Probe, timeoutMs: number): Promise<Check> {
   return r.ok ? { ok: true, ms: r.ms } : { ok: false, ms: r.ms, detail: r.detail }
 }
 
+async function checkDatabase(
+  database: HealthProbes['database'],
+  timeoutMs: number
+): Promise<DatabaseCheck> {
+  // A fixed reason, not the pool's message: there is nothing to probe, and
+  // the answer should read the same on every deploy that has this wrong.
+  if (!database.configured) {
+    return { ok: false, ms: 0, configured: false, detail: 'DATABASE_URL is not set' }
+  }
+  return { ...(await checkOne(database.probe, timeoutMs)), configured: true }
+}
+
 async function checkSponsor(
   sponsor: HealthProbes['sponsor'],
   timeoutMs: number
@@ -135,7 +159,7 @@ export async function checkHealth(options: HealthOptions): Promise<HealthReport>
   const { probes } = options
 
   const [database, horizon, rpc, sponsor] = await Promise.all([
-    checkOne(probes.database, timeoutMs),
+    checkDatabase(probes.database, timeoutMs),
     checkOne(probes.horizon, timeoutMs),
     checkOne(probes.rpc, timeoutMs),
     checkSponsor(probes.sponsor, timeoutMs),
@@ -170,8 +194,11 @@ export function defaultProbes(options: DefaultProbeOptions = {}): HealthProbes {
   const env = options.env ?? process.env
 
   return {
-    async database() {
-      await getPool().query('SELECT 1')
+    database: {
+      configured: databaseConfigured(env),
+      async probe() {
+        await getPool().query('SELECT 1')
+      },
     },
 
     async horizon(signal) {

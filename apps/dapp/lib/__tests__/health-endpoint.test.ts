@@ -25,7 +25,7 @@ const SPONSOR = 'G'.padEnd(56, 'S')
 
 function probes(over: Partial<HealthProbes> = {}): HealthProbes {
   return {
-    database: ok,
+    database: { configured: true, probe: ok },
     horizon: ok,
     rpc: ok,
     sponsor: {
@@ -42,7 +42,7 @@ describe('checkHealth', () => {
 
     expect(report.ok).toBe(true)
     expect(report.network).toBe('testnet')
-    expect(report.checks.database).toEqual({ ok: true, ms: expect.any(Number) })
+    expect(report.checks.database).toEqual({ ok: true, ms: expect.any(Number), configured: true })
     expect(report.checks.horizon).toEqual({ ok: true, ms: expect.any(Number) })
     expect(report.checks.rpc).toEqual({ ok: true, ms: expect.any(Number) })
     expect(report.checks.sponsor).toEqual({
@@ -57,7 +57,9 @@ describe('checkHealth', () => {
 
   it('is not ok when a required check fails, and carries the reason', async () => {
     const report = await checkHealth({
-      probes: probes({ database: fails('connect ECONNREFUSED 127.0.0.1:5432') }),
+      probes: probes({
+        database: { configured: true, probe: fails('connect ECONNREFUSED 127.0.0.1:5432') },
+      }),
       network: 'testnet',
     })
 
@@ -65,9 +67,30 @@ describe('checkHealth', () => {
     expect(report.checks.database).toEqual({
       ok: false,
       ms: expect.any(Number),
+      configured: true,
       detail: 'connect ECONNREFUSED 127.0.0.1:5432',
     })
     expect(report.checks.horizon.ok).toBe(true)
+  })
+
+  it('says when no database is configured at all, and does not probe for one', async () => {
+    // Configured-and-down is a blip a monitor should page about; not
+    // configured is a deployment error, and the two must not read the same.
+    // The sponsor refuses to sponsor without a ledger (see sponsor.test.ts),
+    // so on a deploy with a key this is the line that explains why nothing
+    // is being sponsored.
+    const report = await checkHealth({
+      probes: probes({ database: { configured: false, probe: fails('never called') } }),
+      network: 'mainnet',
+    })
+
+    expect(report.ok).toBe(false)
+    expect(report.checks.database).toEqual({
+      ok: false,
+      ms: 0,
+      configured: false,
+      detail: 'DATABASE_URL is not set',
+    })
   })
 
   it('counts a probe that never answers as down after the timeout, and tells it to stop', async () => {
@@ -106,7 +129,11 @@ describe('checkHealth', () => {
     }
 
     const report = await checkHealth({
-      probes: probes({ database: together, horizon: together, rpc: together }),
+      probes: probes({
+        database: { configured: true, probe: together },
+        horizon: together,
+        rpc: together,
+      }),
       network: 'testnet',
       timeoutMs: 200,
     })
@@ -208,7 +235,12 @@ describe('GET /api/health', () => {
     const body = JSON.parse(text) as Awaited<ReturnType<typeof checkHealth>>
     expect(body.ok).toBe(false)
     expect(body.network).toBe('testnet')
-    expect(body.checks.database.ok).toBe(false)
+    expect(body.checks.database).toEqual({
+      ok: false,
+      ms: 0,
+      configured: false,
+      detail: 'DATABASE_URL is not set',
+    })
     expect(body.checks.horizon).toEqual({ ok: false, ms: expect.any(Number), detail: 'offline' })
     expect(body.checks.rpc.ok).toBe(false)
     expect(body.checks.sponsor).toMatchObject({

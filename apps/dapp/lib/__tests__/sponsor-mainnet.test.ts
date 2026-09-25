@@ -10,6 +10,9 @@ import {
 } from '@stellar/stellar-sdk'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { createSponsorLedger } from '../server/sponsor-ledger'
+import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
+
 /**
  * Sponsorship on mainnet.
  *
@@ -92,6 +95,8 @@ describe('sponsorForSubmission on mainnet', () => {
     const out = await sponsorForSubmission(signedByUser(Networks.PUBLIC), user.publicKey(), {
       env: { SPONSOR_SECRET_KEY: sponsor.secret() },
       fetchImpl: horizon(true, calls),
+      // A ledger, because without one there is no sponsorship to test.
+      ledger: createSponsorLedger(fakeSponsorLedgerDb().query),
     })
     expect(out.sponsored).toBe(true)
     const tx = TransactionBuilder.fromXDR(out.xdr, Networks.PUBLIC)
