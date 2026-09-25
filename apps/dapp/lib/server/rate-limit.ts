@@ -210,26 +210,32 @@ export async function checkRateLimit(
 }
 
 /**
- * The address a request came from, as the proxy in front reports it. The
- * first hop of `x-forwarded-for` is the client; later hops are proxies.
+ * The address a request came from, as the proxy in front reports it.
  *
- * The header is only as honest as the proxy that sets it. A platform that
- * writes it from the connection (Vercel does) makes the key the client's
- * real address; one that merely appends leaves the first hop to the client,
- * who could then pick their own bucket. This deployment's proxy is assumed
- * to write it. What is guarded here is a different abuse: a value too long
- * to be an address would fail the key's index, and that failure would read
- * as "database unreachable" and allow. Such a value is ignored. With no
- * usable header the request is counted under one shared key, which limits
- * a deployment with no proxy as a whole rather than not at all.
+ * A header is only as honest as the proxy that sets it. The deploy is
+ * Netlify, whose edge sets `x-nf-client-connection-ip` from the connection,
+ * so that is read first. `x-forwarded-for` comes next for a platform that
+ * writes it from the connection (Vercel does): its first hop is the client
+ * and later hops are proxies. Behind one that merely appends, the first hop
+ * is the client's to choose, and so is the bucket — which is why the
+ * platform's own header wins when present. `x-real-ip` is the last resort.
+ *
+ * What is guarded here is a different abuse: a value too long to be an
+ * address would fail the key's index, and that failure would read as
+ * "database unreachable" and allow. Such a value is skipped. With no usable
+ * header the request is counted under one shared key, which limits a
+ * deployment with no proxy as a whole rather than not at all.
  */
 const MAX_ADDRESS_LENGTH = 64
 
+/** In order of trust. Only `x-forwarded-for` is a list; the first entry of the others is the whole value. */
+const CLIENT_ADDRESS_HEADERS = ['x-nf-client-connection-ip', 'x-forwarded-for', 'x-real-ip']
+
 export function clientIp(request: Request): string {
-  const first = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  if (first !== undefined && first !== '' && first.length <= MAX_ADDRESS_LENGTH) return first
-  const real = request.headers.get('x-real-ip')?.trim()
-  if (real !== undefined && real !== '' && real.length <= MAX_ADDRESS_LENGTH) return real
+  for (const name of CLIENT_ADDRESS_HEADERS) {
+    const first = request.headers.get(name)?.split(',')[0]?.trim()
+    if (first !== undefined && first !== '' && first.length <= MAX_ADDRESS_LENGTH) return first
+  }
   return 'unknown'
 }
 

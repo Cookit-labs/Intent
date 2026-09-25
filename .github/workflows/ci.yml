@@ -7,6 +7,31 @@ on:
     branches: [main]
 
 jobs:
+  audit:
+    name: Dependency audit (prod, critical)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Fails the workflow on any critical advisory reachable from a production
+      # dependency. Gated at critical, not high, for now: the remaining highs
+      # are fixed only in the Next 15 line and in the EVM wallet stack, and a
+      # job that is red on every PR is a job nobody reads. Raise this to
+      # `high` with the Next 15 upgrade. Two advisories are ignored, in the
+      # root package.json under `pnpm.auditConfig.ignoreGhsas`, each with a
+      # reason: GHSA-2xp9-vwfh-vxw4, the Next image optimizer RCE, fixed only
+      # from 15.5.24 - both apps set `images.unoptimized`, so the
+      # `/_next/image` route it lives in is not served; and
+      # GHSA-p293-qw3h-jr36, an RCE that applies only to Windows-hosted
+      # servers - the sites are built and served on Linux. Nothing else is
+      # ignored.
+      - run: pnpm audit --prod --audit-level=critical
+
   typescript:
     name: TypeScript (typecheck + lint + build)
     runs-on: ubuntu-latest

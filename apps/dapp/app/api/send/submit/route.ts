@@ -5,7 +5,7 @@ import { resolveRecipient } from '../../../../lib/names/resolve'
 import { assertSendPayment } from '../../../../lib/send/build-payment'
 import { expectationFor, resolutionFailure } from '../../../../lib/send/prepare'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
-import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -85,7 +85,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // The app pays the fee when a sponsor key is configured. The user's own
   // signed bytes are wrapped, never altered, and a bump that cannot be made
   // sends the original instead, paying its own fee as before.
-  const sent = await sponsorForSubmission(signedXdr, account)
+  const sent = await sponsorForRequest(request, signedXdr, account)
   const result = await submitSignedSwap(sent.xdr)
   if (!result.ok) return NextResponse.json(result)
 

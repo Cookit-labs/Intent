@@ -1,6 +1,7 @@
 import { stellarNetwork } from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
+import { databaseConfigured } from '../server/db'
 import { getSponsorLedger, type DayUsage, type SponsorLedger } from '../server/sponsor-ledger'
 import { budgetLimits, dayOf, describeBudget, withinBudget, type BudgetReport } from './budget'
 import { sponsorFee } from './fee-bump'
@@ -20,7 +21,11 @@ import { sponsorFee } from './fee-bump'
  * The budget is what bounds the key. Each fee is capped in `fee-bump.ts`,
  * but a thousand small fees drain an account as surely as one large one, so
  * a day's total and any one account's count are capped too, in a ledger
- * the submit routes share through Postgres.
+ * the submit routes share through Postgres. No ledger configured means no
+ * sponsorship: a key with no book to bound it is a balance anyone can drain
+ * a bump at a time, and a deployment in that state is misconfigured, not
+ * generous. A ledger that is configured and momentarily unreachable is the
+ * other case, handled below.
  *
  * Testnet only in one respect: an unfunded sponsor account is created
  * through friendbot on first use, so a fresh deployment does not need a
@@ -38,9 +43,14 @@ export function sponsorConfigured(env: Env = process.env): boolean {
   return key !== undefined && key.trim() !== ''
 }
 
-/** Which account will pay the fee of a transaction submitted through the app. */
+/**
+ * Which account will pay the fee of a transaction submitted through the app.
+ * The sponsor only when it can actually sponsor: a key with no ledger
+ * configured pays for nothing (see `sponsorForSubmission`), and a preview
+ * saying otherwise would be contradicted at submit.
+ */
 export function feePaidBy(env: Env = process.env): 'sponsor' | 'account' {
-  return sponsorConfigured(env) ? 'sponsor' : 'account'
+  return sponsorConfigured(env) && databaseConfigured(env) ? 'sponsor' : 'account'
 }
 
 /** The sponsor's public key, when one is configured and parses. */
@@ -180,6 +190,14 @@ export async function sponsorForSubmission(
     ...(options.maxFeeStroops !== undefined ? { maxFeeStroops: options.maxFeeStroops } : {}),
   })
   if (!bumped.ok) return { xdr: signedXdr, sponsored: false, reason: bumped.reason }
+
+  // The budget needs a ledger, and "not configured" is not "unreachable".
+  // Unreachable is a blip `commitToBudget` rides out, sponsoring without the
+  // books and warning once; not configured is a deployment error, and the
+  // key stays unspent until it is fixed. An injected ledger is a ledger.
+  if (options.ledger === undefined && !databaseConfigured(env)) {
+    return { xdr: signedXdr, sponsored: false, reason: 'no_ledger' }
+  }
 
   // Checked after the bump is built rather than before, because the fee the
   // budget has to hold is the one the bump names, and the bump is the only

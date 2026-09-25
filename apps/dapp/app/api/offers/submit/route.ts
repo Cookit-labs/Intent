@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { assertSelfOffer } from '../../../../lib/swap/build-offer'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
-import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -36,15 +36,20 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'signedXdr is required' }, { status: 400 })
   }
 
-  if (typeof body.account === 'string' && body.account !== '') {
-    try {
-      assertSelfOffer(body.signedXdr, body.account)
-    } catch (e) {
-      return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'refusing to submit' },
-        { status: 400 }
-      )
-    }
+  // Required, not optional: the re-assertion below is the only thing standing
+  // between a tampered envelope and the network, and a body that omits the
+  // account must not be a way to skip it.
+  if (typeof body.account !== 'string' || body.account === '') {
+    return NextResponse.json({ error: 'account is required' }, { status: 400 })
+  }
+
+  try {
+    assertSelfOffer(body.signedXdr, body.account)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'refusing to submit' },
+      { status: 400 }
+    )
   }
 
   // Submission is asset-agnostic: it posts an envelope and reads back result
@@ -52,7 +57,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // The app pays the fee when a sponsor key is configured. The user's own
   // signed bytes are wrapped, never altered, and a bump that cannot be made
   // sends the original instead, paying its own fee as before.
-  const sent = await sponsorForSubmission(body.signedXdr, String(body.account ?? ''))
+  const sent = await sponsorForRequest(request, body.signedXdr, body.account)
   const result = await submitSignedSwap(sent.xdr)
   return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }

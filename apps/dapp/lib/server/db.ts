@@ -15,16 +15,29 @@ import { Pool } from 'pg'
  */
 const globalForDb = globalThis as unknown as { intentPool?: Pool }
 
+/**
+ * Whether a database is configured at all.
+ *
+ * Distinct from whether one answers. A configured database that cannot be
+ * reached is a blip the stores built on it ride out (the limiter allows,
+ * the sponsor ledger sponsors without its books); one that was never
+ * configured is a deployment error, and the callers that must not run
+ * without a ledger — the fee sponsor — refuse rather than ride it out.
+ */
+export function databaseConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  const url = env['DATABASE_URL']
+  return url !== undefined && url.trim() !== ''
+}
+
 export function getPool(): Pool {
   const existing = globalForDb.intentPool
   if (existing !== undefined) return existing
 
-  const connectionString = process.env['DATABASE_URL']
-  if (connectionString === undefined || connectionString === '') {
+  if (!databaseConfigured()) {
     throw new Error('DATABASE_URL is not set. Run `docker compose up -d` and check .env.local')
   }
 
-  const pool = new Pool({ connectionString, max: 5 })
+  const pool = new Pool({ connectionString: process.env['DATABASE_URL'], max: 5 })
   globalForDb.intentPool = pool
   return pool
 }

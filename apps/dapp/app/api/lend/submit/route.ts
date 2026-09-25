@@ -9,7 +9,7 @@ import {
   assertSelfWithdraw,
 } from '../../../../lib/lend/blend-client'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
-import { sponsorForSubmission } from '../../../../lib/sponsor/sponsor'
+import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -47,7 +47,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'signedXdr is required' }, { status: 400 })
   }
 
-  // Required rather than optional, unlike the plan route. A supply has no
+  // Required rather than optional. A supply has no
   // meaningful validation without knowing who it should credit, so submitting
   // one without an account to check against would skip the only check that
   // matters.
@@ -85,7 +85,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // The app pays the fee when a sponsor key is configured. The user's own
   // signed bytes are wrapped, never altered, and a bump that cannot be made
   // sends the original instead, paying its own fee as before.
-  const sent = await sponsorForSubmission(body.signedXdr, String(body.account ?? ''))
+  const sent = await sponsorForRequest(request, body.signedXdr, String(body.account ?? ''))
   const result = await submitSignedSwap(sent.xdr)
   return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }

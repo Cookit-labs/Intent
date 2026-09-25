@@ -12,7 +12,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { QueryFn } from '../server/db'
 import { createSponsorLedger, type SponsorLedger } from '../server/sponsor-ledger'
-import { sponsorBudgetToday, sponsorConfigured, sponsorForSubmission } from '../sponsor/sponsor'
+import {
+  feePaidBy,
+  sponsorBudgetToday,
+  sponsorConfigured,
+  sponsorForSubmission,
+} from '../sponsor/sponsor'
 import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
 
 /**
@@ -69,6 +74,66 @@ describe('sponsorConfigured', () => {
 
   it('is true with a secret key', () => {
     expect(sponsorConfigured({ SPONSOR_SECRET_KEY: sponsor.secret() })).toBe(true)
+  })
+})
+
+describe('feePaidBy', () => {
+  it('is the sponsor only when a key and a ledger are both configured', () => {
+    // What the build previews say. A key with no ledger sponsors nothing
+    // (below), so telling the user their fee is covered would be a lie the
+    // submit route then contradicts.
+    const key = { SPONSOR_SECRET_KEY: sponsor.secret() }
+    expect(feePaidBy({ ...key, DATABASE_URL: 'postgresql://intent@localhost/intent' })).toBe(
+      'sponsor'
+    )
+    expect(feePaidBy(key)).toBe('account')
+    expect(feePaidBy({ DATABASE_URL: 'postgresql://intent@localhost/intent' })).toBe('account')
+  })
+})
+
+/**
+ * Configured versus unreachable. A ledger that is configured and cannot be
+ * reached is a blip: sponsorship goes on without the books and says so once
+ * (tested with the budget below). One that is not configured at all is a
+ * deployment error, and a key with no book to bound it is a balance anyone
+ * can drain at up to a bump per request — so it is not a sponsor.
+ */
+describe('without a ledger configured', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('refuses to sponsor, and says why, when DATABASE_URL is unset', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      env: { SPONSOR_SECRET_KEY: sponsor.secret(), SPONSOR_DAILY_BUDGET_XLM: '0' },
+      fetchImpl: horizon(true, []),
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'no_ledger' })
+    // Not a blip, so not the blip's warning.
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('treats an empty DATABASE_URL as unset', async () => {
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      env: { SPONSOR_SECRET_KEY: sponsor.secret(), DATABASE_URL: ' ' },
+      fetchImpl: horizon(true, []),
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'no_ledger' })
+  })
+
+  it('still reports the reasons that come first', async () => {
+    // A bad key, an unfunded sponsor or a bump that cannot be made are each
+    // named as such; the ledger is asked about only once there is a fee to
+    // put on it.
+    const xdr = signedByUser()
+    const out = await sponsorForSubmission(xdr, user.publicKey(), {
+      env: { SPONSOR_SECRET_KEY: 'not-a-key' },
+      fetchImpl: horizon(true, []),
+    })
+    expect(out).toEqual({ xdr, sponsored: false, reason: 'invalid_sponsor_key' })
   })
 })
 
