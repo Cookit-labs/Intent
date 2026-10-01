@@ -115,6 +115,7 @@ export const venues: Venue[] = [
     bestFor: 'One swap split across several venues',
     url: 'https://soroswap.finance',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'One swap split across Soroswap, Aquarius and the classic DEX. Needs SOROSWAP_API_KEY; every transaction it returns is re-checked before signing.',
   },
@@ -127,6 +128,7 @@ export const venues: Venue[] = [
     bestFor: 'Incentivised AMM pools',
     url: 'https://aqua.network',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Swaps route through Aquarius’s router against the pool the agent chose. Which router wins depends on the direction of the trade.',
   },
@@ -177,6 +179,7 @@ export const venues: Venue[] = [
     bestFor: 'Supply and borrow against collateral',
     url: 'https://blend.capital',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Rates are read live and XLM can be supplied. Borrowing is out of scope, so a position here can never be liquidated.',
   },

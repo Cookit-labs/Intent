@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildMarketContext } from '../agents/market-context'
 import { configuredLendingVenues } from '../lend/venues'
-import { buildAquariusSwap } from '../swap/build-aquarius'
 import { collectQuotes, type QuoteSource } from '../swap/quote'
 import {
   assertVenueOn,
@@ -35,12 +34,22 @@ afterEach(() => {
 })
 
 describe('which venues are on mainnet at launch', () => {
-  it('is Soroswap, the classic DEX, the liquidity pools and Soroban Domains', () => {
+  it('is every venue whose mainnet contracts are verified in the code', () => {
     const ids = venuesOn('mainnet')
       .filter((v) => v.family === 'stellar')
       .map((v) => v.id)
       .sort()
-    expect(ids).toEqual(['sorobandomains', 'soroswap', 'stellar-pools', 'stellarx'].sort())
+    expect(ids).toEqual(
+      [
+        'aquarius',
+        'blend',
+        'sorobandomains',
+        'soroswap',
+        'soroswap-aggregator',
+        'stellar-pools',
+        'stellarx',
+      ].sort()
+    )
   })
 
   it('keeps every Stellar venue on testnet', () => {
@@ -52,14 +61,15 @@ describe('which venues are on mainnet at launch', () => {
   it('treats an absent networks field as testnet only', () => {
     expect(isVenueOn({}, 'testnet')).toBe(true)
     expect(isVenueOn({}, 'mainnet')).toBe(false)
-    expect(isVenueOn(byId('aquarius')!, 'mainnet')).toBe(false)
-    expect(isVenueOn(byId('blend')!, 'mainnet')).toBe(false)
+    expect(isVenueOn(byId('etherfuse')!, 'mainnet')).toBe(false)
+    expect(isVenueOn(byId('noether')!, 'mainnet')).toBe(false)
+    expect(isVenueOn(byId('defindex')!, 'mainnet')).toBe(false)
   })
 
   it('labels a Stellar venue that is not on mainnet, and only there', () => {
-    expect(notOnNetworkLabel(byId('aquarius')!, 'mainnet')).toBe('Not on mainnet yet')
+    expect(notOnNetworkLabel(byId('etherfuse')!, 'mainnet')).toBe('Not on mainnet yet')
     expect(notOnNetworkLabel(byId('soroswap')!, 'mainnet')).toBeUndefined()
-    expect(notOnNetworkLabel(byId('aquarius')!, 'testnet')).toBeUndefined()
+    expect(notOnNetworkLabel(byId('etherfuse')!, 'testnet')).toBeUndefined()
     // An EVM venue is on another chain entirely; the Stellar flag says
     // nothing about it.
     expect(notOnNetworkLabel(byId('uniswap')!, 'mainnet')).toBeUndefined()
@@ -71,7 +81,14 @@ describe('what the agents are offered', () => {
     const ids = buildMarketContext('stellar', {}, 'mainnet')
       .venues.map((v) => v.id)
       .sort()
-    expect(ids).toEqual(['soroswap', 'stellar-pools', 'stellarx'])
+    expect(ids).toEqual([
+      'aquarius',
+      'blend',
+      'soroswap',
+      'soroswap-aggregator',
+      'stellar-pools',
+      'stellarx',
+    ])
   })
 
   it('is unchanged on testnet', () => {
@@ -83,8 +100,8 @@ describe('what the agents are offered', () => {
     expect(ids).toEqual(buildMarketContext('stellar', {}).venues.map((v) => v.id))
   })
 
-  it('offers no lending venue on mainnet yet', () => {
-    expect(configuredLendingVenues({ DEFINDEX_API_KEY: 'sk' }, 'mainnet')).toEqual([])
+  it('offers Blend on mainnet, and DeFindex only on testnet', () => {
+    expect(configuredLendingVenues({ DEFINDEX_API_KEY: 'sk' }, 'mainnet')).toEqual(['blend'])
     expect(configuredLendingVenues({ DEFINDEX_API_KEY: 'sk' }, 'testnet')).toEqual([
       'blend',
       'defindex',
@@ -95,26 +112,28 @@ describe('what the agents are offered', () => {
 describe('nothing is built against a venue that is not here', () => {
   it('passes for a venue on the network and refuses one that is not, by name', () => {
     expect(() => assertVenueOn('soroswap', 'mainnet')).not.toThrow()
+    expect(() => assertVenueOn('aquarius', 'mainnet')).not.toThrow()
+    expect(() => assertVenueOn('blend', 'mainnet')).not.toThrow()
     expect(() => assertVenueOn('aquarius', 'testnet')).not.toThrow()
-    expect(() => assertVenueOn('aquarius', 'mainnet')).toThrow('Aquarius is not on mainnet yet')
-    expect(() => assertVenueOn('blend', 'mainnet')).toThrow('Blend Capital is not on mainnet yet')
+    expect(() => assertVenueOn('etherfuse', 'mainnet')).toThrow('Etherfuse is not on mainnet yet')
+    expect(() => assertVenueOn('noether', 'mainnet')).toThrow('Noether is not on mainnet yet')
+    expect(() => assertVenueOn('defindex', 'mainnet')).toThrow('DeFindex is not on mainnet yet')
     // An id nobody listed is not a venue at all, and is refused the same way.
     expect(() => assertVenueOn('phoenix', 'testnet')).toThrow('phoenix is not on testnet yet')
   })
+})
 
-  it('stops the Aquarius builder on mainnet before it reads the network', async () => {
+describe('a flagged venue with no verified contract stays off the allowlist', () => {
+  it('has no Noether contract on mainnet even though the registry lists it', async () => {
+    vi.resetModules()
     vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
-    await expect(
-      buildAquariusSwap({
-        account: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
-        from: { kind: 'classic', code: 'XLM' },
-        to: { kind: 'classic', code: 'USDC', issuer: 'G' },
-        sendAmount: '1',
-        minReceive: '1',
-        poolIndex: '00',
-        fetchImpl: () => Promise.reject(new Error('must not be called')),
-      })
-    ).rejects.toThrow('Aquarius is not on mainnet yet')
+    const { NOETHER_MARKET, lookupContract } = await import('../swap/contract-registry')
+    expect(NOETHER_MARKET).toBeUndefined()
+    expect(
+      lookupContract('CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN')
+    ).toBeUndefined()
+    vi.unstubAllEnvs()
+    vi.resetModules()
   })
 })
 
@@ -147,7 +166,7 @@ describe('quote sources follow the venue list', () => {
     expect(asked.sort()).toEqual(['aquarius', 'horizon', 'soroswap'])
   })
 
-  it('skips a source whose venue is not on mainnet', async () => {
+  it('asks every source whose venue is on mainnet', async () => {
     vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
     const asked: string[] = []
     const { quotes, failures } = await collectQuotes(
@@ -159,11 +178,14 @@ describe('quote sources follow the venue list', () => {
       ],
       req
     )
-    expect(asked.sort()).toEqual(['horizon', 'soroswap'])
+    expect(asked.sort()).toEqual(['aquarius', 'horizon', 'soroswap', 'soroswap-aggregator'])
     expect(quotes).toEqual([])
-    // Not asked means not failed either: a venue that is not here has no
-    // answer to report, and a failure line for it would read as an outage.
-    expect(failures.map((f) => f.source).sort()).toEqual(['horizon', 'soroswap'])
+    expect(failures.map((f) => f.source).sort()).toEqual([
+      'aquarius',
+      'horizon',
+      'soroswap',
+      'soroswap-aggregator',
+    ])
   })
 })
 
@@ -172,7 +194,8 @@ describe('what the Apps page may call available, decided on the server', () => {
     const bare = availableVenueIds('mainnet', {})
     expect(bare.has('soroswap')).toBe(true)
     expect(bare.has('moneygram')).toBe(false)
-    expect(bare.has('aquarius')).toBe(false)
+    expect(bare.has('aquarius')).toBe(true)
+    expect(bare.has('etherfuse')).toBe(false)
 
     const configured = availableVenueIds('mainnet', {
       MONEYGRAM_PRODUCTION_HOME_DOMAIN: 'stellar.moneygram.com',
