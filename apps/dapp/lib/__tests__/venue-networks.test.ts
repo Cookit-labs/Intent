@@ -43,6 +43,7 @@ describe('which venues are on mainnet at launch', () => {
       [
         'aquarius',
         'blend',
+        'etherfuse',
         'sorobandomains',
         'soroswap',
         'soroswap-aggregator',
@@ -61,15 +62,14 @@ describe('which venues are on mainnet at launch', () => {
   it('treats an absent networks field as testnet only', () => {
     expect(isVenueOn({}, 'testnet')).toBe(true)
     expect(isVenueOn({}, 'mainnet')).toBe(false)
-    expect(isVenueOn(byId('etherfuse')!, 'mainnet')).toBe(false)
     expect(isVenueOn(byId('noether')!, 'mainnet')).toBe(false)
     expect(isVenueOn(byId('defindex')!, 'mainnet')).toBe(false)
   })
 
   it('labels a Stellar venue that is not on mainnet, and only there', () => {
-    expect(notOnNetworkLabel(byId('etherfuse')!, 'mainnet')).toBe('Not on mainnet yet')
+    expect(notOnNetworkLabel(byId('noether')!, 'mainnet')).toBe('Not on mainnet yet')
     expect(notOnNetworkLabel(byId('soroswap')!, 'mainnet')).toBeUndefined()
-    expect(notOnNetworkLabel(byId('etherfuse')!, 'testnet')).toBeUndefined()
+    expect(notOnNetworkLabel(byId('noether')!, 'testnet')).toBeUndefined()
     // An EVM venue is on another chain entirely; the Stellar flag says
     // nothing about it.
     expect(notOnNetworkLabel(byId('uniswap')!, 'mainnet')).toBeUndefined()
@@ -84,6 +84,7 @@ describe('what the agents are offered', () => {
     expect(ids).toEqual([
       'aquarius',
       'blend',
+      'etherfuse',
       'soroswap',
       'soroswap-aggregator',
       'stellar-pools',
@@ -115,7 +116,7 @@ describe('nothing is built against a venue that is not here', () => {
     expect(() => assertVenueOn('aquarius', 'mainnet')).not.toThrow()
     expect(() => assertVenueOn('blend', 'mainnet')).not.toThrow()
     expect(() => assertVenueOn('aquarius', 'testnet')).not.toThrow()
-    expect(() => assertVenueOn('etherfuse', 'mainnet')).toThrow('Etherfuse is not on mainnet yet')
+    expect(() => assertVenueOn('etherfuse', 'mainnet')).not.toThrow()
     expect(() => assertVenueOn('noether', 'mainnet')).toThrow('Noether is not on mainnet yet')
     expect(() => assertVenueOn('defindex', 'mainnet')).toThrow('DeFindex is not on mainnet yet')
     // An id nobody listed is not a venue at all, and is refused the same way.
@@ -195,7 +196,8 @@ describe('what the Apps page may call available, decided on the server', () => {
     expect(bare.has('soroswap')).toBe(true)
     expect(bare.has('moneygram')).toBe(false)
     expect(bare.has('aquarius')).toBe(true)
-    expect(bare.has('etherfuse')).toBe(false)
+    expect(bare.has('etherfuse')).toBe(true)
+    expect(bare.has('noether')).toBe(false)
 
     const configured = availableVenueIds('mainnet', {
       MONEYGRAM_PRODUCTION_HOME_DOMAIN: 'stellar.moneygram.com',
@@ -224,6 +226,10 @@ describe('venue copy on mainnet', () => {
     const names = onMainnet.find((v) => v.id === 'sorobandomains')
     expect(names?.capability).toMatch(/mainnet/i)
     expect(names?.capability).not.toMatch(/testnet/i)
+    // KTB has no market on mainnet, so its copy must not promise Korean bonds.
+    const bonds = onMainnet.find((v) => v.id === 'etherfuse')
+    expect(bonds?.capability).toMatch(/CETES, USTRY/)
+    expect(bonds?.capability).not.toMatch(/Korean/)
     vi.unstubAllEnvs()
     vi.resetModules()
   })

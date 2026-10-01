@@ -154,8 +154,11 @@ export const venues: Venue[] = [
     bestFor: 'Tokenized sovereign debt',
     url: 'https://etherfuse.com',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
-      'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.',
+      activeNetwork() === 'mainnet'
+        ? 'Buy tokenized Mexican and US treasury bills (CETES, USTRY). They settle like any other classic asset.'
+        : 'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.',
   },
   {
     id: 'stellar-pools',

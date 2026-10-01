@@ -3,12 +3,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 /**
  * The asset allowlist follows the network.
  *
- * Every Etherfuse entry was verified against `sand.etherfuse.com` — its
- * sandbox — so those issuers exist on testnet and nowhere else. On mainnet
- * they are simply unknown: an agent is not offered a sandbox T-bill, and a
- * builder cannot open a trustline to it. USDC follows Circle's issuer for
- * the network, and on mainnet that issuer is the one centre.io lists, so it
- * earns the full round trip rather than the testnet caveat.
+ * Etherfuse has two issuers: `sand.etherfuse.com` is its sandbox and
+ * `etherfuse.com` is mainnet, and each exists on its own network only. A
+ * sandbox T-bill must never resolve on mainnet, or the other way round. USDC
+ * follows Circle's issuer for the network, and on mainnet that issuer is the
+ * one centre.io lists, so it earns the full round trip rather than the
+ * testnet caveat.
  */
 
 type Registry = typeof import('../swap/asset-registry')
@@ -45,19 +45,28 @@ describe('on testnet, nothing moved', () => {
   })
 })
 
+const SANDBOX_ISSUER = 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4'
+const MAINNET_ISSUER = 'GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC'
+
 describe('on mainnet', () => {
-  it('knows only XLM and USDC', () => {
-    expect(mainnet.verifiedSymbols()).toEqual(['XLM', 'USDC'])
-    expect(mainnet.tradeableSymbols()).toEqual(['XLM', 'USDC'])
-    expect(mainnet.realWorldAssets()).toEqual([])
+  it('knows the Etherfuse bonds under the mainnet issuer, never the sandbox one', () => {
+    expect(mainnet.verifiedSymbols()).toEqual(['XLM', 'USDC', 'CETES', 'USTRY', 'KTB'])
+    expect(mainnet.realWorldAssets().map((a) => a.code)).toEqual(['CETES', 'USTRY', 'KTB'])
     for (const bond of ['CETES', 'USTRY', 'KTB']) {
-      expect(
-        mainnet.resolveVerifiedAsset(bond),
-        `${bond} must be unknown on mainnet`
-      ).toBeUndefined()
-      expect(mainnet.isVerified(bond)).toBe(false)
-      expect(mainnet.trustSummary(bond)).toBeUndefined()
+      expect(mainnet.resolveVerifiedAsset(bond), bond).toMatchObject({
+        issuer: MAINNET_ISSUER,
+        homeDomain: 'etherfuse.com',
+        trust: 'round-trip',
+      })
+      expect(mainnet.resolveVerifiedAsset(bond)?.issuer).not.toBe(SANDBOX_ISSUER)
+      expect(mainnet.trustSummary(bond)).toMatch(/etherfuse\.com confirms this issuer/)
     }
+  })
+
+  it('offers only the bonds with a market, which is not KTB', () => {
+    // Measured on Horizon 2026-10-01: CETES and USTRY have deep USDC books,
+    // KTB has 102 units outstanding and no asks.
+    expect(mainnet.tradeableSymbols()).toEqual(['XLM', 'USDC', 'CETES', 'USTRY'])
   })
 
   it("trusts Circle's mainnet USDC fully, with no caution", () => {

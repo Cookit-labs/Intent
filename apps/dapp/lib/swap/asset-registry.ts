@@ -21,9 +21,8 @@ import type { ClassicAsset } from './assets'
  * so a reader can check it rather than trust this comment.
  *
  * An issuer exists on one network. Etherfuse's sandbox issuer lives on
- * testnet and nowhere else, so on mainnet its bonds are unknown here — not
- * offered to an agent, not resolvable by a builder — until a mainnet issuer
- * has been verified the same way. Each entry says which networks it is for.
+ * testnet and nowhere else, and its mainnet issuer was verified the same way
+ * before being written down. Each entry says which networks it is for.
  */
 
 export type AssetKind = 'native' | 'stablecoin' | 'rwa'
@@ -71,6 +70,11 @@ export interface VerifiedAsset {
    * in the repo notes for how to re-check after a testnet reset.
    */
   tradeableOnTestnet: boolean
+  /**
+   * The same, for mainnet. Absent means nothing quotes it there, so it is
+   * known and holdable but never offered to an agent.
+   */
+  tradeableOnMainnet?: boolean
   /** The networks this issuer exists on. An entry is unknown elsewhere. */
   networks: StellarNetworkName[]
 }
@@ -78,12 +82,21 @@ export interface VerifiedAsset {
 const NETWORK = activeNetwork()
 
 /**
- * Etherfuse issues every one of its bonds from a single account, verified at
- * `sand.etherfuse.com`. Repeated rather than shared so each entry can be
- * checked in isolation — a constant would hide a mismatch.
+ * Etherfuse issues every one of its bonds from a single account per network.
+ *
+ * Testnet: the sandbox account, verified at `sand.etherfuse.com`.
+ *
+ * Mainnet: `GCRYUGD5…`, verified 2026-10-01 by the full round trip — the
+ * account's `home_domain` on Horizon is `etherfuse.com`, and
+ * https://etherfuse.com/.well-known/stellar.toml lists this issuer for every
+ * bond below. It sets no auth flags and no clawback (checked on the account
+ * and on each asset), so holding one needs a trustline and nothing else.
  */
-const ETHERFUSE_ISSUER = 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4'
-const ETHERFUSE_DOMAIN = 'sand.etherfuse.com'
+const ETHERFUSE_ISSUER =
+  NETWORK === 'mainnet'
+    ? 'GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC'
+    : 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4'
+const ETHERFUSE_DOMAIN = NETWORK === 'mainnet' ? 'etherfuse.com' : 'sand.etherfuse.com'
 
 export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
   XLM: {
@@ -91,6 +104,7 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     trust: 'network',
     code: 'XLM',
     tradeableOnTestnet: true,
+    tradeableOnMainnet: true,
     networks: ['testnet', 'mainnet'],
     // No issuer and no domain: XLM is the network, not something issued on it.
     decimals: 7,
@@ -108,6 +122,7 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
     trust: NETWORK === 'mainnet' ? 'round-trip' : 'claimed-only',
     code: STELLAR_USDC.code,
     tradeableOnTestnet: true,
+    tradeableOnMainnet: true,
     networks: ['testnet', 'mainnet'],
     issuer: STELLAR_USDC.issuer,
     decimals: STELLAR_USDC.decimals,
@@ -121,10 +136,12 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
   CETES: {
     category: 'rwa',
     trust: 'round-trip',
-    // Verified: 100 XLM buys ~2,299 CETES across two routes.
+    // Testnet: 100 XLM buys ~2,299 CETES across two routes. Mainnet: deep
+    // USDC book (about $0.065 a CETES, tens of thousands on each side).
     code: 'CETES',
     tradeableOnTestnet: true,
-    networks: ['testnet'],
+    tradeableOnMainnet: true,
+    networks: ['testnet', 'mainnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
@@ -134,10 +151,12 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
   USTRY: {
     category: 'rwa',
     trust: 'round-trip',
-    // Issued and domain-verified, but nothing quotes it on testnet today.
+    // Nothing quotes it on testnet today. On mainnet it has a deep USDC book
+    // (about $1.075, thousands on each side).
     code: 'USTRY',
     tradeableOnTestnet: false,
-    networks: ['testnet'],
+    tradeableOnMainnet: true,
+    networks: ['testnet', 'mainnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
@@ -147,10 +166,11 @@ export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
   KTB: {
     category: 'rwa',
     trust: 'round-trip',
-    // Issued and domain-verified, but nothing quotes it on testnet today.
+    // Issued and domain-verified, but nothing quotes it: on mainnet 102 units
+    // are outstanding and the USDC book has no asks (2026-10-01).
     code: 'KTB',
     tradeableOnTestnet: false,
-    networks: ['testnet'],
+    networks: ['testnet', 'mainnet'],
     issuer: ETHERFUSE_ISSUER,
     decimals: 7,
     homeDomain: ETHERFUSE_DOMAIN,
@@ -222,7 +242,7 @@ export function realWorldAssets(): VerifiedAsset[] {
  */
 export function tradeableSymbols(): string[] {
   return Object.values(ASSETS_HERE)
-    .filter((a) => a.tradeableOnTestnet)
+    .filter((a) => (NETWORK === 'mainnet' ? a.tradeableOnMainnet === true : a.tradeableOnTestnet))
     .map((a) => a.code)
 }
 
