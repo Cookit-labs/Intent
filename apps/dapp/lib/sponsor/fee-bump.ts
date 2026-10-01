@@ -29,9 +29,11 @@ export interface SponsorOptions {
   /**
    * The most the sponsor will pay for one transaction, in stroops.
    *
-   * One XLM by default. A classic transaction costs a few hundred stroops; a
-   * Soroban call's resource fee runs to a fraction of an XLM. Anything above
-   * that is not a fee, it is a request.
+   * By default it follows the transaction's shape. A classic transaction costs
+   * a few hundred stroops, so anything above 0.01 XLM is a request rather than
+   * a fee. A Soroban call's resource fee runs to a fraction of an XLM, so those
+   * keep one XLM. A single ceiling for both let a handful of classic
+   * submissions at the Soroban limit spend the day's budget for everyone.
    */
   maxFeeStroops?: bigint
 }
@@ -48,7 +50,15 @@ export type SponsorOutcome =
         | 'fee_over_cap'
     }
 
-const DEFAULT_MAX_FEE_STROOPS = BigInt(10_000_000)
+const DEFAULT_CLASSIC_MAX_FEE_STROOPS = BigInt(100_000)
+const DEFAULT_SOROBAN_MAX_FEE_STROOPS = BigInt(10_000_000)
+
+/** Operations whose fee includes a Soroban resource fee. */
+const SOROBAN_OPERATIONS = new Set(['invokeHostFunction', 'extendFootprintTtl', 'restoreFootprint'])
+
+function carriesSoroban(tx: Transaction): boolean {
+  return tx.operations.some((op) => SOROBAN_OPERATIONS.has(op.type))
+}
 
 /** Whether any signature on the transaction is the named account's. */
 function signedBy(tx: Transaction, account: string): boolean {
@@ -92,7 +102,9 @@ export function sponsorFee(
   const perOpFee = perOp > base ? perOp : base
   const outerTotal = perOpFee * (ops + BigInt(1))
 
-  const cap = options.maxFeeStroops ?? DEFAULT_MAX_FEE_STROOPS
+  const cap =
+    options.maxFeeStroops ??
+    (carriesSoroban(inner) ? DEFAULT_SOROBAN_MAX_FEE_STROOPS : DEFAULT_CLASSIC_MAX_FEE_STROOPS)
   if (outerTotal > cap) return { ok: false, reason: 'fee_over_cap' }
 
   const bumped = TransactionBuilder.buildFeeBumpTransaction(
