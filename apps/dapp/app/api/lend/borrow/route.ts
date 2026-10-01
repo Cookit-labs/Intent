@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { buildBlendBorrow, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
+import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { explainPoolError, isTransientPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -36,10 +37,6 @@ interface BorrowBody {
   amount?: string
 }
 
-// No mainnet trade cap here. This venue is testnet-only (`networks` in
-// lib/venues.ts) and its builder refuses any other network, so nothing is
-// spent on mainnet through this route. Give it `assertTradeWithinCap` before
-// the venue gains `networks: ['mainnet']`.
 export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'build')
   if (limited !== undefined) return limited
@@ -73,6 +70,16 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/borrow', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
+  }
+
+  // A borrow adds exposure the same as a supply does, so it is capped the same.
+  try {
+    await assertReserveWithinCap(body.asset, body.amount)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+      { status: 400 }
+    )
   }
 
   try {

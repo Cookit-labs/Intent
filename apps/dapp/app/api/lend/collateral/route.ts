@@ -5,6 +5,7 @@ import {
   buildBlendCollateralWithdraw,
   prepareBlendWithdraw,
 } from '../../../../lib/lend/blend-client'
+import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -35,10 +36,6 @@ interface CollateralBody {
   direction?: 'post' | 'reclaim'
 }
 
-// No mainnet trade cap here. This venue is testnet-only (`networks` in
-// lib/venues.ts) and its builder refuses any other network, so nothing is
-// spent on mainnet through this route. Give it `assertTradeWithinCap` before
-// the venue gains `networks: ['mainnet']`.
 export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'build')
   if (limited !== undefined) return limited
@@ -76,6 +73,19 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/collateral', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
+  }
+
+  // Posting moves the user's funds into the pool, so it is capped. Reclaiming
+  // returns them to a plain supply balance of the same account and is not.
+  if (body.direction === 'post') {
+    try {
+      await assertReserveWithinCap(body.asset, body.amount as string)
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
+        { status: 400 }
+      )
+    }
   }
 
   try {

@@ -37,10 +37,9 @@ interface WithdrawBody {
   amount?: string
 }
 
-// No mainnet trade cap here. This venue is testnet-only (`networks` in
-// lib/venues.ts) and its builder refuses any other network, so nothing is
-// spent on mainnet through this route. Give it `assertTradeWithinCap` before
-// the venue gains `networks: ['mainnet']`.
+// No mainnet trade cap here: a withdrawal returns the account's own position
+// to the account (`assertSelfPoolCall` pins `from`, `spender` and `to` to the
+// signer), so it cannot move value anywhere the user did not already hold it.
 export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'build')
   if (limited !== undefined) return limited
