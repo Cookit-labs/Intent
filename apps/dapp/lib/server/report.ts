@@ -33,6 +33,12 @@ const EMAIL_KEY = /email/i
 /** A Stellar secret seed: S followed by 55 base32 characters. */
 const SECRET_SEED = /S[A-Z2-7]{55}/g
 
+/** An HTTP bearer credential, wherever it appears in text. */
+const BEARER = /\bBearer\s+[\w.~+/=-]+/gi
+
+/** A JWT: three dot-separated base64url segments, the first two opening a JSON object. */
+const JWT = /\beyJ[\w-]+\.eyJ[\w-]+\.[\w-]+/g
+
 /** An email address, wherever it appears in text. */
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
 
@@ -45,9 +51,13 @@ function maskEmail(value: unknown): string {
   return maskAddress(value)
 }
 
-/** Text as it may be logged: seeds gone, addresses masked. */
+/** Text as it may be logged: seeds, bearer tokens and JWTs gone, addresses masked. */
 export function scrubText(text: string): string {
-  return text.replace(SECRET_SEED, REDACTED).replace(EMAIL, maskAddress)
+  return text
+    .replace(SECRET_SEED, REDACTED)
+    .replace(BEARER, `Bearer ${REDACTED}`)
+    .replace(JWT, REDACTED)
+    .replace(EMAIL, maskAddress)
 }
 
 function redactValue(value: unknown): unknown {

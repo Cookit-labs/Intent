@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createReporter, redactContext, type ReportSink } from '../server/report'
+import { createReporter, redactContext, scrubText, type ReportSink } from '../server/report'
 
 /**
  * Error reporting: one line to the server log every time, and a copy to
@@ -165,5 +165,23 @@ describe('reportEvent', () => {
       '[sponsor.low_balance] {"balanceXlm":5,"secret":"[redacted]"}'
     )
     expect(sink.events).toEqual([['sponsor.low_balance', { balanceXlm: 5, secret: '[redacted]' }]])
+  })
+})
+
+describe('scrubText value rules for tokens', () => {
+  it('removes a bearer credential from text', () => {
+    expect(scrubText('anchor said Authorization: Bearer abc123.def-456_x failed')).not.toContain(
+      'abc123'
+    )
+  })
+
+  it('removes a JWT-shaped string under a key that is not secret-named', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJHQUJDIn0.c2lnbmF0dXJl'
+    const out = redactContext({ detail: `token rejected: ${jwt}` })
+    expect(JSON.stringify(out)).not.toContain('eyJhbGci')
+  })
+
+  it('keeps ordinary error text readable', () => {
+    expect(scrubText('Horizon returned 503 for GABC')).toBe('Horizon returned 503 for GABC')
   })
 })
