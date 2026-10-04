@@ -22,7 +22,10 @@ vi.mock('../sponsor/sponsor', async (importOriginal) => {
   return { ...actual, sponsorBudgetToday: () => report() }
 })
 
+vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
+
 const SPONSOR = Keypair.random()
+const REQUEST = new Request('http://localhost/api/sponsor')
 const LEDGER = 'postgresql://intent@localhost/intent'
 
 beforeEach(() => {
@@ -49,7 +52,7 @@ describe('GET /api/sponsor', () => {
     })
     const { GET } = await import('../../app/api/sponsor/route')
 
-    expect(await (await GET()).json()).toEqual({
+    expect(await (await GET(REQUEST)).json()).toEqual({
       sponsored: true,
       account: SPONSOR.publicKey(),
       budget: { day: '2026-09-24', spentXlm: 1.5, budgetXlm: 50, submissions: 12, perAccount: 20 },
@@ -61,7 +64,7 @@ describe('GET /api/sponsor', () => {
     report.mockResolvedValue(undefined)
     const { GET } = await import('../../app/api/sponsor/route')
 
-    expect(await (await GET()).json()).toEqual({ sponsored: false })
+    expect(await (await GET(REQUEST)).json()).toEqual({ sponsored: false })
   })
 
   it('reports a key with no ledger configured as unsponsored, and says why', async () => {
@@ -69,7 +72,7 @@ describe('GET /api/sponsor', () => {
     report.mockResolvedValue(undefined)
     const { GET } = await import('../../app/api/sponsor/route')
 
-    expect(await (await GET()).json()).toEqual({
+    expect(await (await GET(REQUEST)).json()).toEqual({
       sponsored: false,
       account: SPONSOR.publicKey(),
       reason: 'no_ledger',
