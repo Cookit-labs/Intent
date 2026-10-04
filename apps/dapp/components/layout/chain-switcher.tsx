@@ -1,11 +1,12 @@
 'use client'
 
-import { CHAIN_DESCRIPTORS, CHAIN_ORDER } from '@intent/config'
+import { activeNetwork, CHAIN_DESCRIPTORS, CHAIN_ORDER } from '@intent/config'
 import { ChainMark, type ChainLogoId } from '@intent/ui'
-import { ChevronDown } from 'lucide-react'
+import { ArrowUpRight, ChevronDown } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 
+import { otherStellarNetwork } from '../../lib/other-stellar-network'
 import { useChain } from '../../providers/chain-provider'
 
 /**
@@ -27,6 +28,13 @@ export function ChainSwitcher(): JSX.Element {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  // The other Stellar network is its own deployment. Read as a literal so it
+  // is inlined at build.
+  const other = otherStellarNetwork(
+    activeNetwork(),
+    process.env.NEXT_PUBLIC_STELLAR_OTHER_NETWORK_URL,
+    slug === 'stellar' ? pathname : '/stellar/intents'
+  )
 
   useEffect(() => {
     if (!open) return
@@ -94,6 +102,32 @@ export function ChainSwitcher(): JSX.Element {
               </button>
             )
           })}
+          {other.href !== undefined ? (
+            <a
+              href={other.href}
+              role="menuitem"
+              className="hover:bg-muted/60 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors"
+            >
+              <ChainMark chain="stellar" className="h-4 w-4 shrink-0" />
+              <span className="flex flex-col leading-tight">
+                <span>Stellar</span>
+                <span className="text-muted-foreground text-xs">{other.label}</span>
+              </span>
+              <ArrowUpRight className="text-muted-foreground ml-auto h-3.5 w-3.5" />
+            </a>
+          ) : (
+            <div
+              role="menuitem"
+              aria-disabled="true"
+              className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm"
+            >
+              <ChainMark chain="stellar" className="h-4 w-4 shrink-0" />
+              <span className="flex flex-col leading-tight">
+                <span>Stellar</span>
+                <span className="text-xs">{other.label} · not set up here</span>
+              </span>
+            </div>
+          )}
           {COMING_SOON.map((c) => (
             <div
               key={c.id}
