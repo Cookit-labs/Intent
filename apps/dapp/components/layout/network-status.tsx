@@ -81,7 +81,7 @@ export function NetworkStatus({
           </a>
         )
       ) : isMainnet() ? (
-        tradeCapUsd !== undefined ? (
+        tradeCapUsd !== undefined && slug === 'stellar' ? (
           <span className="text-muted-foreground hidden text-xs sm:inline">
             Trades up to ${tradeCapUsd}
           </span>

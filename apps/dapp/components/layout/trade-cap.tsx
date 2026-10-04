@@ -3,6 +3,7 @@
 import { createContext, useContext, type ReactNode } from 'react'
 
 import { tradeCapNote } from '../../lib/trade-cap-copy'
+import { useChain } from '../../providers/chain-provider'
 
 const TradeCapContext = createContext<number | undefined>(undefined)
 
@@ -19,6 +20,7 @@ export function TradeCapProvider({
 
 /** One quiet line under a trade input. Renders nothing where there is no cap. */
 export function TradeCapNote(): JSX.Element | null {
-  const note = tradeCapNote(useContext(TradeCapContext))
+  const { slug } = useChain()
+  const note = tradeCapNote(useContext(TradeCapContext), slug)
   return note === undefined ? null : <p className="text-muted-foreground mt-2 text-xs">{note}</p>
 }
