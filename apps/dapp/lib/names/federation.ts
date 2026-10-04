@@ -1,3 +1,6 @@
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
+
 import { StrKey } from '@stellar/stellar-sdk'
 
 import { NameLookupFailed, NameNotFound } from './errors'
@@ -38,8 +41,18 @@ const RESERVED_HOST = /(?:^|\.)(?:localhost|local|internal|home\.arpa|lan|test|i
 export type FederationMemoType = 'text' | 'id' | 'hash'
 const MEMO_TYPES = new Set<string>(['text', 'id', 'hash'])
 
+/** Every address a host resolves to. */
+export type HostLookup = (hostname: string) => Promise<string[]>
+
 export interface ResolveFederationOptions {
   fetchImpl?: typeof fetch
+  /**
+   * Resolves a host before it is fetched, so a public name that points at a
+   * private address is refused. Defaults to the system resolver, except when
+   * `fetchImpl` is injected: a caller that supplies its own network has no
+   * real hosts to resolve.
+   */
+  lookup?: HostLookup
 }
 
 export interface FederationAnswer {
@@ -56,6 +69,49 @@ function isPublicHost(hostname: string): boolean {
   return !RESERVED_HOST.test(hostname)
 }
 
+function isPrivateV4(address: string): boolean {
+  const [a = 0, b = 0] = address.split('.').map(Number)
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  )
+}
+
+/** Loopback, private, link-local, unspecified or reserved, in either IP family. */
+function isPrivateAddress(address: string): boolean {
+  const family = isIP(address)
+  if (family === 4) return isPrivateV4(address)
+  if (family !== 6) return true
+  const v6 = address.toLowerCase()
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)
+  if (mapped?.[1] !== undefined) return isPrivateV4(mapped[1])
+  return v6 === '::' || v6 === '::1' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6)
+}
+
+async function assertResolvesPublic(hostname: string, lookup: HostLookup): Promise<void> {
+  let addresses: string[]
+  try {
+    addresses = await lookup(hostname)
+  } catch {
+    throw new NameLookupFailed(`${hostname} could not be reached`)
+  }
+  if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
+    throw new NameLookupFailed(`${hostname} is not a host this app will reach`)
+  }
+}
+
+function defaultLookup(options: ResolveFederationOptions): HostLookup | undefined {
+  if (options.lookup !== undefined) return options.lookup
+  if (options.fetchImpl !== undefined) return undefined
+  return async (hostname) => (await dnsLookup(hostname, { all: true })).map((r) => r.address)
+}
+
 function guarded(init: RequestInit = {}): RequestInit {
   return { ...init, redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
 }
@@ -65,18 +121,47 @@ function tooLarge(res: Response): boolean {
   return Number.isFinite(length) && length > MAX_BODY_BYTES
 }
 
-async function federationServerOf(domain: string, fetchImpl: typeof fetch): Promise<URL> {
+/**
+ * The body as text, refused once it passes the cap. `content-length` is the
+ * sender's claim; a chunked response has none, so the stream is counted.
+ */
+async function readBounded(res: Response): Promise<string | undefined> {
+  if (tooLarge(res)) return undefined
+  if (res.body === null) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel()
+      return undefined
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function federationServerOf(
+  domain: string,
+  fetchImpl: typeof fetch,
+  lookup: HostLookup | undefined
+): Promise<URL> {
+  if (lookup !== undefined) await assertResolvesPublic(domain, lookup)
   let res: Response
   try {
     res = await fetchImpl(`https://${domain}/.well-known/stellar.toml`, guarded())
   } catch {
     throw new NameLookupFailed(`${domain} could not be reached`)
   }
-  if (!res.ok || tooLarge(res)) {
+  const toml = res.ok ? await readBounded(res) : undefined
+  if (toml === undefined) {
     throw new NameLookupFailed(`${domain} did not serve a stellar.toml`)
   }
 
-  const server = FEDERATION_SERVER.exec((await res.text()).slice(0, MAX_BODY_BYTES))?.[1]?.trim()
+  const server = FEDERATION_SERVER.exec(toml)?.[1]?.trim()
   if (server === undefined || server === '') {
     throw new NameLookupFailed(`${domain} publishes no federation server`)
   }
@@ -93,6 +178,7 @@ async function federationServerOf(domain: string, fetchImpl: typeof fetch): Prom
   if (!isPublicHost(url.hostname)) {
     throw new NameLookupFailed(`${domain} names a federation server this app will not reach`)
   }
+  if (lookup !== undefined) await assertResolvesPublic(url.hostname, lookup)
   return url
 }
 
@@ -110,7 +196,7 @@ export async function resolveFederation(
     throw new NameLookupFailed(`${domain} is not a domain this app will reach`)
   }
 
-  const query = await federationServerOf(domain, fetchImpl)
+  const query = await federationServerOf(domain, fetchImpl, defaultLookup(options))
   query.searchParams.set('q', trimmed)
   query.searchParams.set('type', 'name')
 
@@ -121,13 +207,14 @@ export async function resolveFederation(
     throw new NameLookupFailed(`the federation server for ${domain} could not be reached`)
   }
   if (res.status === 404) throw new NameNotFound(`${trimmed} is not known to ${domain}`)
-  if (!res.ok || tooLarge(res)) {
+  const text = res.ok ? await readBounded(res) : undefined
+  if (text === undefined) {
     throw new NameLookupFailed(`the federation server for ${domain} did not answer`)
   }
 
   let body: { account_id?: unknown; memo_type?: unknown; memo?: unknown }
   try {
-    body = JSON.parse((await res.text()).slice(0, MAX_BODY_BYTES)) as typeof body
+    body = JSON.parse(text) as typeof body
   } catch {
     throw new NameLookupFailed(`the federation server for ${domain} did not answer with JSON`)
   }

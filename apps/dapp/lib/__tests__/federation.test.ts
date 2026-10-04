@@ -200,3 +200,66 @@ describe('the server is not a proxy for whoever types a domain', () => {
     await expect(resolveFederation('alice*lobstr.co', { fetchImpl })).rejects.not.toThrow(/503/)
   })
 })
+
+describe('federation against a hostile upstream', () => {
+  it('refuses a public name that resolves to a private address, before fetching', async () => {
+    for (const ip of [
+      '10.1.2.3',
+      '127.0.0.1',
+      '169.254.169.254',
+      '192.168.0.9',
+      '172.16.5.5',
+      '::1',
+      'fd00::1',
+      '::ffff:10.0.0.1',
+    ]) {
+      const fetchImpl = stubbedFetch({})
+      await expect(
+        resolveFederation('alice*lobstr.co', { fetchImpl, lookup: async () => [ip] }),
+        ip
+      ).rejects.toThrow(NameLookupFailed)
+      expect(fetchImpl.urls, ip).toHaveLength(0)
+    }
+  })
+
+  it('refuses a federation server whose host resolves to a private address', async () => {
+    const fetchImpl = stubbedFetch({ server: 'https://fed.example.com/federation' })
+    const lookup = async (host: string) =>
+      host === 'fed.example.com' ? ['10.0.0.8'] : ['93.184.216.34']
+    await expect(resolveFederation('alice*lobstr.co', { fetchImpl, lookup })).rejects.toThrow(
+      NameLookupFailed
+    )
+    expect(fetchImpl.urls).toHaveLength(1)
+  })
+
+  it('allows a name that resolves only to public addresses', async () => {
+    const fetchImpl = stubbedFetch({})
+    const answer = await resolveFederation('alice*lobstr.co', {
+      fetchImpl,
+      lookup: async () => ['93.184.216.34', '2606:2800:220:1::1'],
+    })
+    expect(answer.address).toBe(TARGET)
+  })
+
+  it('refuses a chunked toml that grows past the cap, even when its useful part comes first', async () => {
+    const inner = stubbedFetch({})
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/.well-known/stellar.toml')) return inner(input, init)
+      const head = new TextEncoder().encode('FEDERATION_SERVER="https://lobstr.co/federation"\n')
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(head)
+            controller.enqueue(new TextEncoder().encode('#'.repeat(40 * 1024)))
+            controller.enqueue(new TextEncoder().encode('#'.repeat(40 * 1024)))
+            controller.close()
+          },
+        }),
+        { status: 200 }
+      )
+    }) as unknown as typeof fetch
+    await expect(resolveFederation('alice*lobstr.co', { fetchImpl })).rejects.toThrow(
+      NameLookupFailed
+    )
+  })
+})
