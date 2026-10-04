@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { assertOfframpPayment } from '../../../../lib/offramp/build-payment'
 import { readExpectation } from '../../../../lib/offramp/read-expectation'
+import { tokenBelongsTo } from '../../../../lib/offramp/token-subject'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -42,6 +43,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (typeof body[key] !== 'string' || body[key] === '') {
       return NextResponse.json({ error: `${key} is required` }, { status: 400 })
     }
+  }
+
+  if (!tokenBelongsTo(body.authToken as string, body.account as string)) {
+    return NextResponse.json({ error: 'authToken was not issued to this account' }, { status: 403 })
   }
 
   const read = await readExpectation({
