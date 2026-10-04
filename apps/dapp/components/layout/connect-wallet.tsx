@@ -6,10 +6,7 @@ import { Wallet } from 'lucide-react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useWallet } from '../../hooks/use-wallet'
-
-function shortenStellar(address: string): string {
-  return `${address.slice(0, 4)}…${address.slice(-4)}`
-}
+import { StellarWalletMenu } from './stellar-wallet-menu'
 
 /**
  * Connect control for the active chain.
@@ -39,20 +36,12 @@ function StellarConnect(): JSX.Element {
 
   if (isConnected && address !== undefined) {
     return (
-      <div className="flex items-center gap-2">
-        {balance !== undefined ? (
-          <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
-            {Number(balance).toLocaleString(undefined, { maximumFractionDigits: 2 })}{' '}
-            {balanceSymbol}
-          </span>
-        ) : null}
-        <span className="border-border rounded-md border px-2 py-1 font-mono text-xs">
-          {shortenStellar(address)}
-        </span>
-        <Button variant="outline" size="sm" onClick={disconnect} className="text-xs">
-          Disconnect
-        </Button>
-      </div>
+      <StellarWalletMenu
+        address={address}
+        balance={balance}
+        balanceSymbol={balanceSymbol}
+        onDisconnect={disconnect}
+      />
     )
   }
 
