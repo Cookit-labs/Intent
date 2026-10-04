@@ -8,11 +8,12 @@ import {
   ArrowLeftRight,
   ArrowUpRight,
   Check,
-  ChevronDown,
   Copy,
   ExternalLink,
   LogOut,
+  Wallet,
 } from 'lucide-react'
+import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -58,11 +59,14 @@ export function StellarWalletMenu({
   address,
   balance,
   balanceSymbol,
+  walletIcon,
   onDisconnect,
 }: {
   address: string
   balance: string | undefined
   balanceSymbol: string
+  /** The connected wallet's own logo, when it provides one. */
+  walletIcon?: string | undefined
   onDisconnect: () => void
 }): JSX.Element {
   const { adapter, descriptor } = useChain()
@@ -115,18 +119,17 @@ export function StellarWalletMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Wallet ${short(address)}`}
-        className="border-border bg-card hover:bg-muted/60 focus-visible:ring-ring inline-flex h-9 items-center gap-2.5 rounded-md border pl-3 pr-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2"
+        title={short(address)}
+        className="border-border bg-card hover:bg-muted/60 focus-visible:ring-ring relative inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2"
       >
-        {balance !== undefined ? (
-          <span className="hidden tabular-nums sm:inline">
-            {amount(balance)} <span className="text-muted-foreground">{balanceSymbol}</span>
-          </span>
-        ) : null}
-        <span className="bg-border hidden h-4 w-px sm:block" aria-hidden="true" />
-        <span className="h-5 w-5 rounded-full" style={avatarStyle(address)} aria-hidden="true" />
-        <span className="font-mono text-xs">{short(address)}</span>
-        <ChevronDown
-          className={`text-muted-foreground h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+        {walletIcon !== undefined ? (
+          <Image src={walletIcon} alt="" width={20} height={20} unoptimized className="h-5 w-5" />
+        ) : (
+          <Wallet className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+        )}
+        <span
+          className="bg-success ring-background absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2"
+          aria-hidden="true"
         />
       </button>
 

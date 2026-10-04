@@ -21,3 +21,20 @@ export function isWrongStellarNetwork(walletPassphrase: string | undefined): boo
 export function switchNetworkMessage(): string {
   return `Switch your wallet to ${stellarNetwork.name}, then reconnect.`
 }
+
+const PASSPHRASES: Record<string, 'testnet' | 'mainnet'> = {
+  'Test SDF Network ; September 2015': 'testnet',
+  'Public Global Stellar Network ; September 2015': 'mainnet',
+}
+
+/** Which Stellar network a wallet's passphrase names, or nothing if it is neither. */
+export function stellarNetworkOf(
+  walletPassphrase: string | undefined
+): 'testnet' | 'mainnet' | undefined {
+  return walletPassphrase === undefined ? undefined : PASSPHRASES[walletPassphrase]
+}
+
+/** What the header says when the wallet and the app are on different networks. */
+export function mismatchLabel(walletNetwork: 'testnet' | 'mainnet' | undefined): string {
+  return walletNetwork === undefined ? 'Wrong network' : `Wallet is on Stellar ${walletNetwork}`
+}

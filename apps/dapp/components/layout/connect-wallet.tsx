@@ -31,8 +31,17 @@ export function ConnectWallet(): JSX.Element {
 }
 
 function StellarConnect(): JSX.Element {
-  const { address, isConnected, isConnecting, balance, balanceSymbol, error, connect, disconnect } =
-    useWallet()
+  const {
+    address,
+    isConnected,
+    isConnecting,
+    balance,
+    balanceSymbol,
+    walletIcon,
+    error,
+    connect,
+    disconnect,
+  } = useWallet()
 
   if (isConnected && address !== undefined) {
     return (
@@ -40,6 +49,7 @@ function StellarConnect(): JSX.Element {
         address={address}
         balance={balance}
         balanceSymbol={balanceSymbol}
+        walletIcon={walletIcon}
         onDisconnect={disconnect}
       />
     )

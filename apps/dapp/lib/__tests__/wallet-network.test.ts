@@ -47,3 +47,30 @@ describe('before the wallet has said', () => {
     expect(isWrongStellarNetwork(undefined)).toBe(false)
   })
 })
+
+describe('naming the network a wallet is on', () => {
+  it('recognises both Stellar networks from the passphrase', async () => {
+    const { stellarNetworkOf } = await on('testnet')
+    expect(stellarNetworkOf(PUBLIC)).toBe('mainnet')
+    expect(stellarNetworkOf(TESTNET)).toBe('testnet')
+  })
+
+  it('says nothing for a passphrase it does not know, or none', async () => {
+    const { stellarNetworkOf } = await on('testnet')
+    expect(stellarNetworkOf('Standalone Network ; February 2017')).toBeUndefined()
+    expect(stellarNetworkOf(undefined)).toBeUndefined()
+  })
+})
+
+describe('the mismatch label', () => {
+  it('names the network the wallet is on instead of calling it wrong', async () => {
+    const { mismatchLabel } = await on('testnet')
+    expect(mismatchLabel('mainnet')).toBe('Wallet is on Stellar mainnet')
+    expect(mismatchLabel('testnet')).toBe('Wallet is on Stellar testnet')
+  })
+
+  it('falls back to the plain label when the network is not known', async () => {
+    const { mismatchLabel } = await on('testnet')
+    expect(mismatchLabel(undefined)).toBe('Wrong network')
+  })
+})

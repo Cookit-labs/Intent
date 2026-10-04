@@ -2,13 +2,13 @@
 
 import { accountExplorerUrl, stellarDescriptor, stellarNetwork } from '@intent/config'
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
 import { clearSession, ensureSession } from '../api/auth'
-import { isWrongStellarNetwork, switchNetworkMessage } from '../wallet-network'
+import { isWrongStellarNetwork, stellarNetworkOf, switchNetworkMessage } from '../wallet-network'
 
 /**
  * Remembers that a session was established, so a reload can restore it.
@@ -259,6 +259,16 @@ function useStellarWallet(): ChainWallet {
 
   const isWrongNetwork = address !== undefined && isWrongStellarNetwork(network)
 
+  // The kit throws when no wallet has been chosen yet.
+  const walletIcon = useMemo(() => {
+    if (address === undefined) return undefined
+    try {
+      return StellarWalletsKit.selectedModule.productIcon
+    } catch {
+      return undefined
+    }
+  }, [address])
+
   const { data: balances } = useQuery({
     queryKey: ['stellar-balances', address],
     queryFn: () => fetchStellarBalances(address as string),
@@ -277,7 +287,10 @@ function useStellarWallet(): ChainWallet {
     isConnected: address !== undefined,
     isConnecting,
     isWrongNetwork,
-    balance: balances?.xlm,
+    // Not shown while the wallet is on another network: the last read may be
+    // from the network it was on before, and a number beside a mismatch
+    // warning reads as this network's.
+    balance: isWrongNetwork ? undefined : balances?.xlm,
     balanceSymbol: stellarDescriptor.nativeCurrency.symbol,
     // An unfunded account does not exist on-chain yet, which is Stellar's
     // equivalent of a zero balance and the cue to hit friendbot.
@@ -291,6 +304,8 @@ function useStellarWallet(): ChainWallet {
     disconnect,
     switchNetwork,
     isSwitching: false,
+    walletNetwork: stellarNetworkOf(network),
+    walletIcon,
   }
 }
 
