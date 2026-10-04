@@ -71,6 +71,7 @@ import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
+import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
 
@@ -1513,6 +1514,7 @@ export function IntentChat(): JSX.Element {
           showExamples={!parsed}
           {...(parsed ? { onReset: handleReset } : {})}
         />
+        <TradeCapNote />
         {createIntent.isError ? (
           <p className="text-foreground mt-2 text-xs">
             {(createIntent.error as Error).message || 'Something went wrong. No funds moved.'}

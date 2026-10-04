@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import { Header } from './header'
 import { Sidebar } from './sidebar'
+import { TradeCapProvider } from './trade-cap'
 
 /**
  * The application frame, and where it adapts to a narrow screen.
@@ -91,7 +92,9 @@ export function AppShell({
         {/* `min-w-0` on the column above and here: without it a wide child —
             a long hash, a table — forces the whole layout wider than the
             viewport and the page scrolls sideways. */}
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <TradeCapProvider capUsd={tradeCapUsd}>{children}</TradeCapProvider>
+        </main>
       </div>
     </div>
   )
