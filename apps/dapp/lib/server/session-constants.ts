@@ -6,4 +6,4 @@
  * the build even if only a string constant were used.
  */
 export const SESSION_COOKIE = 'intent_access'
-export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+export const SESSION_TTL_SECONDS = 24 * 60 * 60

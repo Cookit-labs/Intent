@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 import { gateEnabled } from './lib/server/access-gate'
+import { constantTimeEqual } from './lib/server/constant-time-equal'
 import { SESSION_COOKIE } from './lib/server/session-constants'
 
 /**
@@ -55,7 +56,7 @@ async function isValidSession(token: string | undefined, secret: string): Promis
     await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encoded))
   )
 
-  if (expected !== signature) return false
+  if (!constantTimeEqual(expected, signature)) return false
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))) as {
