@@ -234,6 +234,7 @@ export const venues: Venue[] = [
   // has been signed through this app end to end.
   {
     id: 'noether',
+    beta: true,
     name: 'Noether',
     family: 'stellar' as const,
     category: 'perps',

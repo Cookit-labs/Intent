@@ -18,11 +18,14 @@ import { ThemeToggle } from './theme-toggle'
  */
 export function Header({
   menuButton,
+  tradeCapUsd,
 }: {
   /** The drawer trigger, supplied by the shell that owns the drawer's state. */
   menuButton?: ReactNode
   /** Unused here; the shell passes the handler through `menuButton`. */
   onOpenMenu?: () => void
+  /** The mainnet per-trade cap, shown beside the network. */
+  tradeCapUsd?: number | undefined
 }): JSX.Element {
   return (
     // Clear, so the canvas glow behind it reads through. The page scrolls in
@@ -34,7 +37,7 @@ export function Header({
         {/* Hidden below `md`: it is the only element here that is purely
             informational, so it is the right one to drop when space runs out. */}
         <div className="hidden md:block">
-          <NetworkStatus />
+          <NetworkStatus tradeCapUsd={tradeCapUsd} />
         </div>
       </div>
 

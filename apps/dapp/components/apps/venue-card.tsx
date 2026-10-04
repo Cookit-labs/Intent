@@ -113,6 +113,11 @@ export function VenueCard({
                 ) : integration === 'quotes' ? (
                   <Badge variant="secondary">{integrationLabel.quotes}</Badge>
                 ) : null}
+                {venue.beta === true ? (
+                  <Badge variant="outline" className="border-warning/40 text-warning">
+                    Beta
+                  </Badge>
+                ) : null}
               </div>
             </div>
           </div>

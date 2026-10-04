@@ -169,3 +169,11 @@ describe('Soroban Domains, the name service', () => {
     expect(names?.capability).toMatch(/.xlm/)
   })
 })
+
+describe('beta venues', () => {
+  it('marks Noether as beta, and nothing that is not in a closed beta', () => {
+    expect(byId('noether')?.beta).toBe(true)
+    const others = venues.filter((v) => v.id !== 'noether' && v.beta === true)
+    expect(others).toEqual([])
+  })
+})

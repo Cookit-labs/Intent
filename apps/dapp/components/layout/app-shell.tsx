@@ -21,7 +21,13 @@ import { Sidebar } from './sidebar'
  * stacking rules at each breakpoint, and the version that reads clearly is two
  * declarations that each do one thing.
  */
-export function AppShell({ children }: { children: ReactNode }): JSX.Element {
+export function AppShell({
+  children,
+  tradeCapUsd,
+}: {
+  children: ReactNode
+  tradeCapUsd?: number | undefined
+}): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const pathname = usePathname()
 
@@ -65,6 +71,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           header and page sit on. See globals.css. */}
       <div className="app-canvas flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
+          tradeCapUsd={tradeCapUsd}
           onOpenMenu={() => setMenuOpen(true)}
           menuButton={
             <button

@@ -51,4 +51,6 @@ export interface Venue {
    * and claiming mainnet by omission would be the wrong default.
    */
   networks?: ('testnet' | 'mainnet')[]
+  /** In a closed or early beta on the venue's side, so the app marks it as such. */
+  beta?: boolean
 }
