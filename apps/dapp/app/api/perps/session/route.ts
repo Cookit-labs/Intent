@@ -25,6 +25,8 @@ const STATUS_FOR: Record<string, number> = {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(request, 'resolve')
+  if (limited !== undefined) return limited
   const account = new URL(request.url).searchParams.get('account') ?? ''
   if (!StrKey.isValidEd25519PublicKey(account)) {
     return NextResponse.json({ error: 'account must be a Stellar public key' }, { status: 400 })

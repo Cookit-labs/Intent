@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { databaseConfigured } from '../../../lib/server/db'
+import { enforceRateLimit } from '../../../lib/server/rate-limit'
 import { sponsorAccount, sponsorBudgetToday, sponsorConfigured } from '../../../lib/sponsor/sponsor'
 
 export const runtime = 'nodejs'
@@ -15,7 +16,9 @@ export const dynamic = 'force-dynamic'
  * `sponsorForSubmission` refuses to pay in that state — and is reported as
  * such, with the reason, so the deploy can be fixed rather than wondered at.
  */
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  const limited = await enforceRateLimit(request, 'resolve')
+  if (limited !== undefined) return limited
   const account = sponsorAccount()
   const ledger = databaseConfigured()
   const budget = ledger ? await sponsorBudgetToday() : undefined
