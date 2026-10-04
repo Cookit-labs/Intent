@@ -184,7 +184,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Rates are read live and XLM can be supplied. Borrowing is out of scope, so a position here can never be liquidated.',
+      'Rates are read live. Supply, borrow, repay and collateral are signed here, and a borrow is checked by the pool itself. A position with a loan can be liquidated if its collateral falls.',
   },
   {
     id: 'defindex',

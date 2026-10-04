@@ -41,13 +41,13 @@ describe('integration status is claimed accurately', () => {
     expect(byId('blend')?.integration).toBe('executes')
   })
 
-  it('does not claim Blend can borrow', () => {
-    // Deliberate scope, not an omission. A supply-only position cannot be
-    // liquidated, and that stays true only while nothing here opens a
-    // liability — so the capability text must not imply otherwise.
+  it('says Blend can borrow and that a loan can be liquidated', () => {
+    // Borrow, repay and collateral routes are live, so the card must not
+    // promise a position can never be liquidated.
     const capability = byId('blend')?.capability ?? ''
     expect(capability).toMatch(/borrow/i)
-    expect(capability).toMatch(/out of scope/i)
+    expect(capability).toMatch(/liquidated/i)
+    expect(capability).not.toMatch(/out of scope|never be liquidated/i)
   })
 
   it('lists the Soroswap aggregator as its own venue, in the aggregator category', () => {
