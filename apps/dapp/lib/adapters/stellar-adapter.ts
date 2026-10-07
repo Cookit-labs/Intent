@@ -15,6 +15,7 @@ import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../cha
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
 import { fetchStellarBalances } from '../stellar-account'
 import { clearSession, ensureSession } from '../api/auth'
+import { networkKey } from '../network-storage-key'
 import { isWrongStellarNetwork, stellarNetworkOf, switchNetworkMessage } from '../wallet-network'
 
 /**
@@ -26,7 +27,7 @@ import { isWrongStellarNetwork, stellarNetworkOf, switchNetworkMessage } from '.
  * do nothing. This flag records the user's *intent* to be disconnected, and is
  * the thing restore checks first.
  */
-const SESSION_KEY = 'intent.stellar.session'
+const SESSION_BASE = 'intent.stellar.session'
 
 interface StoredSession {
   address: string
@@ -95,7 +96,7 @@ function useSharedConnection(): { address: string | undefined; network: string |
 function readSession(): StoredSession | undefined {
   if (typeof window === 'undefined') return undefined
   try {
-    const raw = window.localStorage.getItem(SESSION_KEY)
+    const raw = window.localStorage.getItem(networkKey(SESSION_BASE))
     return raw === null ? undefined : (JSON.parse(raw) as StoredSession)
   } catch {
     // Private-mode browsers throw on localStorage; the session still works for
@@ -106,8 +107,8 @@ function readSession(): StoredSession | undefined {
 
 function writeSession(session: StoredSession | undefined): void {
   try {
-    if (session === undefined) window.localStorage.removeItem(SESSION_KEY)
-    else window.localStorage.setItem(SESSION_KEY, JSON.stringify(session))
+    if (session === undefined) window.localStorage.removeItem(networkKey(SESSION_BASE))
+    else window.localStorage.setItem(networkKey(SESSION_BASE), JSON.stringify(session))
   } catch {
     /* see readSession */
   }
