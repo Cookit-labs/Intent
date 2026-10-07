@@ -1,6 +1,6 @@
 import { stellarNetwork } from '@intent/config'
 
-import { BLEND_POOL, blendPositionUrl } from './contract-registry'
+import { blendPool, blendPositionUrl } from './contract-registry'
 import { OFFER_MEMO } from './build-offer'
 import { PLAN_MEMO } from './build-plan'
 import { POOL_MEMO } from './build-pool'
@@ -387,7 +387,7 @@ function supplies(records: HorizonOperation[], account: string): LedgerSupply[] 
     const back = changes.find((c) => c.to === account && c.amount !== undefined)
     // Both legs means a swap, which is handled elsewhere.
     if (out === undefined || back !== undefined) continue
-    if (out.to !== BLEND_POOL) continue
+    if (out.to !== blendPool()) continue
 
     found.push({
       txHash: op.transaction_hash,

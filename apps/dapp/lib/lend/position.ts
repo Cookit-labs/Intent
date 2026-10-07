@@ -9,7 +9,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 import { liquidationPrice, positionHealth, type HealthLeg, type PositionHealth } from './health'
 import { readPrices } from './oracle'
 import { BLEND_XLM, readReserve, readReserveList } from './reserves'
@@ -91,7 +91,7 @@ export interface ReadPositionOptions {
 async function simulate(server: rpc.Server, account: string, passphrase: string): Promise<unknown> {
   const source = await server.getAccount(account)
   const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: passphrase })
-    .addOperation(new Contract(BLEND_POOL).call('get_positions', new Address(account).toScVal()))
+    .addOperation(new Contract(blendPool()).call('get_positions', new Address(account).toScVal()))
     .setTimeout(60)
     .build()
 

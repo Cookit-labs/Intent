@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { BLEND_POOL, blendPositionUrl } from '../swap/contract-registry'
+import { blendPool, blendPositionUrl } from '../swap/contract-registry'
 
 /**
  * Linking to the position rather than to the receipt.
@@ -15,8 +15,8 @@ describe('the Blend position link', () => {
   it('points at the pool that was actually supplied', () => {
     // Parameterised rather than fixed, so a second pool cannot silently link
     // to the first one's dashboard.
-    const url = blendPositionUrl(BLEND_POOL)
-    expect(url).toContain(BLEND_POOL)
+    const url = blendPositionUrl(blendPool())
+    expect(url).toContain(blendPool())
   })
 
   it('reaches Blend rather than a block explorer', () => {
@@ -34,6 +34,6 @@ describe('the Blend position link', () => {
   it('carries a different pool when given one', () => {
     const other = 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD'
     expect(blendPositionUrl(other)).toContain(other)
-    expect(blendPositionUrl(other)).not.toContain(BLEND_POOL)
+    expect(blendPositionUrl(other)).not.toContain(blendPool())
   })
 })

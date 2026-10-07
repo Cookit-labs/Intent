@@ -10,7 +10,7 @@ import {
   type xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 
 /**
  * Reading Blend's reserves, and turning them into a rate a person can read.
@@ -187,7 +187,7 @@ async function simulate(
   args: xdr.ScVal[],
   options: ReadReserveOptions
 ): Promise<unknown> {
-  const poolId = options.poolId ?? BLEND_POOL
+  const poolId = options.poolId ?? blendPool()
 
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,

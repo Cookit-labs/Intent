@@ -12,7 +12,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 import { assertVenueOn } from '../venues'
 
 /**
@@ -204,7 +204,7 @@ async function loadSequence(
 export async function buildBlendSupply(options: BuildSupplyOptions): Promise<BuiltSupply> {
   assertVenueOn('blend')
   const { account, asset, amount } = options
-  const poolId = options.poolId ?? BLEND_POOL
+  const poolId = options.poolId ?? blendPool()
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
@@ -437,7 +437,7 @@ export interface BuiltWithdraw {
 export async function buildBlendWithdraw(options: BuildWithdrawOptions): Promise<BuiltWithdraw> {
   assertVenueOn('blend')
   const { account, asset } = options
-  const poolId = options.poolId ?? BLEND_POOL
+  const poolId = options.poolId ?? blendPool()
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 
@@ -528,7 +528,7 @@ async function buildSinglePoolCall(
   everythingSentinel: string | undefined
 ): Promise<BuiltCollateral> {
   const { account, asset } = options
-  const poolId = options.poolId ?? BLEND_POOL
+  const poolId = options.poolId ?? blendPool()
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 

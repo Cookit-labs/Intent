@@ -15,10 +15,10 @@ import { describe, expect, it } from 'vitest'
 import { USDC, XLM } from '../swap/assets'
 import { sacFor } from '../swap/build-soroban'
 import {
-  AQUARIUS_ROUTER,
-  BLEND_POOL,
-  SOROSWAP_AGGREGATOR,
-  SOROSWAP_ROUTER,
+  aquariusRouter,
+  blendPool,
+  soroswapAggregator,
+  soroswapRouter,
 } from '../swap/contract-registry'
 import { assertSelfSubmission, builderFor, type VenueKind } from '../swap/venue-routing'
 
@@ -123,7 +123,7 @@ function aquariusCall(opts: { user?: string; fn?: string } = {}): string {
   const to = sacFor(USDC)
   const pair = from < to ? [from, to] : [to, from]
   return envelope(
-    new Contract(AQUARIUS_ROUTER).call(
+    new Contract(aquariusRouter()).call(
       opts.fn ?? 'swap',
       new Address(opts.user ?? ME).toScVal(),
       xdr.ScVal.scvVec(pair.map((c) => new Address(c).toScVal())),
@@ -139,7 +139,7 @@ function aquariusCall(opts: { user?: string; fn?: string } = {}): string {
 /** A Soroswap router swap; the recipient sits fourth. */
 function soroswapCall(opts: { to?: string; fn?: string } = {}): string {
   return envelope(
-    new Contract(SOROSWAP_ROUTER).call(
+    new Contract(soroswapRouter()).call(
       opts.fn ?? 'swap_exact_tokens_for_tokens',
       nativeToScVal(BigInt('100000000'), { type: 'i128' }),
       nativeToScVal(BigInt('1'), { type: 'i128' }),
@@ -153,7 +153,7 @@ function soroswapCall(opts: { to?: string; fn?: string } = {}): string {
 /** A Soroswap aggregator swap; the recipient sits sixth. */
 function aggregatorCall(opts: { to?: string } = {}): string {
   return envelope(
-    new Contract(SOROSWAP_AGGREGATOR).call(
+    new Contract(soroswapAggregator()).call(
       'swap_exact_tokens_for_tokens',
       new Address(sacFor(XLM)).toScVal(),
       new Address(sacFor(USDC)).toScVal(),
@@ -236,7 +236,7 @@ describe('a signed envelope is re-asserted by the shape it actually has', () => 
     // A signed call to any other listed contract is not a swap, whoever it
     // pays; the swap relay does not carry it.
     expect(() =>
-      assertSelfSubmission(envelope(new Contract(BLEND_POOL).call('submit'), ME), ME)
+      assertSelfSubmission(envelope(new Contract(blendPool()).call('submit'), ME), ME)
     ).toThrow(/not a swap contract/)
   })
 
@@ -254,7 +254,7 @@ describe('a signed envelope is re-asserted by the shape it actually has', () => 
 
   it('refuses an envelope whose source is not the account, whatever its shape', () => {
     expect(() =>
-      assertSelfSubmission(envelope(new Contract(AQUARIUS_ROUTER).call('swap'), STRANGER), ME)
+      assertSelfSubmission(envelope(new Contract(aquariusRouter()).call('swap'), STRANGER), ME)
     ).toThrow(/transaction source/)
   })
 })
