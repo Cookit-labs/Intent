@@ -7,6 +7,7 @@ import { expectationFor, resolutionFailure } from '../../../../lib/send/prepare'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { logExecution } from '../../../../lib/server/analytics'
 
 /**
  * Submits a signed payment to a recipient.
@@ -87,6 +88,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   // sends the original instead, paying its own fee as before.
   const sent = await sponsorForRequest(request, signedXdr, account)
   const result = await submitSignedSwap(sent.xdr)
+  await logExecution({
+    kind: 'send',
+    account,
+    feeSponsored: sent.sponsored,
+    result,
+  })
   if (!result.ok) return NextResponse.json(result)
 
   return NextResponse.json({

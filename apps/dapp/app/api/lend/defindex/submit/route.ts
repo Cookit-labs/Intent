@@ -6,6 +6,7 @@ import { isDefindexConfigured } from '../../../../../lib/lend/defindex/config'
 import { resolveDefindexVault } from '../../../../../lib/lend/defindex/contracts'
 import { assertDefindexDeposit } from '../../../../../lib/lend/defindex/deposit'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
+import { logExecution } from '../../../../../lib/server/analytics'
 
 /**
  * Submits a signed DeFindex deposit through DeFindex's relay.
@@ -86,6 +87,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const result = await sendSigned(body.signedXdr as string)
+  await logExecution({
+    kind: 'lend',
+    account: body.account as string,
+    feeSponsored: false,
+    result,
+  })
   if (!result.ok) return NextResponse.json(result)
 
   return NextResponse.json({
