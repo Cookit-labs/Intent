@@ -245,3 +245,73 @@ describe('the schema', () => {
     expect(ddl.every((s) => s.includes('IF NOT EXISTS'))).toBe(true)
   })
 })
+
+describe('rules per network', () => {
+  it('keeps a testnet rule invisible to mainnet, for the same owner', async () => {
+    const shared = fakeStandingRulesDb()
+    const testnet = createStandingRulesRepo(shared.query, 'testnet')
+    const mainnet = createStandingRulesRepo(shared.query, 'mainnet')
+
+    await testnet.createRule({ email: OWNER, wallet: WALLET, rule: rule({ id: 'si_t' }) })
+    await mainnet.createRule({ email: OWNER, wallet: WALLET, rule: rule({ id: 'si_m' }) })
+
+    expect((await testnet.listRules(OWNER, 'stellar')).map((r) => r.id)).toEqual(['si_t'])
+    expect((await mainnet.listRules(OWNER, 'stellar')).map((r) => r.id)).toEqual(['si_m'])
+  })
+
+  it('evaluates only the armed rules of its own network', async () => {
+    const shared = fakeStandingRulesDb()
+    const testnet = createStandingRulesRepo(shared.query, 'testnet')
+    const mainnet = createStandingRulesRepo(shared.query, 'mainnet')
+
+    await testnet.createRule({ email: OWNER, wallet: WALLET, rule: rule({ id: 'si_t' }) })
+    await mainnet.createRule({ email: OWNER, wallet: WALLET, rule: rule({ id: 'si_m' }) })
+
+    expect((await mainnet.armedRules()).map((r) => r.id)).toEqual(['si_m'])
+    expect((await testnet.armedRules()).map((r) => r.id)).toEqual(['si_t'])
+  })
+
+  it('cannot find, cancel or mark seen a rule that belongs to the other network', async () => {
+    const shared = fakeStandingRulesDb()
+    const testnet = createStandingRulesRepo(shared.query, 'testnet')
+    const mainnet = createStandingRulesRepo(shared.query, 'mainnet')
+
+    await testnet.createRule({ email: OWNER, wallet: WALLET, rule: rule({ id: 'si_t' }) })
+    await testnet.markFired('si_t', 0.15, new Date('2026-09-23T11:00:00.000Z'))
+
+    expect(await mainnet.findRule(OWNER, 'si_t')).toBeUndefined()
+    expect(await mainnet.cancelRule(OWNER, 'si_t')).toBe(false)
+    await mainnet.markSeen(OWNER, ['si_t'])
+    expect((await testnet.unseenFired(OWNER, 'stellar')).map((r) => r.id)).toEqual(['si_t'])
+    expect(await mainnet.unseenFired(OWNER, 'stellar')).toEqual([])
+    expect(await mainnet.unnotifiedFired()).toEqual([])
+    expect((await testnet.unnotifiedFired()).map((r) => r.id)).toEqual(['si_t'])
+  })
+
+  it('does not let one network overwrite the other’s rule by reusing its id', async () => {
+    const shared = fakeStandingRulesDb()
+    const testnet = createStandingRulesRepo(shared.query, 'testnet')
+    const mainnet = createStandingRulesRepo(shared.query, 'mainnet')
+
+    await testnet.createRule({
+      email: OWNER,
+      wallet: WALLET,
+      rule: rule({ id: 'same', text: 'testnet text' }),
+    })
+    const clash = await mainnet.createRule({
+      email: OWNER,
+      wallet: WALLET,
+      rule: rule({ id: 'same', text: 'mainnet text' }),
+    })
+
+    expect(clash).toBeUndefined()
+    expect((await testnet.findRule(OWNER, 'same'))?.rule.text).toBe('testnet text')
+  })
+
+  it('records the network on the rule it stores', async () => {
+    const shared = fakeStandingRulesDb()
+    const mainnet = createStandingRulesRepo(shared.query, 'mainnet')
+    const stored = await mainnet.createRule({ email: OWNER, wallet: WALLET, rule: rule() })
+    expect(stored?.network).toBe('mainnet')
+  })
+})

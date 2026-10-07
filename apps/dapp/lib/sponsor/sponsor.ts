@@ -1,4 +1,9 @@
-import { stellarNetwork } from '@intent/config'
+import {
+  activeNetwork,
+  parseStellarNetwork,
+  stellarNetwork,
+  type StellarNetworkName,
+} from '@intent/config'
 import { Keypair } from '@stellar/stellar-sdk'
 
 import { databaseConfigured } from '../server/db'
@@ -38,9 +43,34 @@ const ENV_KEY = 'SPONSOR_SECRET_KEY'
 
 type Env = Record<string, string | undefined>
 
-export function sponsorConfigured(env: Env = process.env): boolean {
-  const key = env[ENV_KEY]
-  return key !== undefined && key.trim() !== ''
+/**
+ * The secret key that pays fees on a network. `SPONSOR_SECRET_KEY_TESTNET` and
+ * `SPONSOR_SECRET_KEY_MAINNET` each serve their own network. The plain
+ * `SPONSOR_SECRET_KEY` serves the deployment's default network and no other:
+ * a key set before there were two networks must not start paying on the one it
+ * was never funded for.
+ */
+export function sponsorKey(
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): string | undefined {
+  const named = env[`${ENV_KEY}_${network.toUpperCase()}`]?.trim()
+  if (named !== undefined && named !== '') return named
+
+  const deploymentDefault = parseStellarNetwork(
+    env['NEXT_PUBLIC_STELLAR_NETWORK'] ?? process.env['NEXT_PUBLIC_STELLAR_NETWORK']
+  )
+  if (network !== deploymentDefault) return undefined
+
+  const plain = env[ENV_KEY]?.trim()
+  return plain === undefined || plain === '' ? undefined : plain
+}
+
+export function sponsorConfigured(
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): boolean {
+  return sponsorKey(env, network) !== undefined
 }
 
 /**
@@ -49,16 +79,22 @@ export function sponsorConfigured(env: Env = process.env): boolean {
  * configured pays for nothing (see `sponsorForSubmission`), and a preview
  * saying otherwise would be contradicted at submit.
  */
-export function feePaidBy(env: Env = process.env): 'sponsor' | 'account' {
-  return sponsorConfigured(env) && databaseConfigured(env) ? 'sponsor' : 'account'
+export function feePaidBy(
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): 'sponsor' | 'account' {
+  return sponsorConfigured(env, network) && databaseConfigured(env) ? 'sponsor' : 'account'
 }
 
 /** The sponsor's public key, when one is configured and parses. */
-export function sponsorAccount(env: Env = process.env): string | undefined {
-  const key = env[ENV_KEY]
-  if (key === undefined || key.trim() === '') return undefined
+export function sponsorAccount(
+  env: Env = process.env,
+  network: StellarNetworkName = activeNetwork()
+): string | undefined {
+  const key = sponsorKey(env, network)
+  if (key === undefined) return undefined
   try {
-    return Keypair.fromSecret(key.trim()).publicKey()
+    return Keypair.fromSecret(key).publicKey()
   } catch {
     return undefined
   }
@@ -164,11 +200,12 @@ export async function sponsorForSubmission(
   options: SponsorForSubmissionOptions = {}
 ): Promise<SponsoredSubmission> {
   const env = options.env ?? process.env
-  if (!sponsorConfigured(env)) return { xdr: signedXdr, sponsored: false }
+  const key = sponsorKey(env)
+  if (key === undefined) return { xdr: signedXdr, sponsored: false }
 
   let sponsor: Keypair
   try {
-    sponsor = Keypair.fromSecret((env[ENV_KEY] as string).trim())
+    sponsor = Keypair.fromSecret(key)
   } catch {
     return { xdr: signedXdr, sponsored: false, reason: 'invalid_sponsor_key' }
   }
