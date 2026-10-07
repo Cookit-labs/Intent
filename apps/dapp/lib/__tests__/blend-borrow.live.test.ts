@@ -8,7 +8,7 @@ import {
   prepareBlendWithdraw,
 } from '../lend/blend-client'
 import { explainPoolError, poolErrorCode } from '../lend/pool-errors'
-import { BLEND_XLM } from '../lend/reserves'
+import { blendXlm } from '../lend/reserves'
 
 /**
  * Opening and closing a liability, against the live pool.
@@ -111,7 +111,7 @@ describe.skipIf(SKIP)('repaying', () => {
   }, 60_000)
 
   it('pays down the signing account and no other', async () => {
-    const built = await buildBlendRepay({ account: ME, asset: BLEND_XLM })
+    const built = await buildBlendRepay({ account: ME, asset: blendXlm() })
 
     expect(() => assertSelfRepay(built.xdr, ME)).not.toThrow()
     expect(() => assertSelfRepay(built.xdr, STRANGER)).toThrow(/refusing to sign/)

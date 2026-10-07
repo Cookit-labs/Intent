@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FX_SYMBOLS,
-  REFLECTOR_CEX_DEX,
-  REFLECTOR_FX,
+  reflectorCexDex,
+  reflectorFx,
   fetchFxPrices,
   fetchReflectorPrices,
 } from '../prices/reflector'
@@ -274,8 +274,8 @@ describe('the FX and commodities feed', () => {
   it('asks the FX contract, not the crypto one', () => {
     // The two feeds share an interface; only the id tells them apart, and
     // asking the crypto feed for MXN returns nothing rather than an error.
-    expect(REFLECTOR_FX).not.toBe(REFLECTOR_CEX_DEX)
-    expect(REFLECTOR_FX.startsWith('C')).toBe(true)
+    expect(reflectorFx()).not.toBe(reflectorCexDex())
+    expect(reflectorFx().startsWith('C')).toBe(true)
   })
 
   it('names the currencies the bonds settle in and gold', () => {

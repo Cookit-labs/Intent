@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FX_SYMBOLS,
-  REFLECTOR_CEX_DEX,
+  reflectorCexDex,
   fetchFxPrices,
   fetchReflectorPrices,
 } from '../prices/reflector'
@@ -25,7 +25,7 @@ const SKIP = process.env['SKIP_LIVE'] === '1'
 
 describe.skipIf(SKIP)('the live Reflector CEX/DEX feed', () => {
   it('is reachable and reports fourteen decimals', async () => {
-    const meta = await readOracleMeta(REFLECTOR_CEX_DEX)
+    const meta = await readOracleMeta(reflectorCexDex())
 
     expect(meta.decimals).toBe(14)
     expect(meta.resolution).toBeGreaterThan(0)
@@ -34,7 +34,7 @@ describe.skipIf(SKIP)('the live Reflector CEX/DEX feed', () => {
   it('is actively updating', async () => {
     // A feed more than two periods behind is treated as absent everywhere
     // else, so if this fails the app is silently on its fallback path.
-    const meta = await readOracleMeta(REFLECTOR_CEX_DEX)
+    const meta = await readOracleMeta(reflectorCexDex())
     const age = Math.floor(Date.now() / 1000) - meta.lastTimestamp
 
     expect(age).toBeLessThan(meta.resolution * 2)
@@ -93,7 +93,7 @@ describe.skipIf(SKIP)('Blend still liquidates against its own oracle', () => {
     // number.
     const poolOracle = await readOracleId()
 
-    expect(poolOracle).not.toBe(REFLECTOR_CEX_DEX)
+    expect(poolOracle).not.toBe(reflectorCexDex())
     expect(poolOracle).toMatch(/^C[A-Z0-9]{55}$/)
   }, 60_000)
 })

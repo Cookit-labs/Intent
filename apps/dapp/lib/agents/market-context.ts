@@ -21,7 +21,7 @@ import { isVenueOn, venues } from '../venues'
 import type { Env } from '../lend/defindex/config'
 import { VAULT_KEYS } from '../lend/defindex/contracts'
 import { readDefindexRate, type DefindexRate } from '../lend/defindex/rate'
-import { BLEND_XLM, readReserve, type Reserve } from '../lend/reserves'
+import { blendXlm, readReserve, type Reserve } from '../lend/reserves'
 import { configuredLendingVenues } from '../lend/venues'
 import { anchorOn, anchorsOn, type AnchorEntry } from '../offramp/anchors'
 import { readWithdrawInfo } from '../offramp/sep24'
@@ -294,7 +294,7 @@ export async function fetchLendingRates(
 ): Promise<LendingRate[]> {
   const env = options.env ?? process.env
   const offered = configuredLendingVenues(env)
-  const readBlend = options.readBlend ?? (() => readReserve(BLEND_XLM))
+  const readBlend = options.readBlend ?? (() => readReserve(blendXlm()))
   const readDefindex =
     options.readDefindex ?? ((symbol: string) => readDefindexRate(symbol, { env }))
 

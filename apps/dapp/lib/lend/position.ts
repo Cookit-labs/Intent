@@ -12,7 +12,7 @@ import {
 import { blendPool } from '../swap/contract-registry'
 import { liquidationPrice, positionHealth, type HealthLeg, type PositionHealth } from './health'
 import { readPrices } from './oracle'
-import { BLEND_XLM, readReserve, readReserveList } from './reserves'
+import { blendXlm, readReserve, readReserveList } from './reserves'
 
 /**
  * What an account holds in the Blend pool, and how close it is to liquidation.
@@ -179,7 +179,7 @@ export async function readBlendPositions(
     // Only XLM is named here because it is the only asset this app supplies.
     // Anything else shows its contract id rather than a guessed ticker — the
     // ticker-impersonation trap this codebase has hit before.
-    return assetId === BLEND_XLM ? 'XLM' : `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
+    return assetId === blendXlm() ? 'XLM' : `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
   }
 
   function balanceFor(index: number, tokens: bigint, rate: bigint): BlendBalance | undefined {
@@ -262,7 +262,7 @@ export async function readBlendPosition(
   options: ReadPositionOptions = {}
 ): Promise<BlendPosition | null> {
   const positions = await readBlendPositions(account, options)
-  const xlm = positions.supplied.find((balance) => balance.assetId === BLEND_XLM)
+  const xlm = positions.supplied.find((balance) => balance.assetId === blendXlm())
   if (xlm === undefined) return null
 
   return { ...xlm, bTokens: xlm.tokens }

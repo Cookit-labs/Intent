@@ -1,4 +1,9 @@
-import { STELLAR_USDC, activeNetwork, type StellarNetworkName } from '@intent/config'
+import {
+  activeNetwork,
+  liveObject,
+  stellarNetworkFor,
+  type StellarNetworkName,
+} from '@intent/config'
 
 import type { ClassicAsset } from './assets'
 
@@ -79,8 +84,6 @@ export interface VerifiedAsset {
   networks: StellarNetworkName[]
 }
 
-const NETWORK = activeNetwork()
-
 /**
  * Etherfuse issues every one of its bonds from a single account per network.
  *
@@ -92,96 +95,127 @@ const NETWORK = activeNetwork()
  * bond below. It sets no auth flags and no clawback (checked on the account
  * and on each asset), so holding one needs a trustline and nothing else.
  */
-const ETHERFUSE_ISSUER =
-  NETWORK === 'mainnet'
+/**
+ * The catalogue for one network. Built per network, not once at startup:
+ * the issuers, the trust level of USDC and the bond list all depend on it.
+ */
+function buildKnownAssets(network: StellarNetworkName): Record<string, VerifiedAsset> {
+  const mainnet = network === 'mainnet'
+  const usdc = stellarNetworkFor(network).usdc
+  const ETHERFUSE_ISSUER = mainnet
     ? 'GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC'
     : 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4'
-const ETHERFUSE_DOMAIN = NETWORK === 'mainnet' ? 'etherfuse.com' : 'sand.etherfuse.com'
+  const ETHERFUSE_DOMAIN = mainnet ? 'etherfuse.com' : 'sand.etherfuse.com'
 
-export const KNOWN_ASSETS: Record<string, VerifiedAsset> = {
-  XLM: {
-    category: 'native',
-    trust: 'network',
-    code: 'XLM',
-    tradeableOnTestnet: true,
-    tradeableOnMainnet: true,
-    networks: ['testnet', 'mainnet'],
-    // No issuer and no domain: XLM is the network, not something issued on it.
-    decimals: 7,
-    description: 'Stellar Lumens, the network’s native asset',
-  },
+  return {
+    XLM: {
+      category: 'native',
+      trust: 'network',
+      code: 'XLM',
+      tradeableOnTestnet: true,
+      tradeableOnMainnet: true,
+      networks: ['testnet', 'mainnet'],
+      // No issuer and no domain: XLM is the network, not something issued on it.
+      decimals: 7,
+      description: 'Stellar Lumens, the network’s native asset',
+    },
 
-  USDC: {
-    category: 'stablecoin',
-    // centre.io lists Circle's *mainnet* issuer only. The testnet issuer
-    // claims the domain and the domain does not name it back — verified by
-    // fetching both. It is the canonical testnet USDC the whole ecosystem
-    // uses, so it stays; the weaker evidence is recorded rather than hidden.
-    // On mainnet the issuer is the one centre.io names, and the round trip
-    // holds: real USDC must not carry the testnet caveat.
-    trust: NETWORK === 'mainnet' ? 'round-trip' : 'claimed-only',
-    code: STELLAR_USDC.code,
-    tradeableOnTestnet: true,
-    tradeableOnMainnet: true,
-    networks: ['testnet', 'mainnet'],
-    issuer: STELLAR_USDC.issuer,
-    decimals: STELLAR_USDC.decimals,
-    homeDomain: 'centre.io',
-    description: 'US dollar stablecoin issued by Circle',
-  },
+    USDC: {
+      category: 'stablecoin',
+      // centre.io lists Circle's *mainnet* issuer only. The testnet issuer
+      // claims the domain and the domain does not name it back — verified by
+      // fetching both. It is the canonical testnet USDC the whole ecosystem
+      // uses, so it stays; the weaker evidence is recorded rather than hidden.
+      // On mainnet the issuer is the one centre.io names, and the round trip
+      // holds: real USDC must not carry the testnet caveat.
+      trust: mainnet ? 'round-trip' : 'claimed-only',
+      code: usdc.code,
+      tradeableOnTestnet: true,
+      tradeableOnMainnet: true,
+      networks: ['testnet', 'mainnet'],
+      issuer: usdc.issuer,
+      decimals: usdc.decimals,
+      homeDomain: 'centre.io',
+      description: 'US dollar stablecoin issued by Circle',
+    },
 
-  // Etherfuse Stablebonds: tokenized sovereign debt, freely tradeable on
-  // testnet. The issuer sets no auth flags, so holding one needs a trustline
-  // and nothing else — no KYC, no whitelist, no approval server.
-  CETES: {
-    category: 'rwa',
-    trust: 'round-trip',
-    // Testnet: 100 XLM buys ~2,299 CETES across two routes. Mainnet: deep
-    // USDC book (about $0.065 a CETES, tens of thousands on each side).
-    code: 'CETES',
-    tradeableOnTestnet: true,
-    tradeableOnMainnet: true,
-    networks: ['testnet', 'mainnet'],
-    issuer: ETHERFUSE_ISSUER,
-    decimals: 7,
-    homeDomain: ETHERFUSE_DOMAIN,
-    description: 'Mexican government treasury bills (Cetes), tokenized by Etherfuse',
-  },
+    // Etherfuse Stablebonds: tokenized sovereign debt, freely tradeable on
+    // testnet. The issuer sets no auth flags, so holding one needs a trustline
+    // and nothing else — no KYC, no whitelist, no approval server.
+    CETES: {
+      category: 'rwa',
+      trust: 'round-trip',
+      // Testnet: 100 XLM buys ~2,299 CETES across two routes. Mainnet: deep
+      // USDC book (about $0.065 a CETES, tens of thousands on each side).
+      code: 'CETES',
+      tradeableOnTestnet: true,
+      tradeableOnMainnet: true,
+      networks: ['testnet', 'mainnet'],
+      issuer: ETHERFUSE_ISSUER,
+      decimals: 7,
+      homeDomain: ETHERFUSE_DOMAIN,
+      description: 'Mexican government treasury bills (Cetes), tokenized by Etherfuse',
+    },
 
-  USTRY: {
-    category: 'rwa',
-    trust: 'round-trip',
-    // Nothing quotes it on testnet today. On mainnet it has a deep USDC book
-    // (about $1.075, thousands on each side).
-    code: 'USTRY',
-    tradeableOnTestnet: false,
-    tradeableOnMainnet: true,
-    networks: ['testnet', 'mainnet'],
-    issuer: ETHERFUSE_ISSUER,
-    decimals: 7,
-    homeDomain: ETHERFUSE_DOMAIN,
-    description: 'US Treasury bills, tokenized by Etherfuse',
-  },
+    USTRY: {
+      category: 'rwa',
+      trust: 'round-trip',
+      // Nothing quotes it on testnet today. On mainnet it has a deep USDC book
+      // (about $1.075, thousands on each side).
+      code: 'USTRY',
+      tradeableOnTestnet: false,
+      tradeableOnMainnet: true,
+      networks: ['testnet', 'mainnet'],
+      issuer: ETHERFUSE_ISSUER,
+      decimals: 7,
+      homeDomain: ETHERFUSE_DOMAIN,
+      description: 'US Treasury bills, tokenized by Etherfuse',
+    },
 
-  KTB: {
-    category: 'rwa',
-    trust: 'round-trip',
-    // Issued and domain-verified, but nothing quotes it: on mainnet 102 units
-    // are outstanding and the USDC book has no asks (2026-10-01).
-    code: 'KTB',
-    tradeableOnTestnet: false,
-    networks: ['testnet', 'mainnet'],
-    issuer: ETHERFUSE_ISSUER,
-    decimals: 7,
-    homeDomain: ETHERFUSE_DOMAIN,
-    description: 'Korean treasury bonds, tokenized by Etherfuse',
-  },
+    KTB: {
+      category: 'rwa',
+      trust: 'round-trip',
+      // Issued and domain-verified, but nothing quotes it: on mainnet 102 units
+      // are outstanding and the USDC book has no asks (2026-10-01).
+      code: 'KTB',
+      tradeableOnTestnet: false,
+      networks: ['testnet', 'mainnet'],
+      issuer: ETHERFUSE_ISSUER,
+      decimals: 7,
+      homeDomain: ETHERFUSE_DOMAIN,
+      description: 'Korean treasury bonds, tokenized by Etherfuse',
+    },
+  }
 }
 
-/** The catalogue as it applies here: entries whose issuer exists on this network. */
-const ASSETS_HERE: Record<string, VerifiedAsset> = Object.fromEntries(
-  Object.entries(KNOWN_ASSETS).filter(([, a]) => a.networks.includes(NETWORK))
+const catalogues = new Map<StellarNetworkName, Record<string, VerifiedAsset>>()
+
+export function knownAssetsFor(network: StellarNetworkName): Record<string, VerifiedAsset> {
+  const held = catalogues.get(network)
+  if (held !== undefined) return held
+  const built = buildKnownAssets(network)
+  catalogues.set(network, built)
+  return built
+}
+
+/** Every catalogued asset on the network of the call in progress. */
+export const KNOWN_ASSETS: Record<string, VerifiedAsset> = liveObject(() =>
+  knownAssetsFor(activeNetwork())
 )
+
+const here = new Map<StellarNetworkName, Record<string, VerifiedAsset>>()
+
+/** The catalogue as it applies here: entries whose issuer exists on this network. */
+function assetsHere(): Record<string, VerifiedAsset> {
+  const network = activeNetwork()
+  const held = here.get(network)
+  if (held !== undefined) return held
+  const built = Object.fromEntries(
+    Object.entries(knownAssetsFor(network)).filter(([, a]) => a.networks.includes(network))
+  )
+  here.set(network, built)
+  return built
+}
 
 /** The Stellar-encoding view, for code that only cares how to send it. */
 export function toClassicAsset(asset: VerifiedAsset): ClassicAsset {
@@ -199,7 +233,7 @@ export function toClassicAsset(asset: VerifiedAsset): ClassicAsset {
  * name.
  */
 export function resolveVerifiedAsset(symbol: string): VerifiedAsset | undefined {
-  return ASSETS_HERE[symbol.trim().toUpperCase()]
+  return assetsHere()[symbol.trim().toUpperCase()]
 }
 
 export function isVerified(symbol: string): boolean {
@@ -225,12 +259,12 @@ export function verificationOf(symbol: string): Verification | undefined {
 
 /** Symbols the app will trade, for prompts and pickers. */
 export function verifiedSymbols(): string[] {
-  return Object.keys(ASSETS_HERE)
+  return Object.keys(assetsHere())
 }
 
 /** Just the real-world assets, which need different explanation than a currency. */
 export function realWorldAssets(): VerifiedAsset[] {
-  return Object.values(ASSETS_HERE).filter((a) => a.category === 'rwa')
+  return Object.values(assetsHere()).filter((a) => a.category === 'rwa')
 }
 
 /**
@@ -241,8 +275,10 @@ export function realWorldAssets(): VerifiedAsset[] {
  * plan that fails at quote time for reasons the user cannot act on.
  */
 export function tradeableSymbols(): string[] {
-  return Object.values(ASSETS_HERE)
-    .filter((a) => (NETWORK === 'mainnet' ? a.tradeableOnMainnet === true : a.tradeableOnTestnet))
+  return Object.values(assetsHere())
+    .filter((a) =>
+      activeNetwork() === 'mainnet' ? a.tradeableOnMainnet === true : a.tradeableOnTestnet
+    )
     .map((a) => a.code)
 }
 
