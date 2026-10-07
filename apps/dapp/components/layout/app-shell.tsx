@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { Header } from './header'
+import { NetworkMismatchDialog } from './network-mismatch-dialog'
 import { Sidebar } from './sidebar'
 import { TradeCapProvider } from './trade-cap'
 
@@ -96,6 +97,7 @@ export function AppShell({
           <TradeCapProvider capUsd={tradeCapUsd}>{children}</TradeCapProvider>
         </main>
       </div>
+      <NetworkMismatchDialog />
     </div>
   )
 }
