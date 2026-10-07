@@ -212,13 +212,14 @@ export async function checkRateLimit(
 /**
  * The address a request came from, as the proxy in front reports it.
  *
- * A header is only as honest as the proxy that sets it. The deploy is
- * Netlify, whose edge sets `x-nf-client-connection-ip` from the connection,
- * so that is read first. `x-forwarded-for` comes next for a platform that
- * writes it from the connection (Vercel does): its first hop is the client
- * and later hops are proxies. Behind one that merely appends, the first hop
- * is the client's to choose, and so is the bucket — which is why the
- * platform's own header wins when present. `x-real-ip` is the last resort.
+ * A header is only as honest as the proxy that sets it. On Netlify the edge
+ * sets `x-nf-client-connection-ip` from the connection, so that is read
+ * first; on Vercel (`VERCEL` is set) it is the platform's own headers, since
+ * the Netlify one would be the client's. `x-forwarded-for` is a list whose
+ * first hop is the client where the platform writes it from the connection.
+ * Behind a proxy that merely appends, the first hop is the client's to
+ * choose, and so is the bucket — which is why the platform's own header wins
+ * when present.
  *
  * What is guarded here is a different abuse: a value too long to be an
  * address would fail the key's index, and that failure would read as
@@ -228,11 +229,22 @@ export async function checkRateLimit(
  */
 const MAX_ADDRESS_LENGTH = 64
 
-/** In order of trust. Only `x-forwarded-for` is a list; the first entry of the others is the whole value. */
-const CLIENT_ADDRESS_HEADERS = ['x-nf-client-connection-ip', 'x-forwarded-for', 'x-real-ip']
+/**
+ * In order of trust, per platform. Only `x-forwarded-for` is a list; the
+ * first entry of the others is the whole value.
+ *
+ * Which header a platform can be believed about depends on whether its edge
+ * strips the client's copy. Netlify strips `x-nf-client-connection-ip`;
+ * Vercel does not, so there a client can send it with any value, and it must
+ * not be read. Vercel sets `x-vercel-forwarded-for` and `x-real-ip` from the
+ * connection and overwrites `x-forwarded-for`, so those are what it is asked.
+ */
+const NETLIFY_HEADERS = ['x-nf-client-connection-ip', 'x-forwarded-for', 'x-real-ip']
+const VERCEL_HEADERS = ['x-vercel-forwarded-for', 'x-real-ip', 'x-forwarded-for']
 
-export function clientIp(request: Request): string {
-  for (const name of CLIENT_ADDRESS_HEADERS) {
+export function clientIp(request: Request, env: Env = process.env): string {
+  const headers = env['VERCEL'] === undefined ? NETLIFY_HEADERS : VERCEL_HEADERS
+  for (const name of headers) {
     const first = request.headers.get(name)?.split(',')[0]?.trim()
     if (first !== undefined && first !== '' && first.length <= MAX_ADDRESS_LENGTH) return first
   }
@@ -253,7 +265,7 @@ export async function enforceRateLimit(
   deps?: RateLimitDeps
 ): Promise<NextResponse | undefined> {
   const window = limitFor(family, deps?.env)
-  const keys = [`ip:${clientIp(request)}:${family}`]
+  const keys = [`ip:${clientIp(request, deps?.env)}:${family}`]
   if (account !== undefined && account !== '') keys.push(`account:${account}:${family}`)
 
   for (const key of keys) {
