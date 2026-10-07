@@ -53,6 +53,12 @@ interface StoredSession {
   verified: boolean
 }
 
+/** Tells the kit which network its own calls are for: the page's. */
+function alignKitNetwork(): void {
+  ensureKit()
+  StellarWalletsKit.setNetwork(isMainnet() ? Networks.PUBLIC : Networks.TESTNET)
+}
+
 /**
  * One connection, shared by every component that asks for it.
  *
@@ -280,8 +286,7 @@ function useStellarWallet(): ChainWallet {
   // connected, so what the kit asks wallets to sign for is the page's network.
   useEffect(() => {
     if (address === undefined) return
-    ensureKit()
-    StellarWalletsKit.setNetwork(isMainnet() ? Networks.PUBLIC : Networks.TESTNET)
+    alignKitNetwork()
   }, [address])
 
   // The wallet's network is the user's to change, in the wallet, and the app

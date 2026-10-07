@@ -51,7 +51,7 @@ Middleware computes the network for every request and sets one trusted request h
 
 - **Pages:** from the URL segment.
 - **API routes:** from the same header sent by the app's own fetch helper, which reads the page's network.
-- Any value outside `STELLAR_NETWORKS`, or no value, becomes the default network.
+- Any value outside `NEXT_PUBLIC_STELLAR_NETWORKS`, or no value, becomes the default network.
 - Any inbound `x-intent-network` is overwritten, never trusted as sent.
 
 Server code reads the network only through `activeNetwork()`, which in multi-network mode reads that header via `next/headers`. In single-network mode it returns the fixed value as today.
@@ -116,9 +116,9 @@ The chain menu lists Arc, Stellar mainnet and Stellar testnet as normal entries.
 
 ## Phasing
 
-Each phase merges on its own and is inert until `STELLAR_NETWORKS` lists more than one network.
+Each phase merges on its own and is inert until `NEXT_PUBLIC_STELLAR_NETWORKS` lists more than one network.
 
-1. **Core.** Route parsing, `STELLAR_NETWORKS`, middleware header, per-request `activeNetwork()`, lazy registries and constants, fail-closed behavior.
+1. **Core.** Route parsing, `NEXT_PUBLIC_STELLAR_NETWORKS`, middleware header, per-request `activeNetwork()`, lazy registries and constants, fail-closed behavior.
 2. **State.** Sponsor keys, ledger and standing-rule migrations, rate-limit keys, session-token network, per-network gate and health.
 3. **UI.** Menu entries, legacy redirect, fetch helper, wallet detection and the auto-prompt.
 4. **Hardening.** The threat table as tests, a security review, and a staging run with both networks.
