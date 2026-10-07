@@ -1,6 +1,13 @@
 'use client'
 
-import { accountExplorerUrl, stellarDescriptor, stellarNetwork } from '@intent/config'
+import {
+  STELLAR_NATIVE,
+  defaultNetwork,
+  stellarDescriptorFor,
+  stellarNetwork,
+  stellarNetworkFor,
+  type StellarNetworkName,
+} from '@intent/config'
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
@@ -291,7 +298,7 @@ function useStellarWallet(): ChainWallet {
     // from the network it was on before, and a number beside a mismatch
     // warning reads as this network's.
     balance: isWrongNetwork ? undefined : balances?.xlm,
-    balanceSymbol: stellarDescriptor.nativeCurrency.symbol,
+    balanceSymbol: STELLAR_NATIVE.symbol,
     // An unfunded account does not exist on-chain yet, which is Stellar's
     // equivalent of a zero balance and the cue to hit friendbot.
     needsFunding:
@@ -341,11 +348,28 @@ async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
   }
 }
 
-export const stellarAdapter: ChainAdapter = {
-  descriptor: stellarDescriptor,
-  useWallet: useStellarWallet,
-  accountUrl: (address) => accountExplorerUrl('stellar', address),
-  // Testnet only. On mainnet there is no faucet and the field is absent.
-  ...(stellarNetwork.friendbotUrl !== undefined ? { faucetUrl: stellarNetwork.friendbotUrl } : {}),
-  signTransaction: signStellarTransaction,
+const adapters = new Map<StellarNetworkName, ChainAdapter>()
+
+/**
+ * The Stellar adapter for one network. The wallet hook and the signer read the
+ * network of the page; what differs per network is the descriptor, the
+ * explorer link and the faucet, so those are fixed here from the network named.
+ */
+export function stellarAdapterFor(network: StellarNetworkName): ChainAdapter {
+  const held = adapters.get(network)
+  if (held !== undefined) return held
+  const net = stellarNetworkFor(network)
+  const built: ChainAdapter = {
+    descriptor: stellarDescriptorFor(network),
+    useWallet: useStellarWallet,
+    accountUrl: (address) => `${net.blockExplorerUrl}/account/${address}`,
+    // Testnet only. On mainnet there is no faucet and the field is absent.
+    ...(net.friendbotUrl !== undefined ? { faucetUrl: net.friendbotUrl } : {}),
+    signTransaction: signStellarTransaction,
+  }
+  adapters.set(network, built)
+  return built
 }
+
+/** The deployment's default network, for code that does not know the page's. */
+export const stellarAdapter: ChainAdapter = stellarAdapterFor(defaultNetwork())
