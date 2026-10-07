@@ -41,7 +41,7 @@ stellar-testnet  -> { chain: 'stellar', network: 'testnet' }
 
 ### 2. Which networks a deployment serves
 
-A new env var, `STELLAR_NETWORKS`, lists them, for example `testnet,mainnet`. The default, when unset, is the single network from `NEXT_PUBLIC_STELLAR_NETWORK`. In that case nothing changes: no header is read, no new behavior runs, and the menu shows only the one network, plus the existing link to another deployment if one is configured.
+A new env var, `NEXT_PUBLIC_STELLAR_NETWORKS`, lists them (public because the browser and the edge middleware read it too), for example `testnet,mainnet`. The default, when unset, is the single network from `NEXT_PUBLIC_STELLAR_NETWORK`. In that case nothing changes: no header is read, no new behavior runs, and the menu shows only the one network, plus the existing link to another deployment if one is configured.
 
 `NEXT_PUBLIC_STELLAR_NETWORK` remains the default network (used for `/stellar`, background jobs and anything with no request). `NEXT_PUBLIC_SOROBAN_RPC_URL` and `NEXT_PUBLIC_STELLAR_HORIZON_URL` apply to the default network only.
 
@@ -70,7 +70,11 @@ Server code reads the network only through `activeNetwork()`, which in multi-net
 | Caches and query keys     | Server caches and react-query keys include the network. The Soroswap client already does.                                                                                                                                                              |
 | Health                    | Reports each enabled network's probes.                                                                                                                                                                                                                 |
 
-Migrations add `network TEXT NOT NULL` with the deployment's current default as the value for existing rows (they were created while it served only that network).
+`standing_rules` gets a `network TEXT NOT NULL` column whose default, for existing rows, is the deployment's current default network (they were created while it served only that one).
+
+`sponsor_ledger` is partitioned by key instead of by a new column: rows are per day, and a network other than the deployment's default writes its account and day-total rows as `<network>:<account>` and `<network>:*`. The default network keeps the plain keys, so existing history stays its own and no table is altered. Isolation is the same and is pinned by tests.
+
+The server-issued wallet-auth token is issued by the separate backend service, outside this repository. What this app controls is the browser's copy: the saved wallet session and the token are stored under a key per network, so one network's proof is never read on the other. Having the backend put the network in the token and check it is a follow-up in that service.
 
 ### 5. Access gate per network
 
@@ -107,7 +111,7 @@ The chain menu lists Arc, Stellar mainnet and Stellar testnet as normal entries.
 ## Testing
 
 - Unit: route-segment parsing; network resolution and the overwrite of a spoofed header; the enabled-networks parser; per-network registries, trade cap and venue gating; sponsor key selection per network; ledger and rule isolation (a row in one network is invisible to the other); the per-network gate; the mismatch check and polling.
-- Integration: with `STELLAR_NETWORKS=testnet,mainnet`, the same API route called with each network returns that network's contracts and limits; with one network configured, behavior is byte-for-byte the current behavior (the existing suite must pass unchanged).
+- Integration: with `NEXT_PUBLIC_STELLAR_NETWORKS=testnet,mainnet`, the same API route called with each network returns that network's contracts and limits; with one network configured, behavior is byte-for-byte the current behavior (the existing suite must pass unchanged).
 - Browser: Playwright run that opens both paths, switches from the menu, and checks the label, cap, venues and the mismatch dialog with a faked wallet network.
 
 ## Phasing
