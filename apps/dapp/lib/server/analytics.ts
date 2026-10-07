@@ -132,8 +132,8 @@ export interface RaceAttemptOk {
   model?: string
   ok: true
   latencyMs: number
-  routeId?: string
-  executionMode?: string
+  routeId?: string | undefined
+  executionMode?: string | undefined
 }
 
 export interface RaceAttemptFailed {
