@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
 
 import { databaseConfigured, getPool, withTimeout, type QueryFn } from './db'
+import { describeExecution, type ExecutionFlow } from './execution-flow'
 import { reportError } from './report'
 
 /**
@@ -13,11 +14,11 @@ import { reportError } from './report'
  *   executions   one row per transaction a user submitted through the app
  *   agent_races  one row per agent competition, and one per agent in it
  *
- * They hold no amounts, no prices, no emails and no text anyone typed or any
- * model wrote. What a transaction moved is read back from the chain by the
- * analytics dashboard, using the hash recorded here, so the log cannot disagree
- * with the ledger and every number built on it can be checked by someone who
- * does not trust us.
+ * They hold no emails and no text anyone typed or any model wrote. An execution
+ * also carries what the signed transaction sold, read from its own bytes and
+ * priced at the time (see execution-flow.ts), so volume can be counted. The hash
+ * stays beside it, so any figure can be checked against the ledger by someone
+ * who does not trust us.
  *
  * Writing is best effort and never in the way: a failure is reported and the
  * user's submit or race carries on exactly as if nothing had been recorded.
@@ -42,6 +43,10 @@ export const ANALYTICS_DDL: readonly string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS executions_hash_idx ON executions (network, hash) WHERE hash IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS executions_time_idx ON executions (network, submitted_at)`,
   `CREATE INDEX IF NOT EXISTS executions_account_idx ON executions (network, account)`,
+  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_in TEXT`,
+  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_out TEXT`,
+  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS amount_in NUMERIC`,
+  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC`,
   `CREATE TABLE IF NOT EXISTS agent_races (
     id          UUID        PRIMARY KEY,
     network     TEXT        NOT NULL,
@@ -85,6 +90,8 @@ export interface ExecutionRecord {
   hash?: string
   /** A fixed code, never an upstream message. */
   failure?: string
+  /** What the transaction sold, when it could be read. */
+  flow?: ExecutionFlow
   at?: Date
 }
 
@@ -248,8 +255,9 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       // A hash is recorded once per network however often it is submitted.
       await query(
         `INSERT INTO executions
-           (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
+            asset_in, asset_out, amount_in, volume_usd)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT DO NOTHING`,
         [
           randomUUID(),
@@ -261,6 +269,10 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.ok,
           r.failure ?? null,
           (r.at ?? new Date()).toISOString(),
+          r.flow?.assetIn ?? null,
+          r.flow?.assetOut ?? null,
+          r.flow?.amountIn ?? null,
+          r.flow?.volumeUsd ?? null,
         ]
       )
     },
@@ -341,6 +353,19 @@ export interface LogExecutionInput {
   account: string
   feeSponsored: boolean
   result: SubmitLike
+  /** The signed envelope that was sent, so what it moved can be recorded. */
+  signedXdr?: string
+}
+
+/** What the transaction sold, or nothing: a failure to read it must never cost the row itself. */
+async function readFlowSafely(input: LogExecutionInput): Promise<ExecutionFlow | undefined> {
+  if (!input.result.ok || input.signedXdr === undefined) return undefined
+  try {
+    return await describeExecution(input.signedXdr)
+  } catch (e) {
+    reportError('analytics/flow', e, { kind: input.kind })
+    return undefined
+  }
 }
 
 /**
@@ -352,12 +377,14 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
   if (!databaseConfigured()) return
   try {
     const repo = await getAnalyticsRepo()
+    const flow = await readFlowSafely(input)
     await repo.recordExecution({
       network: activeNetwork(),
       account: input.account,
       kind: input.kind,
       feeSponsored: input.feeSponsored,
       ...executionFromResult(input.result),
+      ...(flow === undefined ? {} : { flow }),
     })
   } catch (e) {
     reportError('analytics/execution', e, { kind: input.kind })

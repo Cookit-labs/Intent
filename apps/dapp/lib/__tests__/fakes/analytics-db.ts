@@ -19,6 +19,10 @@ export interface FakeExecution {
   ok: boolean
   failure: string | null
   submitted_at: string
+  asset_in: string | null
+  asset_out: string | null
+  amount_in: string | null
+  volume_usd: number | null
 }
 
 export interface FakeRace {
@@ -83,13 +87,28 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
       if (
         sql.startsWith('CREATE TABLE') ||
         sql.startsWith('CREATE INDEX') ||
-        sql.startsWith('CREATE UNIQUE INDEX')
+        sql.startsWith('CREATE UNIQUE INDEX') ||
+        sql.startsWith('ALTER TABLE')
       ) {
         return { rows: [] }
       }
 
       if (sql.startsWith('INSERT INTO executions')) {
-        const [id, network, hash, account, kind, feeSponsored, ok, failure, submittedAt] = p as [
+        const [
+          id,
+          network,
+          hash,
+          account,
+          kind,
+          feeSponsored,
+          ok,
+          failure,
+          submittedAt,
+          assetIn,
+          assetOut,
+          amountIn,
+          volumeUsd,
+        ] = p as [
           string,
           string,
           string | null,
@@ -99,6 +118,10 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           boolean,
           string | null,
           string,
+          string | null,
+          string | null,
+          string | null,
+          number | null,
         ]
         const duplicate =
           hash !== null && executions.some((e) => e.network === network && e.hash === hash)
@@ -113,6 +136,10 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           ok,
           failure,
           submitted_at: submittedAt,
+          asset_in: assetIn,
+          asset_out: assetOut,
+          amount_in: amountIn,
+          volume_usd: volumeUsd,
         })
         return { rows: [{ id }] }
       }

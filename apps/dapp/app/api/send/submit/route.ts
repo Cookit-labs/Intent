@@ -93,6 +93,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     account,
     feeSponsored: sent.sponsored,
     result,
+    signedXdr: sent.xdr,
   })
   if (!result.ok) return NextResponse.json(result)
 
