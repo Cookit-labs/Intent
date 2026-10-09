@@ -49,6 +49,20 @@ export function chainSegment(slug: ChainSlug, network?: StellarNetworkName): str
   return `stellar-${network ?? defaultNetwork()}`
 }
 
+/**
+ * The chain segment the app opens on: Stellar, on mainnet whenever the deployment
+ * serves it. A deployment that serves one network keeps its one `/stellar` address,
+ * which is that network, whichever it is.
+ */
+export function homeSegment(enabled: readonly StellarNetworkName[] = enabledNetworks()): string {
+  return enabled.length > 1 && enabled.includes('mainnet') ? 'stellar-mainnet' : 'stellar'
+}
+
+/** Where the bare root of the app goes. */
+export function homePath(enabled: readonly StellarNetworkName[] = enabledNetworks()): string {
+  return `/${homeSegment(enabled)}/intents`
+}
+
 /** Every segment this deployment answers to, for static generation and menus. */
 export function chainSegments(): string[] {
   if (!isMultiNetwork()) return ['arc', 'stellar']

@@ -28,6 +28,31 @@ export function legacyStellarRedirect(
   return `/stellar-${fallback}${pathname.slice('/stellar'.length)}${search}`
 }
 
+/** The screens that lived at the top level before there were chains. */
+const BARE_SCREENS = [
+  'intents',
+  'agents',
+  'apps',
+  'analytics',
+  'history',
+  'vault',
+  'settings',
+  'competitions',
+  'leaderboard',
+]
+
+/**
+ * Where the bare root, and the old unprefixed screens, go: the same screen on the
+ * home chain, keeping the rest of the path and the query. Nothing for any other
+ * address.
+ */
+export function bareRedirect(pathname: string, search: string, home: string): string | undefined {
+  if (pathname === '/') return `/${home}/intents${search}`
+  const first = pathname.split('/')[1] ?? ''
+  if (!BARE_SCREENS.includes(first)) return undefined
+  return `/${home}${pathname}${search}`
+}
+
 /** Pages that are not part of the app's chain screens and are never behind the gate. */
 const GATE_FREE = ['/verify', '/waitlist', '/admin']
 

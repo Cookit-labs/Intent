@@ -73,7 +73,7 @@ export function Navbar() {
                   {link.label}
                 </a>
               ))}
-              <LaunchDapp variant="inline" className="mt-3" onNavigate={() => setOpen(false)} />
+              <LaunchDapp block className="mt-3" onNavigate={() => setOpen(false)} />
             </div>
           </motion.div>
         )}

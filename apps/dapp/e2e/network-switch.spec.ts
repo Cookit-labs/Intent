@@ -37,6 +37,24 @@ test('mainnet shows only the venues that are on mainnet, and testnet shows them 
   await expect(page.getByText('Not on mainnet yet')).toHaveCount(0)
 })
 
+test('the root opens on Stellar mainnet, and the menu still reaches the other chains', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/stellar-mainnet\/intents$/)
+  await expect(page.locator('header')).toContainText('Stellar mainnet')
+
+  await page.getByRole('button', { name: /^Chain: / }).click()
+  await expect(page.getByRole('menuitem', { name: /^Arc\b/ })).toBeEnabled()
+  await expect(page.getByRole('menuitem', { name: /Stellar testnet/ })).toBeEnabled()
+  await expect(page.getByRole('menuitem', { name: /Stellar mainnet/ })).toBeEnabled()
+})
+
+test('an old unprefixed address opens the same screen on Stellar mainnet', async ({ page }) => {
+  await page.goto('/apps')
+  await expect(page).toHaveURL(/\/stellar-mainnet\/apps$/)
+})
+
 test('the old /stellar address goes to the default network', async ({ page }) => {
   await page.goto('/stellar/apps')
   await page.waitForURL(/\/stellar-(testnet|mainnet)\/apps$/)

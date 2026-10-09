@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { gateEnabled } from '../server/access-gate'
-import { isGateFree, legacyStellarRedirect, segmentNetwork } from '../server/network-route'
+import {
+  bareRedirect,
+  isGateFree,
+  legacyStellarRedirect,
+  segmentNetwork,
+} from '../server/network-route'
 
 describe('segmentNetwork', () => {
   it('names a network only for the two network segments', () => {
@@ -26,6 +31,36 @@ describe('legacyStellarRedirect', () => {
     expect(legacyStellarRedirect('/stellar-mainnet/apps', '', true, 'testnet')).toBeUndefined()
     expect(legacyStellarRedirect('/stellarx', '', true, 'testnet')).toBeUndefined()
     expect(legacyStellarRedirect('/arc/intents', '', true, 'testnet')).toBeUndefined()
+  })
+})
+
+describe('bareRedirect', () => {
+  it('sends the bare root to the home chain, keeping the query', () => {
+    expect(bareRedirect('/', '', 'stellar-mainnet')).toBe('/stellar-mainnet/intents')
+    expect(bareRedirect('/', '?rule=r3', 'stellar')).toBe('/stellar/intents?rule=r3')
+  })
+
+  it('sends the old unprefixed screens to the same screen on the home chain', () => {
+    expect(bareRedirect('/apps', '?x=1', 'stellar-mainnet')).toBe('/stellar-mainnet/apps?x=1')
+    expect(bareRedirect('/history', '', 'stellar')).toBe('/stellar/history')
+    expect(bareRedirect('/competitions/abc', '', 'stellar-mainnet')).toBe(
+      '/stellar-mainnet/competitions/abc'
+    )
+  })
+
+  it('leaves chain addresses, other pages and look-alikes alone', () => {
+    for (const path of [
+      '/arc/intents',
+      '/stellar/intents',
+      '/stellar-mainnet/apps',
+      '/verify',
+      '/admin/waitlist',
+      '/appsx',
+      '/intentsx/1',
+      '/api/health',
+    ]) {
+      expect(bareRedirect(path, '', 'stellar-mainnet')).toBeUndefined()
+    }
   })
 })
 

@@ -7,6 +7,7 @@
  * `middleware.ts`, so this page is reachable only by typing its URL. Kept for
  * possible later use; see the note in middleware.ts to re-enable.
  */
+import { homePath } from '@intent/config'
 import { Button, Card, Input, Label } from '@intent/ui'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -17,7 +18,7 @@ type Stage = 'email' | 'code' | 'not_accepted'
 function VerifyForm(): JSX.Element {
   const router = useRouter()
   const params = useSearchParams()
-  const next = params.get('next') ?? '/arc/intents'
+  const next = params.get('next') ?? homePath()
 
   const [stage, setStage] = useState<Stage>('email')
   const [email, setEmail] = useState('')
