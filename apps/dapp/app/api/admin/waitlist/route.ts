@@ -1,29 +1,19 @@
 import { NextResponse } from 'next/server'
-import { timingSafeEqual } from 'node:crypto'
 
+import { isAdminRequest } from '../../../../lib/server/admin-session'
 import { addSignup, listSignups, normalizeEmail, setStatus } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
  * Waitlist administration.
  *
- * Guarded by a shared token rather than a user role, because there is no user
- * system yet — the gate authenticates testers, not staff. A single secret in
- * the operator's environment is honest about that, and is one obvious thing to
- * replace when real admin accounts exist.
+ * Open to the admin only: a signed session cookie, or the shared token in a header
+ * for scripts. There is no user system to hang a role on; the gate authenticates
+ * testers, not staff.
  */
-function isAuthorised(request: Request): boolean {
-  const expected = process.env['ADMIN_TOKEN']
-  if (expected === undefined || expected.length < 16) return false
-
-  const provided = request.headers.get('x-admin-token') ?? ''
-  const a = Buffer.from(provided)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
-}
 
 export async function GET(request: Request): Promise<NextResponse> {
-  if (!isAuthorised(request)) return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
+  if (!isAdminRequest(request)) return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
   return NextResponse.json({ signups: await listSignups() })
 }
 
@@ -31,7 +21,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'auth')
   if (limited !== undefined) return limited
 
-  if (!isAuthorised(request)) return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
+  if (!isAdminRequest(request)) return NextResponse.json({ error: 'unauthorised' }, { status: 401 })
 
   try {
     const body = (await request.json()) as { email?: unknown; status?: unknown }

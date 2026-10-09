@@ -12,6 +12,11 @@ const state = vi.hoisted(() => ({
   configured: true,
   db: undefined as unknown as FakeAnalyticsDb,
   reported: [] as { where: string; error: unknown }[],
+  flow: (async () => undefined) as (xdr: string) => Promise<unknown>,
+}))
+
+vi.mock('../server/execution-flow', () => ({
+  describeExecution: (xdr: string) => state.flow(xdr),
 }))
 
 vi.mock('../server/db', () => ({
@@ -56,6 +61,7 @@ beforeEach(() => {
   state.configured = true
   state.db = fakeAnalyticsDb()
   state.reported = []
+  state.flow = async () => undefined
 })
 
 afterEach(() => {
@@ -97,6 +103,64 @@ describe('logExecution', () => {
     expect(state.reported.map((r) => r.where)).toEqual(['analytics/execution'])
   })
 
+  it('records what the transaction sold, read from the envelope that was sent', async () => {
+    state.flow = async (xdr) =>
+      xdr === 'signed-xdr'
+        ? { assetIn: 'XLM', amountIn: '10.0000000', assetOut: 'USDC', volumeUsd: 2 }
+        : undefined
+    const { logExecution } = await load()
+    await logExecution({
+      kind: 'swap',
+      account: ACCOUNT,
+      feeSponsored: false,
+      result: { ok: true, hash: 'a'.repeat(64) },
+      signedXdr: 'signed-xdr',
+    })
+    expect(state.db.executions[0]).toMatchObject({
+      asset_in: 'XLM',
+      asset_out: 'USDC',
+      amount_in: '10.0000000',
+      volume_usd: 2,
+    })
+  })
+
+  it('does not read the envelope of a submit that failed', async () => {
+    const read = vi.fn(async () => ({
+      assetIn: 'XLM',
+      amountIn: '1',
+      assetOut: null,
+      volumeUsd: 1,
+    }))
+    state.flow = read
+    const { logExecution } = await load()
+    await logExecution({
+      kind: 'swap',
+      account: ACCOUNT,
+      feeSponsored: false,
+      result: { ok: false, reason: 'underfunded' },
+      signedXdr: 'signed-xdr',
+    })
+    expect(read).not.toHaveBeenCalled()
+    expect(state.db.executions[0]).toMatchObject({ ok: false, volume_usd: null })
+  })
+
+  it('still records the row when the envelope cannot be read', async () => {
+    state.flow = async () => {
+      throw new Error('boom')
+    }
+    const { logExecution } = await load()
+    await logExecution({
+      kind: 'swap',
+      account: ACCOUNT,
+      feeSponsored: false,
+      result: { ok: true, hash: 'c'.repeat(64) },
+      signedXdr: 'signed-xdr',
+    })
+    expect(state.db.executions).toHaveLength(1)
+    expect(state.db.executions[0]).toMatchObject({ volume_usd: null, asset_in: null })
+    expect(state.reported.map((r) => r.where)).toEqual(['analytics/flow'])
+  })
+
   it('records a failed submit with a fixed code and no upstream text', async () => {
     const { logExecution } = await load()
     await logExecution({
@@ -106,6 +170,71 @@ describe('logExecution', () => {
       result: { ok: false, reason: 'underfunded', hash: 'f'.repeat(64) },
     })
     expect(state.db.executions[0]).toMatchObject({ ok: false, failure: 'underfunded' })
+  })
+})
+
+describe('logIntentRead', () => {
+  it('records what the model understood, for the network of the deployment', async () => {
+    const { logIntentRead } = await load({ NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' })
+    await logIntentRead({
+      understood: true,
+      action: 'swap',
+      tokenIn: 'USDC',
+      tokenOut: 'XLM',
+      sizeUsd: 1,
+    })
+    expect(state.db.intentReads).toHaveLength(1)
+    expect(state.db.intentReads[0]).toMatchObject({
+      network: 'mainnet',
+      understood: true,
+      action: 'swap',
+      token_in: 'USDC',
+      token_out: 'XLM',
+      size_usd: 1,
+      reason: null,
+    })
+  })
+
+  it('records a read that failed with its fixed reason and nothing else', async () => {
+    const { logIntentRead } = await load()
+    await logIntentRead({ understood: false, reason: 'unreadable' })
+    expect(state.db.intentReads[0]).toMatchObject({
+      understood: false,
+      reason: 'unreadable',
+      action: null,
+      size_usd: null,
+    })
+  })
+
+  it('stores no column that could hold what the person typed', async () => {
+    const { logIntentRead } = await load()
+    await logIntentRead({ understood: true, action: 'swap', tokenIn: 'XLM', tokenOut: 'USDC' })
+    expect(Object.keys(state.db.intentReads[0] ?? {}).sort()).toEqual(
+      [
+        'action',
+        'id',
+        'network',
+        'read_at',
+        'reason',
+        'size_usd',
+        'token_in',
+        'token_out',
+        'understood',
+      ].sort()
+    )
+  })
+
+  it('does nothing without a database, and survives one that is down', async () => {
+    state.configured = false
+    let { logIntentRead } = await load()
+    await expect(logIntentRead({ understood: false })).resolves.toBeUndefined()
+    expect(state.db.log).toEqual([])
+
+    state.configured = true
+    state.db.down = new Error('connection refused')
+    ;({ logIntentRead } = await load())
+    await expect(logIntentRead({ understood: false })).resolves.toBeUndefined()
+    expect(state.reported.map((r) => r.where)).toEqual(['analytics/intent'])
   })
 })
 
