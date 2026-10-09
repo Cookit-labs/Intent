@@ -123,7 +123,8 @@ export function setClientNetwork(next: StellarNetworkName | undefined): void {
 export function activeNetwork(): StellarNetworkName {
   const fallback = defaultNetwork()
   if (!isMultiNetwork()) return fallback
-  if (typeof window !== 'undefined') return clientNetwork ?? fallback
+  // `window` is not declared here (this package loads no browser types), so it is looked up on the global.
+  if ('window' in globalThis) return clientNetwork ?? fallback
 
   const resolved = globals[RESOLVER_KEY]?.()
   if (resolved === undefined) {
