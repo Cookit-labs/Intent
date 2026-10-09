@@ -47,6 +47,18 @@ export const ANALYTICS_DDL: readonly string[] = [
   `ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_out TEXT`,
   `ALTER TABLE executions ADD COLUMN IF NOT EXISTS amount_in NUMERIC`,
   `ALTER TABLE executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC`,
+  `CREATE TABLE IF NOT EXISTS intent_reads (
+    id         UUID        PRIMARY KEY,
+    network    TEXT        NOT NULL,
+    read_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    understood BOOLEAN     NOT NULL,
+    action     TEXT,
+    token_in   TEXT,
+    token_out  TEXT,
+    size_usd   NUMERIC,
+    reason     TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS intent_reads_time_idx ON intent_reads (network, read_at)`,
   `CREATE TABLE IF NOT EXISTS agent_races (
     id          UUID        PRIMARY KEY,
     network     TEXT        NOT NULL,
@@ -239,8 +251,21 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
   }
 }
 
+export interface IntentReadRecord {
+  network: StellarNetworkName
+  understood: boolean
+  action?: string
+  tokenIn?: string
+  tokenOut?: string
+  sizeUsd?: number
+  /** A fixed code for a read that failed, never free text. */
+  reason?: string
+  at?: Date
+}
+
 export interface AnalyticsRepo {
   ensureSchema: () => Promise<void>
+  recordIntentRead: (record: IntentReadRecord) => Promise<void>
   recordExecution: (record: ExecutionRecord) => Promise<void>
   recordRace: (record: RaceRecord) => Promise<void>
 }
@@ -273,6 +298,25 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.assetOut ?? null,
           r.flow?.amountIn ?? null,
           r.flow?.volumeUsd ?? null,
+        ]
+      )
+    },
+
+    async recordIntentRead(r) {
+      await query(
+        `INSERT INTO intent_reads
+           (id, network, read_at, understood, action, token_in, token_out, size_usd, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          randomUUID(),
+          r.network,
+          (r.at ?? new Date()).toISOString(),
+          r.understood,
+          r.action ?? null,
+          r.tokenIn ?? null,
+          r.tokenOut ?? null,
+          typeof r.sizeUsd === 'number' && Number.isFinite(r.sizeUsd) ? r.sizeUsd : null,
+          r.reason ?? null,
         ]
       )
     },
@@ -388,6 +432,20 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
     })
   } catch (e) {
     reportError('analytics/execution', e, { kind: input.kind })
+  }
+}
+
+/**
+ * Records how a typed instruction was read: the action, tokens and size the model
+ * understood, or the fixed reason it did not. The sentence itself is never stored.
+ */
+export async function logIntentRead(input: Omit<IntentReadRecord, 'network'>): Promise<void> {
+  if (!databaseConfigured()) return
+  try {
+    const repo = await getAnalyticsRepo()
+    await repo.recordIntentRead({ network: activeNetwork(), ...input })
+  } catch (e) {
+    reportError('analytics/intent', e, { understood: input.understood })
   }
 }
 

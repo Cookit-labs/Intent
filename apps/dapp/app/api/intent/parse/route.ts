@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { configuredLendingVenues } from '../../../../lib/lend/venues'
 import { isLlmParseConfigured, readIntentWithLlm } from '../../../../lib/parse-intent-llm'
 import { tradeableSymbols } from '../../../../lib/swap/asset-registry'
+import { logIntentRead } from '../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -91,6 +92,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   })
 
   if (read === null) {
+    await logIntentRead({ understood: false, reason: 'unreadable' })
     return NextResponse.json({ understood: false, reason: 'unreadable' })
   }
 
@@ -104,8 +106,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     lendableOnly.includes(read.tokenIn) || lendableOnly.includes(read.tokenOut)
 
   if (isTrade && namesLendableOnly) {
+    await logIntentRead({ understood: false, reason: 'not_tradeable' })
     return NextResponse.json({ understood: false, reason: 'not_tradeable' })
   }
+
+  await logIntentRead({
+    understood: true,
+    action: read.action,
+    tokenIn: read.tokenIn,
+    tokenOut: read.tokenOut,
+    sizeUsd: read.amountUsd,
+  })
 
   return NextResponse.json({
     understood: true,
