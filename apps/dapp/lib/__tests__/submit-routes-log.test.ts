@@ -82,6 +82,7 @@ describe('swap/submit', () => {
         account: 'GACCOUNT',
         feeSponsored: true,
         result: expect.objectContaining({ ok: true, hash: 'h'.repeat(64) }),
+        signedXdr: 'AAAA',
       },
     ])
   })
