@@ -38,7 +38,7 @@ async function exec(
   failure: string | null = null
 ): Promise<void> {
   await client.query(
-    `INSERT INTO executions
+    `INSERT INTO usage_executions
        (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
         asset_in, asset_out, amount_in, volume_usd)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() - $9::interval, $10, $11, $12, $13)`,
@@ -106,6 +106,10 @@ beforeAll(async () => {
   ]) {
     await client.query(readFileSync(join(MIGRATIONS, file), 'utf8'))
   }
+  // The Go backend keeps its own executions table in the same database. The log has to
+  // coexist with it, which is why the log's table is called usage_executions.
+  await client.query(`CREATE TABLE executions (id text PRIMARY KEY, intent_id text, tx_hash text)`)
+  await client.query(`INSERT INTO executions (id, tx_hash) VALUES ('backend-row', 'abc')`)
   for (const statement of ANALYTICS_DDL) await client.query(statement)
   repo = createMetricsRepo(async (sql, params) => ({
     rows: (await client.query(sql, params as unknown[])).rows as Record<string, unknown>[],
@@ -305,6 +309,11 @@ describe.skipIf(SKIP)('the dashboard queries, against a real database', () => {
       fired: 1,
     })
     expect(i.reads).toEqual({ understood: 2, unreadable: 1 })
+  })
+
+  it('lives beside the backend table of a similar name and leaves it alone', async () => {
+    const { rows } = await client.query('SELECT id, tx_hash FROM executions')
+    expect(rows).toEqual([{ id: 'backend-row', tx_hash: 'abc' }])
   })
 
   it('counts the waitlist by status', async () => {

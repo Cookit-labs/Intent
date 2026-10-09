@@ -108,7 +108,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
         return { rows: [] }
       }
 
-      if (sql.startsWith('INSERT INTO executions')) {
+      if (sql.startsWith('INSERT INTO usage_executions')) {
         const [
           id,
           network,
