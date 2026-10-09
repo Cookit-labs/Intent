@@ -1,3 +1,5 @@
+import { activeNetwork, isMultiNetwork } from '@intent/config'
+
 import { gateEnabled } from '../server/access-gate'
 import { readSessionFromRequest } from '../server/session'
 import {
@@ -32,7 +34,10 @@ export async function sponsorForRequest(
   account: string,
   options: SponsorForSubmissionOptions = {}
 ): Promise<SponsoredSubmission> {
-  if (gateEnabled(options.env ?? process.env) && readSessionFromRequest(request) === undefined) {
+  if (
+    gateEnabled(options.env ?? process.env, isMultiNetwork() ? activeNetwork() : undefined) &&
+    readSessionFromRequest(request) === undefined
+  ) {
     return { xdr: signedXdr, sponsored: false, reason: 'no_session' }
   }
   return sponsorForSubmission(signedXdr, account, options)

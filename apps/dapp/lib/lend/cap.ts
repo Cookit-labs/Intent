@@ -1,6 +1,6 @@
 import { assertTradeWithinCap, type TradeCapOptions } from '../server/trade-cap'
 import { fromBaseUnits } from '../swap/assets'
-import { BLEND_XLM } from './reserves'
+import { blendXlm } from './reserves'
 
 /**
  * The mainnet trade cap for an amount of a Blend reserve.
@@ -15,7 +15,7 @@ export async function assertReserveWithinCap(
   options: TradeCapOptions = {}
 ): Promise<void> {
   await assertTradeWithinCap(
-    asset === BLEND_XLM ? 'XLM' : asset,
+    asset === blendXlm() ? 'XLM' : asset,
     fromBaseUnits(baseAmount),
     options
   )

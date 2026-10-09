@@ -1,4 +1,4 @@
-import { stellarNetwork } from '@intent/config'
+import { stellarNetwork, type StellarNetworkName } from '@intent/config'
 
 /**
  * "Wrong network" for a Stellar wallet.
@@ -37,4 +37,47 @@ export function stellarNetworkOf(
 /** What the header says when the wallet and the app are on different networks. */
 export function mismatchLabel(walletNetwork: 'testnet' | 'mainnet' | undefined): string {
   return walletNetwork === undefined ? 'Wrong network' : `Wallet is on Stellar ${walletNetwork}`
+}
+
+export interface MismatchPrompt {
+  title: string
+  body: string
+  /** The button that goes to the network the wallet is already on. */
+  useWalletNetworkLabel: string
+}
+
+/** What the dialog says when the wallet is on a different network than the page. */
+export function mismatchPrompt(
+  selected: StellarNetworkName,
+  wallet: StellarNetworkName
+): MismatchPrompt {
+  return {
+    title: `Your wallet is on Stellar ${wallet}`,
+    body: `Switch it to Stellar ${selected} to continue, or use Stellar ${wallet} here instead.`,
+    useWalletNetworkLabel: `Use Stellar ${wallet} instead`,
+  }
+}
+
+/** Where in a wallet the network is changed. An app cannot change it for the user. */
+export function switchSteps(walletName: string | undefined, target: StellarNetworkName): string {
+  const label = target === 'mainnet' ? 'Mainnet' : 'Testnet'
+  if (walletName === 'Freighter') {
+    return `In Freighter, open the menu, choose Network, then pick ${label}.`
+  }
+  if (walletName !== undefined) {
+    return `In ${walletName}, open its settings and change the network to ${label}.`
+  }
+  return `In your wallet, open its settings and change the network to Stellar ${target}.`
+}
+
+/**
+ * Whether to refuse to sign. Only when the wallet says it is on a different
+ * network: a wallet that does not report one is still handed the passphrase
+ * with the request, and the ones that honor it sign for the right network.
+ */
+export function refusesToSign(
+  walletPassphrase: string | undefined,
+  selectedPassphrase: string
+): boolean {
+  return walletPassphrase !== undefined && walletPassphrase !== selectedPassphrase
 }

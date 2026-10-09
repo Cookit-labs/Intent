@@ -1,4 +1,4 @@
-import { stellarNetwork } from '@intent/config'
+import { resolveRequestedNetwork, stellarNetwork, type StellarNetworkName } from '@intent/config'
 
 import { readSponsorBalance, type SponsorBalance } from '../sponsor/balance'
 import { sponsorAccount } from '../sponsor/sponsor'
@@ -201,6 +201,19 @@ export function cachedHealth(
     }
     return held.report
   }
+}
+
+/**
+ * Which network a health request asks about: `?network=` when the deployment
+ * serves it, otherwise the default. A monitor with no query still gets an
+ * answer; one that names a network gets that network's probes.
+ */
+export function healthNetwork(
+  url: string,
+  enabled: readonly StellarNetworkName[],
+  fallback: StellarNetworkName
+): StellarNetworkName {
+  return resolveRequestedNetwork(new URL(url).searchParams.get('network'), enabled, fallback)
 }
 
 export function healthStatus(report: HealthReport): 200 | 503 {

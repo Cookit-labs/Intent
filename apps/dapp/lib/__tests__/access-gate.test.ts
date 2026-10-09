@@ -56,14 +56,29 @@ describe('the middleware', () => {
     return middleware(new NextRequest(`http://localhost${path}`))
   }
 
-  it('matches the app pages again, not the api or its own pages', async () => {
+  it('matches pages and the api, so each carries a network, and only skips static assets', async () => {
     const { config } = await import('../../middleware')
     expect(config.matcher).toHaveLength(1)
     const pattern = new RegExp(`^${config.matcher[0]}$`)
-    expect(pattern.test('/stellar')).toBe(true)
-    expect(pattern.test('/stellar/apps')).toBe(true)
-    for (const own of ['/api/swap/quote', '/verify', '/waitlist', '/admin/waitlist', '/icon']) {
-      expect(pattern.test(own), own).toBe(false)
+    for (const path of [
+      '/stellar',
+      '/stellar/apps',
+      '/api/swap/quote',
+      '/verify',
+      '/admin/waitlist',
+    ]) {
+      expect(pattern.test(path), path).toBe(true)
+    }
+    for (const asset of ['/_next/static/chunk.js', '/_next/image', '/favicon.ico', '/icon']) {
+      expect(pattern.test(asset), asset).toBe(false)
+    }
+  })
+
+  it('still lets the api and its own pages through the gate unchecked', async () => {
+    process.env['ACCESS_GATE'] = 'on'
+    process.env['AUTH_SECRET'] = 'a'.repeat(48)
+    for (const path of ['/api/swap/quote', '/verify', '/waitlist', '/admin/waitlist']) {
+      expect((await run(path)).status, path).toBe(200)
     }
   })
 

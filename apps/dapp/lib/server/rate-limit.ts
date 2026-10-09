@@ -1,3 +1,4 @@
+import { activeNetwork, isMultiNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { getPool, withTimeout, type QueryFn } from './db'
@@ -265,8 +266,11 @@ export async function enforceRateLimit(
   deps?: RateLimitDeps
 ): Promise<NextResponse | undefined> {
   const window = limitFor(family, deps?.env)
-  const keys = [`ip:${clientIp(request, deps?.env)}:${family}`]
-  if (account !== undefined && account !== '') keys.push(`account:${account}:${family}`)
+  // With several networks served the allowance is per network, so use on one
+  // cannot run down the other's. With one, the keys are what they always were.
+  const scope = isMultiNetwork() ? `:${activeNetwork()}` : ''
+  const keys = [`ip:${clientIp(request, deps?.env)}:${family}${scope}`]
+  if (account !== undefined && account !== '') keys.push(`account:${account}:${family}${scope}`)
 
   for (const key of keys) {
     const decision = await checkRateLimit({ key, ...window }, deps)

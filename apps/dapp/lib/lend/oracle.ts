@@ -12,7 +12,7 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 
 /**
  * A SEP-40 oracle client, serving two oracles that answer different questions.
@@ -128,7 +128,7 @@ async function call(
 export async function readOracleId(options: OracleOptions = {}): Promise<string> {
   if (options.oracleId !== undefined) return options.oracleId
 
-  const config = (await call(options.poolId ?? BLEND_POOL, 'get_config', [], options)) as
+  const config = (await call(options.poolId ?? blendPool(), 'get_config', [], options)) as
     | { oracle?: string }
     | undefined
 
