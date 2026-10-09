@@ -67,11 +67,11 @@ User intent submitted
 
 This is the **frontend monorepo** — the public website and the execution dApp. It is one part of three:
 
-| Repo | What it contains |
-|------|-----------------|
-| **[Intent (this repo)](https://github.com/Cookit-labs/Intent)** | Next.js website + dApp frontend |
-| **[Backend](https://github.com/Cookit-labs/Backend)** | Go API, competition engine, reputation, settlement |
-| **[intent-core-contracts](https://github.com/Cookit-labs/intent-core-contracts)** | Solidity contracts on Arc L1 |
+| Repo                                                                              | What it contains                                   |
+| --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **[Intent (this repo)](https://github.com/Cookit-labs/Intent)**                   | Next.js website + dApp frontend                    |
+| **[Backend](https://github.com/Cookit-labs/Backend)**                             | Go API, competition engine, reputation, settlement |
+| **[intent-core-contracts](https://github.com/Cookit-labs/intent-core-contracts)** | Solidity contracts on Arc L1                       |
 
 ---
 
@@ -101,14 +101,14 @@ intent/
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui |
-| **Animations** | Framer Motion, GSAP, Lenis (smooth scroll) |
-| **Web3** | wagmi v2, viem, RainbowKit |
-| **State** | Zustand, TanStack Query v5 |
-| **Monorepo** | pnpm workspaces, Turborepo |
-| **Chain** | Arc L1 |
+| Layer          | Technology                                                   |
+| -------------- | ------------------------------------------------------------ |
+| **Frontend**   | Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui |
+| **Animations** | Framer Motion, GSAP, Lenis (smooth scroll)                   |
+| **Web3**       | wagmi v2, viem, RainbowKit                                   |
+| **State**      | Zustand, TanStack Query v5                                   |
+| **Monorepo**   | pnpm workspaces, Turborepo                                   |
+| **Chain**      | Arc L1                                                       |
 
 ---
 
@@ -128,10 +128,16 @@ make setup
 make dev
 ```
 
-| App | URL |
-|-----|-----|
-| Website | http://localhost:3000 |
-| dApp | http://localhost:3001 |
+| App     | URL                    |
+| ------- | ---------------------- |
+| Website | http://localhost:3000  |
+| dApp    | https://localhost:3001 |
+
+The dApp's dev server runs over HTTPS with a local certificate, because Freighter
+refuses to sign for a site without one. The first run downloads `mkcert` and
+Windows asks to trust its root certificate (`mkcert -uninstall` removes it). The
+dApp needs Postgres and Redis for sessions, limits and the sponsor ledger, so
+start Docker first: `docker compose up -d`.
 
 ---
 
@@ -142,6 +148,7 @@ make dev
 Public landing site. Explains the protocol, showcases the agent competition model, and links to the dApp.
 
 **Key sections:**
+
 - Hero with protocol visualization
 - How agents compete
 - Live leaderboard preview
@@ -152,6 +159,7 @@ Public landing site. Explains the protocol, showcases the agent competition mode
 The execution terminal. Connect your wallet, submit intents, and watch AI agents compete to fulfill them in real-time.
 
 **Routes:**
+
 - `/` — dashboard
 - `/intents` — submit & manage intents
 - `/competitions` — active competition feed
@@ -171,7 +179,7 @@ make dev          # Start website + dApp
 make build        # Build all packages and apps
 make typecheck    # TypeScript type checking
 make lint         # ESLint across all packages
-make test         # Run tests
+make test         # Run tests (SKIP_LIVE=1 make test skips the ones that reach testnet)
 make format       # Prettier format
 make clean        # Clean build artifacts
 ```
@@ -198,14 +206,13 @@ cp apps/dapp/.env.example apps/dapp/.env.local
 
 ---
 
-## Access Gate (built, currently DISABLED)
+## Access Gate
 
-> Not active. This was built from a prompt intended for a different project,
-> so **nothing in the dApp is gated** — all routes are open. The code is kept
-> in case it is wanted later; re-enable by restoring the matcher in
-> `apps/dapp/middleware.ts`.
-
-When enabled, only emails marked `accepted` receive a login code.
+On for mainnet pages, off for testnet; `ACCESS_GATE=on|off` overrides it. Only
+emails marked `accepted` receive a login code. Accept one at `/admin/waitlist`
+with `ADMIN_TOKEN`, including an address that has not signed up. Without
+`RESEND_API_KEY` the code prints in the dApp's server console instead of being
+emailed.
 
 ```bash
 docker compose up -d          # Postgres :55432, Redis :56379 (non-default: other
@@ -230,10 +237,10 @@ Set `RESEND_API_KEY` and `EMAIL_FROM` to send real mail.
 
 **Accepting someone:** open `/admin/waitlist`, enter `ADMIN_TOKEN`, click Accept.
 
-| Route | Purpose |
-|-------|---------|
-| `/verify` | Email + OTP sign-in |
-| `/waitlist` | Public signup |
+| Route             | Purpose                 |
+| ----------------- | ----------------------- |
+| `/verify`         | Email + OTP sign-in     |
+| `/waitlist`       | Public signup           |
 | `/admin/waitlist` | Accept / revoke testers |
 
 Codes are stored hashed with a 10-minute TTL, die after 5 wrong attempts, and are
@@ -270,12 +277,12 @@ own competition would not be reproducible between identical runs.
 **Swapping provider** means adding one file under `lib/agents/brains/` and a
 line in `registry.ts`. Nothing else knows which model answered.
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `AGENT_BRAIN` | `mock` | `deepseek` to use the model |
-| `DEEPSEEK_API_KEY` | — | Unset falls back to simulated agents |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning |
-| `NEXT_PUBLIC_USE_AI` | `false` | Routes the UI through the agent endpoint |
+| Variable             | Default             | Purpose                                  |
+| -------------------- | ------------------- | ---------------------------------------- |
+| `AGENT_BRAIN`        | `mock`              | `deepseek` to use the model              |
+| `DEEPSEEK_API_KEY`   | —                   | Unset falls back to simulated agents     |
+| `DEEPSEEK_MODEL`     | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning   |
+| `NEXT_PUBLIC_USE_AI` | `false`             | Routes the UI through the agent endpoint |
 
 ---
 
