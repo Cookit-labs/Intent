@@ -8,8 +8,8 @@ import { getPool, withTimeout, type QueryFn } from './db'
  *
  * Postgres rather than memory because the app runs as serverless functions,
  * and a counter in one instance's memory limits nothing. Postgres rather
- * than Redis because only the OTP flow uses Redis and everything else here
- * is already Postgres. A fixed window is the simplest thing that holds: one
+ * than Redis because everything else here is already Postgres, and one
+ * database is one service to run. A fixed window is the simplest thing that holds: one
  * upsert per request, one row per (key, window), the count coming back on
  * the same round trip.
  *
