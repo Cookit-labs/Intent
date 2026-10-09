@@ -9,10 +9,10 @@ import {
   xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 import { liquidationPrice, positionHealth, type HealthLeg, type PositionHealth } from './health'
 import { readPrices } from './oracle'
-import { BLEND_XLM, readReserve, readReserveList } from './reserves'
+import { blendXlm, readReserve, readReserveList } from './reserves'
 
 /**
  * What an account holds in the Blend pool, and how close it is to liquidation.
@@ -91,7 +91,7 @@ export interface ReadPositionOptions {
 async function simulate(server: rpc.Server, account: string, passphrase: string): Promise<unknown> {
   const source = await server.getAccount(account)
   const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: passphrase })
-    .addOperation(new Contract(BLEND_POOL).call('get_positions', new Address(account).toScVal()))
+    .addOperation(new Contract(blendPool()).call('get_positions', new Address(account).toScVal()))
     .setTimeout(60)
     .build()
 
@@ -179,7 +179,7 @@ export async function readBlendPositions(
     // Only XLM is named here because it is the only asset this app supplies.
     // Anything else shows its contract id rather than a guessed ticker — the
     // ticker-impersonation trap this codebase has hit before.
-    return assetId === BLEND_XLM ? 'XLM' : `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
+    return assetId === blendXlm() ? 'XLM' : `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
   }
 
   function balanceFor(index: number, tokens: bigint, rate: bigint): BlendBalance | undefined {
@@ -262,7 +262,7 @@ export async function readBlendPosition(
   options: ReadPositionOptions = {}
 ): Promise<BlendPosition | null> {
   const positions = await readBlendPositions(account, options)
-  const xlm = positions.supplied.find((balance) => balance.assetId === BLEND_XLM)
+  const xlm = positions.supplied.find((balance) => balance.assetId === blendXlm())
   if (xlm === undefined) return null
 
   return { ...xlm, bTokens: xlm.tokens }

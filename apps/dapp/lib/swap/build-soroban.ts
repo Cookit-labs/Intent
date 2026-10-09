@@ -16,7 +16,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
-import { SOROSWAP_ROUTER } from './contract-registry'
+import { soroswapRouter } from './contract-registry'
 import { plain } from './preview'
 import { resolveVerifiedAsset } from './asset-registry'
 import { assertVenueOn } from '../venues'
@@ -108,7 +108,7 @@ export async function buildSorobanSwap(
 ): Promise<BuiltSorobanSwap> {
   assertVenueOn('soroswap')
   const { account, from, to, sendAmount, minReceive } = options
-  const routerId = options.routerId ?? SOROSWAP_ROUTER
+  const routerId = options.routerId ?? soroswapRouter()
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
   const deadlineSeconds = options.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS

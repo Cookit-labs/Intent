@@ -19,7 +19,7 @@ import {
   type AggregatorExpectation,
 } from '../swap/build-aggregator'
 import { sacFor } from '../swap/build-soroban'
-import { SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import { soroswapAggregator, soroswapRouter } from '../swap/contract-registry'
 import type { AggregatorApiQuote, ApiResult, SoroswapApi } from '../swap/soroswap-api'
 import type { AggregatorQuoted } from '../swap/sources/soroswap-aggregator-quoter'
 
@@ -70,7 +70,7 @@ const clock = { nowSeconds: () => NOW }
 function expectation(over: Partial<AggregatorExpectation> = {}): AggregatorExpectation {
   return {
     platform: 'aggregator',
-    contractId: SOROSWAP_AGGREGATOR,
+    contractId: soroswapAggregator(),
     assetIn: XLM_SAC,
     assetOut: USDC_SAC,
     from: XLM,
@@ -135,7 +135,7 @@ function aggregatorCall(o: AggregatorCallOptions = {}): string {
     nativeToScVal(BigInt(o.deadline ?? DEADLINE), { type: 'u64' }),
   ].slice(0, o.argCount ?? 7)
 
-  const contract = o.contract ?? SOROSWAP_AGGREGATOR
+  const contract = o.contract ?? soroswapAggregator()
   const fn = o.fn ?? 'swap_exact_tokens_for_tokens'
   const call = new Contract(contract).call(fn, ...args)
   const op =
@@ -169,7 +169,7 @@ function routerCall(o: RouterCallOptions = {}): string {
     nativeToScVal(BigInt(DEADLINE), { type: 'u64' }),
   ]
   return envelope(ME, [
-    new Contract(o.contract ?? SOROSWAP_ROUTER).call('swap_exact_tokens_for_tokens', ...args),
+    new Contract(o.contract ?? soroswapRouter()).call('swap_exact_tokens_for_tokens', ...args),
   ])
 }
 
@@ -213,7 +213,7 @@ describe('an aggregator call is admitted only when every field is the quote', ()
 
   it('refuses a call to a contract other than the one the quote named', () => {
     expect(() =>
-      assertAggregatorSwap(aggregatorCall({ contract: SOROSWAP_ROUTER }), ME, expectation(), clock)
+      assertAggregatorSwap(aggregatorCall({ contract: soroswapRouter() }), ME, expectation(), clock)
     ).toThrow(/not the contract the quote named/)
   })
 
@@ -336,7 +336,7 @@ describe('the envelope around the call', () => {
 })
 
 describe('a router-only plan', () => {
-  const router = expectation({ platform: 'router', contractId: SOROSWAP_ROUTER })
+  const router = expectation({ platform: 'router', contractId: soroswapRouter() })
 
   it('accepts a router call paying the signer', () => {
     const checked = assertAggregatorSwap(routerCall(), ME, router, clock)
@@ -437,7 +437,7 @@ describe('building through the API', () => {
       quotedAt: new Date().toISOString(),
     },
     raw,
-    aggregatorId: SOROSWAP_AGGREGATOR,
+    aggregatorId: soroswapAggregator(),
     protocols: ['soroswap', 'aqua', 'sdex'],
     slippageBps: 50,
   }
@@ -454,7 +454,7 @@ describe('building through the API', () => {
         return build
       },
       async contractAddress(name: string): Promise<string | undefined> {
-        return name === 'router' ? SOROSWAP_ROUTER : SOROSWAP_AGGREGATOR
+        return name === 'router' ? soroswapRouter() : soroswapAggregator()
       },
     }
     return api
@@ -477,7 +477,7 @@ describe('building through the API', () => {
     expect(api.buildCalls).toEqual([{ q: raw, account: ME }])
     // Carried out so the route can run the same check again on the bytes
     // that come back from simulation, which are the ones a wallet sees.
-    expect(built.expectation.contractId).toBe(SOROSWAP_AGGREGATOR)
+    expect(built.expectation.contractId).toBe(soroswapAggregator())
     expect(built.expectation.amountIn).toBe(AMOUNT_IN)
   })
 

@@ -1,3 +1,5 @@
+import { activeNetwork, defaultNetwork, type StellarNetworkName } from '@intent/config'
+
 import type { StandingIntent, StandingStatus } from '../standing-intent'
 import { getPool, type QueryFn } from './db'
 
@@ -25,6 +27,8 @@ export interface StoredStandingRule {
   email: string
   wallet: string
   chain: string
+  /** The Stellar network the rule belongs to. A rule never runs, lists or cancels on another. */
+  network: string
   /** The intent, with `status` and `lastFiredAt` reconciled from the columns. */
   rule: StandingIntent
   status: StandingStatus
@@ -84,6 +88,19 @@ export const STANDING_RULES_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS standing_rules_owner_idx ON standing_rules (email, chain)`,
 ]
 
+/**
+ * The network column, added to a table that may already hold rules. Rules
+ * written before there were two networks belong to the network the deployment
+ * was serving, so that is the default for existing rows. Idempotent, like the
+ * statements above, and mirrored in `006_standing_rules_network.sql`.
+ */
+export function standingRulesNetworkDdl(defaultNet: StellarNetworkName): readonly string[] {
+  return [
+    `ALTER TABLE standing_rules ADD COLUMN IF NOT EXISTS network TEXT NOT NULL DEFAULT '${defaultNet}'`,
+    `CREATE INDEX IF NOT EXISTS standing_rules_network_idx ON standing_rules (network, status)`,
+  ]
+}
+
 function iso(value: unknown): string | null {
   if (value === null || value === undefined) return null
   if (value instanceof Date) return value.toISOString()
@@ -101,6 +118,7 @@ function toStored(row: Record<string, unknown>): StoredStandingRule {
     email: String(row['email']),
     wallet: String(row['wallet']),
     chain: String(row['chain']),
+    network: String(row['network'] ?? defaultNetwork()),
     rule: {
       ...base,
       id: String(row['id']),
@@ -120,10 +138,19 @@ function toStored(row: Record<string, unknown>): StoredStandingRule {
   }
 }
 
-export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
+/**
+ * `network` is the one this repository answers for; every statement that reads
+ * or changes a rule is bounded by it. It defaults to the deployment's own
+ * network, which is the only one a single-network deployment ever has.
+ */
+export function createStandingRulesRepo(
+  query: QueryFn,
+  network: StellarNetworkName = defaultNetwork()
+): StandingRulesRepo {
   return {
     async ensureSchema() {
       for (const statement of STANDING_RULES_DDL) await query(statement)
+      for (const statement of standingRulesNetworkDdl(defaultNetwork())) await query(statement)
     },
 
     async createRule({ email, wallet, rule }) {
@@ -131,12 +158,12 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
       // replaces a row the same owner wrote. A conflicting id under another
       // owner updates nothing and returns nothing.
       const { rows } = await query(
-        `INSERT INTO standing_rules (id, email, wallet, chain, rule, status, created_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, 'armed', $6)
+        `INSERT INTO standing_rules (id, email, wallet, chain, rule, status, created_at, network)
+         VALUES ($1, $2, $3, $4, $5::jsonb, 'armed', $6, $7)
          ON CONFLICT (id) DO UPDATE SET rule = EXCLUDED.rule
-           WHERE standing_rules.email = EXCLUDED.email
+           WHERE standing_rules.email = EXCLUDED.email AND standing_rules.network = EXCLUDED.network
          RETURNING *`,
-        [rule.id, email, wallet, rule.chain, JSON.stringify(rule), rule.createdAt]
+        [rule.id, email, wallet, rule.chain, JSON.stringify(rule), rule.createdAt, network]
       )
       const row = rows[0]
       return row === undefined ? undefined : toStored(row)
@@ -144,32 +171,33 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
 
     async listRules(email, chain) {
       const { rows } = await query(
-        `SELECT * FROM standing_rules WHERE email = $1 AND chain = $2 ORDER BY created_at DESC`,
-        [email, chain]
+        `SELECT * FROM standing_rules WHERE email = $1 AND chain = $2 AND network = $3 ORDER BY created_at DESC`,
+        [email, chain, network]
       )
       return rows.map(toStored)
     },
 
     async findRule(email, id) {
-      const { rows } = await query(`SELECT * FROM standing_rules WHERE email = $1 AND id = $2`, [
-        email,
-        id,
-      ])
+      const { rows } = await query(
+        `SELECT * FROM standing_rules WHERE email = $1 AND id = $2 AND network = $3`,
+        [email, id, network]
+      )
       const row = rows[0]
       return row === undefined ? undefined : toStored(row)
     },
 
     async cancelRule(email, id) {
       const { rows } = await query(
-        `UPDATE standing_rules SET status = 'cancelled' WHERE email = $1 AND id = $2 RETURNING id`,
-        [email, id]
+        `UPDATE standing_rules SET status = 'cancelled' WHERE email = $1 AND id = $2 AND network = $3 RETURNING id`,
+        [email, id, network]
       )
       return rows.length > 0
     },
 
     async armedRules() {
       const { rows } = await query(
-        `SELECT * FROM standing_rules WHERE status = 'armed' ORDER BY created_at ASC`
+        `SELECT * FROM standing_rules WHERE status = 'armed' AND network = $1 ORDER BY created_at ASC`,
+        [network]
       )
       return rows.map(toStored)
     },
@@ -202,7 +230,9 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
       const { rows } = await query(
         `SELECT * FROM standing_rules
          WHERE fired_at IS NOT NULL AND notified_at IS NULL AND status <> 'cancelled'
-         ORDER BY fired_at ASC`
+           AND network = $1
+         ORDER BY fired_at ASC`,
+        [network]
       )
       return rows.map(toStored)
     },
@@ -211,9 +241,9 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
       const { rows } = await query(
         `SELECT * FROM standing_rules
          WHERE email = $1 AND chain = $2 AND fired_at IS NOT NULL AND seen_at IS NULL
-           AND status <> 'cancelled'
+           AND status <> 'cancelled' AND network = $3
          ORDER BY fired_at DESC`,
-        [email, chain]
+        [email, chain, network]
       )
       return rows.map(toStored)
     },
@@ -222,8 +252,8 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
       if (ids.length === 0) return
       await query(
         `UPDATE standing_rules SET seen_at = $3
-         WHERE email = $1 AND id = ANY($2::text[]) AND seen_at IS NULL`,
-        [email, ids, at.toISOString()]
+         WHERE email = $1 AND id = ANY($2::text[]) AND seen_at IS NULL AND network = $4`,
+        [email, ids, at.toISOString(), network]
       )
     },
   }
@@ -238,12 +268,14 @@ export function createStandingRulesRepo(query: QueryFn): StandingRulesRepo {
  */
 const globalForRules = globalThis as unknown as { intentStandingSchema?: Promise<void> }
 
-export async function getStandingRulesRepo(): Promise<StandingRulesRepo> {
+export async function getStandingRulesRepo(
+  network: StellarNetworkName = activeNetwork()
+): Promise<StandingRulesRepo> {
   const pool = getPool()
   const repo = createStandingRulesRepo(async (sql, params) => {
     const result = await pool.query(sql, params)
     return { rows: result.rows as Record<string, unknown>[] }
-  })
+  }, network)
 
   if (globalForRules.intentStandingSchema === undefined) {
     globalForRules.intentStandingSchema = repo.ensureSchema().catch((e: unknown) => {

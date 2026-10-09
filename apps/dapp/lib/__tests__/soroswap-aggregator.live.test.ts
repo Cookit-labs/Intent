@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { resolveAggregatorProtocols } from '../swap/aggregator-protocols'
 import { USDC, XLM } from '../swap/assets'
-import { SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import { soroswapAggregator, soroswapRouter } from '../swap/contract-registry'
 import { createSoroswapApi, SOROSWAP_API_URL } from '../swap/soroswap-api'
 import { createSoroswapAggregatorQuoter } from '../swap/sources/soroswap-aggregator-quoter'
 
@@ -43,17 +43,17 @@ live('the ids the API publishes are the ids the registry allows', () => {
     // No auth on this endpoint. If the two ever disagree, the registry is
     // stale and every router-platform build would be refused — by design,
     // and loudly, rather than signed against a contract nobody reviewed.
-    expect(await api.contractAddress('router')).toBe(SOROSWAP_ROUTER)
+    expect(await api.contractAddress('router')).toBe(soroswapRouter())
   }, 20_000)
 
   it('names the aggregator the registry lists', async () => {
-    expect(await api.contractAddress('aggregator')).toBe(SOROSWAP_AGGREGATOR)
+    expect(await api.contractAddress('aggregator')).toBe(soroswapAggregator())
   }, 20_000)
 })
 
 live('the adapters, read from the contract and the ledger', () => {
   it('offers Soroswap, Aquarius and the classic DEX, and never Phoenix', async () => {
-    const got = await resolveAggregatorProtocols({ aggregatorId: SOROSWAP_AGGREGATOR })
+    const got = await resolveAggregatorProtocols({ aggregatorId: soroswapAggregator() })
 
     expect(got).toBeDefined()
     if (got === undefined) return
@@ -66,13 +66,13 @@ live('the adapters, read from the contract and the ledger', () => {
     // no instance at the second one's address. If this starts failing,
     // Phoenix has been redeployed on testnet — which changes nothing above
     // until a swap through it has been verified by hand.
-    const got = await resolveAggregatorProtocols({ aggregatorId: SOROSWAP_AGGREGATOR })
+    const got = await resolveAggregatorProtocols({ aggregatorId: soroswapAggregator() })
     if (got === undefined) throw new Error('adapters could not be read')
 
     expect(got.adapters).toHaveLength(3)
     const phoenix = got.adapters.find((a) => a.protocol === 'phoenix')
     expect(phoenix?.deployed).toBe(false)
-    expect(got.adapters.find((a) => a.protocol === 'soroswap')?.router).toBe(SOROSWAP_ROUTER)
+    expect(got.adapters.find((a) => a.protocol === 'soroswap')?.router).toBe(soroswapRouter())
   }, 60_000)
 })
 

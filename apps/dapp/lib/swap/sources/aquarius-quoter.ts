@@ -13,7 +13,7 @@ import {
 
 import type { ClassicAsset } from '../assets'
 import { sacFor } from '../build-soroban'
-import { AQUARIUS_ROUTER } from '../contract-registry'
+import { aquariusRouter } from '../contract-registry'
 import type {
   MultiQuoteOutcome,
   QuoteFailure,
@@ -53,7 +53,7 @@ import type {
  */
 
 /** The router for the active network, from the registry; re-exported for the builder. */
-export { AQUARIUS_ROUTER }
+export { aquariusRouter }
 
 /**
  * Simulation needs a source account but never submits, so any well-formed
@@ -117,7 +117,7 @@ function failure(reason: QuoteFailure['reason'], detail?: string): QuoteOutcome 
 
 export function createAquariusQuoter(options: AquariusQuoterOptions = {}): QuoteSource {
   const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
-  const routerId = options.routerId ?? AQUARIUS_ROUTER
+  const routerId = options.routerId ?? aquariusRouter()
   const enabled = options.enabled ?? true
 
   function server(): Pick<rpc.Server, 'simulateTransaction'> {

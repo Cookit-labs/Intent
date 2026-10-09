@@ -1,3 +1,5 @@
+import { activeNetwork, defaultNetwork, type StellarNetworkName } from '@intent/config'
+
 import { getPool, withTimeout, type QueryFn } from './db'
 
 /**
@@ -49,8 +51,8 @@ export const SPONSOR_LEDGER_DDL: readonly string[] = [
 /** The account the day as a whole is counted under. */
 const EVERYONE = '*'
 
-/** The account row and the `*` row, in either order, as one usage. */
-function toUsage(rows: Record<string, unknown>[]): DayUsage {
+/** The account row and the day's total row, in either order, as one usage. */
+function toUsage(rows: Record<string, unknown>[], everyone: string): DayUsage {
   const usage: DayUsage = {
     totalStroops: BigInt(0),
     totalCount: 0,
@@ -61,7 +63,7 @@ function toUsage(rows: Record<string, unknown>[]): DayUsage {
     // BIGINT comes back from pg as a string.
     const stroops = BigInt(String(row['stroops']))
     const count = Number(row['count'])
-    if (row['account'] === EVERYONE) {
+    if (row['account'] === everyone) {
       usage.totalStroops = stroops
       usage.totalCount = count
     } else {
@@ -72,7 +74,17 @@ function toUsage(rows: Record<string, unknown>[]): DayUsage {
   return usage
 }
 
-export function createSponsorLedger(query: QueryFn): SponsorLedger {
+/**
+ * `scope` names a network whose spend is kept apart from the rest. Its rows
+ * carry the network in their key (`mainnet:G…`, `mainnet:*`), so one table
+ * holds every network's day without a schema change, and a network's total,
+ * budget and releases never touch another's. Without a scope the keys are the
+ * plain ones every row written before there were two networks already has.
+ */
+export function createSponsorLedger(query: QueryFn, scope?: StellarNetworkName): SponsorLedger {
+  const keyed = (account: string): string => (scope === undefined ? account : `${scope}:${account}`)
+  const everyone = keyed(EVERYONE)
+
   return {
     async ensureSchema() {
       for (const statement of SPONSOR_LEDGER_DDL) await query(statement)
@@ -82,9 +94,9 @@ export function createSponsorLedger(query: QueryFn): SponsorLedger {
       const { rows } = await query(
         `SELECT account, stroops, count FROM sponsor_ledger
          WHERE day = $1 AND account = ANY($2::text[])`,
-        [day, account === undefined ? [EVERYONE] : [account, EVERYONE]]
+        [day, account === undefined ? [everyone] : [keyed(account), everyone]]
       )
-      return toUsage(rows)
+      return toUsage(rows, everyone)
     },
 
     async record(day, account, stroops) {
@@ -95,22 +107,22 @@ export function createSponsorLedger(query: QueryFn): SponsorLedger {
       // own write produced, and the one that went over gives it back.
       const { rows } = await query(
         `INSERT INTO sponsor_ledger (day, account, stroops, count)
-         VALUES ($1, $2, $3, 1), ($1, '*', $3, 1)
+         VALUES ($1, $2, $3, 1), ($1, $4, $3, 1)
          ON CONFLICT (day, account) DO UPDATE
            SET stroops = sponsor_ledger.stroops + EXCLUDED.stroops,
                count = sponsor_ledger.count + 1
          RETURNING account, stroops, count`,
-        [day, account, stroops.toString()]
+        [day, keyed(account), stroops.toString(), everyone]
       )
-      return toUsage(rows)
+      return toUsage(rows, everyone)
     },
 
     async release(day, account, stroops) {
       await query(
         `UPDATE sponsor_ledger
          SET stroops = sponsor_ledger.stroops - $3, count = sponsor_ledger.count - 1
-         WHERE day = $1 AND account IN ($2, '*')`,
-        [day, account, stroops.toString()]
+         WHERE day = $1 AND account IN ($2, $4)`,
+        [day, keyed(account), stroops.toString(), everyone]
       )
     },
   }
@@ -125,12 +137,19 @@ const LEDGER_TIMEOUT_MS = 2_000
 
 const globalForLedger = globalThis as unknown as { intentSponsorLedgerSchema?: Promise<void> }
 
-export async function getSponsorLedger(): Promise<SponsorLedger> {
+export async function getSponsorLedger(
+  network: StellarNetworkName = activeNetwork()
+): Promise<SponsorLedger> {
   const pool = getPool()
-  const ledger = createSponsorLedger(async (sql, params) => {
-    const result = await withTimeout(pool.query(sql, params), LEDGER_TIMEOUT_MS)
-    return { rows: result.rows as Record<string, unknown>[] }
-  })
+  // The deployment's default network keeps the plain keys, so the history a
+  // single-network deployment already has stays its own.
+  const ledger = createSponsorLedger(
+    async (sql, params) => {
+      const result = await withTimeout(pool.query(sql, params), LEDGER_TIMEOUT_MS)
+      return { rows: result.rows as Record<string, unknown>[] }
+    },
+    network === defaultNetwork() ? undefined : network
+  )
 
   if (globalForLedger.intentSponsorLedgerSchema === undefined) {
     globalForLedger.intentSponsorLedgerSchema = ledger.ensureSchema().catch((e: unknown) => {

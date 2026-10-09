@@ -1,6 +1,6 @@
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
 
-import { BLEND_XLM } from '../lend/reserves'
+import { blendXlm } from '../lend/reserves'
 import { fromBaseUnits } from '../swap/assets'
 import type { PlanAction } from '../swap/build-plan'
 import { fetchPools, type Pool } from '../swap/liquidity-pools'
@@ -142,7 +142,7 @@ export async function assertPlanWithinCap(
       case 'lend':
         // Named by contract. XLM is the one reserve this app supplies, and
         // anything else has no price here to cap by.
-        spend(action.asset === BLEND_XLM ? 'XLM' : action.asset, fromBaseUnits(action.amount))
+        spend(action.asset === blendXlm() ? 'XLM' : action.asset, fromBaseUnits(action.amount))
         break
       case 'pool': {
         pools ??= await (options.pools ?? fetchPools)()

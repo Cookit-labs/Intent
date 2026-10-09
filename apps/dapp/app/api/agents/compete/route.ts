@@ -1,3 +1,4 @@
+import { activeNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
@@ -18,6 +19,7 @@ import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
+import { logRace, type RaceInput } from '../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -190,6 +192,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const competitionId = randomUUID()
+  // Taken here, in the request, so the race is recorded for the network it ran on.
+  const network = activeNetwork()
+  const startedAt = new Date()
   // Prices are fetched first so the parser can size "$30 of XLM" against the
   // real market rather than an indicative table.
   const market = await buildMarketContextAsync(chain)
@@ -247,6 +252,31 @@ export async function POST(request: Request): Promise<Response> {
         controller.enqueue(encoder.encode(encodeFrame(frame)))
       }
 
+      // What each agent did, for the analytics log. Only outcomes and timings:
+      // nothing an agent wrote and nothing the user typed.
+      const attempts: RaceInput['attempts'] = []
+      const record = (
+        winner: string | null,
+        unanimous: boolean | null,
+        scores: Record<string, number>
+      ): Promise<void> =>
+        logRace({
+          id: competitionId,
+          network,
+          startedAt,
+          durationMs: Date.now() - startedAt.getTime(),
+          intent: {
+            type: intent.input.type,
+            tokenIn: intent.input.tokenIn,
+            tokenOut: intent.input.tokenOut,
+            sizeUsd: intent.escrowUsd,
+          },
+          attempts,
+          scores,
+          winner,
+          unanimous,
+        })
+
       send({
         type: 'competition:started',
         competitionId,
@@ -260,6 +290,7 @@ export async function POST(request: Request): Promise<Response> {
       // agent delays only its own card.
       const settled = await Promise.all(
         roster.map(async (agent, seat) => {
+          const began = Date.now()
           const controllerForAgent = new AbortController()
           const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
@@ -274,6 +305,13 @@ export async function POST(request: Request): Promise<Response> {
             })
 
             if (!outcome.ok) {
+              attempts.push({
+                agent: agent.key,
+                model: agent.model,
+                ok: false,
+                latencyMs: Date.now() - began,
+                error: outcome.error,
+              })
               // Said, and left empty. No placeholder: an agent that did not
               // answer has no proposal, and showing one would be inventing it.
               send({
@@ -294,6 +332,15 @@ export async function POST(request: Request): Promise<Response> {
               own?.quote as SwapQuote | undefined,
               market.prices
             )
+
+            attempts.push({
+              agent: agent.key,
+              model: agent.model,
+              ok: true,
+              latencyMs: Date.now() - began,
+              routeId: proposal.routeId,
+              executionMode: proposal.executionMode,
+            })
 
             send({
               type: 'competition:proposal',
@@ -317,6 +364,7 @@ export async function POST(request: Request): Promise<Response> {
           message:
             'None of the agents answered this time. Nothing was proposed. Try again in a moment.',
         })
+        await record(null, null, {})
         closed = true
         controller.close()
         return
@@ -348,6 +396,7 @@ export async function POST(request: Request): Promise<Response> {
 
       const scored = scoreProposals(proposals, { competitionId, plan })
       const winner = pickWinner(scored)
+      let unanimous: boolean | null = null
 
       if (winner !== null) {
         const winningProposal = proposals.find((p) => p.agent === winner)
@@ -357,7 +406,7 @@ export async function POST(request: Request): Promise<Response> {
         // the same route and the same plan, the "winner" was drawn by hash
         // among equals — and saying "Recommended: Halcyon" over that reads as
         // a judgement nobody made.
-        const unanimous = unanimousChoice(scored)
+        unanimous = unanimousChoice(scored)
 
         send({
           type: 'competition:winner',
@@ -374,6 +423,11 @@ export async function POST(request: Request): Promise<Response> {
         })
       }
 
+      await record(
+        winner,
+        winner !== null ? unanimous : null,
+        Object.fromEntries(scored.map((s) => [s.agent, s.score]))
+      )
       closed = true
       controller.close()
     },

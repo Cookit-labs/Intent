@@ -1,7 +1,13 @@
 import { Keypair } from '@stellar/stellar-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { cachedHealth, checkHealth, healthStatus, type HealthProbes } from '../server/health'
+import {
+  cachedHealth,
+  checkHealth,
+  healthNetwork,
+  healthStatus,
+  type HealthProbes,
+} from '../server/health'
 
 /**
  * The health endpoint: what a load balancer, an uptime monitor, or a person
@@ -226,7 +232,7 @@ describe('GET /api/health', () => {
     )
     const { GET } = await import('../../app/api/health/route')
 
-    const res = await GET()
+    const res = await GET(new Request('http://localhost/api/health'))
 
     expect(res.status).toBe(503)
     expect(res.headers.get('cache-control')).toBe('no-store')
@@ -275,5 +281,21 @@ describe('cachedHealth', () => {
     clock += 2
     await get()
     expect(runs).toBe(2)
+  })
+})
+
+describe('healthNetwork', () => {
+  it('reads ?network= when the deployment serves it, and falls back to the default otherwise', () => {
+    const both = ['testnet', 'mainnet'] as const
+    expect(healthNetwork('http://x.test/api/health?network=mainnet', both, 'testnet')).toBe(
+      'mainnet'
+    )
+    expect(healthNetwork('http://x.test/api/health', both, 'testnet')).toBe('testnet')
+    expect(healthNetwork('http://x.test/api/health?network=pubnet', both, 'testnet')).toBe(
+      'testnet'
+    )
+    expect(healthNetwork('http://x.test/api/health?network=mainnet', ['testnet'], 'testnet')).toBe(
+      'testnet'
+    )
   })
 })

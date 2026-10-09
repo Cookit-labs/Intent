@@ -4,6 +4,7 @@ import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { assertSelfSubmission } from '../../../../lib/swap/venue-routing'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { logExecution } from '../../../../lib/server/analytics'
 
 /**
  * Submits a signed swap to the network.
@@ -58,5 +59,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   // sends the original instead, paying its own fee as before.
   const sent = await sponsorForRequest(request, body.signedXdr, body.account)
   const result = await submitSignedSwap(sent.xdr)
+  await logExecution({
+    kind: 'swap',
+    account: body.account,
+    feeSponsored: sent.sponsored,
+    result,
+    signedXdr: sent.xdr,
+  })
   return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }

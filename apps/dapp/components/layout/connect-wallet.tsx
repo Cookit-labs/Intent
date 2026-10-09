@@ -19,11 +19,28 @@ export function ConnectWallet(): JSX.Element {
 
   if (descriptor.family === 'evm') {
     return (
-      <ConnectButton
-        accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
-        chainStatus="icon"
-        showBalance={{ smallScreen: false, largeScreen: true }}
-      />
+      <ConnectButton.Custom>
+        {({ account, chain, mounted, authenticationStatus, openConnectModal }) => {
+          const ready = mounted && authenticationStatus !== 'loading'
+          const connected = ready && account !== undefined && chain !== undefined
+          // Not connected: the same button the Stellar side shows, so the
+          // control does not change shape with the chain. Connected, and
+          // while it is not yet known, RainbowKit's own control takes over.
+          if (ready && !connected) return <ConnectButtonView onClick={openConnectModal} />
+          return (
+            <div
+              aria-hidden={!ready}
+              className={ready ? undefined : 'pointer-events-none opacity-0'}
+            >
+              <ConnectButton
+                accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
+                chainStatus="icon"
+                showBalance={{ smallScreen: false, largeScreen: true }}
+              />
+            </div>
+          )
+        }}
+      </ConnectButton.Custom>
     )
   }
 
@@ -65,10 +82,23 @@ function StellarConnect(): JSX.Element {
           {error}
         </span>
       ) : null}
-      <Button size="sm" onClick={connect} disabled={isConnecting} className="gap-1.5">
-        <Wallet className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-        {isConnecting ? 'Connecting…' : 'Connect wallet'}
-      </Button>
+      <ConnectButtonView onClick={connect} busy={isConnecting} />
     </div>
+  )
+}
+
+/** The one disconnected button, whatever the chain. */
+function ConnectButtonView({
+  onClick,
+  busy = false,
+}: {
+  onClick: () => void
+  busy?: boolean
+}): JSX.Element {
+  return (
+    <Button size="sm" onClick={onClick} disabled={busy} className="gap-1.5">
+      <Wallet className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+      {busy ? 'Connecting…' : 'Connect wallet'}
+    </Button>
   )
 }

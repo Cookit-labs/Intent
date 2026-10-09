@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { readOracleId, readPrice, readPrices } from '../lend/oracle'
-import { BLEND_XLM } from '../lend/reserves'
+import { blendXlm } from '../lend/reserves'
 
 /**
  * The oracle the pool actually consults, read live.
@@ -24,7 +24,7 @@ describe.skipIf(SKIP)('the live Blend oracle', () => {
   }, 60_000)
 
   it('prices XLM', async () => {
-    const price = await readPrice(BLEND_XLM)
+    const price = await readPrice(blendXlm())
 
     expect(price).toBeDefined()
     expect(price?.decimals).toBe(7)
@@ -36,23 +36,23 @@ describe.skipIf(SKIP)('the live Blend oracle', () => {
     // and they answer different questions — but only this one governs whether
     // a position is liquidated, so a health factor built on the book's figure
     // would be wrong by roughly four times.
-    const price = await readPrice(BLEND_XLM)
+    const price = await readPrice(blendXlm())
     const usd = Number(price?.price ?? 0) / 1e7
 
     expect(usd).toBeGreaterThan(0.2)
   }, 60_000)
 
   it('prices every asset the pool lends', async () => {
-    const prices = await readPrices([BLEND_XLM, WBTC, USDC])
+    const prices = await readPrices([blendXlm(), WBTC, USDC])
 
     expect(Object.keys(prices)).toHaveLength(3)
     // wBTC is worth far more per unit than XLM; a mix-up between reserves
     // would be visible here rather than in a liquidation.
-    expect(prices[WBTC]?.price).toBeGreaterThan(prices[BLEND_XLM]?.price ?? BigInt(0))
+    expect(prices[WBTC]?.price).toBeGreaterThan(prices[blendXlm()]?.price ?? BigInt(0))
   }, 90_000)
 
   it('carries a timestamp, so a stale price is detectable', async () => {
-    const price = await readPrice(BLEND_XLM)
+    const price = await readPrice(blendXlm())
     expect(price?.timestamp).toBeGreaterThan(0)
   }, 60_000)
 })

@@ -155,10 +155,12 @@ export const venues: Venue[] = [
     url: 'https://etherfuse.com',
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
-    capability:
-      activeNetwork() === 'mainnet'
+    // A getter: which bonds exist depends on the network of the request.
+    get capability(): string {
+      return activeNetwork() === 'mainnet'
         ? 'Buy tokenized Mexican and US treasury bills (CETES, USTRY). They settle like any other classic asset.'
-        : 'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.',
+        : 'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.'
+    },
   },
   {
     id: 'stellar-pools',
@@ -258,10 +260,11 @@ export const venues: Venue[] = [
     url: 'https://sorobandomains.org',
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
-    capability:
-      activeNetwork() === 'mainnet'
+    get capability(): string {
+      return activeNetwork() === 'mainnet'
         ? 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names and payments both live on Stellar mainnet.'
-        : 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
+        : 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.'
+    },
   },
 ]
 

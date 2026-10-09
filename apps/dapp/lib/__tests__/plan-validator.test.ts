@@ -10,7 +10,7 @@ import {
 } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { BLEND_POOL, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import { blendPool, soroswapRouter } from '../swap/contract-registry'
 import { assertSelfPlan, describePlan } from '../swap/plan-validator'
 
 /**
@@ -72,7 +72,7 @@ const trustline = () => Operation.changeTrust({ asset: USDC })
 const UNKNOWN_CONTRACT = 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA'
 
 /** The Soroswap router's swap; `to` is who receives the output. */
-const routerSwap = (contractId = SOROSWAP_ROUTER, to = ME) =>
+const routerSwap = (contractId = soroswapRouter(), to = ME) =>
   new Contract(contractId).call(
     'swap_exact_tokens_for_tokens',
     nativeToScVal(BigInt(10), { type: 'i128' }),
@@ -84,7 +84,7 @@ const routerSwap = (contractId = SOROSWAP_ROUTER, to = ME) =>
 
 /** Blend's `submit(from, spender, to, requests)`; `to` is whose position the requests act on. */
 const blendSupply = (fn = 'submit', to = ME) =>
-  new Contract(BLEND_POOL).call(
+  new Contract(blendPool()).call(
     fn,
     new Address(ME).toScVal(),
     new Address(ME).toScVal(),
@@ -191,7 +191,7 @@ describe('a contract call may not pay a stranger', () => {
   // function name only, so the same bytes those routes refuse passed here —
   // a hole in the one route whose guarantee the builders all repeat.
   it('refuses a Soroswap router swap whose output goes to a stranger', () => {
-    expect(() => assertSelfPlan(envelope([routerSwap(SOROSWAP_ROUTER, STRANGER)]), ME)).toThrow()
+    expect(() => assertSelfPlan(envelope([routerSwap(soroswapRouter(), STRANGER)]), ME)).toThrow()
   })
 
   it("refuses a Blend submit that acts on a stranger's position", () => {

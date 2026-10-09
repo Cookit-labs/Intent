@@ -1,4 +1,4 @@
-import { activeNetwork } from '@intent/config'
+import { activeNetwork, type StellarNetworkName } from '@intent/config'
 import type { rpc } from '@stellar/stellar-sdk'
 
 import {
@@ -42,8 +42,6 @@ import type { MarketPrice } from '../swap/price-types'
  * here. Both mainnet contracts were read on the public network on
  * 2026-09-24: `decimals()` 14, XLM, EUR and MXN with fresh timestamps.
  */
-const NETWORK = activeNetwork()
-
 /**
  * Reflector's CEX/DEX feed. Base currency USD.
  *
@@ -52,10 +50,11 @@ const NETWORK = activeNetwork()
  * addresses were found already gone that way — so a failure here is an
  * ordinary outcome the callers fall through, not an exception.
  */
-export const REFLECTOR_CEX_DEX =
-  NETWORK === 'mainnet'
+export function reflectorCexDex(network: StellarNetworkName = activeNetwork()): string {
+  return network === 'mainnet'
     ? 'CAFJZQWSED6YAWZU3GWRTOCNPPCGBN32L7QV43XX5LZLFTK6JLN34DLN'
     : 'CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63'
+}
 
 /**
  * Reflector's FX and commodities feed. Same interface as the crypto feed,
@@ -67,10 +66,11 @@ export const REFLECTOR_CEX_DEX =
  * in pesos and reais, and until this feed the agents had no rate for either.
  * Gold is carried for the same reason ahead of any asset anchored to it.
  */
-export const REFLECTOR_FX =
-  NETWORK === 'mainnet'
+export function reflectorFx(network: StellarNetworkName = activeNetwork()): string {
+  return network === 'mainnet'
     ? 'CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC'
     : 'CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W'
+}
 
 /** The currencies the app's bonds settle in, the euro, and gold. */
 export const FX_SYMBOLS = ['MXN', 'BRL', 'EUR', 'XAU'] as const
@@ -116,14 +116,14 @@ function toUsd(price: bigint, decimals: number): number {
 export async function fetchFxPrices(
   options: Omit<ReflectorOptions, 'oracleId'> = {}
 ): Promise<Record<string, MarketPrice>> {
-  return fetchReflectorPrices([...FX_SYMBOLS], { ...options, oracleId: REFLECTOR_FX })
+  return fetchReflectorPrices([...FX_SYMBOLS], { ...options, oracleId: reflectorFx() })
 }
 
 export async function fetchReflectorPrices(
   symbols: string[],
   options: ReflectorOptions = {}
 ): Promise<Record<string, MarketPrice>> {
-  const oracleId = options.oracleId ?? REFLECTOR_CEX_DEX
+  const oracleId = options.oracleId ?? reflectorCexDex()
   const oracleOptions: OracleOptions = {
     oracleId,
     ...(options.rpcUrl !== undefined ? { rpcUrl: options.rpcUrl } : {}),
