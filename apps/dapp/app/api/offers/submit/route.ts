@@ -65,6 +65,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     account: body.account,
     feeSponsored: sent.sponsored,
     result,
+    signedXdr: sent.xdr,
   })
   return NextResponse.json({ ...result, feeSponsored: sent.sponsored })
 }
