@@ -1,6 +1,6 @@
 'use client'
 
-import { DEFAULT_CHAIN, parseChainSegment } from '@intent/config'
+import { homeSegment, parseChainSegment } from '@intent/config'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -13,7 +13,7 @@ import { usePathname } from 'next/navigation'
 export function NotFoundActions(): JSX.Element {
   const pathname = usePathname()
   const first = pathname.split('/')[1] ?? ''
-  const chain = parseChainSegment(first) !== undefined ? first : DEFAULT_CHAIN
+  const chain = parseChainSegment(first) !== undefined ? first : homeSegment()
 
   return (
     <>

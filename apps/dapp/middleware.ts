@@ -5,12 +5,18 @@ import {
   NETWORK_HEADER,
   defaultNetwork,
   enabledNetworks,
+  homeSegment,
   resolveRequestedNetwork,
 } from '@intent/config'
 
 import { gateEnabled } from './lib/server/access-gate'
 import { constantTimeEqual } from './lib/server/constant-time-equal'
-import { isGateFree, legacyStellarRedirect, segmentNetwork } from './lib/server/network-route'
+import {
+  bareRedirect,
+  isGateFree,
+  legacyStellarRedirect,
+  segmentNetwork,
+} from './lib/server/network-route'
 import { SESSION_COOKIE } from './lib/server/session-constants'
 
 /**
@@ -90,6 +96,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (!isApi) {
     const moved = legacyStellarRedirect(pathname, search, multi, fallback)
     if (moved !== undefined) return NextResponse.redirect(new URL(moved, request.url))
+
+    // The bare root and the old unprefixed screens open on the home chain.
+    const home = bareRedirect(pathname, search, homeSegment(enabled))
+    if (home !== undefined) return NextResponse.redirect(new URL(home, request.url))
   }
 
   // Which network this request is for. A page says it in its address; an API

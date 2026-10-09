@@ -103,6 +103,43 @@ describe('the gate, per network', () => {
   })
 })
 
+describe('where the root and the old unprefixed addresses go', () => {
+  const location = (res: Response): URL => new URL(res.headers.get('location') as string)
+
+  it('opens on Stellar mainnet when both networks are served', async () => {
+    const res = await run('http://app.test/', { env: BOTH })
+    expect(res.status).toBe(307)
+    expect(location(res).pathname).toBe('/stellar-mainnet/intents')
+  })
+
+  it('opens on the one Stellar address when one network is served', async () => {
+    const res = await run('http://app.test/', {})
+    expect(res.status).toBe(307)
+    expect(location(res).pathname).toBe('/stellar/intents')
+  })
+
+  it('sends an old unprefixed screen to the same screen on the home chain, keeping the query', async () => {
+    const res = await run('http://app.test/apps?x=1', { env: BOTH })
+    expect(location(res).pathname).toBe('/stellar-mainnet/apps')
+    expect(location(res).search).toBe('?x=1')
+  })
+
+  it('leaves chain addresses, the API and the verification page where they are', async () => {
+    for (const path of ['/arc/intents', '/stellar-testnet/intents', '/api/health', '/verify']) {
+      const res = await run(`http://app.test${path}`, { env: { ...BOTH, ACCESS_GATE: 'off' } })
+      expect(res.headers.get('location')).toBeNull()
+    }
+  })
+
+  it('does not put the root behind the gate: the visitor lands on mainnet and is then asked to verify', async () => {
+    const root = await run('http://app.test/', { env: BOTH })
+    expect(location(root).pathname).toBe('/stellar-mainnet/intents')
+    const page = await run('http://app.test/stellar-mainnet/intents', { env: BOTH })
+    expect(location(page).pathname).toBe('/verify')
+    expect(location(page).searchParams.get('next')).toBe('/stellar-mainnet/intents')
+  })
+})
+
 describe('the old /stellar address', () => {
   it('redirects to the default network when several are served', async () => {
     const res = await run('http://app.test/stellar/apps?x=1', { env: BOTH })

@@ -22,7 +22,7 @@ export const CHAIN_DESCRIPTORS: Record<ChainSlug, ChainDescriptor> = {
 /** Display order for switchers and menus. */
 export const CHAIN_ORDER: readonly ChainSlug[] = ['arc', 'stellar']
 
-export const DEFAULT_CHAIN: ChainSlug = 'arc'
+export const DEFAULT_CHAIN: ChainSlug = 'stellar'
 
 export function isChainSlug(value: string): value is ChainSlug {
   return value === 'arc' || value === 'stellar'
