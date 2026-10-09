@@ -28,7 +28,12 @@ const QUOTE_TIMEOUT_MS = 15_000
 // buying XLM, Horizon won selling it, and Aquarius sat between the two both
 // ways — no venue wins everywhere, so `bestQuote` below decides per request
 // rather than by preference.
-const sources = [createHorizonQuoter(), createSoroswapQuoter(), createAquariusQuoter()]
+//
+// Built per request, not once at load: each source reads the network it quotes on,
+// and with two networks served that is only known inside a request.
+function quoteSources() {
+  return [createHorizonQuoter(), createSoroswapQuoter(), createAquariusQuoter()]
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'build')
@@ -88,7 +93,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const timer = setTimeout(() => controller.abort(), QUOTE_TIMEOUT_MS)
 
   try {
-    const { quotes, failures } = await collectQuotes(sources, req, controller.signal)
+    const { quotes, failures } = await collectQuotes(quoteSources(), req, controller.signal)
     const best = bestQuote(quotes)
 
     if (best === undefined) {
