@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import type { AgentProposalResult, ProposalOutcome } from '../brain'
 import { createBrain } from '../brains/openai-compatible'
@@ -283,4 +283,5 @@ async function main(): Promise<void> {
   console.log(`\nwrote ${out}`)
 }
 
-void main()
+const entry = process.argv[1]
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) void main()
