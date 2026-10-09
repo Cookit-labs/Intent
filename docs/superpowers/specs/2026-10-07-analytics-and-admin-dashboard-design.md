@@ -8,8 +8,20 @@ Know, and be able to prove, how much Intent is used: total volume, number of tra
 
 Two deliverables:
 
-1. Two small **append-only logs** in the dapp (this repo): one record per submitted transaction (`executions`), and one per agent competition and per agent in it (`agent_races`, `agent_proposals`).
-2. An **admin dashboard** in its own private repo, `Cookit-labs/intent-admin-dashboard`, that turns those records and the chain into the metrics.
+1. Two small **append-only logs** in the dapp (this repo): one record per submitted transaction (`usage_executions`), and one per agent competition and per agent in it (`agent_races`, `agent_proposals`).
+2. An **admin dashboard** that turns those records into the metrics. This began as its own private repo, `Cookit-labs/intent-admin-dashboard`; see the revision below.
+
+## Revision, 2026-10-09
+
+Decided while building it, and where the text below disagrees, this wins:
+
+- **The dashboard lives in the dapp**, at `/admin`, with its own sidebar, a chain and network switcher, and a date range. It ships with the app and needs no second deploy or database. A separate repo can still be split out later; the data layer is `lib/server/admin-metrics.ts` and the only contract is `GET /api/admin/metrics`.
+- **Amounts are recorded at submit time.** Each execution stores the assets, the amount sold and its dollar value, read from the signed transaction and priced by the app's own oracle, with the hash beside it. The log is no longer amount-free. This is the app's reading, not the chain's: a nightly reconciliation against Horizon by hash is still wanted, and is not built.
+- **There is no ingester and no second database for now.** The dashboard reads the usage tables directly, read only.
+- **Access is the admin session.** One shared `ADMIN_TOKEN`, exchanged once for a signed, expiring, http-only cookie. GitHub organisation sign-in below is the better answer once there is more than one admin.
+- **A transaction counts when the network accepted it at submit**, not after a chain re-read.
+- **Typed intents are logged separately** (`intent_reads`: what the model understood, never the sentence), and "intents" on the dashboard means agent races.
+- **The table is `usage_executions`**: the backend's own `executions` table shares the database, and the first name collided with it.
 
 ## Why the log has to come first
 
@@ -22,7 +34,7 @@ The dapp records no trades. Its database holds the waitlist, standing rules, rat
 One table, written by every `submit` route when a signed transaction is sent.
 
 ```
-executions
+usage_executions
   id            uuid        primary key
   network       text        'testnet' | 'mainnet'
   hash          text        the transaction hash, null if the network refused it before a hash existed
@@ -36,7 +48,7 @@ executions
 ```
 
 - **Appended in the same request** that submits, after the result is known. A failure to write the row never fails or delays the user's transaction: it is reported and the submit still answers normally.
-- **No amounts, no prices, no emails.** What a transaction moved is read back from the chain afterwards (Part 2). The log stays tiny and cannot disagree with the ledger.
+- **No emails and no typed text.** (Amounts and dollar values are recorded too; see the revision above. The hash stays beside them so any figure can be checked on an explorer.)
 - **Per network** with no extra machinery: the row carries the request's network, which the per-request network work already provides.
 - **Retention.** The tables are append-only; nothing in the app updates or deletes rows.
 - **Creation.** The tables are created on first use with idempotent statements, like the others here, and mirrored as a numbered migration file in `packages/db/migrations`.
@@ -61,12 +73,12 @@ agent_proposals  one row per agent in a race
 - **No intent text and nothing an agent wrote.** An agent's error is sorted into a small fixed set (`timeout`, `rate_limited`, `auth`, `invalid_response`, `error`); the size is the app's own USD estimate of the intent, which may be empty.
 - Not linked to a transaction yet. Which race led to which execution, and so execution quality, is the next design.
 
-## Part 2: the admin dashboard (new repo)
+## Part 2: the admin dashboard (original design, superseded where the revision above says so)
 
 ### Data flow
 
 ```
-dapp DB (executions, read-only role)  ->  ingester  ->  analytics DB (own database)  ->  dashboard
+dapp DB (usage_executions, read-only role)  ->  ingester  ->  analytics DB (own database)  ->  dashboard
                                               ^
                        Horizon: the transaction, its effects, its fee
                        Oracle prices at the ledger's close time
