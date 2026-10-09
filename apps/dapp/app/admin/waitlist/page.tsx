@@ -1,12 +1,5 @@
 'use client'
 
-/**
- * INACTIVE — access-gate feature, not wired into Intent.
- *
- * Built from a prompt meant for another project. The gate is switched off in
- * `middleware.ts`, so this page is reachable only by typing its URL. Kept for
- * possible later use; see the note in middleware.ts to re-enable.
- */
 import { Badge, Button, Card, Input, Label } from '@intent/ui'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -32,21 +25,19 @@ export default function AdminWaitlistPage(): JSX.Element {
   const [entries, setEntries] = useState<Entry[]>([])
   const [error, setError] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [invite, setInvite] = useState('')
 
-  const load = useCallback(
-    async (withToken: string): Promise<boolean> => {
-      setError(undefined)
-      const res = await fetch('/api/admin/waitlist', { headers: { 'x-admin-token': withToken } })
-      if (res.status === 401) {
-        setError('That token was not accepted.')
-        return false
-      }
-      const data = (await res.json()) as { signups?: Entry[] }
-      setEntries(data.signups ?? [])
-      return true
-    },
-    []
-  )
+  const load = useCallback(async (withToken: string): Promise<boolean> => {
+    setError(undefined)
+    const res = await fetch('/api/admin/waitlist', { headers: { 'x-admin-token': withToken } })
+    if (res.status === 401) {
+      setError('That token was not accepted.')
+      return false
+    }
+    const data = (await res.json()) as { signups?: Entry[] }
+    setEntries(data.signups ?? [])
+    return true
+  }, [])
 
   useEffect(() => {
     if (!authed) return
@@ -71,6 +62,12 @@ export default function AdminWaitlistPage(): JSX.Element {
     })
     await load(token)
     setBusy(false)
+  }
+
+  async function sendInvite(e: React.FormEvent): Promise<void> {
+    e.preventDefault()
+    await update(invite.trim(), 'accepted')
+    setInvite('')
   }
 
   if (!authed) {
@@ -110,6 +107,18 @@ export default function AdminWaitlistPage(): JSX.Element {
             {entries.length} total · {pending.length} pending
           </span>
         </div>
+
+        <form onSubmit={sendInvite} className="flex gap-2">
+          <Input
+            type="email"
+            value={invite}
+            onChange={(e) => setInvite(e.target.value)}
+            placeholder="Accept an email that has not signed up"
+          />
+          <Button type="submit" disabled={busy || invite.trim() === ''}>
+            Accept
+          </Button>
+        </form>
 
         <Card className="divide-border divide-y">
           {entries.length === 0 ? (

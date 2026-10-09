@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 
-import { listSignups, normalizeEmail, setStatus } from '../../../../lib/server/db'
+import { addSignup, listSignups, normalizeEmail, setStatus } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -42,7 +42,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: 'invalid_status' }, { status: 400 })
     }
 
-    await setStatus(normalizeEmail(body.email), body.status)
+    const email = normalizeEmail(body.email)
+    // Accepting an address that never signed up must still let it in, so the row
+    // is made first: `setStatus` only updates rows that exist.
+    if (body.status === 'accepted') await addSignup(email, null)
+    await setStatus(email, body.status)
     return NextResponse.json({ status: 'updated' })
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
