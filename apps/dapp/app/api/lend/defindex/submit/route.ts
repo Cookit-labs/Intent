@@ -92,6 +92,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     account: body.account as string,
     feeSponsored: false,
     result,
+    signedXdr: body.signedXdr as string,
   })
   if (!result.ok) return NextResponse.json(result)
 
