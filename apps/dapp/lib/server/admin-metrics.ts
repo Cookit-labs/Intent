@@ -216,14 +216,14 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
              count(*) FILTER (WHERE ok AND kind = ANY($3) AND volume_usd IS NULL) AS unvalued,
              count(DISTINCT account) FILTER (WHERE ok)                          AS wallets,
              count(*) FILTER (WHERE ok AND fee_sponsored)                       AS sponsored
-           FROM executions
+           FROM usage_executions
            WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
           [scope.network, from, headline]
         ),
         query(
           `SELECT count(*) AS n FROM (
              SELECT account, min(submitted_at) AS first_seen
-             FROM executions WHERE network = $1 AND ok GROUP BY account
+             FROM usage_executions WHERE network = $1 AND ok GROUP BY account
            ) f
            WHERE $2::timestamptz IS NULL OR f.first_seen >= $2`,
           [scope.network, from]
@@ -271,7 +271,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                 count(*) FILTER (WHERE NOT ok)                                     AS failed,
                 coalesce(sum(volume_usd) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
                 count(DISTINCT account) FILTER (WHERE ok)                          AS wallets
-         FROM executions
+         FROM usage_executions
          WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY 1 ORDER BY 1`,
         [scope.network, from, headline]
@@ -295,7 +295,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                 count(*) FILTER (WHERE ok)                      AS txs,
                 count(*) FILTER (WHERE NOT ok)                  AS failed,
                 coalesce(sum(volume_usd) FILTER (WHERE ok), 0)  AS volume
-         FROM executions
+         FROM usage_executions
          WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY kind ORDER BY volume DESC, txs DESC`,
         [scope.network, since(scope, now)]
@@ -311,7 +311,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
     async pairs(scope, now) {
       const { rows } = await query(
         `SELECT asset_in, asset_out, count(*) AS txs, coalesce(sum(volume_usd), 0) AS volume
-         FROM executions
+         FROM usage_executions
          WHERE network = $1 AND ok AND asset_in IS NOT NULL AND kind = ANY($3)
            AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY asset_in, asset_out ORDER BY volume DESC, txs DESC LIMIT 8`,
@@ -329,7 +329,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       const { rows } = await query(
         `SELECT account, count(*) AS txs, coalesce(sum(volume_usd), 0) AS volume,
                 min(submitted_at) AS first_seen, max(submitted_at) AS last_seen
-         FROM executions
+         FROM usage_executions
          WHERE network = $1 AND ok AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY account ORDER BY volume DESC, txs DESC, account LIMIT 10`,
         [scope.network, since(scope, now)]
@@ -356,11 +356,11 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
          AND ($4::boolean IS NULL OR ok = $4)
          AND ($5::boolean IS NULL OR fee_sponsored = $5)`
       const [count, page] = await Promise.all([
-        query(`SELECT count(*) AS n FROM executions WHERE ${where}`, params),
+        query(`SELECT count(*) AS n FROM usage_executions WHERE ${where}`, params),
         query(
           `SELECT id, hash, account, kind, ok, failure, fee_sponsored, submitted_at,
                   asset_in, asset_out, amount_in, volume_usd
-           FROM executions WHERE ${where}
+           FROM usage_executions WHERE ${where}
            ORDER BY submitted_at DESC, id LIMIT $6 OFFSET $7`,
           [...params, filter.limit, filter.offset]
         ),

@@ -8,7 +8,7 @@ Know, and be able to prove, how much Intent is used: total volume, number of tra
 
 Two deliverables:
 
-1. Two small **append-only logs** in the dapp (this repo): one record per submitted transaction (`executions`), and one per agent competition and per agent in it (`agent_races`, `agent_proposals`).
+1. Two small **append-only logs** in the dapp (this repo): one record per submitted transaction (`usage_executions`), and one per agent competition and per agent in it (`agent_races`, `agent_proposals`).
 2. An **admin dashboard** in its own private repo, `Cookit-labs/intent-admin-dashboard`, that turns those records and the chain into the metrics.
 
 ## Why the log has to come first
@@ -22,7 +22,7 @@ The dapp records no trades. Its database holds the waitlist, standing rules, rat
 One table, written by every `submit` route when a signed transaction is sent.
 
 ```
-executions
+usage_executions
   id            uuid        primary key
   network       text        'testnet' | 'mainnet'
   hash          text        the transaction hash, null if the network refused it before a hash existed
@@ -66,7 +66,7 @@ agent_proposals  one row per agent in a race
 ### Data flow
 
 ```
-dapp DB (executions, read-only role)  ->  ingester  ->  analytics DB (own database)  ->  dashboard
+dapp DB (usage_executions, read-only role)  ->  ingester  ->  analytics DB (own database)  ->  dashboard
                                               ^
                        Horizon: the transaction, its effects, its fee
                        Oracle prices at the ledger's close time
