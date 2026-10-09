@@ -87,6 +87,33 @@ describe('configuration', () => {
   })
 })
 
+describe('on mainnet', () => {
+  it('asks the API for a mainnet quote, never a testnet one', async () => {
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
+    const { fetchImpl, calls } = respond(200, apiQuote)
+    const api = createSoroswapApi({ apiKey: 'sk_test', fetchImpl })
+
+    await api.quote(quoteReq)
+
+    expect(calls[0]?.url).toBe('https://api.soroswap.finance/quote?network=mainnet')
+  })
+
+  it('looks contract ids up on the mainnet path, and caches them apart from testnet', async () => {
+    const aggregator = 'CAYP3UWLJM7ZPTUKL6R6BFGTRWLZ46LRKOXTERI2K6BIJAWGYY62TXTO'
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
+    const { fetchImpl, calls } = respond(200, { address: aggregator })
+    const api = createSoroswapApi({ apiKey: '', fetchImpl })
+
+    expect(await api.contractAddress('aggregator')).toBe(aggregator)
+    expect(calls[0]?.url).toBe('https://api.soroswap.finance/api/mainnet/aggregator')
+
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'testnet')
+    await api.contractAddress('aggregator')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]?.url).toBe('https://api.soroswap.finance/api/testnet/aggregator')
+  })
+})
+
 describe('quoting', () => {
   it('asks for a testnet quote with the bearer key and the protocol list', async () => {
     const { fetchImpl, calls } = respond(200, apiQuote)

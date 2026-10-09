@@ -6,6 +6,7 @@ import {
   Keypair,
   Networks,
   Operation,
+  StrKey,
   TransactionBuilder,
 } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
@@ -52,6 +53,25 @@ function unsigned(): string {
     )
     .setTimeout(60)
     .build()
+  return tx.toXDR()
+}
+
+function sorobanInner(fee: string): string {
+  const tx = new TransactionBuilder(new Account(user.publicKey(), '1'), {
+    fee,
+    networkPassphrase: Networks.TESTNET,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: StrKey.encodeContract(Buffer.alloc(32)),
+        function: 'swap',
+        args: [],
+        auth: [],
+      })
+    )
+    .setTimeout(60)
+    .build()
+  tx.sign(user)
   return tx.toXDR()
 }
 
@@ -125,6 +145,39 @@ describe('sponsorFee', () => {
     if (!first.ok) return
     const again = sponsorFee(first.xdr, user.publicKey(), { sponsor, passphrase: Networks.TESTNET })
     expect(again).toEqual({ ok: false, reason: 'already_bumped' })
+  })
+
+  it('caps a classic transaction far below a Soroban one by default', () => {
+    // 0.5 XLM is a request, not a fee, for a transaction with no contract call.
+    const out = sponsorFee(inner({ fee: '5000000' }), user.publicKey(), {
+      sponsor,
+      passphrase: Networks.TESTNET,
+    })
+    expect(out).toEqual({ ok: false, reason: 'fee_over_cap' })
+  })
+
+  it('still bumps a classic transaction at an ordinary fee by default', () => {
+    const out = sponsorFee(inner({ ops: 10 }), user.publicKey(), {
+      sponsor,
+      passphrase: Networks.TESTNET,
+    })
+    expect(out.ok).toBe(true)
+  })
+
+  it('bumps a Soroban transaction at its real resource fee by default', () => {
+    const out = sponsorFee(sorobanInner('250000'), user.publicKey(), {
+      sponsor,
+      passphrase: Networks.TESTNET,
+    })
+    expect(out.ok).toBe(true)
+  })
+
+  it('still refuses a Soroban transaction whose fee is beyond any resource fee', () => {
+    const out = sponsorFee(sorobanInner('50000000'), user.publicKey(), {
+      sponsor,
+      passphrase: Networks.TESTNET,
+    })
+    expect(out).toEqual({ ok: false, reason: 'fee_over_cap' })
   })
 
   it('refuses an inner fee that would cost the sponsor more than it allows', () => {

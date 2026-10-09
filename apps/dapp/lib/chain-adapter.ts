@@ -30,6 +30,12 @@ export interface WalletSnapshot {
   isWalletUnavailable: boolean
   /** Populated when connect/switch failed, for display. */
   error: string | undefined
+  /** The Stellar network the wallet says it is on, when it names one the app knows. */
+  walletNetwork?: 'testnet' | 'mainnet' | undefined
+  /** The connected wallet's own logo, when the wallet provides one. */
+  walletIcon?: string | undefined
+  /** The connected wallet's name, for instructions that depend on it. */
+  walletName?: string | undefined
 }
 
 export interface WalletActions {
@@ -63,7 +69,11 @@ export interface SignRequest {
 
 export type SignOutcome =
   | { ok: true; signedXdr: string }
-  | { ok: false; reason: 'rejected' | 'not_supported' | 'wallet_error'; detail?: string }
+  | {
+      ok: false
+      reason: 'rejected' | 'not_supported' | 'wallet_error' | 'wrong_network'
+      detail?: string
+    }
 
 export interface ChainAdapter {
   descriptor: ChainDescriptor

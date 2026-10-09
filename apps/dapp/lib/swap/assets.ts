@@ -1,4 +1,4 @@
-import { STELLAR_USDC } from '@intent/config'
+import { STELLAR_USDC, liveObject } from '@intent/config'
 
 import { resolveVerifiedAsset, toClassicAsset, verifiedSymbols } from './asset-registry'
 
@@ -86,11 +86,14 @@ export function applySlippage(baseAmount: string, toleranceBps: number): string 
 
 export const XLM: ClassicAsset = { kind: 'classic', code: 'XLM' }
 
-export const USDC: ClassicAsset = {
-  kind: 'classic',
-  code: STELLAR_USDC.code,
-  issuer: STELLAR_USDC.issuer,
-}
+/** USDC on the network of the call in progress: Circle issues from a different account on each. */
+export const USDC: ClassicAsset = liveObject(
+  (): ClassicAsset => ({
+    kind: 'classic',
+    code: STELLAR_USDC.code,
+    issuer: STELLAR_USDC.issuer,
+  })
+)
 
 /**
  * The assets a user may name in an intent.

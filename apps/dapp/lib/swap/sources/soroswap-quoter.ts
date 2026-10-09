@@ -13,7 +13,7 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from '../assets'
-import { SOROSWAP_ROUTER } from '../contract-registry'
+import { soroswapRouter } from '../contract-registry'
 import type { QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
 
 /**
@@ -52,11 +52,12 @@ import type { QuoteOutcome, QuoteRequest, QuoteSource } from '../quote'
  * ticker-impersonation the asset registry exists to catch, reached through a
  * hardcoded constant rather than a lookup.
  */
-const CONTRACTS: Record<string, string> = {
-  XLM: Asset.native().contractId(stellarNetwork.networkPassphrase),
-  USDC: new Asset(STELLAR_USDC.code, STELLAR_USDC.issuer).contractId(
-    stellarNetwork.networkPassphrase
-  ),
+function contracts(): Record<string, string> {
+  const passphrase = stellarNetwork.networkPassphrase
+  return {
+    XLM: Asset.native().contractId(passphrase),
+    USDC: new Asset(STELLAR_USDC.code, STELLAR_USDC.issuer).contractId(passphrase),
+  }
 }
 
 /**
@@ -73,12 +74,12 @@ export interface SoroswapQuoterOptions {
 }
 
 function contractFor(asset: ClassicAsset): string | undefined {
-  return CONTRACTS[asset.code.toUpperCase()]
+  return contracts()[asset.code.toUpperCase()]
 }
 
 export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): QuoteSource {
   const rpcUrl = options.rpcUrl ?? stellarNetwork.sorobanRpcUrl
-  const routerId = options.routerId ?? SOROSWAP_ROUTER
+  const routerId = options.routerId ?? soroswapRouter()
   const enabled = options.enabled ?? true
 
   return {
@@ -204,7 +205,7 @@ export function createSoroswapQuoter(options: SoroswapQuoterOptions = {}): Quote
   }
 }
 
-export { SOROSWAP_ROUTER, CONTRACTS as SOROSWAP_CONTRACTS }
+export { soroswapRouter, contracts as soroswapContracts }
 
 /**
  * Whether a contract id is the canonical Stellar Asset Contract for an asset.

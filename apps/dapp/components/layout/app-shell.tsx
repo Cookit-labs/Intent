@@ -6,7 +6,9 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { Header } from './header'
+import { NetworkMismatchDialog } from './network-mismatch-dialog'
 import { Sidebar } from './sidebar'
+import { TradeCapProvider } from './trade-cap'
 
 /**
  * The application frame, and where it adapts to a narrow screen.
@@ -21,7 +23,13 @@ import { Sidebar } from './sidebar'
  * stacking rules at each breakpoint, and the version that reads clearly is two
  * declarations that each do one thing.
  */
-export function AppShell({ children }: { children: ReactNode }): JSX.Element {
+export function AppShell({
+  children,
+  tradeCapUsd,
+}: {
+  children: ReactNode
+  tradeCapUsd?: number | undefined
+}): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const pathname = usePathname()
 
@@ -65,6 +73,7 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
           header and page sit on. See globals.css. */}
       <div className="app-canvas flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
+          tradeCapUsd={tradeCapUsd}
           onOpenMenu={() => setMenuOpen(true)}
           menuButton={
             <button
@@ -84,8 +93,11 @@ export function AppShell({ children }: { children: ReactNode }): JSX.Element {
         {/* `min-w-0` on the column above and here: without it a wide child —
             a long hash, a table — forces the whole layout wider than the
             viewport and the page scrolls sideways. */}
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <TradeCapProvider capUsd={tradeCapUsd}>{children}</TradeCapProvider>
+        </main>
       </div>
+      <NetworkMismatchDialog />
     </div>
   )
 }

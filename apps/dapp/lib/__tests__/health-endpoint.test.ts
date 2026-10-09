@@ -1,7 +1,13 @@
 import { Keypair } from '@stellar/stellar-sdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { checkHealth, healthStatus, type HealthProbes } from '../server/health'
+import {
+  cachedHealth,
+  checkHealth,
+  healthNetwork,
+  healthStatus,
+  type HealthProbes,
+} from '../server/health'
 
 /**
  * The health endpoint: what a load balancer, an uptime monitor, or a person
@@ -68,7 +74,7 @@ describe('checkHealth', () => {
       ok: false,
       ms: expect.any(Number),
       configured: true,
-      detail: 'connect ECONNREFUSED 127.0.0.1:5432',
+      detail: 'unreachable',
     })
     expect(report.checks.horizon.ok).toBe(true)
   })
@@ -189,7 +195,7 @@ describe('checkHealth', () => {
         configured: true,
         funded: false,
         account: SPONSOR,
-        detail: 'Horizon 503',
+        detail: 'unreachable',
       })
     })
   })
@@ -226,7 +232,7 @@ describe('GET /api/health', () => {
     )
     const { GET } = await import('../../app/api/health/route')
 
-    const res = await GET()
+    const res = await GET(new Request('http://localhost/api/health'))
 
     expect(res.status).toBe(503)
     expect(res.headers.get('cache-control')).toBe('no-store')
@@ -241,14 +247,55 @@ describe('GET /api/health', () => {
       configured: false,
       detail: 'DATABASE_URL is not set',
     })
-    expect(body.checks.horizon).toEqual({ ok: false, ms: expect.any(Number), detail: 'offline' })
+    expect(body.checks.horizon).toEqual({
+      ok: false,
+      ms: expect.any(Number),
+      detail: 'unreachable',
+    })
     expect(body.checks.rpc.ok).toBe(false)
     expect(body.checks.sponsor).toMatchObject({
       ok: false,
       configured: true,
       funded: false,
       account: Keypair.fromSecret(secret).publicKey(),
-      detail: 'offline',
+      detail: 'unreachable',
     })
+  })
+})
+
+describe('cachedHealth', () => {
+  it('serves one probe run to every caller inside the window', async () => {
+    let runs = 0
+    let clock = 1_000
+    const run = async () => {
+      runs += 1
+      return { ok: true, network: 'testnet', checks: {} } as never
+    }
+    const get = cachedHealth(run, 10_000, () => clock)
+
+    await get()
+    clock += 9_999
+    await get()
+    expect(runs).toBe(1)
+
+    clock += 2
+    await get()
+    expect(runs).toBe(2)
+  })
+})
+
+describe('healthNetwork', () => {
+  it('reads ?network= when the deployment serves it, and falls back to the default otherwise', () => {
+    const both = ['testnet', 'mainnet'] as const
+    expect(healthNetwork('http://x.test/api/health?network=mainnet', both, 'testnet')).toBe(
+      'mainnet'
+    )
+    expect(healthNetwork('http://x.test/api/health', both, 'testnet')).toBe('testnet')
+    expect(healthNetwork('http://x.test/api/health?network=pubnet', both, 'testnet')).toBe(
+      'testnet'
+    )
+    expect(healthNetwork('http://x.test/api/health?network=mainnet', ['testnet'], 'testnet')).toBe(
+      'testnet'
+    )
   })
 })

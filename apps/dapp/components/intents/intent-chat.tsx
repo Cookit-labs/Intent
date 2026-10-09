@@ -64,13 +64,14 @@ import { usePerp } from '../../hooks/use-perp'
 import { PerpConfirm } from './perp-confirm'
 import { parsePerpIntent } from '../../lib/parse-perp'
 import { tradeableSymbols } from '../../lib/swap/asset-registry'
-import { BLEND_XLM } from '../../lib/lend/reserves'
+import { blendXlm } from '../../lib/lend/reserves'
 import { lendingVenueName } from '../../lib/lend/venues'
 import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
+import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
 
@@ -581,7 +582,7 @@ export function IntentChat(): JSX.Element {
             : supplyOnly.amount
 
       supply.prepare({
-        assetId: BLEND_XLM,
+        assetId: blendXlm(),
         symbol: supplyOnly.asset,
         amount: toBaseUnits(units),
       })
@@ -717,7 +718,7 @@ export function IntentChat(): JSX.Element {
 
           setParsed(null)
           setFollowOn(null)
-          supply.prepare({ assetId: BLEND_XLM, symbol, amount: toBaseUnits(units) })
+          supply.prepare({ assetId: blendXlm(), symbol, amount: toBaseUnits(units) })
           return
         }
         if (body.understood === true && body.tokenIn !== undefined && body.tokenOut !== undefined) {
@@ -954,7 +955,7 @@ export function IntentChat(): JSX.Element {
           kind: 'swap-then-lend',
           quote: route,
           receiveSymbol: parsed.input.tokenOut,
-          lendAsset: BLEND_XLM,
+          lendAsset: blendXlm(),
           venue,
           swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for ${parsed.input.tokenOut}`,
         })
@@ -1513,6 +1514,7 @@ export function IntentChat(): JSX.Element {
           showExamples={!parsed}
           {...(parsed ? { onReset: handleReset } : {})}
         />
+        <TradeCapNote />
         {createIntent.isError ? (
           <p className="text-foreground mt-2 text-xs">
             {(createIntent.error as Error).message || 'Something went wrong. No funds moved.'}

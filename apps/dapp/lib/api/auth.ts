@@ -1,6 +1,7 @@
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit'
 import { stellarNetwork } from '@intent/config'
 
+import { networkKey } from '../network-storage-key'
 import { apiRequest } from './http-client'
 
 /**
@@ -20,7 +21,7 @@ import { apiRequest } from './http-client'
  * would accept it. A server nonce is single-use by construction.
  */
 
-const TOKEN_KEY = 'intent.session.v1'
+const TOKEN_BASE = 'intent.session.v1'
 
 interface StoredToken {
   token: string
@@ -32,7 +33,7 @@ interface StoredToken {
 function read(): StoredToken | undefined {
   if (typeof window === 'undefined') return undefined
   try {
-    const raw = window.localStorage.getItem(TOKEN_KEY)
+    const raw = window.localStorage.getItem(networkKey(TOKEN_BASE))
     if (raw === null) return undefined
     return JSON.parse(raw) as StoredToken
   } catch {
@@ -45,8 +46,8 @@ function read(): StoredToken | undefined {
 function write(value: StoredToken | undefined): void {
   if (typeof window === 'undefined') return
   try {
-    if (value === undefined) window.localStorage.removeItem(TOKEN_KEY)
-    else window.localStorage.setItem(TOKEN_KEY, JSON.stringify(value))
+    if (value === undefined) window.localStorage.removeItem(networkKey(TOKEN_BASE))
+    else window.localStorage.setItem(networkKey(TOKEN_BASE), JSON.stringify(value))
   } catch {
     /* see read() */
   }

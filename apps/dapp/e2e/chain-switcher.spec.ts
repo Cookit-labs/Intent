@@ -17,11 +17,19 @@ test('the chain switcher lists arc and stellar, with solana and avalanche coming
   const menu = page.getByRole('menu', { name: 'Choose a chain' })
   await expect(menu).toBeVisible()
 
-  for (const chain of ['Arc', 'Stellar']) {
-    const item = menu.getByRole('menuitem', { name: new RegExp(`^${chain}\\b`) })
-    await expect(item).toHaveCount(1)
-    await expect(item).toBeEnabled()
-  }
+  const arc = menu.getByRole('menuitem', { name: /^Arc\b/ })
+  await expect(arc).toHaveCount(1)
+  await expect(arc).toBeEnabled()
+
+  // Stellar appears for the network this server runs on, and again for the
+  // other network: a link when another deployment is configured, otherwise a
+  // disabled row that says it is not set up here.
+  const active = menu.getByRole('menuitem', { name: /^Stellar Stellar testnet$/ })
+  await expect(active).toHaveCount(1)
+  await expect(active).toBeEnabled()
+  const other = menu.getByRole('menuitem', { name: /^Stellar Stellar mainnet/ })
+  await expect(other).toHaveCount(1)
+  await expect(other).toHaveAttribute('aria-disabled', 'true')
 
   for (const chain of ['Solana', 'Avalanche']) {
     const item = menu.getByRole('menuitem', { name: new RegExp(`^${chain}\\b`) })

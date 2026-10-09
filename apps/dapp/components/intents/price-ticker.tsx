@@ -20,8 +20,6 @@ import type { MarketPrice } from '../../lib/swap/price-types'
  * corrected. Both are shown rather than one reconciled figure, because
  * averaging them would describe no market at all.
  */
-const HERE = activeNetwork()
-
 async function loadTestnetPrice(): Promise<MarketPrice | null> {
   const res = await fetch('/api/prices/testnet')
   if (!res.ok) return null
@@ -35,6 +33,7 @@ export function PriceTicker({
   /** Mainnet readings, already loaded for sizing. */
   prices: Record<string, MarketPrice> | undefined
 }): JSX.Element | null {
+  const here = activeNetwork()
   const { data: testnet } = useQuery({
     queryKey: ['testnet-xlm-price'],
     queryFn: loadTestnetPrice,
@@ -69,19 +68,19 @@ export function PriceTicker({
       {testnet != null ? (
         <span
           className="flex items-center gap-1.5"
-          title={`XLM mid price from the Stellar ${HERE} order book — the venue this app signs against, so this is the rate your swaps actually fill near.`}
+          title={`XLM mid price from the Stellar ${here} order book — the venue this app signs against, so this is the rate your swaps actually fill near.`}
         >
           <span className="bg-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
           <span className="text-foreground font-medium">XLM ${testnet.usd.toFixed(4)}</span>
-          <span className="opacity-60">{HERE}</span>
+          <span className="opacity-60">{here}</span>
         </span>
       ) : (
         <span
           className="flex items-center gap-1.5"
-          title={`The ${HERE} XLM/USDC order book could not be read, or has no offers resting on it right now.`}
+          title={`The ${here} XLM/USDC order book could not be read, or has no offers resting on it right now.`}
         >
           <span className="bg-muted-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
-          <span className="opacity-60">{HERE} book unavailable</span>
+          <span className="opacity-60">{here} book unavailable</span>
         </span>
       )}
 

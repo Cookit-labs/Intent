@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { enforceRateLimit } from '../../../lib/server/rate-limit'
 import { reportError } from '../../../lib/server/report'
 import { fetchOpenOffers } from '../../../lib/swap/offers'
 
@@ -13,6 +14,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request): Promise<NextResponse> {
+  const limited = await enforceRateLimit(req, 'resolve')
+  if (limited !== undefined) return limited
+
   const account = new URL(req.url).searchParams.get('account')
 
   if (account === null || account.trim() === '') {

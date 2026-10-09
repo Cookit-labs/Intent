@@ -217,6 +217,14 @@ export async function submitOrder(options: {
 }): Promise<{ ok: true; hash: string; ledger?: number; explorerUrl: string } | OrderFailure> {
   const { client, token, request, signedXdr } = options
 
+  // The same venue check as prepare. A signature made on one network must not
+  // be forwarded by a deployment running on another.
+  try {
+    assertVenueOn('noether')
+  } catch (e) {
+    return failure(e)
+  }
+
   // The contracts are resolved again here rather than carried from prepare:
   // two independent reads bracket the signature, and an envelope that
   // matched the first and not the second is refused.

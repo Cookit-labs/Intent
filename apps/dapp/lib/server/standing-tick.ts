@@ -1,3 +1,5 @@
+import { chainSegment, type StellarNetworkName } from '@intent/config'
+
 import type { SponsorBalance } from '../sponsor/balance'
 import { describeTrigger, evaluateTrigger } from '../standing-intent'
 import type { AlertsRepo } from './alerts'
@@ -69,8 +71,20 @@ export interface TickResult {
   notified: number
 }
 
+/** Where a fired-rule email links to: the network the rule belongs to, not the default. */
+export function ruleLinkFor(
+  appUrl: string,
+  rule: { chain: string; network: string; id: string }
+): string {
+  const segment =
+    rule.chain === 'stellar'
+      ? chainSegment('stellar', rule.network as StellarNetworkName)
+      : rule.chain
+  return `${appUrl.replace(/\/+$/, '')}/${segment}/intents?rule=${encodeURIComponent(rule.id)}`
+}
+
 function ruleLink(appUrl: string, rule: StoredStandingRule): string {
-  return `${appUrl.replace(/\/+$/, '')}/${rule.chain}/intents?rule=${encodeURIComponent(rule.id)}`
+  return ruleLinkFor(appUrl, rule)
 }
 
 const LOW_BALANCE = 'sponsor_low_balance'

@@ -18,7 +18,12 @@
  *
  * Key-gated. `/quote` and `/quote/build` return 403 without one, and the
  * contract-id lookups need none. Register at https://api.soroswap.finance/register.
+ *
+ * The network is the app's active one, read at each call: the API serves both
+ * and answers a different aggregator for each.
  */
+
+import { activeNetwork } from '@intent/config'
 
 export const SOROSWAP_API_URL = 'https://api.soroswap.finance'
 
@@ -108,9 +113,6 @@ export interface SoroswapApi {
    */
   contractAddress: (name: SoroswapContractName) => Promise<string | undefined>
 }
-
-/** Only testnet exists for this app. Stated once so it cannot drift per call. */
-const NETWORK = 'testnet'
 
 /**
  * Resolved ids, keyed by base URL and contract name.
@@ -239,7 +241,7 @@ export function createSoroswapApi(options: SoroswapApiOptions = {}): SoroswapApi
   ): Promise<ApiResult<unknown>> {
     let res: Response
     try {
-      res = await doFetch(`${baseUrl}${path}?network=${NETWORK}`, {
+      res = await doFetch(`${baseUrl}${path}?network=${activeNetwork()}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -329,12 +331,15 @@ export function createSoroswapApi(options: SoroswapApiOptions = {}): SoroswapApi
     },
 
     async contractAddress(name) {
-      const key = `${baseUrl}/${NETWORK}/${name}`
+      // Read per call and part of the key: the API answers a different contract
+      // on each network, and a cached testnet id must never serve mainnet.
+      const network = activeNetwork()
+      const key = `${baseUrl}/${network}/${name}`
       const cached = contractCache.get(key)
       if (cached !== undefined && cached.expiresAt > now()) return cached.address
 
       try {
-        const res = await doFetch(`${baseUrl}/api/${NETWORK}/${name}`, {
+        const res = await doFetch(`${baseUrl}/api/${network}/${name}`, {
           headers: { Accept: 'application/json' },
         })
         if (!res.ok) return undefined

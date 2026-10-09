@@ -1,3 +1,5 @@
+import { activeNetwork, isMultiNetwork } from '@intent/config'
+
 /**
  * Where the server says what went wrong.
  *
@@ -33,6 +35,12 @@ const EMAIL_KEY = /email/i
 /** A Stellar secret seed: S followed by 55 base32 characters. */
 const SECRET_SEED = /S[A-Z2-7]{55}/g
 
+/** An HTTP bearer credential, wherever it appears in text. */
+const BEARER = /\bBearer\s+[\w.~+/=-]+/gi
+
+/** A JWT: three dot-separated base64url segments, the first two opening a JSON object. */
+const JWT = /\beyJ[\w-]+\.eyJ[\w-]+\.[\w-]+/g
+
 /** An email address, wherever it appears in text. */
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
 
@@ -45,9 +53,13 @@ function maskEmail(value: unknown): string {
   return maskAddress(value)
 }
 
-/** Text as it may be logged: seeds gone, addresses masked. */
+/** Text as it may be logged: seeds, bearer tokens and JWTs gone, addresses masked. */
 export function scrubText(text: string): string {
-  return text.replace(SECRET_SEED, REDACTED).replace(EMAIL, maskAddress)
+  return text
+    .replace(SECRET_SEED, REDACTED)
+    .replace(BEARER, `Bearer ${REDACTED}`)
+    .replace(JWT, REDACTED)
+    .replace(EMAIL, maskAddress)
 }
 
 function redactValue(value: unknown): unknown {
@@ -81,6 +93,8 @@ export interface ReporterDeps {
   log: (line: string, error?: unknown) => void
   /** Absent when there is nowhere to send a copy. */
   sink?: ReportSink
+  /** The Stellar network of the work in progress, when several are served. */
+  network?: () => string | undefined
 }
 
 function describe(error: unknown): string {
@@ -109,6 +123,21 @@ function scrubbedError(error: unknown): unknown {
 export function createReporter(deps: ReporterDeps) {
   const { log, sink } = deps
 
+  /** The context with the network added, so a report says which network it came from. */
+  function withNetwork(
+    context: Record<string, unknown> | undefined
+  ): Record<string, unknown> | undefined {
+    let network: string | undefined
+    try {
+      network = deps.network?.()
+    } catch {
+      // Outside a request there may be no network to name; a report is still worth sending.
+      network = undefined
+    }
+    if (network === undefined) return context
+    return { ...context, network }
+  }
+
   function forward(send: () => void): void {
     if (sink === undefined) return
     try {
@@ -120,7 +149,8 @@ export function createReporter(deps: ReporterDeps) {
   }
 
   function reportError(where: string, error: unknown, context?: Record<string, unknown>): void {
-    const safe = context === undefined ? undefined : redactContext(context)
+    const named = withNetwork(context)
+    const safe = named === undefined ? undefined : redactContext(named)
     const tail = safe === undefined ? '' : ` ${JSON.stringify(safe)}`
     const clean = scrubbedError(error)
     log(`[${where}] ${describe(clean)}${tail}`, clean)
@@ -128,7 +158,8 @@ export function createReporter(deps: ReporterDeps) {
   }
 
   function reportEvent(name: string, context?: Record<string, unknown>): void {
-    const safe = context === undefined ? undefined : redactContext(context)
+    const named = withNetwork(context)
+    const safe = named === undefined ? undefined : redactContext(named)
     const tail = safe === undefined ? '' : ` ${JSON.stringify(safe)}`
     log(`[${name}]${tail}`)
     forward(() => sink?.event(name, safe ?? {}))
@@ -172,6 +203,7 @@ const sentrySink: ReportSink = {
 }
 
 export const { reportError, reportEvent } = createReporter({
+  network: () => (isMultiNetwork() ? activeNetwork() : undefined),
   log: (line, error) => {
     if (error === undefined) console.error(line)
     else console.error(line, error)

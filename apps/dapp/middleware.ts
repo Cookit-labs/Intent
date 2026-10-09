@@ -1,7 +1,16 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+import {
+  NETWORK_HEADER,
+  defaultNetwork,
+  enabledNetworks,
+  resolveRequestedNetwork,
+} from '@intent/config'
+
 import { gateEnabled } from './lib/server/access-gate'
+import { constantTimeEqual } from './lib/server/constant-time-equal'
+import { isGateFree, legacyStellarRedirect, segmentNetwork } from './lib/server/network-route'
 import { SESSION_COOKIE } from './lib/server/session-constants'
 
 /**
@@ -55,7 +64,7 @@ async function isValidSession(token: string | undefined, secret: string): Promis
     await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encoded))
   )
 
-  if (expected !== signature) return false
+  if (!constantTimeEqual(expected, signature)) return false
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(encoded))) as {
@@ -70,7 +79,37 @@ async function isValidSession(token: string | undefined, secret: string): Promis
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  if (!gateEnabled(process.env)) return NextResponse.next()
+  const fallback = defaultNetwork()
+  const enabled = enabledNetworks()
+  const multi = enabled.length > 1
+  const { pathname, search } = request.nextUrl
+  const isApi = pathname.startsWith('/api/')
+
+  // An address from before network segments existed: send it to the default
+  // network's own, so the page and everything it calls agree on the network.
+  if (!isApi) {
+    const moved = legacyStellarRedirect(pathname, search, multi, fallback)
+    if (moved !== undefined) return NextResponse.redirect(new URL(moved, request.url))
+  }
+
+  // Which network this request is for. A page says it in its address; an API
+  // call says it in a header the app's own fetch adds. Either is checked
+  // against what this deployment serves, and anything else is the default.
+  const requested = isApi
+    ? request.headers.get(NETWORK_HEADER)
+    : (segmentNetwork(pathname.split('/')[1] ?? '') ?? null)
+  const network = resolveRequestedNetwork(requested, enabled, fallback)
+
+  // The one copy server code trusts. Always written here, never passed
+  // through: a client that sends its own is overwritten, not believed.
+  const forwarded = new Headers(request.headers)
+  forwarded.set(NETWORK_HEADER, network)
+  const pass = (): NextResponse => NextResponse.next({ request: { headers: forwarded } })
+
+  // The API answers with its own checks, and the verification, waitlist and
+  // admin pages are where an unverified visitor is sent.
+  if (isApi || isGateFree(pathname)) return pass()
+  if (!gateEnabled(process.env, network)) return pass()
 
   const secret = process.env['AUTH_SECRET']
 
@@ -81,11 +120,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     if (process.env.NODE_ENV === 'production') {
       return new NextResponse('Access gate misconfigured', { status: 503 })
     }
-    return NextResponse.next()
+    return pass()
   }
 
   const token = request.cookies.get(SESSION_COOKIE)?.value
-  if (await isValidSession(token, secret)) return NextResponse.next()
+  if (await isValidSession(token, secret)) return pass()
 
   const url = request.nextUrl.clone()
   url.pathname = '/verify'
@@ -95,11 +134,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Every app page, and none of the gate's own: the API answers with its own
- * checks, and `/verify`, `/waitlist` and `/admin/waitlist` are where an
- * unverified visitor is sent, so they cannot themselves redirect. When the
- * gate is off the handler returns before looking at any of this.
+ * Every page and every API route, so each carries a network. The gate has its
+ * own exemptions inside the handler (`isGateFree`, and the API altogether);
+ * only static assets are left out here.
  */
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icon|verify|waitlist|admin).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icon).*)'],
 }

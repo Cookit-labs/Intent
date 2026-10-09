@@ -17,6 +17,7 @@ import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
 import { createSoroswapAggregatorQuoter } from '../../../../lib/swap/sources/soroswap-aggregator-quoter'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
 import { applySlippage, fromBaseUnits } from '../../../../lib/swap/assets'
+import { checkSlippageBps } from '../../../../lib/swap/slippage'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -68,6 +69,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (typeof body.quote !== 'object' || body.quote === null) {
     return NextResponse.json({ error: 'quote is required' }, { status: 400 })
+  }
+
+  const slippage = checkSlippageBps(body.slippageBps)
+  if (!slippage.ok) {
+    return NextResponse.json({ error: slippage.error }, { status: 400 })
   }
 
   const submitted = body.quote as SwapQuote
@@ -125,7 +131,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // output the client's send amount is a claim about nothing — the envelope
   // spends up to the quoted input widened by the tolerance, so that ceiling
   // is what is capped.
-  const slippageBps = typeof body.slippageBps === 'number' ? body.slippageBps : DEFAULT_SLIPPAGE_BPS
+  const slippageBps = slippage.bps ?? DEFAULT_SLIPPAGE_BPS
   const spends =
     fresh.quote.kind === 'strict_receive'
       ? widen(fresh.quote.sendAmount, slippageBps)
@@ -137,7 +143,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const built = await buildSwapTransaction({
       account: body.account,
       quote: fresh.quote,
-      ...(typeof body.slippageBps === 'number' ? { slippageBps: body.slippageBps } : {}),
+      ...(slippage.bps !== undefined ? { slippageBps: slippage.bps } : {}),
     })
 
     return NextResponse.json({

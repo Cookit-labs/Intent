@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * The allowlist follows the network.
@@ -74,20 +74,25 @@ afterAll(() => {
   vi.resetModules()
 })
 
+// The registry reads the network when it is asked, not when it is imported, so
+// each case says which network it is asking about.
 describe('on testnet, nothing moved', () => {
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'testnet'))
+  afterEach(() => vi.unstubAllEnvs())
+
   it('pins the ids the app has always used', async () => {
     const { registry, reflector, reserves, soroswap } = await on('testnet')
-    expect(registry.SOROSWAP_ROUTER).toBe(TESTNET.soroswapRouter)
-    expect(registry.SOROSWAP_AGGREGATOR).toBe(TESTNET.soroswapAggregator)
-    expect(registry.AQUARIUS_ROUTER).toBe(TESTNET.aquariusRouter)
-    expect(registry.BLEND_POOL).toBe(TESTNET.blendPool)
-    expect(registry.NOETHER_MARKET).toBe(TESTNET.noetherMarket)
-    expect(registry.NOETHER_ROUTER).toBe(TESTNET.noetherRouter)
-    expect(reflector.REFLECTOR_CEX_DEX).toBe(TESTNET.reflectorCexDex)
-    expect(reflector.REFLECTOR_FX).toBe(TESTNET.reflectorFx)
-    expect(reserves.BLEND_XLM).toBe(TESTNET.xlmSac)
-    expect(soroswap.SOROSWAP_ROUTER).toBe(TESTNET.soroswapRouter)
-    expect(soroswap.SOROSWAP_CONTRACTS).toEqual({ XLM: TESTNET.xlmSac, USDC: TESTNET.usdcSac })
+    expect(registry.soroswapRouter()).toBe(TESTNET.soroswapRouter)
+    expect(registry.soroswapAggregator()).toBe(TESTNET.soroswapAggregator)
+    expect(registry.aquariusRouter()).toBe(TESTNET.aquariusRouter)
+    expect(registry.blendPool()).toBe(TESTNET.blendPool)
+    expect(registry.noetherMarket()).toBe(TESTNET.noetherMarket)
+    expect(registry.noetherRouter()).toBe(TESTNET.noetherRouter)
+    expect(reflector.reflectorCexDex()).toBe(TESTNET.reflectorCexDex)
+    expect(reflector.reflectorFx()).toBe(TESTNET.reflectorFx)
+    expect(reserves.blendXlm()).toBe(TESTNET.xlmSac)
+    expect(soroswap.soroswapRouter()).toBe(TESTNET.soroswapRouter)
+    expect(soroswap.soroswapContracts()).toEqual({ XLM: TESTNET.xlmSac, USDC: TESTNET.usdcSac })
     expect(registry.blendPositionUrl()).toBe(
       `https://testnet.blend.capital/dashboard/?poolId=${TESTNET.blendPool}`
     )
@@ -101,23 +106,26 @@ describe('on testnet, nothing moved', () => {
 })
 
 describe('on mainnet', () => {
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet'))
+  afterEach(() => vi.unstubAllEnvs())
+
   it('resolves every verified id to its mainnet contract', async () => {
     const { registry, reflector, reserves, soroswap } = await on('mainnet')
-    expect(registry.SOROSWAP_ROUTER).toBe(MAINNET.soroswapRouter)
-    expect(registry.SOROSWAP_AGGREGATOR).toBe(MAINNET.soroswapAggregator)
-    expect(registry.AQUARIUS_ROUTER).toBe(MAINNET.aquariusRouter)
-    expect(registry.BLEND_POOL).toBe(MAINNET.blendPool)
-    expect(reflector.REFLECTOR_CEX_DEX).toBe(MAINNET.reflectorCexDex)
-    expect(reflector.REFLECTOR_FX).toBe(MAINNET.reflectorFx)
-    expect(reserves.BLEND_XLM).toBe(MAINNET.xlmSac)
-    expect(soroswap.SOROSWAP_ROUTER).toBe(MAINNET.soroswapRouter)
-    expect(soroswap.SOROSWAP_CONTRACTS).toEqual({ XLM: MAINNET.xlmSac, USDC: MAINNET.usdcSac })
+    expect(registry.soroswapRouter()).toBe(MAINNET.soroswapRouter)
+    expect(registry.soroswapAggregator()).toBe(MAINNET.soroswapAggregator)
+    expect(registry.aquariusRouter()).toBe(MAINNET.aquariusRouter)
+    expect(registry.blendPool()).toBe(MAINNET.blendPool)
+    expect(reflector.reflectorCexDex()).toBe(MAINNET.reflectorCexDex)
+    expect(reflector.reflectorFx()).toBe(MAINNET.reflectorFx)
+    expect(reserves.blendXlm()).toBe(MAINNET.xlmSac)
+    expect(soroswap.soroswapRouter()).toBe(MAINNET.soroswapRouter)
+    expect(soroswap.soroswapContracts()).toEqual({ XLM: MAINNET.xlmSac, USDC: MAINNET.usdcSac })
   })
 
   it('leaves Noether undefined, because it has no mainnet deployment', async () => {
     const { registry } = await on('mainnet')
-    expect(registry.NOETHER_MARKET).toBeUndefined()
-    expect(registry.NOETHER_ROUTER).toBeUndefined()
+    expect(registry.noetherMarket()).toBeUndefined()
+    expect(registry.noetherRouter()).toBeUndefined()
     // And the allowlist has no entry for it: a call to its testnet market
     // is refused, not narrated as a perp order.
     const out = registry.labelForCall(TESTNET.noetherMarket, 'open_position')
@@ -132,14 +140,12 @@ describe('on mainnet', () => {
       label: 'Swap via Soroswap',
     })
 
-    // Verified ids, but their venues are not on mainnet at launch, so a call
-    // to any of them is refused rather than narrated as a swap or a supply.
-    expect(registry.lookupContract(MAINNET.aquariusRouter)).toBeUndefined()
-    expect(registry.lookupContract(MAINNET.blendPool)).toBeUndefined()
-    expect(registry.lookupContract(MAINNET.soroswapAggregator)).toBeUndefined()
+    // Verified ids whose venues are flagged for mainnet.
+    expect(registry.lookupContract(MAINNET.aquariusRouter)?.label).toBe('Swap via Aquarius')
+    expect(registry.lookupContract(MAINNET.blendPool)?.label).toBe('Blend lending pool')
     expect(
-      registry.labelForCall(MAINNET.soroswapAggregator, 'swap_exact_tokens_for_tokens').ok
-    ).toBe(false)
+      registry.labelForCall(MAINNET.soroswapAggregator, 'swap_exact_tokens_for_tokens')
+    ).toEqual({ ok: true, label: 'Swap via Soroswap aggregator' })
 
     expect(registry.lookupContract(TESTNET.soroswapRouter)).toBeUndefined()
     const out = registry.labelForCall(TESTNET.soroswapRouter, 'swap_exact_tokens_for_tokens')

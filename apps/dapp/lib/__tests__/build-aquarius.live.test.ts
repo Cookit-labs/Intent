@@ -4,7 +4,7 @@ import { resolveAsset } from '../swap/assets'
 import { buildAquariusSwap } from '../swap/build-aquarius'
 import { prepareSorobanSwap } from '../swap/build-soroban'
 import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
-import { AQUARIUS_ROUTER, lookupContract } from '../swap/contract-registry'
+import { aquariusRouter, lookupContract } from '../swap/contract-registry'
 
 /**
  * An Aquarius swap, simulated against the live router.
@@ -80,7 +80,7 @@ describe.skipIf(SKIP)('an Aquarius swap the router accepts', () => {
 
 describe.skipIf(SKIP)('the router is one this app will sign for', () => {
   it('is in the contract registry with its swap function labelled', () => {
-    const entry = lookupContract(AQUARIUS_ROUTER)
+    const entry = lookupContract(aquariusRouter())
     expect(entry?.functions['swap']).toBe('Swap via Aquarius')
   })
 })

@@ -1,4 +1,4 @@
-import { stellarNetwork } from '@intent/config'
+import { resolveRequestedNetwork, stellarNetwork, type StellarNetworkName } from '@intent/config'
 
 import { readSponsorBalance, type SponsorBalance } from '../sponsor/balance'
 import { sponsorAccount } from '../sponsor/sponsor'
@@ -81,8 +81,15 @@ export interface HealthOptions {
 
 const DEFAULT_TIMEOUT_MS = 3_000
 
+class ProbeTimeout extends Error {}
+
+/**
+ * A fixed string per failure. The endpoint is unauthenticated, and an
+ * upstream's own message can carry a connection string, a hostname or a
+ * hint about how this deployment is set up.
+ */
 function reason(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+  return e instanceof ProbeTimeout ? e.message : 'unreachable'
 }
 
 type Timed<T> = { ok: true; ms: number; value: T } | { ok: false; ms: number; detail: string }
@@ -102,7 +109,7 @@ async function timed<T>(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       controller.abort()
-      reject(new Error(`timed out after ${timeoutMs} ms`))
+      reject(new ProbeTimeout(`timed out after ${timeoutMs} ms`))
     }, timeoutMs)
   })
 
@@ -170,6 +177,43 @@ export async function checkHealth(options: HealthOptions): Promise<HealthReport>
     network: options.network,
     checks: { database, horizon, rpc, sponsor },
   }
+}
+
+/**
+ * One probe run shared by every caller inside the window. Four upstream
+ * requests per unauthenticated GET is a cheap way to lean on Horizon and the
+ * RPC; this bounds it to one run per window.
+ */
+export function cachedHealth(
+  run: () => Promise<HealthReport>,
+  ttlMs: number,
+  now: () => number = Date.now
+): () => Promise<HealthReport> {
+  let held: { at: number; report: Promise<HealthReport> } | undefined
+  return () => {
+    const t = now()
+    if (held === undefined || t - held.at > ttlMs) {
+      const report = run()
+      held = { at: t, report }
+      report.catch(() => {
+        if (held?.report === report) held = undefined
+      })
+    }
+    return held.report
+  }
+}
+
+/**
+ * Which network a health request asks about: `?network=` when the deployment
+ * serves it, otherwise the default. A monitor with no query still gets an
+ * answer; one that names a network gets that network's probes.
+ */
+export function healthNetwork(
+  url: string,
+  enabled: readonly StellarNetworkName[],
+  fallback: StellarNetworkName
+): StellarNetworkName {
+  return resolveRequestedNetwork(new URL(url).searchParams.get('network'), enabled, fallback)
 }
 
 export function healthStatus(report: HealthReport): 200 | 503 {

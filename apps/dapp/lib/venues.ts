@@ -115,6 +115,7 @@ export const venues: Venue[] = [
     bestFor: 'One swap split across several venues',
     url: 'https://soroswap.finance',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'One swap split across Soroswap, Aquarius and the classic DEX. Needs SOROSWAP_API_KEY; every transaction it returns is re-checked before signing.',
   },
@@ -127,6 +128,7 @@ export const venues: Venue[] = [
     bestFor: 'Incentivised AMM pools',
     url: 'https://aqua.network',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
       'Swaps route through Aquarius’s router against the pool the agent chose. Which router wins depends on the direction of the trade.',
   },
@@ -152,8 +154,13 @@ export const venues: Venue[] = [
     bestFor: 'Tokenized sovereign debt',
     url: 'https://etherfuse.com',
     integration: 'executes',
-    capability:
-      'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.',
+    networks: ['testnet', 'mainnet'],
+    // A getter: which bonds exist depends on the network of the request.
+    get capability(): string {
+      return activeNetwork() === 'mainnet'
+        ? 'Buy tokenized Mexican and US treasury bills (CETES, USTRY). They settle like any other classic asset.'
+        : 'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.'
+    },
   },
   {
     id: 'stellar-pools',
@@ -177,8 +184,9 @@ export const venues: Venue[] = [
     bestFor: 'Supply and borrow against collateral',
     url: 'https://blend.capital',
     integration: 'executes',
+    networks: ['testnet', 'mainnet'],
     capability:
-      'Rates are read live and XLM can be supplied. Borrowing is out of scope, so a position here can never be liquidated.',
+      'Rates are read live. Supply, borrow, repay and collateral are signed here, and a borrow is checked by the pool itself. A position with a loan can be liquidated if its collateral falls.',
   },
   {
     id: 'defindex',
@@ -228,6 +236,7 @@ export const venues: Venue[] = [
   // has been signed through this app end to end.
   {
     id: 'noether',
+    beta: true,
     name: 'Noether',
     family: 'stellar' as const,
     category: 'perps',
@@ -251,10 +260,11 @@ export const venues: Venue[] = [
     url: 'https://sorobandomains.org',
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
-    capability:
-      activeNetwork() === 'mainnet'
+    get capability(): string {
+      return activeNetwork() === 'mainnet'
         ? 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names and payments both live on Stellar mainnet.'
-        : 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.',
+        : 'Type deon.xlm as a recipient and the payment goes to the address the name resolves to, shown in full before you sign. Names are read from the registry on Stellar mainnet; the payment settles here on testnet.'
+    },
   },
 ]
 

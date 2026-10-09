@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createReporter, redactContext, type ReportSink } from '../server/report'
+import { createReporter, redactContext, scrubText, type ReportSink } from '../server/report'
 
 /**
  * Error reporting: one line to the server log every time, and a copy to
@@ -165,5 +165,59 @@ describe('reportEvent', () => {
       '[sponsor.low_balance] {"balanceXlm":5,"secret":"[redacted]"}'
     )
     expect(sink.events).toEqual([['sponsor.low_balance', { balanceXlm: 5, secret: '[redacted]' }]])
+  })
+})
+
+describe('scrubText value rules for tokens', () => {
+  it('removes a bearer credential from text', () => {
+    expect(scrubText('anchor said Authorization: Bearer abc123.def-456_x failed')).not.toContain(
+      'abc123'
+    )
+  })
+
+  it('removes a JWT-shaped string under a key that is not secret-named', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJHQUJDIn0.c2lnbmF0dXJl'
+    const out = redactContext({ detail: `token rejected: ${jwt}` })
+    expect(JSON.stringify(out)).not.toContain('eyJhbGci')
+  })
+
+  it('keeps ordinary error text readable', () => {
+    expect(scrubText('Horizon returned 503 for GABC')).toBe('Horizon returned 503 for GABC')
+  })
+})
+
+describe('the network on a report', () => {
+  it('is added to the context, the log line and the copy, when the reporter can name one', () => {
+    const lines: string[] = []
+    const sink = { error: vi.fn(), event: vi.fn() }
+    const reporter = createReporter({
+      log: (line) => lines.push(line),
+      sink,
+      network: () => 'mainnet',
+    })
+    reporter.reportError('swap/build', new Error('boom'), { account: 'GABC' })
+
+    expect(lines[0]).toContain('"network":"mainnet"')
+    expect(sink.error).toHaveBeenCalledWith(
+      'swap/build',
+      expect.any(Error),
+      expect.objectContaining({ account: 'GABC', network: 'mainnet' })
+    )
+  })
+
+  it('is left out when there is none, and when naming it fails', () => {
+    const noName = vi.fn()
+    createReporter({ log: noName, network: () => undefined }).reportEvent('x', { a: 1 })
+    expect(noName.mock.calls[0]?.[0]).not.toContain('network')
+
+    const throwing = vi.fn()
+    createReporter({
+      log: throwing,
+      network: () => {
+        throw new Error('no request')
+      },
+    }).reportEvent('y', { a: 1 })
+    expect(throwing.mock.calls[0]?.[0]).toContain('"a":1')
+    expect(throwing.mock.calls[0]?.[0]).not.toContain('network')
   })
 })
