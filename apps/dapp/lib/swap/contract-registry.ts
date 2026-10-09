@@ -1,4 +1,4 @@
-import { activeNetwork } from '@intent/config'
+import { activeNetwork, type StellarNetworkName } from '@intent/config'
 
 import { venueIdOn } from '../venues'
 
@@ -45,21 +45,19 @@ export interface ContractEntry {
 }
 
 /**
- * Which network's ids this module hands out, decided once at import like the
- * config it reads. Every constant below is a `{ testnet, mainnet }` pair, and
+ * Which network's ids this module hands out is decided per call, from the
+ * network of the request. Every id below is a `{ testnet, mainnet }` pair, and
  * `mainnet` is `undefined` wherever no id could be verified from the venue's
  * own documentation or deployment repository — an unverified venue is absent
  * from the allowlist there rather than guessed at. A testnet id is never on
  * the mainnet allowlist, nor the reverse: a signature is only handed to a
  * contract this app has reviewed on the network it is about to be broadcast to.
  */
-const NETWORK = activeNetwork()
-
-function onActiveNetwork<M extends string | undefined>(ids: {
+function lazyId<M extends string | undefined>(ids: {
   testnet: string
   mainnet: M
-}): string | M {
-  return NETWORK === 'mainnet' ? ids.mainnet : ids.testnet
+}): (network?: StellarNetworkName) => string | M {
+  return (network = activeNetwork()) => (network === 'mainnet' ? ids.mainnet : ids.testnet)
 }
 
 /**
@@ -71,7 +69,7 @@ function onActiveNetwork<M extends string | undefined>(ids: {
  * (`ids.router`, read 2026-09-24); the same file's testnet entry is the id
  * below. Its instance was read on the public network the same day.
  */
-export const SOROSWAP_ROUTER = onActiveNetwork({
+export const soroswapRouter = lazyId({
   testnet: 'CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD',
   mainnet: 'CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH',
 })
@@ -85,7 +83,7 @@ export const SOROSWAP_ROUTER = onActiveNetwork({
  * (`ids.FixedV2`, read 2026-09-24). Its reserve list on the public network
  * answered XLM and USDC that day.
  */
-export const BLEND_POOL = onActiveNetwork({
+export const blendPool = lazyId({
   testnet: 'CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF',
   mainnet: 'CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD',
 })
@@ -105,7 +103,7 @@ export const BLEND_POOL = onActiveNetwork({
  * (read 2026-09-24), whose testnet entry is the id below. Its instance was
  * read on the public network the same day.
  */
-export const AQUARIUS_ROUTER = onActiveNetwork({
+export const aquariusRouter = lazyId({
   testnet: 'CBCFTQSPDBAIZ6R6PJQKSQWKNKWH2QIV3I4J72SHWBIK3ADRRAM5A6GD',
   mainnet: 'CBQDHNBFBZYE4MKPWBSJOPIYLW4SFSXAXUTSXJN76GNKYVYPCKWC6QUK',
 })
@@ -127,7 +125,7 @@ export const AQUARIUS_ROUTER = onActiveNetwork({
  * (`ids.aggregator`, read 2026-09-24). Its `get_adapters()` on the public
  * network that day listed the Soroswap and Aquarius routers above.
  */
-export const SOROSWAP_AGGREGATOR = onActiveNetwork({
+export const soroswapAggregator = lazyId({
   testnet: 'CC74XDT7UVLUZCELKBIYXFYIX6A6LGPWURJVUXGRPQO745RWX7WEURMA',
   mainnet: 'CAYP3UWLJM7ZPTUKL6R6BFGTRWLZ46LRKOXTERI2K6BIJAWGYY62TXTO',
 })
@@ -145,11 +143,11 @@ export const SOROSWAP_AGGREGATOR = onActiveNetwork({
  * No mainnet ids: Noether has not launched there (see `noether-client.ts`),
  * so on mainnet both are `undefined` and the venue is off the allowlist.
  */
-export const NOETHER_MARKET = onActiveNetwork({
+export const noetherMarket = lazyId({
   testnet: 'CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN',
   mainnet: undefined,
 })
-export const NOETHER_ROUTER = onActiveNetwork({
+export const noetherRouter = lazyId({
   testnet: 'CBDVQKYEN6QMRGQZC77DFYEQXQHDMCVJ3TPBJKNERJVMIESA6GQT44LG',
   mainnet: undefined,
 })
@@ -162,91 +160,95 @@ export const NOETHER_ROUTER = onActiveNetwork({
  * and someone who has just lent wants to see the position rather than the
  * receipt.
  */
-export function blendPositionUrl(poolId: string = BLEND_POOL): string {
-  const host = NETWORK === 'mainnet' ? 'mainnet' : 'testnet'
+export function blendPositionUrl(poolId: string = blendPool()): string {
+  const host = activeNetwork() === 'mainnet' ? 'mainnet' : 'testnet'
   return `https://${host}.blend.capital/dashboard/?poolId=${poolId}`
 }
 
 /** Every contract the app knows, on this network or not; see `ENTRIES`. */
-const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined; venue: string })[] = [
-  {
-    id: SOROSWAP_ROUTER,
-    venue: 'soroswap',
-    label: 'Swap via Soroswap',
-    functions: {
-      swap_exact_tokens_for_tokens: 'Swap via Soroswap',
-      swap_tokens_for_exact_tokens: 'Swap via Soroswap',
+function candidates(
+  network: StellarNetworkName
+): (Omit<ContractEntry, 'id'> & { id: string | undefined; venue: string })[] {
+  return [
+    {
+      id: soroswapRouter(network),
+      venue: 'soroswap',
+      label: 'Swap via Soroswap',
+      functions: {
+        swap_exact_tokens_for_tokens: 'Swap via Soroswap',
+        swap_tokens_for_exact_tokens: 'Swap via Soroswap',
+      },
     },
-  },
-  {
-    id: AQUARIUS_ROUTER,
-    venue: 'aquarius',
-    label: 'Swap via Aquarius',
-    functions: {
-      swap: 'Swap via Aquarius',
-      // The router's two multi-hop entry points, read from its live interface
-      // on 2026-09-23. Listed so a chained route reads honestly if a plan ever
-      // builds one; the swap builder does not produce either today and its
-      // assertion refuses both.
-      swap_chained: 'Swap via Aquarius',
-      swap_chained_strict_receive: 'Swap via Aquarius',
+    {
+      id: aquariusRouter(network),
+      venue: 'aquarius',
+      label: 'Swap via Aquarius',
+      functions: {
+        swap: 'Swap via Aquarius',
+        // The router's two multi-hop entry points, read from its live interface
+        // on 2026-09-23. Listed so a chained route reads honestly if a plan ever
+        // builds one; the swap builder does not produce either today and its
+        // assertion refuses both.
+        swap_chained: 'Swap via Aquarius',
+        swap_chained_strict_receive: 'Swap via Aquarius',
+      },
     },
-  },
-  {
-    id: SOROSWAP_AGGREGATOR,
-    venue: 'soroswap-aggregator',
-    label: 'Swap via Soroswap aggregator',
-    // The two trade entrypoints from the contract's `SoroswapAggregatorTrait`,
-    // and nothing else. It also exposes `update_adapters`, `set_pause`,
-    // `set_admin` and `upgrade`; none is something a swap does, and a review
-    // line reading "Swap" over any of them would be the registry lying.
-    functions: {
-      swap_exact_tokens_for_tokens: 'Swap via Soroswap aggregator',
-      swap_tokens_for_exact_tokens: 'Swap via Soroswap aggregator',
+    {
+      id: soroswapAggregator(network),
+      venue: 'soroswap-aggregator',
+      label: 'Swap via Soroswap aggregator',
+      // The two trade entrypoints from the contract's `SoroswapAggregatorTrait`,
+      // and nothing else. It also exposes `update_adapters`, `set_pause`,
+      // `set_admin` and `upgrade`; none is something a swap does, and a review
+      // line reading "Swap" over any of them would be the registry lying.
+      functions: {
+        swap_exact_tokens_for_tokens: 'Swap via Soroswap aggregator',
+        swap_tokens_for_exact_tokens: 'Swap via Soroswap aggregator',
+      },
     },
-  },
-  {
-    id: BLEND_POOL,
-    venue: 'blend',
-    label: 'Blend lending pool',
-    functions: {
-      // `submit` carries a request vector whose type decides whether this is
-      // a supply, a withdrawal, collateral, a borrow or a repayment, and this
-      // registry labels by function name alone. Nothing labels a Blend call
-      // through it today: a plan admits no contract call, and the direct lend
-      // routes never consult the registry — each asserts its own shape and
-      // names its own noun in a refusal (see `assertSelfPoolCall` in
-      // lend/blend-client.ts). The entry stays so this remains the one list
-      // of contracts the app calls; if anything ever labels a Blend call
-      // from here, it must learn to read the vector rather than stay a
-      // constant.
-      submit: 'Supply to Blend',
+    {
+      id: blendPool(network),
+      venue: 'blend',
+      label: 'Blend lending pool',
+      functions: {
+        // `submit` carries a request vector whose type decides whether this is
+        // a supply, a withdrawal, collateral, a borrow or a repayment, and this
+        // registry labels by function name alone. Nothing labels a Blend call
+        // through it today: a plan admits no contract call, and the direct lend
+        // routes never consult the registry — each asserts its own shape and
+        // names its own noun in a refusal (see `assertSelfPoolCall` in
+        // lend/blend-client.ts). The entry stays so this remains the one list
+        // of contracts the app calls; if anything ever labels a Blend call
+        // from here, it must learn to read the vector rather than stay a
+        // constant.
+        submit: 'Supply to Blend',
+      },
     },
-  },
-  {
-    id: NOETHER_MARKET,
-    venue: 'noether',
-    label: 'Noether perps market',
-    functions: {
-      // The isolated open the gateway's `/v1/orders/prepare` builds. Closing,
-      // cross margin and orders are deliberately absent: nothing here builds
-      // them, and a label for a call no builder produces would only ever
-      // narrate a substituted envelope.
-      open_position: 'Open a perp position on Noether',
+    {
+      id: noetherMarket(network),
+      venue: 'noether',
+      label: 'Noether perps market',
+      functions: {
+        // The isolated open the gateway's `/v1/orders/prepare` builds. Closing,
+        // cross margin and orders are deliberately absent: nothing here builds
+        // them, and a label for a call no builder produces would only ever
+        // narrate a substituted envelope.
+        open_position: 'Open a perp position on Noether',
+      },
     },
-  },
-  {
-    id: NOETHER_ROUTER,
-    venue: 'noether',
-    label: 'Noether router',
-    functions: {
-      // The venue's own web app opens through the router with a signed oracle
-      // price attached. Listed so such an envelope reads honestly if one is
-      // ever presented; `assertPerpOrder` checks its arguments either way.
-      open_with_price: 'Open a perp position on Noether',
+    {
+      id: noetherRouter(network),
+      venue: 'noether',
+      label: 'Noether router',
+      functions: {
+        // The venue's own web app opens through the router with a signed oracle
+        // price attached. Listed so such an envelope reads honestly if one is
+        // ever presented; `assertPerpOrder` checks its arguments either way.
+        open_with_price: 'Open a perp position on Noether',
+      },
     },
-  },
-]
+  ]
+}
 
 /**
  * The candidates that exist on this network. One whose id is `undefined`
@@ -255,14 +257,27 @@ const CANDIDATES: (Omit<ContractEntry, 'id'> & { id: string | undefined; venue: 
  * fact about the chain, and whether the app executes there is a separate
  * decision (`networks` in `lib/venues.ts`).
  */
-const ENTRIES: ContractEntry[] = CANDIDATES.filter(
-  (e): e is ContractEntry & { venue: string } => e.id !== undefined && venueIdOn(e.venue)
-)
+interface Table {
+  entries: ContractEntry[]
+  byId: Map<string, ContractEntry>
+}
 
-const BY_ID = new Map(ENTRIES.map((e) => [e.id, e]))
+const tables = new Map<StellarNetworkName, Table>()
+
+/** The allowlist for one network, built once per network and kept. */
+function tableFor(network: StellarNetworkName): Table {
+  const held = tables.get(network)
+  if (held !== undefined) return held
+  const entries = candidates(network).filter(
+    (e): e is ContractEntry & { venue: string } => e.id !== undefined && venueIdOn(e.venue, network)
+  )
+  const built: Table = { entries, byId: new Map(entries.map((e) => [e.id, e])) }
+  tables.set(network, built)
+  return built
+}
 
 export function lookupContract(id: string): ContractEntry | undefined {
-  return BY_ID.get(id)
+  return tableFor(activeNetwork()).byId.get(id)
 }
 
 /**
@@ -283,7 +298,7 @@ export function labelForCall(
     }
   }
 
-  const entry = BY_ID.get(contractId)
+  const entry = tableFor(activeNetwork()).byId.get(contractId)
   if (entry === undefined) {
     return {
       ok: false,

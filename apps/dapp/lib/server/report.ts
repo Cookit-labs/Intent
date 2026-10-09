@@ -1,3 +1,5 @@
+import { activeNetwork, isMultiNetwork } from '@intent/config'
+
 /**
  * Where the server says what went wrong.
  *
@@ -91,6 +93,8 @@ export interface ReporterDeps {
   log: (line: string, error?: unknown) => void
   /** Absent when there is nowhere to send a copy. */
   sink?: ReportSink
+  /** The Stellar network of the work in progress, when several are served. */
+  network?: () => string | undefined
 }
 
 function describe(error: unknown): string {
@@ -119,6 +123,21 @@ function scrubbedError(error: unknown): unknown {
 export function createReporter(deps: ReporterDeps) {
   const { log, sink } = deps
 
+  /** The context with the network added, so a report says which network it came from. */
+  function withNetwork(
+    context: Record<string, unknown> | undefined
+  ): Record<string, unknown> | undefined {
+    let network: string | undefined
+    try {
+      network = deps.network?.()
+    } catch {
+      // Outside a request there may be no network to name; a report is still worth sending.
+      network = undefined
+    }
+    if (network === undefined) return context
+    return { ...context, network }
+  }
+
   function forward(send: () => void): void {
     if (sink === undefined) return
     try {
@@ -130,7 +149,8 @@ export function createReporter(deps: ReporterDeps) {
   }
 
   function reportError(where: string, error: unknown, context?: Record<string, unknown>): void {
-    const safe = context === undefined ? undefined : redactContext(context)
+    const named = withNetwork(context)
+    const safe = named === undefined ? undefined : redactContext(named)
     const tail = safe === undefined ? '' : ` ${JSON.stringify(safe)}`
     const clean = scrubbedError(error)
     log(`[${where}] ${describe(clean)}${tail}`, clean)
@@ -138,7 +158,8 @@ export function createReporter(deps: ReporterDeps) {
   }
 
   function reportEvent(name: string, context?: Record<string, unknown>): void {
-    const safe = context === undefined ? undefined : redactContext(context)
+    const named = withNetwork(context)
+    const safe = named === undefined ? undefined : redactContext(named)
     const tail = safe === undefined ? '' : ` ${JSON.stringify(safe)}`
     log(`[${name}]${tail}`)
     forward(() => sink?.event(name, safe ?? {}))
@@ -182,6 +203,7 @@ const sentrySink: ReportSink = {
 }
 
 export const { reportError, reportEvent } = createReporter({
+  network: () => (isMultiNetwork() ? activeNetwork() : undefined),
   log: (line, error) => {
     if (error === undefined) console.error(line)
     else console.error(line, error)

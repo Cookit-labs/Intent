@@ -14,7 +14,7 @@ import { resolveAsset } from '../swap/assets'
 import { assertSelfAquariusSwap, buildAquariusSwap } from '../swap/build-aquarius'
 import { sacFor } from '../swap/build-soroban'
 import { labelForCall } from '../swap/contract-registry'
-import { AQUARIUS_ROUTER } from '../swap/sources/aquarius-quoter'
+import { aquariusRouter } from '../swap/sources/aquarius-quoter'
 
 /**
  * Building an Aquarius swap, without a network.
@@ -70,7 +70,7 @@ function handBuilt(opts: {
     fee: BASE_FEE,
     networkPassphrase: Networks.TESTNET,
   })
-    .addOperation(new Contract(AQUARIUS_ROUTER).call(opts.fn ?? 'swap', ...args))
+    .addOperation(new Contract(aquariusRouter()).call(opts.fn ?? 'swap', ...args))
     .setTimeout(180)
     .build()
     .toXDR()
@@ -184,7 +184,7 @@ describe('the router is one this app will sign for', () => {
     // pool. A plan step calling any of them must read as a swap in review,
     // or the registry refuses it with a message about an unknown function.
     for (const fn of ['swap', 'swap_chained', 'swap_chained_strict_receive']) {
-      expect(labelForCall(AQUARIUS_ROUTER, fn)).toEqual({ ok: true, label: 'Swap via Aquarius' })
+      expect(labelForCall(aquariusRouter(), fn)).toEqual({ ok: true, label: 'Swap via Aquarius' })
     }
   })
 })

@@ -2,6 +2,7 @@ const { withSentryConfig } = require('@sentry/nextjs/config')
 
 /** @type {import('next').NextConfig} */
 const config = {
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   transpilePackages: ['@intent/ui', '@intent/types', '@intent/config', '@intent/sdk'],
   async redirects() {
     // Routes moved under a chain segment. These keep pre-multichain links (and

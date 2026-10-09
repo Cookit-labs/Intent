@@ -6,10 +6,7 @@ import { Wallet } from 'lucide-react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useWallet } from '../../hooks/use-wallet'
-
-function shortenStellar(address: string): string {
-  return `${address.slice(0, 4)}…${address.slice(-4)}`
-}
+import { StellarWalletMenu } from './stellar-wallet-menu'
 
 /**
  * Connect control for the active chain.
@@ -22,11 +19,28 @@ export function ConnectWallet(): JSX.Element {
 
   if (descriptor.family === 'evm') {
     return (
-      <ConnectButton
-        accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
-        chainStatus="icon"
-        showBalance={{ smallScreen: false, largeScreen: true }}
-      />
+      <ConnectButton.Custom>
+        {({ account, chain, mounted, authenticationStatus, openConnectModal }) => {
+          const ready = mounted && authenticationStatus !== 'loading'
+          const connected = ready && account !== undefined && chain !== undefined
+          // Not connected: the same button the Stellar side shows, so the
+          // control does not change shape with the chain. Connected, and
+          // while it is not yet known, RainbowKit's own control takes over.
+          if (ready && !connected) return <ConnectButtonView onClick={openConnectModal} />
+          return (
+            <div
+              aria-hidden={!ready}
+              className={ready ? undefined : 'pointer-events-none opacity-0'}
+            >
+              <ConnectButton
+                accountStatus={{ smallScreen: 'avatar', largeScreen: 'full' }}
+                chainStatus="icon"
+                showBalance={{ smallScreen: false, largeScreen: true }}
+              />
+            </div>
+          )
+        }}
+      </ConnectButton.Custom>
     )
   }
 
@@ -34,25 +48,27 @@ export function ConnectWallet(): JSX.Element {
 }
 
 function StellarConnect(): JSX.Element {
-  const { address, isConnected, isConnecting, balance, balanceSymbol, error, connect, disconnect } =
-    useWallet()
+  const {
+    address,
+    isConnected,
+    isConnecting,
+    balance,
+    balanceSymbol,
+    walletIcon,
+    error,
+    connect,
+    disconnect,
+  } = useWallet()
 
   if (isConnected && address !== undefined) {
     return (
-      <div className="flex items-center gap-2">
-        {balance !== undefined ? (
-          <span className="text-muted-foreground hidden font-mono text-xs sm:inline">
-            {Number(balance).toLocaleString(undefined, { maximumFractionDigits: 2 })}{' '}
-            {balanceSymbol}
-          </span>
-        ) : null}
-        <span className="border-border rounded-md border px-2 py-1 font-mono text-xs">
-          {shortenStellar(address)}
-        </span>
-        <Button variant="outline" size="sm" onClick={disconnect} className="text-xs">
-          Disconnect
-        </Button>
-      </div>
+      <StellarWalletMenu
+        address={address}
+        balance={balance}
+        balanceSymbol={balanceSymbol}
+        walletIcon={walletIcon}
+        onDisconnect={disconnect}
+      />
     )
   }
 
@@ -66,10 +82,23 @@ function StellarConnect(): JSX.Element {
           {error}
         </span>
       ) : null}
-      <Button size="sm" onClick={connect} disabled={isConnecting} className="gap-1.5">
-        <Wallet className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-        {isConnecting ? 'Connecting…' : 'Connect wallet'}
-      </Button>
+      <ConnectButtonView onClick={connect} busy={isConnecting} />
     </div>
+  )
+}
+
+/** The one disconnected button, whatever the chain. */
+function ConnectButtonView({
+  onClick,
+  busy = false,
+}: {
+  onClick: () => void
+  busy?: boolean
+}): JSX.Element {
+  return (
+    <Button size="sm" onClick={onClick} disabled={busy} className="gap-1.5">
+      <Wallet className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+      {busy ? 'Connecting…' : 'Connect wallet'}
+    </Button>
   )
 }

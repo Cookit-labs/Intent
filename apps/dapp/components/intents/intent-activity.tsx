@@ -29,7 +29,7 @@ function Section({ title, intents }: { title: string; intents: Intent[] }): JSX.
 }
 
 export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.Element {
-  const { slug } = useChain()
+  const { slug, segment } = useChain()
   const { data: intents, isLoading, isError, error } = useIntents(slug)
 
   const active = intents?.filter((i) => ACTIVE.has(i.status)) ?? []
@@ -66,7 +66,7 @@ export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.E
           </Button>
         ) : (
           <Button asChild className="bg-foreground text-background hover:bg-foreground/90">
-            <Link href={`/${slug}/intents/new`}>
+            <Link href={`/${segment}/intents/new`}>
               <Plus className="h-4 w-4" /> Compose your first intent
             </Link>
           </Button>

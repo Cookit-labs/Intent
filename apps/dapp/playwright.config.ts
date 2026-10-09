@@ -72,6 +72,10 @@ export default defineConfig({
       NOETHER_API_URL: '',
       SPONSOR_SECRET_KEY: '',
       REDIS_URL: '',
+      // Serving both networks is opt-in for a run; the access gate is turned off
+      // there so mainnet pages can be reached without the email-code login.
+      NEXT_PUBLIC_STELLAR_NETWORKS: process.env['E2E_STELLAR_NETWORKS'] ?? '',
+      ACCESS_GATE: process.env['E2E_STELLAR_NETWORKS'] === undefined ? '' : 'off',
     },
   },
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { assertReserveWithinCap } from '../lend/cap'
-import { BLEND_XLM } from '../lend/reserves'
+import { blendXlm } from '../lend/reserves'
 import { TradeCapExceeded } from '../server/trade-cap'
 import type { MarketPrice } from '../swap/price-types'
 
@@ -21,10 +21,10 @@ describe('capping a Blend amount', () => {
   it('passes an XLM amount under the cap and refuses one over it', async () => {
     // 200 XLM = $40; 300 XLM = $60 against a $50 cap. Base units: 7 decimals.
     await expect(
-      assertReserveWithinCap(BLEND_XLM, '2000000000', { env: {}, network: 'mainnet', prices })
+      assertReserveWithinCap(blendXlm(), '2000000000', { env: {}, network: 'mainnet', prices })
     ).resolves.toBeUndefined()
     await expect(
-      assertReserveWithinCap(BLEND_XLM, '3000000000', { env: {}, network: 'mainnet', prices })
+      assertReserveWithinCap(blendXlm(), '3000000000', { env: {}, network: 'mainnet', prices })
     ).rejects.toThrow(TradeCapExceeded)
   })
 
@@ -40,7 +40,7 @@ describe('capping a Blend amount', () => {
 
   it('reads no prices on testnet', async () => {
     await expect(
-      assertReserveWithinCap(BLEND_XLM, '99999999999999', {
+      assertReserveWithinCap(blendXlm(), '99999999999999', {
         network: 'testnet',
         prices: () => Promise.reject(new Error('must not be asked')),
       })

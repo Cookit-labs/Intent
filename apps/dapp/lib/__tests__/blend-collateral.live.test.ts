@@ -7,7 +7,7 @@ import {
   buildBlendCollateralWithdraw,
   prepareBlendWithdraw,
 } from '../lend/blend-client'
-import { BLEND_XLM } from '../lend/reserves'
+import { blendXlm } from '../lend/reserves'
 
 /**
  * Posting and reclaiming collateral, against the live pool.
@@ -30,7 +30,7 @@ describe.skipIf(SKIP)('posting collateral', () => {
   it('builds a call the pool accepts', async () => {
     const built = await buildBlendCollateralSupply({
       account: ME,
-      asset: BLEND_XLM,
+      asset: blendXlm(),
       amount: '1000000000',
     })
 
@@ -41,7 +41,7 @@ describe.skipIf(SKIP)('posting collateral', () => {
   it('credits the account that posted it', async () => {
     const built = await buildBlendCollateralSupply({
       account: ME,
-      asset: BLEND_XLM,
+      asset: blendXlm(),
       amount: '1000000000',
     })
 
@@ -60,7 +60,7 @@ describe.skipIf(SKIP)('posting collateral', () => {
     // wrong reason if the source check were ever removed.
     const built = await buildBlendCollateralSupply({
       account: ME,
-      asset: BLEND_XLM,
+      asset: blendXlm(),
       amount: '1000000000',
     })
 
@@ -70,14 +70,14 @@ describe.skipIf(SKIP)('posting collateral', () => {
   it('needs an amount, since there is no "all" to post', async () => {
     // Withdrawing everything is meaningful; supplying everything is not, and a
     // sentinel here would post an absurd number rather than the balance.
-    await expect(buildBlendCollateralSupply({ account: ME, asset: BLEND_XLM })).rejects.toThrow(
+    await expect(buildBlendCollateralSupply({ account: ME, asset: blendXlm() })).rejects.toThrow(
       /needs an amount/
     )
   }, 30_000)
 
   it('refuses a zero or negative amount', async () => {
     await expect(
-      buildBlendCollateralSupply({ account: ME, asset: BLEND_XLM, amount: '0' })
+      buildBlendCollateralSupply({ account: ME, asset: blendXlm(), amount: '0' })
     ).rejects.toThrow(/positive amount/)
   }, 60_000)
 })
@@ -94,7 +94,7 @@ describe.skipIf(SKIP)('reclaiming collateral', () => {
     // that is not there.
     const built = await buildBlendCollateralWithdraw({
       account: ME,
-      asset: BLEND_XLM,
+      asset: blendXlm(),
       amount: '1000000',
     })
 
@@ -108,14 +108,14 @@ describe.skipIf(SKIP)('reclaiming collateral', () => {
     // Collateral earns interest like any supply, so an exact figure read a
     // moment ago is already short. The sentinel is the only way to reclaim all
     // of it.
-    const built = await buildBlendCollateralWithdraw({ account: ME, asset: BLEND_XLM })
+    const built = await buildBlendCollateralWithdraw({ account: ME, asset: blendXlm() })
 
     expect(built.everything).toBe(true)
     expect(built.amount).toBe('170141183460469231731687303715884105727')
   }, 60_000)
 
   it('pays the account that posted it', async () => {
-    const built = await buildBlendCollateralWithdraw({ account: ME, asset: BLEND_XLM })
+    const built = await buildBlendCollateralWithdraw({ account: ME, asset: blendXlm() })
 
     expect(() => assertSelfCollateralWithdraw(built.xdr, ME)).not.toThrow()
     expect(() => assertSelfCollateralWithdraw(built.xdr, STRANGER)).toThrow(/refusing to sign/)

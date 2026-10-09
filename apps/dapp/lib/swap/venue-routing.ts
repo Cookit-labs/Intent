@@ -4,7 +4,7 @@ import { FeeBumpTransaction, TransactionBuilder } from '@stellar/stellar-sdk'
 import { assertSelfAquariusSwap } from './build-aquarius'
 import { assertSelfSoroswapSwap } from './build-soroban'
 import { assertSelfSwap } from './build-tx'
-import { AQUARIUS_ROUTER, SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from './contract-registry'
+import { aquariusRouter, soroswapAggregator, soroswapRouter } from './contract-registry'
 import { readContractCall } from './plan-validator'
 import type { SwapQuote } from './quote'
 
@@ -115,13 +115,13 @@ export function assertSelfSubmission(signedXdr: string, account: string): void {
 
   const { contractId } = readContractCall(op)
   switch (contractId) {
-    case AQUARIUS_ROUTER:
+    case aquariusRouter():
       assertSelfAquariusSwap(signedXdr, account)
       return
-    case SOROSWAP_ROUTER:
+    case soroswapRouter():
       assertSelfSoroswapSwap(signedXdr, account, 'router')
       return
-    case SOROSWAP_AGGREGATOR:
+    case soroswapAggregator():
       assertSelfSoroswapSwap(signedXdr, account, 'aggregator')
       return
     default:

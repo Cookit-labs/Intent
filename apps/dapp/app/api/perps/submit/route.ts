@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createNoetherClient } from '../../../../lib/perps/noether-client'
 import { submitOrder, validateOrderRequest } from '../../../../lib/perps/order-flow'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { logExecution } from '../../../../lib/server/analytics'
 
 /**
  * Submits a signed Noether position through the gateway.
@@ -57,6 +58,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     token,
     request: validated.request,
     signedXdr,
+  })
+  await logExecution({
+    kind: 'perp',
+    account: validated.request.account,
+    feeSponsored: false,
+    result: out,
   })
   if (!out.ok) {
     return NextResponse.json(

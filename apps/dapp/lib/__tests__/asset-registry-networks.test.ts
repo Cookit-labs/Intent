@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * The asset allowlist follows the network.
@@ -32,7 +32,11 @@ afterAll(() => {
   vi.resetModules()
 })
 
+// The registry reads the network when asked, not at import, so each case says which.
 describe('on testnet, nothing moved', () => {
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'testnet'))
+  afterEach(() => vi.unstubAllEnvs())
+
   it('still knows the Etherfuse bonds and the testnet USDC', () => {
     expect(testnet.verifiedSymbols()).toEqual(['XLM', 'USDC', 'CETES', 'USTRY', 'KTB'])
     expect(testnet.tradeableSymbols()).toEqual(['XLM', 'USDC', 'CETES'])
@@ -49,6 +53,9 @@ const SANDBOX_ISSUER = 'GC3CW7EDYRTWQ635VDIGY6S4ZUF5L6TQ7AA4MWS7LEQDBLUSZXV7UPS4
 const MAINNET_ISSUER = 'GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC'
 
 describe('on mainnet', () => {
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet'))
+  afterEach(() => vi.unstubAllEnvs())
+
   it('knows the Etherfuse bonds under the mainnet issuer, never the sandbox one', () => {
     expect(mainnet.verifiedSymbols()).toEqual(['XLM', 'USDC', 'CETES', 'USTRY', 'KTB'])
     expect(mainnet.realWorldAssets().map((a) => a.code)).toEqual(['CETES', 'USTRY', 'KTB'])

@@ -188,3 +188,47 @@ describe('describeBudget', () => {
     })
   })
 })
+
+describe('a ledger per network', () => {
+  it('keeps one network’s spend out of the other’s totals, on the same database', async () => {
+    const shared = fakeSponsorLedgerDb()
+    const testnet = createSponsorLedger(shared.query)
+    const mainnet = createSponsorLedger(shared.query, 'mainnet')
+
+    await testnet.record(DAY, A, BigInt(500))
+    await mainnet.record(DAY, A, BigInt(7))
+
+    expect(await testnet.usage(DAY, A)).toMatchObject({
+      totalStroops: BigInt(500),
+      accountStroops: BigInt(500),
+      accountCount: 1,
+    })
+    expect(await mainnet.usage(DAY, A)).toMatchObject({
+      totalStroops: BigInt(7),
+      accountStroops: BigInt(7),
+      accountCount: 1,
+    })
+  })
+
+  it('takes a reservation back from its own network only', async () => {
+    const shared = fakeSponsorLedgerDb()
+    const testnet = createSponsorLedger(shared.query)
+    const mainnet = createSponsorLedger(shared.query, 'mainnet')
+
+    await testnet.record(DAY, A, BigInt(500))
+    await mainnet.record(DAY, A, BigInt(500))
+    await mainnet.release(DAY, A, BigInt(500))
+
+    expect((await mainnet.usage(DAY, A)).totalStroops).toBe(BigInt(0))
+    expect((await testnet.usage(DAY, A)).totalStroops).toBe(BigInt(500))
+  })
+
+  it('counts the day total per network, so one network cannot spend the other’s budget', async () => {
+    const shared = fakeSponsorLedgerDb()
+    const mainnet = createSponsorLedger(shared.query, 'mainnet')
+    const testnet = createSponsorLedger(shared.query, 'testnet')
+
+    await testnet.record(DAY, A, BigInt(1_000_000))
+    expect((await mainnet.usage(DAY)).totalStroops).toBe(BigInt(0))
+  })
+})

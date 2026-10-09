@@ -7,6 +7,7 @@ import { tokenBelongsTo } from '../../../../lib/offramp/token-subject'
 import { submitSignedSwap } from '../../../../lib/swap/submit'
 import { sponsorForRequest } from '../../../../lib/sponsor/sponsor-request'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { logExecution } from '../../../../lib/server/analytics'
 
 /**
  * Submits a signed offramp payment.
@@ -79,6 +80,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   // sends the original instead, paying its own fee as before.
   const sent = await sponsorForRequest(request, body.signedXdr as string, body.account as string)
   const result = await submitSignedSwap(sent.xdr)
+  await logExecution({
+    kind: 'offramp',
+    account: body.account as string,
+    feeSponsored: sent.sponsored,
+    result,
+    signedXdr: sent.xdr,
+  })
   if (!result.ok) return NextResponse.json(result)
 
   return NextResponse.json({

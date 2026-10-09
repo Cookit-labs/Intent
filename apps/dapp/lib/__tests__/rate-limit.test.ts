@@ -210,6 +210,44 @@ describe('enforceRateLimit', () => {
     expect([...db.counts.keys()].map((k) => k.split('|')[0])).toEqual(['ip:203.0.113.9:build'])
   })
 
+  it('on Vercel, ignores a client-sent x-nf-client-connection-ip', async () => {
+    // Netlify strips that header at its edge. Vercel does not, so there it is
+    // whatever the client wrote, and trusting it would give every request a
+    // bucket of its own. The platform's own header is read instead.
+    await enforceRateLimit(
+      post({
+        'x-nf-client-connection-ip': '6.6.6.6',
+        'x-vercel-forwarded-for': '203.0.113.9',
+        'x-forwarded-for': '10.0.0.1',
+      }),
+      'build',
+      undefined,
+      deps({ VERCEL: '1' })
+    )
+
+    expect([...db.counts.keys()].map((k) => k.split('|')[0])).toEqual(['ip:203.0.113.9:build'])
+  })
+
+  it('on Vercel, falls back to x-real-ip and never to the spoofable Netlify header', async () => {
+    await enforceRateLimit(
+      post({ 'x-nf-client-connection-ip': '6.6.6.6', 'x-real-ip': '8.8.8.8' }),
+      'build',
+      undefined,
+      deps({ VERCEL: '1' })
+    )
+    await enforceRateLimit(
+      post({ 'x-nf-client-connection-ip': '6.6.6.6' }),
+      'build',
+      undefined,
+      deps({ VERCEL: '1' })
+    )
+
+    expect([...db.counts.keys()].map((k) => k.split('|')[0])).toEqual([
+      'ip:8.8.8.8:build',
+      'ip:unknown:build',
+    ])
+  })
+
   it('falls back to the first hop of x-forwarded-for, then x-real-ip, then unknown', async () => {
     await enforceRateLimit(
       post({ 'x-forwarded-for': '9.9.9.9, 10.0.0.1' }),
