@@ -60,9 +60,9 @@ export function fakeSponsorLedgerDb(): FakeSponsorLedgerDb {
       }
 
       if (sql.startsWith('INSERT INTO sponsor_ledger')) {
-        const [day, account, stroops] = p as [string, string, string]
+        const [day, account, stroops, everyone = '*'] = p as [string, string, string, string?]
         const returned: Record<string, unknown>[] = []
-        for (const who of [account, '*']) {
+        for (const who of [account, everyone]) {
           const id = `${day}|${who}`
           const row = rows.get(id) ?? { stroops: BigInt(0), count: 0 }
           const next = { stroops: row.stroops + BigInt(stroops), count: row.count + 1 }
@@ -73,8 +73,8 @@ export function fakeSponsorLedgerDb(): FakeSponsorLedgerDb {
       }
 
       if (sql.startsWith('UPDATE sponsor_ledger SET stroops = sponsor_ledger.stroops - $3')) {
-        const [day, account, stroops] = p as [string, string, string]
-        for (const who of [account, '*']) {
+        const [day, account, stroops, everyone = '*'] = p as [string, string, string, string?]
+        for (const who of [account, everyone]) {
           const row = rows.get(`${day}|${who}`)
           if (row === undefined) continue
           row.stroops -= BigInt(stroops)

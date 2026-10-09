@@ -12,7 +12,7 @@ import {
 import { describe, expect, it } from 'vitest'
 
 import { assertSelfSupply, buildBlendSupply } from '../lend/blend-client'
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 
 /**
  * Building a supply, and refusing one that credits somebody else.
@@ -51,7 +51,7 @@ function request(): xdr.ScVal {
 
 /** A supply built by hand, so each address can be pointed somewhere. */
 function handBuilt(from: string, spender: string, to: string, source = ME): string {
-  const op = new Contract(BLEND_POOL).call(
+  const op = new Contract(blendPool()).call(
     'submit',
     new Address(from).toScVal(),
     new Address(spender).toScVal(),
@@ -152,7 +152,7 @@ describe('a supply is a lone contract call', () => {
 
   it('refuses a call to a different function on the pool', () => {
     // A pool that supplies also borrows. Only one of those is built here.
-    const borrow = new Contract(BLEND_POOL).call(
+    const borrow = new Contract(blendPool()).call(
       'borrow',
       new Address(ME).toScVal(),
       new Address(ME).toScVal(),
@@ -171,7 +171,7 @@ describe('a supply is a lone contract call', () => {
   })
 
   it('refuses a call with the wrong number of arguments', () => {
-    const short = new Contract(BLEND_POOL).call('submit', new Address(ME).toScVal())
+    const short = new Contract(blendPool()).call('submit', new Address(ME).toScVal())
     const built = new TransactionBuilder(new Account(ME, '1'), {
       fee: BASE_FEE,
       networkPassphrase: Networks.TESTNET,

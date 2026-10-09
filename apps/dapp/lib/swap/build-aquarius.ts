@@ -14,7 +14,7 @@ import {
 import { resolveVerifiedAsset } from './asset-registry'
 import type { ClassicAsset } from './assets'
 import { sacFor } from './build-soroban'
-import { AQUARIUS_ROUTER } from './contract-registry'
+import { aquariusRouter } from './contract-registry'
 import { assertVenueOn } from '../venues'
 
 /**
@@ -104,7 +104,7 @@ export async function buildAquariusSwap(
 ): Promise<BuiltAquariusSwap> {
   assertVenueOn('aquarius')
   const { account, from, to, sendAmount, minReceive, poolIndex } = options
-  const routerId = options.routerId ?? AQUARIUS_ROUTER
+  const routerId = options.routerId ?? aquariusRouter()
   const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
   const fetchImpl = options.fetchImpl ?? fetch
 

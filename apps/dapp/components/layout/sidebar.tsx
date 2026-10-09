@@ -27,7 +27,7 @@ export function Sidebar({
   className?: string
 } = {}): JSX.Element {
   const pathname = usePathname()
-  const { slug, descriptor } = useChain()
+  const { slug, segment, descriptor } = useChain()
 
   return (
     <aside
@@ -44,7 +44,7 @@ export function Sidebar({
         {nav.map((item) => {
           const { href: path, label, icon: Icon } = item
           const soon = 'soon' in item && item.soon
-          const href = `/${slug}${path}`
+          const href = `/${segment}${path}`
           const active = pathname.startsWith(href)
           return (
             <Link

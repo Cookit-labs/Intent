@@ -18,6 +18,7 @@ export interface FakeRow {
   email: string
   wallet: string
   chain: string
+  network: string
   rule: Record<string, unknown>
   status: string
   created_at: Date
@@ -47,12 +48,17 @@ export function fakeStandingRulesDb(): FakeDb {
     log.push(sql)
     const p = params as unknown[]
 
-    if (sql.startsWith('CREATE TABLE') || sql.startsWith('CREATE INDEX')) {
+    if (
+      sql.startsWith('CREATE TABLE') ||
+      sql.startsWith('CREATE INDEX') ||
+      sql.startsWith('ALTER TABLE')
+    ) {
       return { rows: [] }
     }
 
     if (sql.startsWith('INSERT INTO standing_rules')) {
-      const [id, email, wallet, chain, rule, createdAt] = p as [
+      const [id, email, wallet, chain, rule, createdAt, network] = p as [
+        string,
         string,
         string,
         string,
@@ -62,7 +68,7 @@ export function fakeStandingRulesDb(): FakeDb {
       ]
       const existing = rows.get(id)
       if (existing !== undefined) {
-        if (existing.email !== email) return { rows: [] }
+        if (existing.email !== email || existing.network !== network) return { rows: [] }
         existing.rule = JSON.parse(rule) as Record<string, unknown>
         return { rows: [{ ...existing }] }
       }
@@ -71,6 +77,7 @@ export function fakeStandingRulesDb(): FakeDb {
         email,
         wallet,
         chain,
+        network,
         rule: JSON.parse(rule) as Record<string, unknown>,
         status: 'armed',
         created_at: new Date(createdAt),
@@ -86,13 +93,14 @@ export function fakeStandingRulesDb(): FakeDb {
     if (
       sql.startsWith('SELECT * FROM standing_rules WHERE email = $1 AND chain = $2 AND fired_at')
     ) {
-      const [email, chain] = p as [string, string]
+      const [email, chain, network] = p as [string, string, string]
       return {
         rows: [...rows.values()]
           .filter(
             (r) =>
               r.email === email &&
               r.chain === chain &&
+              r.network === network &&
               r.fired_at !== null &&
               r.seen_at === null &&
               r.status !== 'cancelled'
@@ -102,24 +110,27 @@ export function fakeStandingRulesDb(): FakeDb {
     }
 
     if (sql.startsWith('SELECT * FROM standing_rules WHERE email = $1 AND chain = $2')) {
-      const [email, chain] = p as [string, string]
+      const [email, chain, network] = p as [string, string, string]
       return {
         rows: [...rows.values()]
-          .filter((r) => r.email === email && r.chain === chain)
+          .filter((r) => r.email === email && r.chain === chain && r.network === network)
           .sort((a, b) => b.created_at.getTime() - a.created_at.getTime()),
       }
     }
 
     if (sql.startsWith('SELECT * FROM standing_rules WHERE email = $1 AND id = $2')) {
-      const [email, id] = p as [string, string]
+      const [email, id, network] = p as [string, string, string]
       const row = rows.get(id)
-      return { rows: row !== undefined && row.email === email ? [row] : [] }
+      return {
+        rows: row !== undefined && row.email === email && row.network === network ? [row] : [],
+      }
     }
 
     if (sql.startsWith("SELECT * FROM standing_rules WHERE status = 'armed'")) {
+      const [network] = p as [string]
       return {
         rows: [...rows.values()]
-          .filter((r) => r.status === 'armed')
+          .filter((r) => r.status === 'armed' && r.network === network)
           .sort((a, b) => a.created_at.getTime() - b.created_at.getTime()),
       }
     }
@@ -129,17 +140,24 @@ export function fakeStandingRulesDb(): FakeDb {
         'SELECT * FROM standing_rules WHERE fired_at IS NOT NULL AND notified_at IS NULL'
       )
     ) {
+      const [network] = p as [string]
       return {
         rows: [...rows.values()]
-          .filter((r) => r.fired_at !== null && r.notified_at === null && r.status !== 'cancelled')
+          .filter(
+            (r) =>
+              r.fired_at !== null &&
+              r.notified_at === null &&
+              r.status !== 'cancelled' &&
+              r.network === network
+          )
           .sort((a, b) => (a.fired_at?.getTime() ?? 0) - (b.fired_at?.getTime() ?? 0)),
       }
     }
 
     if (sql.startsWith("UPDATE standing_rules SET status = 'cancelled'")) {
-      const [email, id] = p as [string, string]
+      const [email, id, network] = p as [string, string, string]
       const row = rows.get(id)
-      if (row === undefined || row.email !== email) return { rows: [] }
+      if (row === undefined || row.email !== email || row.network !== network) return { rows: [] }
       row.status = 'cancelled'
       return { rows: [{ id }] }
     }
@@ -166,11 +184,12 @@ export function fakeStandingRulesDb(): FakeDb {
     }
 
     if (sql.startsWith('UPDATE standing_rules SET seen_at = $3')) {
-      const [email, ids, at] = p as [string, string[], string]
+      const [email, ids, at, network] = p as [string, string[], string, string]
       const touched: { id: string }[] = []
       for (const id of ids) {
         const row = rows.get(id)
-        if (row === undefined || row.email !== email || row.seen_at !== null) continue
+        if (row === undefined || row.email !== email || row.network !== network) continue
+        if (row.seen_at !== null) continue
         row.seen_at = new Date(at)
         touched.push({ id })
       }

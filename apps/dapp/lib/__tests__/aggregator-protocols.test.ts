@@ -5,7 +5,7 @@ import {
   resetAggregatorProtocolCache,
   resolveAggregatorProtocols,
 } from '../swap/aggregator-protocols'
-import { AQUARIUS_ROUTER, SOROSWAP_AGGREGATOR, SOROSWAP_ROUTER } from '../swap/contract-registry'
+import { aquariusRouter, soroswapAggregator, soroswapRouter } from '../swap/contract-registry'
 
 /**
  * Which venues the aggregator may be asked to route through.
@@ -79,9 +79,9 @@ function fakeServer(adapters: Adapter[] | 'error' | 'throw', missing: string[] =
 }
 
 const LIVE: Adapter[] = [
-  { protocol_id: 0, router: SOROSWAP_ROUTER, paused: false },
+  { protocol_id: 0, router: soroswapRouter(), paused: false },
   { protocol_id: 1, router: PHOENIX_DEAD, paused: false },
-  { protocol_id: 2, router: AQUARIUS_ROUTER, paused: false },
+  { protocol_id: 2, router: aquariusRouter(), paused: false },
 ]
 
 afterEach(() => resetAggregatorProtocolCache())
@@ -91,13 +91,13 @@ describe('the protocol list is read from the contract and the ledger', () => {
     const server = fakeServer(LIVE, [PHOENIX_DEAD])
 
     const got = await resolveAggregatorProtocols({
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: server,
     })
 
     expect(got?.protocols).toEqual(['soroswap', 'aqua', 'sdex'])
     // Every adapter was checked against the ledger, not taken on trust.
-    expect(server.probes).toEqual([SOROSWAP_ROUTER, PHOENIX_DEAD, AQUARIUS_ROUTER])
+    expect(server.probes).toEqual([soroswapRouter(), PHOENIX_DEAD, aquariusRouter()])
     expect(got?.adapters.find((a) => a.protocol === 'phoenix')?.deployed).toBe(false)
   })
 
@@ -108,7 +108,7 @@ describe('the protocol list is read from the contract and the ledger', () => {
     const server = fakeServer([...LIVE, { protocol_id: 3, router: COMET, paused: false }])
 
     const got = await resolveAggregatorProtocols({
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: server,
     })
 
@@ -118,14 +118,14 @@ describe('the protocol list is read from the contract and the ledger', () => {
   it('drops an adapter the aggregator has paused', async () => {
     const server = fakeServer(
       [
-        { protocol_id: 0, router: SOROSWAP_ROUTER, paused: false },
-        { protocol_id: 2, router: AQUARIUS_ROUTER, paused: true },
+        { protocol_id: 0, router: soroswapRouter(), paused: false },
+        { protocol_id: 2, router: aquariusRouter(), paused: true },
       ],
       []
     )
 
     const got = await resolveAggregatorProtocols({
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: server,
     })
 
@@ -137,7 +137,7 @@ describe('the protocol list is read from the contract and the ledger', () => {
     // alternative — falling back to a hardcoded list — is exactly the file
     // this exists to replace.
     const got = await resolveAggregatorProtocols({
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: fakeServer('error'),
     })
 
@@ -147,7 +147,7 @@ describe('the protocol list is read from the contract and the ledger', () => {
   it('never throws when the RPC is unreachable', async () => {
     await expect(
       resolveAggregatorProtocols({
-        aggregatorId: SOROSWAP_AGGREGATOR,
+        aggregatorId: soroswapAggregator(),
         serverImpl: fakeServer('throw'),
       })
     ).resolves.toBeUndefined()
@@ -159,7 +159,7 @@ describe('the answer is cached', () => {
     let now = 5_000_000
     const server = fakeServer(LIVE, [PHOENIX_DEAD])
     const options = {
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: server,
       now: () => now,
       ttlMs: 60_000,
@@ -179,10 +179,10 @@ describe('the answer is cached', () => {
     const working = fakeServer(LIVE, [PHOENIX_DEAD])
 
     expect(
-      await resolveAggregatorProtocols({ aggregatorId: SOROSWAP_AGGREGATOR, serverImpl: failing })
+      await resolveAggregatorProtocols({ aggregatorId: soroswapAggregator(), serverImpl: failing })
     ).toBeUndefined()
     const got = await resolveAggregatorProtocols({
-      aggregatorId: SOROSWAP_AGGREGATOR,
+      aggregatorId: soroswapAggregator(),
       serverImpl: working,
     })
 

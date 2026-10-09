@@ -128,8 +128,8 @@ describe('a flagged venue with no verified contract stays off the allowlist', ()
   it('has no Noether contract on mainnet even though the registry lists it', async () => {
     vi.resetModules()
     vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
-    const { NOETHER_MARKET, lookupContract } = await import('../swap/contract-registry')
-    expect(NOETHER_MARKET).toBeUndefined()
+    const { noetherMarket, lookupContract } = await import('../swap/contract-registry')
+    expect(noetherMarket()).toBeUndefined()
     expect(
       lookupContract('CBHHWFAYLB3SXJCE232DC6WNSK74IBEOROAGCI2AFBA2H5NQOH2KYKNN')
     ).toBeUndefined()

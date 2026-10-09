@@ -82,3 +82,6 @@ apps/dapp/lib/agents/evals/results/
 # uploads the report as an artifact when the smoke suite fails.
 apps/dapp/playwright-report/
 apps/dapp/test-results/
+
+# local https certificates and keys from next dev --experimental-https
+certificates

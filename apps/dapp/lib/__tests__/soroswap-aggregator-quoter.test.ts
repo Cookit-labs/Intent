@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProtocolWhitelist } from '../swap/aggregator-protocols'
 import { resolveAsset, type ClassicAsset } from '../swap/assets'
 import { sacFor } from '../swap/build-soroban'
-import { SOROSWAP_AGGREGATOR } from '../swap/contract-registry'
+import { soroswapAggregator } from '../swap/contract-registry'
 import { sourceDisplayName } from '../swap/quote'
 import type { QuoteRequest } from '../swap/quote'
 import type { AggregatorApiQuote, ApiResult, SoroswapApi } from '../swap/soroswap-api'
@@ -74,7 +74,7 @@ function fakeApi(options: FakeApiOptions = {}): SoroswapApi & { quoteCalls: unkn
       return { ok: false, reason: 'upstream_error', detail: 'not under test' }
     },
     async contractAddress(): Promise<string | undefined> {
-      return 'aggregator' in options ? options.aggregator : SOROSWAP_AGGREGATOR
+      return 'aggregator' in options ? options.aggregator : soroswapAggregator()
     },
   }
   return api
@@ -191,7 +191,7 @@ describe('a quote through the resolved aggregator', () => {
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.quoted.raw).toBe(apiQuote)
-    expect(out.quoted.aggregatorId).toBe(SOROSWAP_AGGREGATOR)
+    expect(out.quoted.aggregatorId).toBe(soroswapAggregator())
     expect(out.quoted.protocols).toEqual(['soroswap', 'aqua', 'sdex'])
   })
 })

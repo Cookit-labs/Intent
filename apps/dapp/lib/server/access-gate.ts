@@ -14,9 +14,14 @@
 
 type Env = Record<string, string | undefined>
 
-export function gateEnabled(env: Env): boolean {
+/**
+ * `network` is the one the request is for. With several networks served the
+ * gate follows it: mainnet is behind the door and testnet stays open. Without
+ * it, the deployment's own network decides, as before.
+ */
+export function gateEnabled(env: Env, network?: 'testnet' | 'mainnet'): boolean {
   const flag = env['ACCESS_GATE']?.trim().toLowerCase()
   if (flag === 'on') return true
   if (flag === 'off') return false
-  return env['NEXT_PUBLIC_STELLAR_NETWORK']?.trim() === 'mainnet'
+  return (network ?? env['NEXT_PUBLIC_STELLAR_NETWORK']?.trim()) === 'mainnet'
 }

@@ -10,6 +10,13 @@ import { sentryDsn } from './lib/server/report'
  * through `reportError` at the call site instead.
  */
 export async function register(): Promise<void> {
+  // First, and whether or not Sentry is on: with several Stellar networks
+  // served, server code asks the request which network it is for, and this is
+  // where it learns how.
+  if (process.env['NEXT_RUNTIME'] === 'nodejs') {
+    const { installNetworkResolver } = await import('./lib/server/network-context')
+    installNetworkResolver()
+  }
   if (sentryDsn() === undefined) return
   if (process.env['NEXT_RUNTIME'] === 'nodejs') await import('./sentry.server.config')
   if (process.env['NEXT_RUNTIME'] === 'edge') await import('./sentry.edge.config')
