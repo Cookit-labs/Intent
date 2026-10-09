@@ -4,7 +4,7 @@
 -- The application runs the same statements on first use; keep this in sync with
 -- ANALYTICS_DDL in apps/dapp/lib/server/analytics.ts.
 
-CREATE TABLE IF NOT EXISTS executions (
+CREATE TABLE IF NOT EXISTS usage_executions (
   id            UUID        PRIMARY KEY,
   network       TEXT        NOT NULL,
   hash          TEXT,
@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS executions (
   failure       TEXT,
   submitted_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS executions_hash_idx ON executions (network, hash) WHERE hash IS NOT NULL;
-CREATE INDEX IF NOT EXISTS executions_time_idx ON executions (network, submitted_at);
-CREATE INDEX IF NOT EXISTS executions_account_idx ON executions (network, account);
+CREATE UNIQUE INDEX IF NOT EXISTS usage_executions_hash_idx ON usage_executions (network, hash) WHERE hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS usage_executions_time_idx ON usage_executions (network, submitted_at);
+CREATE INDEX IF NOT EXISTS usage_executions_account_idx ON usage_executions (network, account);
 
 CREATE TABLE IF NOT EXISTS agent_races (
   id          UUID        PRIMARY KEY,
@@ -55,5 +55,5 @@ CREATE TABLE IF NOT EXISTS agent_proposals (
 --   CREATE ROLE intent_analytics_ro LOGIN PASSWORD '<from a secret store>';
 --   GRANT CONNECT ON DATABASE <db> TO intent_analytics_ro;
 --   GRANT USAGE ON SCHEMA public TO intent_analytics_ro;
---   GRANT SELECT ON executions, agent_races, agent_proposals, sponsor_ledger TO intent_analytics_ro;
+--   GRANT SELECT ON usage_executions, agent_races, agent_proposals, sponsor_ledger TO intent_analytics_ro;
 -- It is deliberately not granted standing_rules, waitlist_signups or anything else.

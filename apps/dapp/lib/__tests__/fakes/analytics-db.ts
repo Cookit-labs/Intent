@@ -25,6 +25,18 @@ export interface FakeExecution {
   volume_usd: number | null
 }
 
+export interface FakeIntentRead {
+  id: string
+  network: string
+  read_at: string
+  understood: boolean
+  action: string | null
+  token_in: string | null
+  token_out: string | null
+  size_usd: number | null
+  reason: string | null
+}
+
 export interface FakeRace {
   id: string
   network: string
@@ -58,6 +70,7 @@ export interface FakeAnalyticsDb {
   query: QueryFn
   executions: FakeExecution[]
   races: FakeRace[]
+  intentReads: FakeIntentRead[]
   proposals: FakeProposal[]
   log: string[]
   down?: Error
@@ -70,12 +83,14 @@ function normalise(sql: string): string {
 export function fakeAnalyticsDb(): FakeAnalyticsDb {
   const executions: FakeExecution[] = []
   const races: FakeRace[] = []
+  const intentReads: FakeIntentRead[] = []
   const proposals: FakeProposal[] = []
   const log: string[] = []
 
   const db: FakeAnalyticsDb = {
     executions,
     races,
+    intentReads,
     proposals,
     log,
     query: async (rawSql, params = []) => {
@@ -93,7 +108,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
         return { rows: [] }
       }
 
-      if (sql.startsWith('INSERT INTO executions')) {
+      if (sql.startsWith('INSERT INTO usage_executions')) {
         const [
           id,
           network,
@@ -140,6 +155,32 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           asset_out: assetOut,
           amount_in: amountIn,
           volume_usd: volumeUsd,
+        })
+        return { rows: [{ id }] }
+      }
+
+      if (sql.startsWith('INSERT INTO intent_reads')) {
+        const [id, network, readAt, understood, action, tokenIn, tokenOut, sizeUsd, reason] = p as [
+          string,
+          string,
+          string,
+          boolean,
+          string | null,
+          string | null,
+          string | null,
+          number | null,
+          string | null,
+        ]
+        intentReads.push({
+          id,
+          network,
+          read_at: readAt,
+          understood,
+          action,
+          token_in: tokenIn,
+          token_out: tokenOut,
+          size_usd: sizeUsd,
+          reason,
         })
         return { rows: [{ id }] }
       }
