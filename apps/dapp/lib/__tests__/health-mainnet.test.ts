@@ -23,10 +23,11 @@ beforeAll(async () => {
   vi.resetModules()
   health = await import('../server/health')
   balance = await import('../sponsor/balance')
-  vi.unstubAllEnvs()
+  // Left set for the whole file: the network is read when asked, not at import.
 }, 60_000)
 
 afterAll(() => {
+  vi.unstubAllEnvs()
   vi.resetModules()
 })
 

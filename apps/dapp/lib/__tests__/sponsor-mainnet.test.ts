@@ -64,10 +64,11 @@ beforeAll(async () => {
   vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
   vi.resetModules()
   mainnet = await import('../sponsor/sponsor')
-  vi.unstubAllEnvs()
+  // Left set for the whole file: the network is read when asked, not at import.
 }, 60_000)
 
 afterAll(() => {
+  vi.unstubAllEnvs()
   vi.resetModules()
 })
 

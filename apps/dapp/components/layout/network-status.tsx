@@ -1,6 +1,6 @@
 'use client'
 
-import { activeNetwork, isMainnet, stellarNetwork } from '@intent/config'
+import { activeNetwork, isMainnet, isMultiNetwork, stellarNetwork } from '@intent/config'
 import { Badge, Button } from '@intent/ui'
 
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
@@ -44,7 +44,10 @@ export function NetworkStatus({
     // this deployment serves the other, so say where each is and offer the
     // way to the one the wallet is on, rather than calling its network wrong.
     const other =
-      slug === 'stellar' && walletNetwork !== undefined && walletNetwork !== activeNetwork()
+      !isMultiNetwork() &&
+      slug === 'stellar' &&
+      walletNetwork !== undefined &&
+      walletNetwork !== activeNetwork()
         ? otherStellarNetwork(
             activeNetwork(),
             process.env.NEXT_PUBLIC_STELLAR_OTHER_NETWORK_URL,

@@ -74,3 +74,36 @@ describe('the mismatch label', () => {
     expect(mismatchLabel(undefined)).toBe('Wrong network')
   })
 })
+
+describe('the prompt when the wallet is on the other network', () => {
+  it('names both networks and offers the one the wallet is already on', async () => {
+    const { mismatchPrompt } = await on('mainnet')
+    expect(mismatchPrompt('mainnet', 'testnet')).toEqual({
+      title: 'Your wallet is on Stellar testnet',
+      body: 'Switch it to Stellar mainnet to continue, or use Stellar testnet here instead.',
+      useWalletNetworkLabel: 'Use Stellar testnet instead',
+    })
+    expect(mismatchPrompt('testnet', 'mainnet').title).toBe('Your wallet is on Stellar mainnet')
+  })
+
+  it('gives Freighter its own steps and every other wallet a plain instruction', async () => {
+    const { switchSteps } = await on('mainnet')
+    expect(switchSteps('Freighter', 'mainnet')).toMatch(/Freighter.*Network.*Mainnet/i)
+    expect(switchSteps('Freighter', 'testnet')).toMatch(/Testnet/)
+    expect(switchSteps('xBull', 'mainnet')).toMatch(/xBull/)
+    expect(switchSteps(undefined, 'testnet')).toMatch(/wallet.*Stellar testnet/i)
+  })
+})
+
+describe('refusing to sign on the wrong network', () => {
+  it('refuses only when the wallet says it is on a different network', async () => {
+    const { refusesToSign } = await on('mainnet')
+    expect(refusesToSign(TESTNET, PUBLIC)).toBe(true)
+    expect(refusesToSign(PUBLIC, PUBLIC)).toBe(false)
+  })
+
+  it('lets a wallet that does not say which network it is on go on, since the passphrase is sent with the request', async () => {
+    const { refusesToSign } = await on('mainnet')
+    expect(refusesToSign(undefined, PUBLIC)).toBe(false)
+  })
+})

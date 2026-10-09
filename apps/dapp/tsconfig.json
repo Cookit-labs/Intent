@@ -2,12 +2,20 @@
   "extends": "@intent/tsconfig/tsconfig.nextjs.json",
   "compilerOptions": {
     // "baseUrl": ".",
-    "paths": { "@/*": ["./*"] },
+    "paths": {
+      "@/*": ["./*"]
+    },
     "outDir": ".next",
     "noEmit": true,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next-mainnet/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

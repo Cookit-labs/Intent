@@ -31,21 +31,21 @@ describe('choosing the network', () => {
     const config = await loadConfig(undefined)
     expect(config.activeNetwork()).toBe('testnet')
     expect(config.isMainnet()).toBe(false)
-    expect(config.stellarNetwork).toBe(config.stellarTestnet)
+    expect(config.stellarNetwork).toEqual(config.stellarTestnet)
     expect(config.stellarNetwork.networkPassphrase).toBe('Test SDF Network ; September 2015')
   })
 
   it('is testnet when the flag is blank, as an .env line left empty is', async () => {
     const config = await loadConfig('')
     expect(config.activeNetwork()).toBe('testnet')
-    expect(config.stellarNetwork).toBe(config.stellarTestnet)
+    expect(config.stellarNetwork).toEqual(config.stellarTestnet)
   })
 
   it('is mainnet when the flag says so', async () => {
     const config = await loadConfig('mainnet')
     expect(config.activeNetwork()).toBe('mainnet')
     expect(config.isMainnet()).toBe(true)
-    expect(config.stellarNetwork).toBe(config.stellarMainnet)
+    expect(config.stellarNetwork).toEqual(config.stellarMainnet)
   })
 
   it('refuses any other value at import, naming the flag', async () => {

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import { enabledNetworks, isMultiNetwork, type StellarNetworkName } from '@intent/config'
 import { NextResponse } from 'next/server'
 
 import { fetchFxPrices } from '../../../../lib/prices/reflector'
@@ -6,6 +7,7 @@ import { alertRecipient, getAlertsRepo, sponsorAlertThreshold } from '../../../.
 import { getEmailSender } from '../../../../lib/server/email'
 import { getStandingRulesRepo } from '../../../../lib/server/standing-rules'
 import { runTick, type SponsorWatch } from '../../../../lib/server/standing-tick'
+import { tickAllNetworks } from '../../../../lib/server/standing-tick-all'
 import { readSponsorBalance } from '../../../../lib/sponsor/balance'
 import { sponsorAccount } from '../../../../lib/sponsor/sponsor'
 import { fetchMarketPrices, toPriceTable } from '../../../../lib/swap/prices'
@@ -45,17 +47,25 @@ function appUrl(request: Request): string {
 }
 
 /** The sponsor watch, when there is a sponsor to watch and someone to tell. */
-async function sponsorWatch(): Promise<SponsorWatch | undefined> {
-  const account = sponsorAccount()
+async function sponsorWatch(network: StellarNetworkName): Promise<SponsorWatch | undefined> {
+  const account = sponsorAccount(process.env, network)
   const alertEmail = alertRecipient()
   if (account === undefined || alertEmail === undefined) return undefined
+
+  // One "already told you today" record per network, so a low testnet sponsor
+  // cannot silence the mainnet one. With one network the kinds are unchanged.
+  const alerts = await getAlertsRepo()
+  const kind = (k: string): string => (isMultiNetwork() ? `${k}:${network}` : k)
 
   return {
     account,
     balance: () => readSponsorBalance(account),
     alertBelowXlm: sponsorAlertThreshold(),
     alertEmail,
-    alerts: await getAlertsRepo(),
+    alerts: {
+      wasSent: (k, day) => alerts.wasSent(kind(k), day),
+      markSent: (k, day) => alerts.markSent(kind(k), day),
+    },
   }
 }
 
@@ -73,21 +83,30 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  // The same sources the rest of the app prices with, minus route quoting —
-  // a tick needs to know what an asset is worth, not what a swap would fill
-  // at. Both readers degrade rather than throw.
-  const [market, fx] = await Promise.all([fetchMarketPrices(), fetchFxPrices()])
-  const prices = { ...toPriceTable(fx), ...toPriceTable(market) }
+  // Each served network runs on its own, with that network selected: its
+  // rules, its prices and its sponsor. A scheduler has no request to read a
+  // network from, so each is named here.
+  const { result, failed } = await tickAllNetworks(enabledNetworks(), async (network) => {
+    // The same sources the rest of the app prices with, minus route quoting —
+    // a tick needs to know what an asset is worth, not what a swap would fill
+    // at. Both readers degrade rather than throw.
+    const [market, fx] = await Promise.all([fetchMarketPrices(), fetchFxPrices()])
+    const prices = { ...toPriceTable(fx), ...toPriceTable(market) }
 
-  const sponsor = await sponsorWatch()
-  const result = await runTick({
-    now: new Date(),
-    prices,
-    repo: await getStandingRulesRepo(),
-    mailer: getEmailSender(),
-    appUrl: appUrl(request),
-    ...(sponsor !== undefined ? { sponsor } : {}),
+    const sponsor = await sponsorWatch(network)
+    return runTick({
+      now: new Date(),
+      prices,
+      repo: await getStandingRulesRepo(network),
+      mailer: getEmailSender(),
+      appUrl: appUrl(request),
+      ...(sponsor !== undefined ? { sponsor } : {}),
+    })
   })
 
-  return NextResponse.json(result)
+  // A network that failed is named, and the status says so, so the scheduler
+  // can alert; the networks that ran have done their work either way.
+  return NextResponse.json(failed.length === 0 ? result : { ...result, failed }, {
+    status: failed.length === 0 ? 200 : 500,
+  })
 }

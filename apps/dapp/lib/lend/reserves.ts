@@ -1,4 +1,4 @@
-import { activeNetwork, stellarNetwork } from '@intent/config'
+import { activeNetwork, stellarNetwork, type StellarNetworkName } from '@intent/config'
 import {
   Account,
   Address,
@@ -10,7 +10,7 @@ import {
   type xdr,
 } from '@stellar/stellar-sdk'
 
-import { BLEND_POOL } from '../swap/contract-registry'
+import { blendPool } from '../swap/contract-registry'
 
 /**
  * Reading Blend's reserves, and turning them into a rate a person can read.
@@ -97,10 +97,11 @@ const READ_ONLY_SOURCE = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVV
  * and `mainnet.contracts.json` (read 2026-09-24); the mainnet one is the
  * first reserve the `Fixed` pool listed on the public network that day.
  */
-export const BLEND_XLM =
-  activeNetwork() === 'mainnet'
+export function blendXlm(network: StellarNetworkName = activeNetwork()): string {
+  return network === 'mainnet'
     ? 'CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA'
     : 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'
+}
 
 export interface ReserveConfig {
   index: number
@@ -187,7 +188,7 @@ async function simulate(
   args: xdr.ScVal[],
   options: ReadReserveOptions
 ): Promise<unknown> {
-  const poolId = options.poolId ?? BLEND_POOL
+  const poolId = options.poolId ?? blendPool()
 
   const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, '0'), {
     fee: BASE_FEE,
