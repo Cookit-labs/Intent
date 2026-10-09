@@ -5,7 +5,7 @@
 -- statements on first use; keep this in sync with ANALYTICS_DDL in
 -- apps/dapp/lib/server/analytics.ts.
 
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_in   TEXT;
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_out  TEXT;
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS amount_in  NUMERIC;
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC;
+ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS asset_in   TEXT;
+ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS asset_out  TEXT;
+ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS amount_in  NUMERIC;
+ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC;

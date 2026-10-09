@@ -11,7 +11,7 @@ import { reportError } from './report'
  *
  * Two small append-only logs, written as things happen and never changed:
  *
- *   executions   one row per transaction a user submitted through the app
+ *   usage_executions   one row per transaction a user submitted through the app
  *   agent_races  one row per agent competition, and one per agent in it
  *
  * They hold no emails and no text anyone typed or any model wrote. An execution
@@ -29,7 +29,7 @@ import { reportError } from './report'
  */
 
 export const ANALYTICS_DDL: readonly string[] = [
-  `CREATE TABLE IF NOT EXISTS executions (
+  `CREATE TABLE IF NOT EXISTS usage_executions (
     id            UUID        PRIMARY KEY,
     network       TEXT        NOT NULL,
     hash          TEXT,
@@ -40,13 +40,13 @@ export const ANALYTICS_DDL: readonly string[] = [
     failure       TEXT,
     submitted_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS executions_hash_idx ON executions (network, hash) WHERE hash IS NOT NULL`,
-  `CREATE INDEX IF NOT EXISTS executions_time_idx ON executions (network, submitted_at)`,
-  `CREATE INDEX IF NOT EXISTS executions_account_idx ON executions (network, account)`,
-  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_in TEXT`,
-  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS asset_out TEXT`,
-  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS amount_in NUMERIC`,
-  `ALTER TABLE executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS usage_executions_hash_idx ON usage_executions (network, hash) WHERE hash IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS usage_executions_time_idx ON usage_executions (network, submitted_at)`,
+  `CREATE INDEX IF NOT EXISTS usage_executions_account_idx ON usage_executions (network, account)`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS asset_in TEXT`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS asset_out TEXT`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS amount_in NUMERIC`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC`,
   `CREATE TABLE IF NOT EXISTS intent_reads (
     id         UUID        PRIMARY KEY,
     network    TEXT        NOT NULL,
@@ -279,7 +279,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
     async recordExecution(r) {
       // A hash is recorded once per network however often it is submitted.
       await query(
-        `INSERT INTO executions
+        `INSERT INTO usage_executions
            (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
             asset_in, asset_out, amount_in, volume_usd)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
