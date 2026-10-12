@@ -47,14 +47,38 @@ function amount(value: string): string {
   return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : value
 }
 
-function when(iso: string): string {
-  const then = new Date(iso).getTime()
-  const minutes = Math.round((Date.now() - then) / 60_000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+function time(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+
+function dayLabel(iso: string): string {
+  const date = new Date(iso)
+  const now = new Date()
+  if (dayKey(date) === dayKey(now)) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (dayKey(date) === dayKey(yesterday)) return 'Yesterday'
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
+  })
+}
+
+function groupByDay(rows: HistoryRow[]): { label: string; rows: HistoryRow[] }[] {
+  const groups = new Map<string, { label: string; rows: HistoryRow[] }>()
+  for (const row of rows) {
+    const key = dayKey(new Date(row.settledAt))
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, { label: dayLabel(row.settledAt), rows: [row] })
+    else group.rows.push(row)
+  }
+  return [...groups.values()]
 }
 
 export function SwapHistory(): JSX.Element | null {
@@ -146,8 +170,13 @@ export function SwapHistory(): JSX.Element | null {
         <span>{swaps.length}</span>
       </div>
 
-      {swaps.map((s) => (
-        <SwapRow key={s.txHash} swap={s} />
+      {groupByDay(swaps).map((group) => (
+        <section key={group.label} className="flex flex-col gap-3">
+          <h3 className="text-muted-foreground pt-2 text-xs font-medium">{group.label}</h3>
+          {group.rows.map((s) => (
+            <SwapRow key={s.txHash} swap={s} />
+          ))}
+        </section>
       ))}
     </div>
   )
@@ -180,7 +209,7 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
             {/* Named, like the intent rows. Without a title these read as a
                 different kind of thing entirely from the list beneath. */}
             <span className="text-sm font-semibold">{KIND_LABELS[swap.kind]}</span>
-            <span className="text-muted-foreground text-xs">{when(swap.settledAt)}</span>
+            <span className="text-muted-foreground text-xs">{time(swap.settledAt)}</span>
           </div>
 
           <div className="mt-1.5 flex items-center gap-2 text-sm tabular-nums">
