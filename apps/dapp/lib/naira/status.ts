@@ -5,12 +5,19 @@
  * "timeout: no deposit received"), and its name is not the user's to read.
  * Anything not recognised is `processing`: a payout in an unknown state is more
  * likely under way than failed, and "failed" would invite a second payment.
+ * Only the one state known to precede the deposit is `waiting`; "in bank
+ * queue" and anything unfamiliar are not, because paying into an order that
+ * already has its deposit would be paying twice.
  */
 export type NairaStatus = 'waiting' | 'processing' | 'paid' | 'expired' | 'failed'
 
 export function normaliseStatus(provider: string): NairaStatus {
   const s = provider.trim().toLowerCase()
   if (s === 'initiated') return 'waiting'
+  // The provider's "processing: wallet worker on it.." means its worker is
+  // watching the deposit wallet, which is before any deposit. Treating it as a
+  // deposit received refused the payment the order was waiting for.
+  if (s.startsWith('processing') && /wallet worker|watching/.test(s)) return 'waiting'
   if (s.startsWith('timeout')) return 'expired'
   if (s === 'disbursed' || s.startsWith('settled')) return 'paid'
   if (s === 'failed' || s.startsWith('failed')) return 'failed'
