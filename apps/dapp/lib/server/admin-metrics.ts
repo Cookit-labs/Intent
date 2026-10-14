@@ -1,7 +1,9 @@
 import type { StellarNetworkName } from '@intent/config'
 
+import { getNairaOrderRepo } from '../naira/orders'
 import { getAnalyticsRepo } from './analytics'
 import { databaseConfigured, getPool, withTimeout, type QueryFn } from './db'
+import { reportError } from './report'
 
 /**
  * The numbers the admin dashboard shows, read from the usage log.
@@ -156,6 +158,37 @@ export interface WaitlistCounts {
   rejected: number
 }
 
+/**
+ * A payout whose payment left the user's wallet and that the provider has not
+ * paid out. Holds no bank account number or holder name: the last four digits
+ * are enough to tell two orders apart.
+ */
+export interface NairaAttentionRow {
+  id: string
+  at: string
+  status: string
+  coin: string
+  amount: string
+  amountNgn: number
+  bankName: string
+  accountTail: string
+  paymentHash: string
+}
+
+export interface NairaReport {
+  orders: number
+  paid: { count: number; ngn: number }
+  /** Orders by status, and how many of them had their payment sent. */
+  byStatus: { status: string; count: number; sent: number; ngn: number }[]
+  /** Which asset the deposit was made in: XLM direct, or USDC after a swap. */
+  byCoin: { coin: string; orders: number; paid: number; paidNgn: number }[]
+  /**
+   * Not limited to the date range: a payment that was sent and never paid out
+   * matters however old it is, until it is resolved.
+   */
+  attention: NairaAttentionRow[]
+}
+
 export interface MetricsRepo {
   overview: (scope: Scope, now?: Date) => Promise<Overview>
   series: (scope: Scope, now?: Date) => Promise<SeriesPoint[]>
@@ -170,6 +203,7 @@ export interface MetricsRepo {
   agents: (scope: Scope, now?: Date) => Promise<AgentsReport>
   intents: (scope: Scope, now?: Date) => Promise<IntentsReport>
   waitlist: () => Promise<WaitlistCounts>
+  naira: (scope: Scope, now?: Date) => Promise<NairaReport>
 }
 
 /** Every day from the first to the last, so a quiet day is a zero and not a gap in the chart. */
@@ -475,6 +509,66 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       }
     },
 
+    async naira(scope, now) {
+      const from = since(scope, now)
+      const params = [scope.network, from]
+      const inRange = `network = $1 AND ($2::timestamptz IS NULL OR created_at >= $2)`
+      const [status, coin, attention] = await Promise.all([
+        query(
+          `SELECT status, count(*) AS n,
+                  count(*) FILTER (WHERE payment_hash IS NOT NULL) AS sent,
+                  coalesce(sum(amount_ngn), 0) AS ngn
+           FROM naira_orders WHERE ${inRange} GROUP BY status ORDER BY n DESC`,
+          params
+        ),
+        query(
+          `SELECT coin, count(*) AS orders,
+                  count(*) FILTER (WHERE status = 'paid') AS paid,
+                  coalesce(sum(amount_ngn) FILTER (WHERE status = 'paid'), 0) AS paid_ngn
+           FROM naira_orders WHERE ${inRange} GROUP BY coin ORDER BY orders DESC`,
+          params
+        ),
+        query(
+          `SELECT id, created_at, status, coin, amount_xlm AS amount, amount_ngn, bank_name,
+                  right(account_number, 4) AS tail, payment_hash
+           FROM naira_orders
+           WHERE network = $1 AND payment_hash IS NOT NULL AND status <> 'paid'
+           ORDER BY created_at LIMIT 50`,
+          [scope.network]
+        ),
+      ])
+
+      const byStatus = status.rows.map((r) => ({
+        status: String(r['status']),
+        count: num(r['n']),
+        sent: num(r['sent']),
+        ngn: money(r['ngn']),
+      }))
+      const paidRow = byStatus.find((s) => s.status === 'paid')
+      return {
+        orders: byStatus.reduce((total, s) => total + s.count, 0),
+        paid: { count: paidRow?.count ?? 0, ngn: paidRow?.ngn ?? 0 },
+        byStatus,
+        byCoin: coin.rows.map((r) => ({
+          coin: String(r['coin']),
+          orders: num(r['orders']),
+          paid: num(r['paid']),
+          paidNgn: money(r['paid_ngn']),
+        })),
+        attention: attention.rows.map((r) => ({
+          id: String(r['id']),
+          at: new Date(String(r['created_at'])).toISOString(),
+          status: String(r['status']),
+          coin: String(r['coin']),
+          amount: String(r['amount']),
+          amountNgn: money(r['amount_ngn']),
+          bankName: String(r['bank_name']),
+          accountTail: String(r['tail']),
+          paymentHash: String(r['payment_hash']),
+        })),
+      }
+    },
+
     async waitlist() {
       const { rows } = await query(
         `SELECT status, count(*) AS n FROM waitlist_signups GROUP BY status`
@@ -498,6 +592,10 @@ export async function getMetricsRepo(): Promise<MetricsRepo | undefined> {
   if (!databaseConfigured()) return undefined
   // The log's tables are made on first use; make sure they are there before reading them.
   await getAnalyticsRepo()
+  // The payouts table and its `coin` column are made on first use too. Without
+  // this the dashboard could read them before the first order had ever run,
+  // and report a missing column as an empty report.
+  await getNairaOrderRepo().catch((e: unknown) => reportError('admin/naira-schema', e))
   const pool = getPool()
   return createMetricsRepo(async (sql, params) => {
     const result = await withTimeout(pool.query(sql, params), QUERY_TIMEOUT_MS)

@@ -3,6 +3,7 @@
 import { Button, ChainMark, Input, Label, cn } from '@intent/ui'
 import {
   ArrowLeftRight,
+  Banknote,
   Brain,
   ChevronDown,
   Eye,
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { href: '/admin/transactions', label: 'Transactions', icon: ArrowLeftRight },
   { href: '/admin/intents', label: 'Intents', icon: Brain },
   { href: '/admin/wallets', label: 'Wallets', icon: Wallet },
+  { href: '/admin/payouts', label: 'Payouts', icon: Banknote },
   { href: '/admin/waitlist', label: 'Waitlist', icon: ListChecks, chainless: true },
 ]
 
