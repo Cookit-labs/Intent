@@ -75,7 +75,22 @@ export interface LinqClientOptions {
   apiKey?: string
   fetchImpl?: typeof fetch
   timeoutMs?: number
+  /** Pause before the single retry of a throttled or failed call. */
+  retryDelayMs?: number
 }
+
+/** What a call is, in words a person can use to tell one failure from another. */
+function stepName(path: string): string {
+  if (path.startsWith('/b2b/verifybank')) return 'bank lookup'
+  if (path.startsWith('/b2b/rate')) return 'rate'
+  if (path.startsWith('/b2b/stellar/trustline')) return 'refund check'
+  if (path.startsWith('/b2b/status')) return 'status'
+  if (path.startsWith('/b2b/offramp')) return 'order'
+  return 'request'
+}
+
+const RETRY_DELAY_MS = 800
+const MAX_RETRY_AFTER_MS = 2_500
 
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
@@ -103,16 +118,42 @@ export function createLinqClient(options: LinqClientOptions = {}): {
   const doFetch = options.fetchImpl ?? fetch
   const configured = baseUrl !== '' && apiKey !== ''
 
+  /**
+   * One request, with one retry when the provider is throttling or failing.
+   *
+   * Every call here is a read or carries an idempotency key, so asking again
+   * cannot do the thing twice: an order made by the first try is returned by
+   * the second. A timeout is never retried, because that is the case where the
+   * first try may still be running.
+   */
   async function call(
     path: string,
     init: { method: 'GET' | 'POST'; body?: unknown }
   ): Promise<LinqResult<Record<string, unknown>>> {
+    const first = await attempt(path, init)
+    if (first.retryable !== true) return first.result
+
+    const pause = Math.min(
+      first.retryAfterMs ?? options.retryDelayMs ?? RETRY_DELAY_MS,
+      MAX_RETRY_AFTER_MS
+    )
+    await new Promise((resolve) => setTimeout(resolve, pause))
+    return (await attempt(path, init)).result
+  }
+
+  async function attempt(
+    path: string,
+    init: { method: 'GET' | 'POST'; body?: unknown }
+  ): Promise<{
+    result: LinqResult<Record<string, unknown>>
+    retryable?: boolean
+    retryAfterMs?: number
+  }> {
+    const unavailable = (message: string): { result: LinqResult<Record<string, unknown>> } => ({
+      result: { ok: false, code: 'unavailable', message },
+    })
     if (!configured) {
-      return {
-        ok: false,
-        code: 'unavailable',
-        message: 'Naira payouts are not available right now.',
-      }
+      return unavailable('Naira payouts are not available right now.')
     }
 
     const controller = new AbortController()
@@ -136,34 +177,39 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       }
 
       if (res.status >= 500 || res.status === 429) {
+        const header = Number(res.headers.get('retry-after'))
         return {
-          ok: false,
-          code: 'unavailable',
-          message: 'Naira payouts are busy. Try again in a moment.',
+          // Says which call and what the provider answered, so a throttle can
+          // be told from an outage the next time it is reported.
+          ...unavailable(
+            `Naira payouts are busy (${stepName(path)}, ${res.status}). Try again in a moment.`
+          ),
+          retryable: true,
+          ...(Number.isFinite(header) && header > 0 ? { retryAfterMs: header * 1000 } : {}),
         }
       }
       if (res.status === 401 || res.status === 403) {
         // Said as unavailable: the user cannot fix a bad key, and its name is
         // not theirs to read.
-        return {
-          ok: false,
-          code: 'unavailable',
-          message: 'Naira payouts are not available right now.',
-        }
+        return unavailable('Naira payouts are not available right now.')
       }
       if (!res.ok) {
         return {
-          ok: false,
-          code: 'rejected',
-          message: str(body['message']) || 'The payout request was refused.',
+          result: {
+            ok: false,
+            code: 'rejected',
+            message: str(body['message']) || 'The payout request was refused.',
+          },
         }
       }
-      return { ok: true, value: body }
+      return { result: { ok: true, value: body } }
     } catch {
       return {
-        ok: false,
-        code: 'unknown',
-        message: 'No answer in time. The request may have gone through; check its status.',
+        result: {
+          ok: false,
+          code: 'unknown',
+          message: 'No answer in time. The request may have gone through; check its status.',
+        },
       }
     } finally {
       clearTimeout(timer)

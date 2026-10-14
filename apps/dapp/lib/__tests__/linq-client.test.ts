@@ -207,6 +207,75 @@ describe('linq client', () => {
     ).toMatchObject({ ok: false, code: 'unavailable' })
   })
 
+  it('retries once when the provider throttles, and succeeds on the second try', async () => {
+    let n = 0
+    const { fetchImpl, calls } = server(() => {
+      n += 1
+      return n === 1
+        ? { status: 429, body: { message: 'Rate limit exceeded' } }
+        : { status: 200, body: { accountName: 'John Doe', bankName: 'UBA' } }
+    })
+    const result = await createLinqClient({ ...config, fetchImpl, retryDelayMs: 0 }).verifyBank({
+      bankCode: '033',
+      accountNumber: '1234567890',
+    })
+    expect(result).toMatchObject({ ok: true, value: { accountName: 'John Doe' } })
+    expect(calls).toHaveLength(2)
+  })
+
+  it('says which call failed and what the provider answered, after one retry', async () => {
+    const { fetchImpl, calls } = server(() => ({ status: 503, body: {} }))
+    const result = await createLinqClient({ ...config, fetchImpl, retryDelayMs: 0 }).verifyBank({
+      bankCode: '033',
+      accountNumber: '1234567890',
+    })
+    expect(result).toMatchObject({ ok: false, code: 'unavailable' })
+    expect((result as { message: string }).message).toContain('(bank lookup, 503)')
+    expect(calls).toHaveLength(2)
+  })
+
+  it('retries an order with the same idempotency key, so it cannot become two', async () => {
+    let n = 0
+    const { fetchImpl, calls } = server(() => {
+      n += 1
+      return n === 1 ? { status: 502, body: {} } : { status: 201, body: goodOrder() }
+    })
+    const result = await createLinqClient({ ...config, fetchImpl, retryDelayMs: 0 }).createOrder(
+      orderInput
+    )
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(2)
+    const keys = calls.map((c) => JSON.parse(c.init.body ?? '{}') as { idempotencyKey: string })
+    expect(keys[0]?.idempotencyKey).toBe('key-1')
+    expect(keys[1]?.idempotencyKey).toBe('key-1')
+  })
+
+  it('does not retry a refusal or a timeout', async () => {
+    const refused = server(() => ({ status: 400, body: { message: 'invalid bank account' } }))
+    await createLinqClient({
+      ...config,
+      fetchImpl: refused.fetchImpl,
+      retryDelayMs: 0,
+    }).createOrder(orderInput)
+    expect(refused.calls).toHaveLength(1)
+
+    let hung = 0
+    const fetchImpl = ((_url: string, init: { signal?: AbortSignal }) => {
+      hung += 1
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    }) as unknown as typeof fetch
+    const result = await createLinqClient({
+      ...config,
+      fetchImpl,
+      timeoutMs: 20,
+      retryDelayMs: 0,
+    }).createOrder(orderInput)
+    expect(result).toMatchObject({ ok: false, code: 'unknown' })
+    expect(hung).toBe(1)
+  })
+
   it('reads an order status', async () => {
     const { fetchImpl, calls } = server(() => ({
       status: 200,
