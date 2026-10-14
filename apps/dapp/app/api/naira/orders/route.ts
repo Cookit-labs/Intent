@@ -9,6 +9,8 @@ import { guardNaira } from '../../../../lib/naira/guard'
 import { getNairaOrderRepo, orderNetwork, toPublic } from '../../../../lib/naira/orders'
 import { normaliseStatus } from '../../../../lib/naira/status'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
+import { balanceOf } from '../../../../lib/swap/delivered-balance'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,14 +21,28 @@ function maxNgn(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 200_000
 }
 
-const body = z.object({
+const common = {
   account: z.string().refine((a) => StrKey.isValidEd25519PublicKey(a)),
   bankCode: z.string().min(1).max(10),
   accountNumber: z.string().regex(/^\d{10}$/),
-  amountNgn: z.number().positive().finite(),
   /** Minted once per attempt by the page and reused on a retry. */
   idempotencyKey: z.string().uuid(),
-})
+}
+
+const body = z.discriminatedUnion('coin', [
+  z.object({ ...common, coin: z.literal('xlm'), amountNgn: z.number().positive().finite() }),
+  z.object({ ...common, coin: z.literal('usdc'), amountUsdc: z.number().positive().finite() }),
+])
+
+function overLimit(): Response {
+  return NextResponse.json(
+    {
+      error: 'over_limit',
+      message: `One payout is limited to ₦${maxNgn().toLocaleString('en-US')}.`,
+    },
+    { status: 400 }
+  )
+}
 
 /**
  * Creates the payout order and returns what the review card shows.
@@ -36,6 +52,12 @@ const body = z.object({
  * against, and a page that could choose it could choose a mismatch. The row is
  * stored before the response, so a deposit address is never in the user's hands
  * without a record of it.
+ *
+ * An XLM order is sized by the naira the user wants. A USDC order follows a
+ * swap, so it is sized by the USDC actually in hand; the browser reports that
+ * figure because Horizon does not expose a router's output, and it is bounded
+ * here by the account's real balance. A figure that is too high cannot be paid
+ * and one that is too low only pays the user less.
  */
 export async function POST(request: Request): Promise<Response> {
   const guard = guardNaira(request)
@@ -59,15 +81,6 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 }
     )
   }
-  if (input.amountNgn > maxNgn()) {
-    return NextResponse.json(
-      {
-        error: 'over_limit',
-        message: `One payout is limited to ₦${maxNgn().toLocaleString('en-US')}.`,
-      },
-      { status: 400 }
-    )
-  }
 
   const repo = await getNairaOrderRepo()
 
@@ -76,6 +89,55 @@ export async function POST(request: Request): Promise<Response> {
   if (existing !== undefined) return NextResponse.json({ order: toPublic(existing) })
 
   const linq = createLinqClient()
+
+  // What is being deposited, checked before the provider is asked for anything.
+  let usdc: number | undefined
+  if (input.coin === 'usdc') {
+    // Rounded down to the ledger's seven places, so the figure is one an
+    // account can actually hold and pay.
+    usdc = Math.floor(input.amountUsdc * 1e7) / 1e7
+    if (usdc <= 0) {
+      return NextResponse.json(
+        { error: 'invalid_body', message: 'That USDC amount is too small.' },
+        { status: 400 }
+      )
+    }
+
+    const held = await balanceOf(input.account, 'USDC').catch(() => undefined)
+    if (held !== undefined && BigInt(toBaseUnits(usdc.toFixed(7))) > held) {
+      return NextResponse.json(
+        {
+          error: 'insufficient',
+          message: `That is more USDC than the account holds (${fromBaseUnits(held.toString())}).`,
+        },
+        { status: 409 }
+      )
+    }
+
+    // The refund goes to the account itself, so it must be able to receive USDC.
+    const trust = await linq.hasUsdcTrustline(input.account)
+    if (!trust.ok) {
+      const status = trust.code === 'rejected' ? 422 : 503
+      return NextResponse.json({ error: trust.code, message: trust.message }, { status })
+    }
+    if (trust.value.trusts === false) {
+      return NextResponse.json(
+        { error: 'no_trustline', message: 'This account cannot receive USDC refunds yet.' },
+        { status: 409 }
+      )
+    }
+
+    // The cap is on naira, which a USDC order only learns once it is made, so
+    // it is estimated from the indicative rate first.
+    const rate = await linq.getRate()
+    if (!rate.ok) {
+      return NextResponse.json({ error: rate.code, message: rate.message }, { status: 503 })
+    }
+    if (usdc * rate.value.ngnPerUsd > maxNgn()) return overLimit()
+  } else if (input.amountNgn > maxNgn()) {
+    return overLimit()
+  }
+
   const verified = await linq.verifyBank({
     bankCode: input.bankCode,
     accountNumber: input.accountNumber,
@@ -86,7 +148,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const made = await linq.createOrder({
-    amountNGN: Math.round(input.amountNgn * 100) / 100,
+    coin: input.coin,
+    ...(input.coin === 'xlm'
+      ? { amountNGN: Math.round(input.amountNgn * 100) / 100 }
+      : { amountStableCoin: usdc as number }),
     bankCode: input.bankCode,
     bankName: bank.name,
     bankAccount: input.accountNumber,
@@ -115,7 +180,9 @@ export async function POST(request: Request): Promise<Response> {
     accountNumber: input.accountNumber,
     accountName: verified.value.accountName,
     depositAddress: order.depositAddress,
-    amountXlm: String(order.amountXlm),
+    coin: order.coin,
+    // Seven places, never exponent notation: this string becomes a payment amount.
+    amount: order.amountCoin.toFixed(7),
     amountNgn: String(order.amountNGN),
     rate: String(order.rate),
     status: normaliseStatus(order.status),

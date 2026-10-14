@@ -1,5 +1,6 @@
 'use client'
 
+import type { NairaOrderView } from '../lib/naira/orders'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useChain } from '../providers/chain-provider'
@@ -151,6 +152,11 @@ export interface SequenceState {
    * card, and what this browser's address book has to say about it.
    */
   send?: SendReview
+  /**
+   * The payout order, once the swap has settled and the server has made it.
+   * Followed to the bank afterwards by its id.
+   */
+  naira?: { orderId: string }
 }
 
 /** A payment as the server built it, for the review card. */
@@ -242,6 +248,24 @@ export interface SwapThenOfframp {
   limits?: WithdrawLimits
 }
 
+/**
+ * A swap into USDC, then a payout of whatever it delivered to a bank in naira.
+ *
+ * The bank details are collected before the swap, so that the payout order can
+ * be made the moment the swap settles. The order is made from what actually
+ * arrived: its USDC amount is not knowable until step one confirms.
+ */
+export interface SwapThenNaira {
+  kind: 'swap-then-naira'
+  quote: unknown
+  /** Always USDC; carried so the balance change can be measured. */
+  receiveSymbol: string
+  /** Held in memory for the one request that creates the order; never stored here. */
+  bankCode: string
+  accountNumber: string
+  swapLabel?: string
+}
+
 /** A withdrawal of USDC already held. One step, one signature. */
 export interface OfframpOnly {
   kind: 'offramp-only'
@@ -250,7 +274,13 @@ export interface OfframpOnly {
   amount?: string
 }
 
-export type SequenceRequest = SwapThenLend | SwapThenOfframp | OfframpOnly | SendOnly | SwapThenSend
+export type SequenceRequest =
+  | SwapThenLend
+  | SwapThenOfframp
+  | SwapThenNaira
+  | OfframpOnly
+  | SendOnly
+  | SwapThenSend
 
 export interface Sequence extends SequenceState {
   /** Builds the first step and shows the whole sequence. Does not sign. */
@@ -262,6 +292,11 @@ export interface Sequence extends SequenceState {
   reset: () => void
   /** Re-opens the anchor's page during `anchor-interactive`. */
   reopenAnchor: () => void
+  /**
+   * Tries again to set up the payout after a swap that already settled.
+   * Reuses the same request key, so it can never become a second order.
+   */
+  retryPayout: () => void
 }
 
 const EMPTY: SequenceState = { phase: 'idle', steps: [], current: 0 }
@@ -302,6 +337,14 @@ export function useSequence(): Sequence {
     { asset: string; amount: string; address: string; memo?: string } | undefined
   >(undefined)
 
+  // The payout's request key and what it was made for. The key is minted once,
+  // so a retry after a timeout returns the order that may already exist instead
+  // of making another; `delivered` is what the swap put in the account, kept so
+  // a retry does not need the swap again.
+  const nairaPlan = useRef<
+    { idempotencyKey: string; orderId?: string; delivered?: string } | undefined
+  >(undefined)
+
   // Mirrors `state.phase` for the guard in the anchor effect below, which must
   // read the sequence's *current* phase from inside a closure that would
   // otherwise capture a stale one — and must not depend on `state.phase`, or
@@ -317,6 +360,7 @@ export function useSequence(): Sequence {
     builtFor.current = undefined
     lendPlan.current = undefined
     sendPlan.current = undefined
+    nairaPlan.current = undefined
     resetOfframp()
   }, [resetOfframp])
 
@@ -456,6 +500,7 @@ export function useSequence(): Sequence {
 
       async function run(): Promise<void> {
         setRequest(req)
+        nairaPlan.current = undefined
 
         if (req.kind === 'offramp-only') {
           // One step. The anchor's part starts immediately; the payment is
@@ -557,6 +602,10 @@ export function useSequence(): Sequence {
             }
           } else if (req.kind === 'swap-then-send') {
             second = { label: sendStepLabel(undefined, req.receiveSymbol, req.recipient) }
+          } else if (req.kind === 'swap-then-naira') {
+            // Re-said with real figures once the order exists, before the
+            // second signature.
+            second = { label: 'Pay out the USDC to the bank in naira' }
           } else {
             second = { label: withdrawStepLabel(req.anchor) }
           }
@@ -680,6 +729,88 @@ export function useSequence(): Sequence {
       // up and raises the next wallet prompt, so the user signs twice instead
       // of clicking twice and signing twice.
       setState((s) => ({ ...s, phase: 'review', current: 1, xdr: envelope, autoAdvance: true }))
+    },
+    []
+  )
+
+  /**
+   * Makes the payout order from what the swap actually delivered, builds the
+   * USDC payment for it, and shows the final figures before asking to sign.
+   *
+   * No `autoAdvance`: this is a payment to somebody else's bank account, and
+   * slippage has already moved the numbers, so the user reads them first.
+   *
+   * Every failure here is said with where the user stands: the swap settled,
+   * so they hold USDC, and nothing has been paid out.
+   */
+  const buildNaira = useCallback(
+    async (signer: string, req: SwapThenNaira, amountUsdc: string): Promise<void> => {
+      setState((s) => ({ ...s, phase: 'building' }))
+
+      const plan = nairaPlan.current ?? { idempotencyKey: crypto.randomUUID() }
+      nairaPlan.current = plan
+      plan.delivered = amountUsdc
+      const holding = ' The swap went through; you are holding USDC and nothing was paid out.'
+
+      try {
+        const created = await fetch('/api/naira/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            coin: 'usdc',
+            account: signer,
+            bankCode: req.bankCode,
+            accountNumber: req.accountNumber,
+            amountUsdc: Number(amountUsdc),
+            idempotencyKey: plan.idempotencyKey,
+          }),
+        })
+        const made = (await created.json()) as { order?: NairaOrderView; message?: string }
+        if (!created.ok || made.order === undefined) {
+          setState((s) => ({
+            ...s,
+            phase: 'failed',
+            error: (made.message ?? 'The payout could not be set up.') + holding,
+          }))
+          return
+        }
+        const order = made.order
+        plan.orderId = order.id
+
+        const buildRes = await fetch(`/api/naira/orders/${order.id}/build`, { method: 'POST' })
+        const built = (await buildRes.json()) as { xdr?: string; message?: string }
+        if (!buildRes.ok || built.xdr === undefined) {
+          setState((s) => ({
+            ...s,
+            phase: 'failed',
+            error: (built.message ?? 'The payment could not be built.') + holding,
+          }))
+          return
+        }
+
+        const envelope = built.xdr
+        const ngn = Number(order.amountNgn).toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+        const label =
+          `Send ${order.amount} USDC so ${order.accountName} receives ₦${ngn} ` +
+          `at ${order.bankName} ${order.accountMask}`
+        setState((s) => ({
+          ...s,
+          phase: 'review',
+          current: 1,
+          xdr: envelope,
+          naira: { orderId: order.id },
+          steps: s.steps.map((step, i) => (i === 1 ? { ...step, label } : step)),
+        }))
+      } catch {
+        setState((s) => ({
+          ...s,
+          phase: 'failed',
+          error: 'The payout service did not answer.' + holding,
+        }))
+      }
     },
     []
   )
@@ -901,6 +1032,11 @@ export function useSequence(): Sequence {
       (req.kind === 'send-only' && stepIndex === 0) ||
       (req.kind === 'swap-then-send' && stepIndex === 1)
 
+    // Which step pays the bank's deposit address: the second of a
+    // swap-then-naira. Its submit route re-checks the envelope against the
+    // stored order.
+    const isNairaStep = req.kind === 'swap-then-naira' && stepIndex === 1
+
     async function run(): Promise<void> {
       // Captured before the swap runs, so what it delivers can be measured as
       // a difference. A router reports its output as a contract return value
@@ -941,15 +1077,17 @@ export function useSequence(): Sequence {
 
       setState((s) => ({ ...s, phase: 'submitting' }))
 
-      const endpoint = isSendStep
-        ? '/api/send/submit'
-        : isOfframpStep
-          ? '/api/offramp/submit'
-          : stepIndex === 0
-            ? '/api/plan/submit'
-            : isDefindexStep
-              ? '/api/lend/defindex/submit'
-              : '/api/lend/submit'
+      const endpoint = isNairaStep
+        ? `/api/naira/orders/${nairaPlan.current?.orderId ?? ''}/submit`
+        : isSendStep
+          ? '/api/send/submit'
+          : isOfframpStep
+            ? '/api/offramp/submit'
+            : stepIndex === 0
+              ? '/api/plan/submit'
+              : isDefindexStep
+                ? '/api/lend/defindex/submit'
+                : '/api/lend/submit'
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -960,31 +1098,33 @@ export function useSequence(): Sequence {
           // payment belongs to, and the token that proves the account may act
           // on it. `isOfframpStep` narrows `req` to the two offramp kinds,
           // which is what carries the `anchor` field — no cast needed.
-          isSendStep
-            ? {
-                signedXdr: signed.signedXdr,
-                account: signer,
-                recipient: (req as SendOnly | SwapThenSend).recipient,
-                asset: sendPlan.current?.asset,
-                amount: sendPlan.current?.amount,
-                ...(sendPlan.current?.memo !== undefined ? { memo: sendPlan.current.memo } : {}),
-              }
-            : isOfframpStep
+          isNairaStep
+            ? { signedXdr: signed.signedXdr }
+            : isSendStep
               ? {
                   signedXdr: signed.signedXdr,
                   account: signer,
-                  anchor: req.anchor,
-                  transactionId: offrampTransactionId,
-                  authToken: offrampToken,
+                  recipient: (req as SendOnly | SwapThenSend).recipient,
+                  asset: sendPlan.current?.asset,
+                  amount: sendPlan.current?.amount,
+                  ...(sendPlan.current?.memo !== undefined ? { memo: sendPlan.current.memo } : {}),
                 }
-              : isDefindexStep
+              : isOfframpStep
                 ? {
                     signedXdr: signed.signedXdr,
                     account: signer,
-                    asset: lendPlan.current?.asset,
-                    amount: lendPlan.current?.amount,
+                    anchor: req.anchor,
+                    transactionId: offrampTransactionId,
+                    authToken: offrampToken,
                   }
-                : { signedXdr: signed.signedXdr, account: signer }
+                : isDefindexStep
+                  ? {
+                      signedXdr: signed.signedXdr,
+                      account: signer,
+                      asset: lendPlan.current?.asset,
+                      amount: lendPlan.current?.amount,
+                    }
+                  : { signedXdr: signed.signedXdr, account: signer }
         ),
       })
       const result = (await res.json()) as {
@@ -1069,7 +1209,7 @@ export function useSequence(): Sequence {
                   : // DeFindex has no position page this app knows of, so
                     // its step carries no link rather than Blend's. A payment
                     // left nothing behind anywhere.
-                    stepIndex > 0 && !isDefindexStep && !isSendStep
+                    stepIndex > 0 && !isDefindexStep && !isSendStep && !isNairaStep
                     ? { positionUrl: blendPositionUrl() }
                     : {}),
                 // Re-said in the past tense, which is what history shows.
@@ -1131,6 +1271,9 @@ export function useSequence(): Sequence {
           // Sized to what arrived, like the supply; held for a read, like the
           // anchor's payment, because the destination is somebody else's.
           await buildSend(signer, req, 1, fromBaseUnits(delivered), false)
+        } else if (req.kind === 'swap-then-naira') {
+          // The order is made from what arrived, not from what was quoted.
+          await buildNaira(signer, req, fromBaseUnits(delivered))
         } else {
           // The anchor is asked for what arrived, and the label is re-said
           // with the real figure rather than the estimate.
@@ -1167,6 +1310,7 @@ export function useSequence(): Sequence {
     request,
     buildLend,
     buildSend,
+    buildNaira,
     beginOfframp,
     forgetOfframp,
     offrampTransactionId,
@@ -1188,5 +1332,13 @@ export function useSequence(): Sequence {
 
   const reopenAnchor = useCallback(() => reopenOfframp(), [reopenOfframp])
 
-  return { ...state, prepare, confirm, stop, reset, reopenAnchor }
+  const retryPayout = useCallback(() => {
+    const delivered = nairaPlan.current?.delivered
+    if (request?.kind !== 'swap-then-naira' || delivered === undefined || address === undefined) {
+      return
+    }
+    void buildNaira(address, request, delivered)
+  }, [request, address, buildNaira])
+
+  return { ...state, prepare, confirm, stop, reset, reopenAnchor, retryPayout }
 }

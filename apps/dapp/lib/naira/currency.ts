@@ -97,3 +97,20 @@ export function readPayoutSource(text: string, xlmPriceUsd: number | undefined):
   }
   return { kind: 'xlm' }
 }
+
+export type PayoutPath = 'xlm' | 'usdc'
+
+/**
+ * Which route the form opens on, from how the instruction was worded.
+ *
+ * "Cash out", "withdraw" and "offramp" ask for the money to leave, so the
+ * direct XLM payment is preselected. "Swap" and "convert" ask for an exchange,
+ * so the agents get to compete on a swap into USDC first. It is a starting
+ * point only: the form says which route it is on and the user can change it.
+ */
+export function preselectPayoutPath(text: string): PayoutPath {
+  const lower = text.toLowerCase()
+  if (CASH_OUT_CUE.test(lower)) return 'xlm'
+  if (/\b(swap|convert|exchange|trade)\b/.test(lower)) return 'usdc'
+  return 'xlm'
+}

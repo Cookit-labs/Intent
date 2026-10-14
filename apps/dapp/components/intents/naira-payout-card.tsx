@@ -41,16 +41,28 @@ export function NairaPayoutCard({
   initialXlm,
   xlmPriceUsd,
   balanceXlm,
+  initialPath = 'xlm',
+  onConvertFirst,
 }: {
   initialXlm?: number
   xlmPriceUsd?: number
   balanceXlm?: string
+  /** Which route the form opens on; the user can change it. */
+  initialPath?: 'xlm' | 'usdc'
+  /**
+   * Hands the filled form to the swap flow. Absent means the convert-first
+   * route is not offered and the form only pays XLM directly.
+   */
+  onConvertFirst?: (v: { amountXlm: number; bankCode: string; accountNumber: string }) => void
 }): JSX.Element {
   const { state, create, pay, edit } = useNairaPayout()
 
   const [amount, setAmount] = useState(initialXlm !== undefined ? String(initialXlm) : '')
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
+  const [path, setPath] = useState<'xlm' | 'usdc'>(
+    onConvertFirst !== undefined ? initialPath : 'xlm'
+  )
 
   const banks = useQuery({
     queryKey: ['naira-banks'],
@@ -130,8 +142,8 @@ export function NairaPayoutCard({
         </div>
         <p className="text-muted-foreground text-sm">{STATUS_COPY[order.status]}</p>
         <p className="text-sm tabular-nums">
-          {order.amountXlm} XLM to {naira(Number(order.amountNgn))} for {order.accountName},{' '}
-          {order.bankName} {order.accountMask}
+          {order.amount} {order.coin.toUpperCase()} to {naira(Number(order.amountNgn))} for{' '}
+          {order.accountName}, {order.bankName} {order.accountMask}
         </p>
       </div>
     )
@@ -149,11 +161,15 @@ export function NairaPayoutCard({
         </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm tabular-nums">
           <dt className="text-muted-foreground">You send</dt>
-          <dd className="text-right font-medium">{order.amountXlm} XLM</dd>
+          <dd className="text-right font-medium">
+            {order.amount} {order.coin.toUpperCase()}
+          </dd>
           <dt className="text-muted-foreground">They receive</dt>
           <dd className="text-right font-medium">{naira(Number(order.amountNgn))}</dd>
           <dt className="text-muted-foreground">Rate</dt>
-          <dd className="text-right">₦{Number(order.rate).toLocaleString('en-US')} per XLM</dd>
+          <dd className="text-right">
+            ₦{Number(order.rate).toLocaleString('en-US')} per {order.coin.toUpperCase()}
+          </dd>
           <dt className="text-muted-foreground">Account holder</dt>
           <dd className="text-right">{order.accountName}</dd>
           <dt className="text-muted-foreground">Bank</dt>
@@ -217,8 +233,42 @@ export function NairaPayoutCard({
   return (
     <div className="border-border flex flex-col gap-5 rounded-2xl border p-5">
       <div className="flex items-center gap-2 text-sm font-medium">
-        <Banknote className="h-4 w-4" /> Cash out XLM to naira
+        <Banknote className="h-4 w-4" />{' '}
+        {path === 'usdc' ? 'Convert XLM to USDC, then pay out naira' : 'Cash out XLM to naira'}
       </div>
+
+      {onConvertFirst !== undefined ? (
+        <div className="flex flex-col gap-1.5">
+          <div role="radiogroup" aria-label="How to pay" className="flex gap-2">
+            {(
+              [
+                ['xlm', 'Send XLM directly'],
+                ['usdc', 'Convert to USDC first'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={path === value}
+                onClick={() => setPath(value)}
+                className={
+                  path === value
+                    ? 'bg-foreground text-background rounded-full px-3 py-1.5 text-xs'
+                    : 'border-border hover:border-foreground/40 rounded-full border px-3 py-1.5 text-xs transition-colors'
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            {path === 'xlm'
+              ? 'One signature. Your XLM goes straight to the payout.'
+              : 'Two signatures. Agents compete on the swap, then the USDC is paid out. Swap fees and slippage apply.'}
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <div className="text-muted-foreground flex items-baseline justify-between text-xs">
@@ -249,7 +299,11 @@ export function NairaPayoutCard({
         />
         <p className="text-muted-foreground text-xs">
           {estimateNgn !== undefined
-            ? `About ${naira(estimateNgn)}. The final rate is locked when you review.`
+            ? `About ${naira(estimateNgn)}. ${
+                path === 'usdc'
+                  ? 'The swap result and the final figure are shown before you sign the payout.'
+                  : 'The final rate is locked when you review.'
+              }`
             : rate.isError
               ? (rate.error as Error).message
               : 'Enter an amount to see what the bank receives.'}
@@ -322,16 +376,86 @@ export function NairaPayoutCard({
         disabled={!canReview || phase === 'creating'}
         onClick={() => {
           if (estimateNgn === undefined) return
+          if (path === 'usdc' && onConvertFirst !== undefined) {
+            onConvertFirst({ amountXlm: xlm, bankCode, accountNumber })
+            return
+          }
           create({ amountNgn: estimateNgn, bankCode, accountNumber })
         }}
         className="bg-foreground text-background rounded-full px-4 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-40"
       >
         {phase === 'creating'
           ? 'Setting up your payout…'
-          : bankName !== undefined
-            ? `Review payout to ${bankName}`
-            : 'Review payout'}
+          : path === 'usdc'
+            ? 'Compare swap routes'
+            : bankName !== undefined
+              ? `Review payout to ${bankName}`
+              : 'Review payout'}
       </button>
+    </div>
+  )
+}
+
+/**
+ * Follows a payout that was set up by the swap flow, from the order's id.
+ *
+ * The card above follows its own orders; a two-leg payout is made inside the
+ * sequence, so this reads the same record by id until it reaches an end.
+ */
+export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element {
+  const order = useQuery({
+    queryKey: ['naira-order', orderId],
+    queryFn: async () => {
+      const res = await fetch(`/api/naira/orders/${orderId}`)
+      const body = (await res.json()) as {
+        order?: {
+          status: NairaStatus
+          amount: string
+          coin: string
+          amountNgn: string
+          accountName: string
+          bankName: string
+          accountMask: string
+        }
+      }
+      if (!res.ok || body.order === undefined) throw new Error('Could not read the payout.')
+      return body.order
+    },
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'paid' || status === 'failed' || status === 'expired' ? false : 5_000
+    },
+  })
+
+  const data = order.data
+  if (data === undefined) {
+    return (
+      <div className="border-border text-muted-foreground flex items-center gap-2 rounded-2xl border p-5 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+        Checking your payout…
+      </div>
+    )
+  }
+
+  const done = data.status === 'paid'
+  const bad = data.status === 'failed' || data.status === 'expired'
+  return (
+    <div className="border-border flex flex-col gap-3 rounded-2xl border p-5">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        {done ? (
+          <Check className="h-4 w-4" />
+        ) : bad ? (
+          <TriangleAlert className="h-4 w-4" />
+        ) : (
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+        )}
+        {done ? 'Payout complete' : bad ? 'Payout stopped' : 'Payout in progress'}
+      </div>
+      <p className="text-muted-foreground text-sm">{STATUS_COPY[data.status]}</p>
+      <p className="text-sm tabular-nums">
+        {data.amount} {data.coin.toUpperCase()} to {naira(Number(data.amountNgn))} for{' '}
+        {data.accountName}, {data.bankName} {data.accountMask}
+      </p>
     </div>
   )
 }

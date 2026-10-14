@@ -33,6 +33,11 @@ export interface NairaFormValues {
   accountNumber: string
 }
 
+/** The order body: an XLM payout is sized in naira, as the user typed it. */
+function xlmOrderBody(values: NairaFormValues): Record<string, unknown> {
+  return { coin: 'xlm', ...values }
+}
+
 export interface NairaPayoutState {
   phase: NairaPhase
   order?: NairaOrderView
@@ -81,7 +86,7 @@ export function useNairaPayout(): {
           const res = await fetch('/api/naira/orders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account: address, ...values, idempotencyKey }),
+            body: JSON.stringify({ account: address, ...xlmOrderBody(values), idempotencyKey }),
           })
           const body = (await res.json()) as { order?: NairaOrderView } & ApiError
           if (!res.ok || body.order === undefined) {

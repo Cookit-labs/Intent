@@ -58,7 +58,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const repo = await getNairaOrderRepo()
   await repo.setStatus(event.orderId, status, providerStatus || String(event.event), {
-    amountXlm: typeof event.amountStableCoin === 'number' ? event.amountStableCoin : 0,
+    amountCoin: typeof event.amountStableCoin === 'number' ? event.amountStableCoin : 0,
     amountNgn: typeof event.amountNGN === 'number' ? event.amountNGN : 0,
   })
   return NextResponse.json({ ok: true })
