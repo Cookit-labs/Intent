@@ -85,3 +85,6 @@ apps/dapp/test-results/
 
 # local https certificates and keys from next dev --experimental-https
 certificates
+
+.vercel
+.env*

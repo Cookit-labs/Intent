@@ -14,7 +14,15 @@ import { reportError } from '../../../../lib/server/report'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const VIEWS = ['overview', 'transactions', 'intents', 'agents', 'wallets', 'waitlist'] as const
+const VIEWS = [
+  'overview',
+  'transactions',
+  'intents',
+  'agents',
+  'wallets',
+  'waitlist',
+  'payouts',
+] as const
 type View = (typeof VIEWS)[number]
 
 const PAGE = 25
@@ -84,6 +92,19 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
     }
     case 'waitlist':
       return { waitlist: await repo.waitlist() }
+    case 'payouts': {
+      const explorer = stellarDescriptorFor(scope.network).blockExplorerUrl
+      const naira = await repo.naira(scope)
+      return {
+        naira: {
+          ...naira,
+          attention: naira.attention.map((r) => ({
+            ...r,
+            explorerUrl: `${explorer}/tx/${r.paymentHash}`,
+          })),
+        },
+      }
+    }
   }
 }
 

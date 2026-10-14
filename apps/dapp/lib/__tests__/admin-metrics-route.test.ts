@@ -41,6 +41,13 @@ function repo(): MetricsRepo {
     series: record('series', [
       { day: '2026-10-09', transactions: 4, failed: 1, volumeUsd: 10, wallets: 3 },
     ]),
+    naira: record('naira', {
+      orders: 0,
+      paid: { count: 0, ngn: 0 },
+      byStatus: [],
+      byCoin: [],
+      attention: [],
+    }),
     byKind: record('byKind', []),
     pairs: record('pairs', []),
     wallets: record('wallets', []),
@@ -185,6 +192,51 @@ describe('GET /api/admin/metrics', () => {
   it('splits active wallets into new and returning', async () => {
     const body = await (await GET(get('view=wallets'))).json()
     expect(body).toMatchObject({ active: 3, fresh: 1, returning: 2 })
+  })
+
+  it('answers payouts with an explorer link on each unpaid payment', async () => {
+    state.repo = {
+      ...repo(),
+      naira: async (scope: unknown) => {
+        state.calls.push({ fn: 'naira', scope })
+        return {
+          orders: 2,
+          paid: { count: 1, ngn: 2000 },
+          byStatus: [],
+          byCoin: [],
+          attention: [
+            {
+              id: 'ord-1',
+              at: '2026-10-13T09:00:00.000Z',
+              status: 'processing',
+              coin: 'xlm',
+              amount: '6.0000000',
+              amountNgn: 2000,
+              bankName: 'United Bank for Africa',
+              accountTail: '7890',
+              paymentHash: 'cd'.repeat(32),
+            },
+          ],
+        }
+      },
+    } as MetricsRepo
+
+    const res = await GET(get('view=payouts&network=mainnet&range=7d'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(state.calls[0]).toMatchObject({
+      fn: 'naira',
+      scope: { network: 'mainnet', range: '7d' },
+    })
+    expect(body.naira.attention[0].explorerUrl).toBe(
+      `https://stellar.expert/explorer/public/tx/${'cd'.repeat(32)}`
+    )
+    expect(JSON.stringify(body)).not.toMatch(/account_number|accountNumber/)
+  })
+
+  it('refuses the payouts view to anyone who is not the admin', async () => {
+    expect((await GET(get('view=payouts', {}))).status).toBe(401)
+    expect(state.calls).toEqual([])
   })
 
   it('answers the waitlist even for a chain that is not recorded', async () => {
