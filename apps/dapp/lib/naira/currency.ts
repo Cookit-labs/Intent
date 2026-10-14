@@ -70,7 +70,10 @@ export function unsupportedCurrencyMessage(currency: string): string {
   return `Payouts to ${currency} are not supported. Supported currency: ${supported}.`
 }
 
-export type PayoutSource = { kind: 'xlm'; amountXlm?: number } | { kind: 'other'; asset: string }
+export type PayoutSource =
+  | { kind: 'xlm'; amountXlm?: number }
+  | { kind: 'usdc'; amountUsdc?: number }
+  | { kind: 'other'; asset: string }
 
 /**
  * What the user is cashing out, and how much of it when they said.
@@ -83,9 +86,20 @@ export type PayoutSource = { kind: 'xlm'; amountXlm?: number } | { kind: 'other'
 export function readPayoutSource(text: string, xlmPriceUsd: number | undefined): PayoutSource {
   const lower = text.toLowerCase()
 
-  const other = /\b(usdc|cetes|wbtc|weth|eurc|aqua|yxlm)\b/.exec(lower)
+  const other = /\b(cetes|wbtc|weth|eurc|aqua|yxlm)\b/.exec(lower)
   if (other !== null && !/\bxlm\b/.test(lower)) {
     return { kind: 'other', asset: (other[1] ?? '').toUpperCase() }
+  }
+
+  // USDC already held is paid out as it is, with no swap. Naming XLM as well
+  // ("swap my XLM to USDC and offramp") is a request to convert, which is
+  // XLM's route, so XLM wins when both appear.
+  if (/\busdc\b/.test(lower) && !/\bxlm\b/.test(lower)) {
+    const units = /(\d+(?:\.\d+)?)\s*usdc\b/.exec(lower)
+    if (units !== null) return { kind: 'usdc', amountUsdc: Number(units[1]) }
+    const dollars = /\$\s*(\d+(?:\.\d+)?)/.exec(lower)
+    if (dollars !== null) return { kind: 'usdc', amountUsdc: Number(dollars[1]) }
+    return { kind: 'usdc' }
   }
 
   const units = /(\d+(?:\.\d+)?)\s*xlm\b/.exec(lower)

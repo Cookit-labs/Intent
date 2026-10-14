@@ -69,9 +69,27 @@ describe('readPayoutSource', () => {
   })
 
   it('refuses another asset by name', () => {
-    expect(readPayoutSource('cash out 10 USDC to naira', 0.1)).toEqual({
+    expect(readPayoutSource('cash out 10 CETES to naira', 0.1)).toEqual({
       kind: 'other',
-      asset: 'USDC',
+      asset: 'CETES',
+    })
+  })
+
+  it('pays out USDC that is already held, sized as stated', () => {
+    expect(readPayoutSource('cash out 2 USDC to naira', 0.1)).toEqual({
+      kind: 'usdc',
+      amountUsdc: 2,
+    })
+    expect(readPayoutSource('offramp $2.5 of USDC to naira', 0.1)).toEqual({
+      kind: 'usdc',
+      amountUsdc: 2.5,
+    })
+    expect(readPayoutSource('cash out my USDC to naira', 0.1)).toEqual({ kind: 'usdc' })
+  })
+
+  it('treats a mention of XLM alongside USDC as the XLM route', () => {
+    expect(readPayoutSource('swap 10 XLM to USDC and offramp to naira', 0.1)).toMatchObject({
+      kind: 'xlm',
     })
   })
 })

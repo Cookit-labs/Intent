@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { assertNairaPayment } from '../../../../../../lib/naira/build-payment'
 import { guardNaira } from '../../../../../../lib/naira/guard'
 import { getNairaOrderRepo } from '../../../../../../lib/naira/orders'
+import { reconcileBeforePay } from '../../../../../../lib/naira/reconcile'
 import { logExecution } from '../../../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
 import { sponsorForRequest } from '../../../../../../lib/sponsor/sponsor-request'
@@ -37,9 +38,16 @@ export async function POST(
   const repo = await getNairaOrderRepo()
   const row = await repo.getForEmail(context.params.id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
-  if (row.status !== 'waiting' || row.paymentHash !== undefined) {
+  // The same question as at build, asked again at the last moment: the
+  // signature took a while, and the order may have ended or been paid since.
+  const current = await reconcileBeforePay(repo, row)
+  if (current.status !== 'waiting' || current.paymentHash !== undefined) {
     return NextResponse.json(
-      { error: 'not_payable', message: 'This payout has already been paid or has ended.' },
+      {
+        error: 'not_payable',
+        providerStatus: current.providerStatus,
+        message: `This payout has already been paid or has ended (${current.providerStatus || current.status}).`,
+      },
       { status: 409 }
     )
   }

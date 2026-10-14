@@ -28,11 +28,16 @@ export async function GET(
   if (!isTerminal(row.status)) {
     const live = await createLinqClient().getStatus(row.providerOrder)
     if (live.ok && live.value.status !== '') {
+      const status = normaliseStatus(live.value.status)
       await repo.setStatus(
         row.providerOrder,
-        normaliseStatus(live.value.status),
+        status,
         live.value.status,
-        { amountCoin: live.value.amountCoin, amountNgn: live.value.amountNGN }
+        // Only an order that has had its deposit has settled figures; a
+        // waiting one keeps exactly what it was made for.
+        status === 'waiting'
+          ? undefined
+          : { amountCoin: live.value.amountCoin, amountNgn: live.value.amountNGN }
       )
       row = (await repo.getForEmail(row.id, guard.email)) ?? row
     }

@@ -41,12 +41,18 @@ export function NairaPayoutCard({
   initialXlm,
   xlmPriceUsd,
   balanceXlm,
+  asset = 'xlm',
+  balanceUsdc,
   initialPath = 'xlm',
   onConvertFirst,
 }: {
+  /** The amount asked for, in `asset`. */
   initialXlm?: number
   xlmPriceUsd?: number
   balanceXlm?: string
+  /** What is being paid out: XLM, or USDC that is already held. */
+  asset?: 'xlm' | 'usdc'
+  balanceUsdc?: string
   /** Which route the form opens on; the user can change it. */
   initialPath?: 'xlm' | 'usdc'
   /**
@@ -103,11 +109,20 @@ export function NairaPayoutCard({
     retry: false,
   })
 
+  const symbol = asset === 'usdc' ? 'USDC' : 'XLM'
   const xlm = Number(amount)
-  const maxXlm = balanceXlm !== undefined ? Math.max(0, Number(balanceXlm) - KEEP_XLM) : undefined
+  // XLM keeps a reserve back for fees and the account; USDC does not, because
+  // fees are paid in XLM.
+  const balance = asset === 'usdc' ? balanceUsdc : balanceXlm
+  const maxXlm =
+    balance !== undefined
+      ? Math.max(0, Number(balance) - (asset === 'usdc' ? 0 : KEEP_XLM))
+      : undefined
+  // A dollar of USDC is a dollar; XLM is priced.
+  const unitUsd = asset === 'usdc' ? 1 : xlmPriceUsd
   const estimateNgn =
-    rate.data !== undefined && xlmPriceUsd !== undefined && xlm > 0
-      ? Math.floor(xlm * xlmPriceUsd * rate.data * 100) / 100
+    rate.data !== undefined && unitUsd !== undefined && xlm > 0
+      ? Math.floor(xlm * unitUsd * rate.data * 100) / 100
       : undefined
 
   const overBalance = maxXlm !== undefined && xlm > maxXlm
@@ -234,7 +249,9 @@ export function NairaPayoutCard({
     <div className="border-border flex flex-col gap-5 rounded-2xl border p-5">
       <div className="flex items-center gap-2 text-sm font-medium">
         <Banknote className="h-4 w-4" />{' '}
-        {path === 'usdc' ? 'Convert XLM to USDC, then pay out naira' : 'Cash out XLM to naira'}
+        {path === 'usdc'
+          ? 'Convert XLM to USDC, then pay out naira'
+          : `Cash out ${symbol} to naira`}
       </div>
 
       {onConvertFirst !== undefined ? (
@@ -264,7 +281,7 @@ export function NairaPayoutCard({
           </div>
           <p className="text-muted-foreground text-xs">
             {path === 'xlm'
-              ? 'One signature. Your XLM goes straight to the payout.'
+              ? `One signature. Your ${symbol} goes straight to the payout.`
               : 'Two signatures. Agents compete on the swap, then the USDC is paid out. Swap fees and slippage apply.'}
           </p>
         </div>
@@ -272,11 +289,11 @@ export function NairaPayoutCard({
 
       <div className="flex flex-col gap-1.5">
         <div className="text-muted-foreground flex items-baseline justify-between text-xs">
-          <label htmlFor="naira-amount">Amount (XLM)</label>
-          {balanceXlm !== undefined ? (
+          <label htmlFor="naira-amount">Amount ({symbol})</label>
+          {balance !== undefined ? (
             <span>
-              Available: {Number(balanceXlm).toLocaleString('en-US', { maximumFractionDigits: 2 })}{' '}
-              XLM
+              Available: {Number(balance).toLocaleString('en-US', { maximumFractionDigits: 2 })}{' '}
+              {symbol}
               {maxXlm !== undefined && maxXlm > 0 ? (
                 <button
                   type="button"
@@ -310,8 +327,9 @@ export function NairaPayoutCard({
         </p>
         {overBalance ? (
           <p className="text-xs">
-            That is more than you can spend. About {KEEP_XLM} XLM stays in your account for the
-            reserve and fees.
+            {asset === 'usdc'
+              ? `That is more ${symbol} than the account holds.`
+              : `That is more than you can spend. About ${KEEP_XLM} XLM stays in your account for the reserve and fees.`}
           </p>
         ) : null}
       </div>
@@ -380,7 +398,12 @@ export function NairaPayoutCard({
             onConvertFirst({ amountXlm: xlm, bankCode, accountNumber })
             return
           }
-          create({ amountNgn: estimateNgn, bankCode, accountNumber })
+          create({
+            amountNgn: estimateNgn,
+            bankCode,
+            accountNumber,
+            ...(asset === 'usdc' ? { usdc: xlm } : {}),
+          })
         }}
         className="bg-foreground text-background rounded-full px-4 py-2.5 text-sm transition-opacity hover:opacity-90 disabled:opacity-40"
       >

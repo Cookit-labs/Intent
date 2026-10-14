@@ -121,6 +121,8 @@ export function IntentChat(): JSX.Element {
   const [nairaForm, setNairaForm] = useState<{
     key: number
     path: 'xlm' | 'usdc'
+    /** What is paid out: XLM, or USDC that is already held. */
+    asset: 'xlm' | 'usdc'
     amountXlm?: number
   } | null>(null)
   // The bank details of a convert-first payout, held only until the swap is
@@ -569,8 +571,19 @@ export function IntentChat(): JSX.Element {
         )
         return
       }
+      if (source.kind === 'usdc') {
+        // USDC already held goes out as it is: no swap, so no route to choose.
+        setNairaForm({
+          key: Date.now(),
+          path: 'xlm',
+          asset: 'usdc',
+          ...(source.amountUsdc !== undefined ? { amountXlm: source.amountUsdc } : {}),
+        })
+        return
+      }
       setNairaForm({
         key: Date.now(),
+        asset: 'xlm',
         path: preselectPayoutPath(text),
         ...(source.amountXlm !== undefined ? { amountXlm: source.amountXlm } : {}),
       })
@@ -1435,14 +1448,30 @@ export function IntentChat(): JSX.Element {
                     ? { xlmPriceUsd: swap.usdPrices['XLM'] }
                     : {})}
                   {...(balances?.xlm !== undefined ? { balanceXlm: balances.xlm } : {})}
+                  asset={nairaForm.asset}
+                  {...(balances?.trustlines?.['USDC']?.balance !== undefined
+                    ? { balanceUsdc: balances.trustlines['USDC'].balance }
+                    : {})}
                   initialPath={nairaForm.path}
-                  onConvertFirst={({ amountXlm, bankCode, accountNumber }) => {
-                    // The agents compete on XLM to USDC. The bank details wait
-                    // here until one is chosen and the swap is signed.
-                    setNairaConvert({ bankCode, accountNumber })
-                    setNairaForm(null)
-                    setParsed(parseIntent(`Swap ${amountXlm} XLM to USDC`, swap.usdPrices))
-                  }}
+                  {...(nairaForm.asset === 'usdc'
+                    ? {}
+                    : {
+                        onConvertFirst: ({
+                          amountXlm,
+                          bankCode,
+                          accountNumber,
+                        }: {
+                          amountXlm: number
+                          bankCode: string
+                          accountNumber: string
+                        }) => {
+                          // The agents compete on XLM to USDC. The bank details wait
+                          // here until one is chosen and the swap is signed.
+                          setNairaConvert({ bankCode, accountNumber })
+                          setNairaForm(null)
+                          setParsed(parseIntent(`Swap ${amountXlm} XLM to USDC`, swap.usdPrices))
+                        },
+                      })}
                 />
               ) : null}
 

@@ -31,11 +31,20 @@ export interface NairaFormValues {
   amountNgn: number
   bankCode: string
   accountNumber: string
+  /** Set when USDC already held is being paid out: the amount of USDC. */
+  usdc?: number
 }
 
-/** The order body: an XLM payout is sized in naira, as the user typed it. */
-function xlmOrderBody(values: NairaFormValues): Record<string, unknown> {
-  return { coin: 'xlm', ...values }
+/**
+ * The order body. An XLM payout is sized in naira, as the user typed it; USDC
+ * already held is sized by the USDC itself, which the server bounds by the
+ * account's real balance.
+ */
+function orderBody(values: NairaFormValues): Record<string, unknown> {
+  const { usdc, amountNgn, ...rest } = values
+  return usdc !== undefined
+    ? { coin: 'usdc', amountUsdc: usdc, ...rest }
+    : { coin: 'xlm', amountNgn, ...rest }
 }
 
 export interface NairaPayoutState {
@@ -74,7 +83,7 @@ export function useNairaPayout(): {
         setState({ phase: 'failed', error: 'Connect a wallet first.' })
         return
       }
-      const fingerprint = `${address}|${values.bankCode}|${values.accountNumber}|${values.amountNgn}`
+      const fingerprint = `${address}|${values.bankCode}|${values.accountNumber}|${values.amountNgn}|${values.usdc ?? ''}`
       if (attempt.current === null || attempt.current.fingerprint !== fingerprint) {
         attempt.current = { fingerprint, key: crypto.randomUUID() }
       }
@@ -86,7 +95,7 @@ export function useNairaPayout(): {
           const res = await fetch('/api/naira/orders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account: address, ...xlmOrderBody(values), idempotencyKey }),
+            body: JSON.stringify({ account: address, ...orderBody(values), idempotencyKey }),
           })
           const body = (await res.json()) as { order?: NairaOrderView } & ApiError
           // The order behind this key has ended, so the key is spent: the next
