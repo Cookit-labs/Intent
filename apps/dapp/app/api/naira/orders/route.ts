@@ -189,13 +189,26 @@ export async function POST(request: Request): Promise<Response> {
     return overLimit()
   }
 
-  const verified = await linq.verifyBank({
-    bankCode: input.bankCode,
-    accountNumber: input.accountNumber,
-  })
-  if (!verified.ok) {
-    const status = verified.code === 'rejected' ? 422 : 503
-    return NextResponse.json({ error: verified.code, message: verified.message }, { status })
+  // The holder is taken from this user's own earlier order to the same account
+  // when there is one, and from the provider's lookup otherwise. Either way it
+  // is a name the provider returned, never one the browser sent.
+  let accountName: string | undefined
+  try {
+    accountName = await repo.findHolder(guard.email, input.bankCode, input.accountNumber)
+  } catch {
+    // A record that cannot be read is the same as no record: ask the provider.
+    accountName = undefined
+  }
+  if (accountName === undefined) {
+    const verified = await linq.verifyBank({
+      bankCode: input.bankCode,
+      accountNumber: input.accountNumber,
+    })
+    if (!verified.ok) {
+      const status = verified.code === 'rejected' ? 422 : 503
+      return NextResponse.json({ error: verified.code, message: verified.message }, { status })
+    }
+    accountName = verified.value.accountName
   }
 
   const made = await linq.createOrder({
@@ -206,7 +219,7 @@ export async function POST(request: Request): Promise<Response> {
     bankCode: input.bankCode,
     bankName: bank.name,
     bankAccount: input.accountNumber,
-    accountName: verified.value.accountName,
+    accountName: accountName,
     refundAddress: input.account,
     customerRef: guard.email,
     idempotencyKey: input.idempotencyKey,
@@ -229,7 +242,7 @@ export async function POST(request: Request): Promise<Response> {
     bankCode: input.bankCode,
     bankName: bank.name,
     accountNumber: input.accountNumber,
-    accountName: verified.value.accountName,
+    accountName: accountName,
     depositAddress: order.depositAddress,
     coin: order.coin,
     // Seven places, never exponent notation: this string becomes a payment amount.

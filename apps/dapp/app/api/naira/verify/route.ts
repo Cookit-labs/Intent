@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { createLinqClient } from '../../../../lib/linq/client'
 import { bankByCode } from '../../../../lib/naira/banks'
 import { guardNaira } from '../../../../lib/naira/guard'
+import { holderOnRecord } from '../../../../lib/naira/holder'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 export const runtime = 'nodejs'
@@ -38,6 +39,13 @@ export async function POST(request: Request): Promise<Response> {
       { status: 400 }
     )
   }
+
+  // An account this user has already been paid out to was looked up by the
+  // provider then, and its holder is on record. Asking again spends lookups the
+  // provider throttles, and a throttled lookup blocked a payout to an account
+  // that had been verified an hour before.
+  const known = await holderOnRecord(guard.email, parsed.data.bankCode, parsed.data.accountNumber)
+  if (known !== undefined) return NextResponse.json({ accountName: known })
 
   const result = await createLinqClient().verifyBank(parsed.data)
   if (!result.ok) {
