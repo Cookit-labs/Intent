@@ -40,26 +40,35 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: true })
   }
 
-  // The event names the outcome; the status text separates a timeout from a
-  // failed payout. `processing` is never downgraded from a terminal state by
-  // the repo's own guard.
-  const providerStatus = typeof event.status === 'string' ? event.status : ''
-  const status =
+  // The status text is what the order is, read by the same rules as every
+  // other place a status comes from. The event name is only a fallback for an
+  // event that carries no text: trusting it over the text moved an order the
+  // provider was still watching for its deposit to "processing", and the
+  // payment it was waiting for was then refused.
+  const providerStatus = typeof event.status === 'string' ? event.status.trim() : ''
+  const fromEvent =
     event.event === 'order.processing'
       ? 'processing'
       : event.event === 'order.completed'
         ? 'paid'
         : event.event === 'order.failed'
-          ? normaliseStatus(providerStatus) === 'expired'
-            ? 'expired'
-            : 'failed'
+          ? 'failed'
           : undefined
+  const status = providerStatus !== '' ? normaliseStatus(providerStatus) : fromEvent
   if (status === undefined) return NextResponse.json({ ok: true })
 
+  // Settled figures describe what actually arrived and was paid. An order that
+  // is still waiting has none, and writing the provider's rounded echo of the
+  // request over it would change what the payment is asserted against.
+  const settled =
+    status === 'waiting'
+      ? undefined
+      : {
+          amountCoin: typeof event.amountStableCoin === 'number' ? event.amountStableCoin : 0,
+          amountNgn: typeof event.amountNGN === 'number' ? event.amountNGN : 0,
+        }
+
   const repo = await getNairaOrderRepo()
-  await repo.setStatus(event.orderId, status, providerStatus || String(event.event), {
-    amountCoin: typeof event.amountStableCoin === 'number' ? event.amountStableCoin : 0,
-    amountNgn: typeof event.amountNGN === 'number' ? event.amountNGN : 0,
-  })
+  await repo.setStatus(event.orderId, status, providerStatus || String(event.event), settled)
   return NextResponse.json({ ok: true })
 }

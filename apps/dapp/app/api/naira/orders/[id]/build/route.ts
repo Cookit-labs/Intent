@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { buildNairaPayment } from '../../../../../../lib/naira/build-payment'
 import { guardNaira } from '../../../../../../lib/naira/guard'
 import { getNairaOrderRepo } from '../../../../../../lib/naira/orders'
+import { reconcileBeforePay } from '../../../../../../lib/naira/reconcile'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
 
 export const runtime = 'nodejs'
@@ -27,9 +28,17 @@ export async function POST(
   const row = await repo.getForEmail(context.params.id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  if (row.status !== 'waiting') {
+  // Asked of the provider now, not read from a copy that a webhook may have
+  // moved: the only question is whether it is still waiting for the deposit.
+  const current = await reconcileBeforePay(repo, row)
+  if (current.status !== 'waiting' || current.paymentHash !== undefined) {
     return NextResponse.json(
-      { error: 'not_payable', message: 'This payout is no longer waiting for a deposit.' },
+      {
+        error: 'not_payable',
+        // The provider's own state is named, so a refusal can be told apart.
+        providerStatus: current.providerStatus,
+        message: `This payout is no longer waiting for a deposit (${current.providerStatus || current.status}).`,
+      },
       { status: 409 }
     )
   }

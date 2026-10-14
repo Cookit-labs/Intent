@@ -753,19 +753,42 @@ export function useSequence(): Sequence {
       const holding = ' The swap went through; you are holding USDC and nothing was paid out.'
 
       try {
-        const created = await fetch('/api/naira/orders', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            coin: 'usdc',
-            account: signer,
-            bankCode: req.bankCode,
-            accountNumber: req.accountNumber,
-            amountUsdc: Number(amountUsdc),
-            idempotencyKey: plan.idempotencyKey,
-          }),
-        })
-        const made = (await created.json()) as { order?: NairaOrderView; message?: string }
+        const makeOrder = async (): Promise<{
+          ok: boolean
+          body: { order?: NairaOrderView; message?: string; error?: string }
+        }> => {
+          const res = await fetch('/api/naira/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              coin: 'usdc',
+              account: signer,
+              bankCode: req.bankCode,
+              accountNumber: req.accountNumber,
+              amountUsdc: Number(amountUsdc),
+              idempotencyKey: plan.idempotencyKey,
+            }),
+          })
+          return {
+            ok: res.ok,
+            body: (await res.json()) as {
+              order?: NairaOrderView
+              message?: string
+              error?: string
+            },
+          }
+        }
+
+        let attempt = await makeOrder()
+        // The order behind this key ended unpaid (its ten minutes ran out
+        // while the user was away). The key is spent, and the USDC is still in
+        // the account, so a new request is what a retry means.
+        if (attempt.body.error === 'order_closed') {
+          plan.idempotencyKey = crypto.randomUUID()
+          attempt = await makeOrder()
+        }
+        const created = { ok: attempt.ok }
+        const made = attempt.body
         if (!created.ok || made.order === undefined) {
           setState((s) => ({
             ...s,
