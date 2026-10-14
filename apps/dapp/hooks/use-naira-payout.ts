@@ -89,6 +89,9 @@ export function useNairaPayout(): {
             body: JSON.stringify({ account: address, ...xlmOrderBody(values), idempotencyKey }),
           })
           const body = (await res.json()) as { order?: NairaOrderView } & ApiError
+          // The order behind this key has ended, so the key is spent: the next
+          // attempt must be a new request, not a replay of a closed one.
+          if (body.error === 'order_closed') attempt.current = null
           if (!res.ok || body.order === undefined) {
             setState({
               phase: 'failed',
@@ -173,7 +176,15 @@ export function useNairaPayout(): {
     })()
   }, [state.order, address, adapter])
 
-  const edit = useCallback(() => setState({ phase: 'form' }), [])
+  const edit = useCallback(() => {
+    // Back to the form starts a new request, unless the last one's outcome is
+    // unknown: then the same key must be kept, so a retry returns the order
+    // that may already exist instead of making a second.
+    setState((s) => {
+      if (s.unknown !== true) attempt.current = null
+      return { phase: 'form' }
+    })
+  }, [])
 
   // Follows the order to its end. The webhook is the fast path; this is the
   // one that still works when a webhook is missed.

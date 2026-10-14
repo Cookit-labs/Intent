@@ -77,17 +77,19 @@ describe('readPayoutSource', () => {
 })
 
 describe('preselectPayoutPath', () => {
-  it.each(['swap $30 worth of XLM to naira', 'convert 100 XLM to naira', 'Exchange my XLM to NGN'])(
-    'opens %j on convert-first',
-    (text) => {
-      expect(preselectPayoutPath(text)).toBe('usdc')
-    }
-  )
+  it.each([
+    'swap $30 worth of XLM to naira',
+    'convert 100 XLM to naira',
+    'Exchange my XLM to NGN',
+    'offramp $2 worth of XLM to naira',
+    'Offramp 50 XLM to naira',
+  ])('opens %j on convert-first', (text) => {
+    expect(preselectPayoutPath(text)).toBe('usdc')
+  })
 
   it.each([
     'cash out 100 XLM to naira',
     'withdraw $30 of XLM to my Nigerian bank',
-    'offramp 50 XLM to naira',
     'send 50 XLM to naira',
   ])('opens %j on the direct route', (text) => {
     expect(preselectPayoutPath(text)).toBe('xlm')

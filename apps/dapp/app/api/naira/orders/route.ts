@@ -123,7 +123,21 @@ export async function POST(request: Request): Promise<Response> {
 
   // A retry of the same attempt returns the order already made, not a second.
   const existing = await repo.getByIdempotencyKey(input.idempotencyKey, guard.email)
-  if (existing !== undefined) return NextResponse.json({ order: toPublic(existing) })
+  if (existing !== undefined) {
+    // An order that ended unpaid cannot be paid, and handing it back made the
+    // next step fail with "no longer waiting". Said here, so the page starts a
+    // new request instead of retrying this one.
+    if (existing.status !== 'waiting' && existing.paymentHash === undefined) {
+      return NextResponse.json(
+        {
+          error: 'order_closed',
+          message: 'That payout ended before it was paid. Review it again to start a new one.',
+        },
+        { status: 409 }
+      )
+    }
+    return NextResponse.json({ order: toPublic(existing) })
+  }
 
   const linq = createLinqClient()
 
