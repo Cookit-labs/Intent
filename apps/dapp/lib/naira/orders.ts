@@ -1,6 +1,7 @@
 import { activeNetwork } from '@intent/config'
 
 import { getPool, withTimeout, type QueryFn } from '../server/db'
+import type { NairaCoin } from './build-payment'
 import type { NairaStatus } from './status'
 
 /**
@@ -34,6 +35,9 @@ export const NAIRA_DDL: readonly string[] = [
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS naira_orders_email_idx ON naira_orders (email, created_at)`,
+  // Which asset the deposit is in. \`amount_xlm\` keeps its name and holds the
+  // amount of this asset; a rename is deferred.
+  `ALTER TABLE naira_orders ADD COLUMN IF NOT EXISTS coin TEXT NOT NULL DEFAULT 'xlm'`,
 ]
 
 export interface NairaOrderRow {
@@ -48,7 +52,9 @@ export interface NairaOrderRow {
   accountNumber: string
   accountName: string
   depositAddress: string
-  amountXlm: string
+  coin: NairaCoin
+  /** Amount of `coin` the deposit must be, display units. */
+  amount: string
   amountNgn: string
   rate: string
   status: NairaStatus
@@ -62,7 +68,8 @@ export interface NairaOrderView {
   id: string
   status: NairaStatus
   depositAddress: string
-  amountXlm: string
+  coin: NairaCoin
+  amount: string
   amountNgn: string
   rate: string
   bankName: string
@@ -76,7 +83,8 @@ export function toPublic(row: NairaOrderRow): NairaOrderView {
     id: row.id,
     status: row.status,
     depositAddress: row.depositAddress,
-    amountXlm: row.amountXlm,
+    coin: row.coin,
+    amount: row.amount,
     amountNgn: row.amountNgn,
     rate: row.rate,
     bankName: row.bankName,
@@ -99,7 +107,8 @@ function fromDb(r: Record<string, unknown>): NairaOrderRow {
     accountNumber: String(r['account_number']),
     accountName: String(r['account_name']),
     depositAddress: String(r['deposit_address']),
-    amountXlm: String(r['amount_xlm']),
+    coin: r['coin'] === 'usdc' ? 'usdc' : 'xlm',
+    amount: String(r['amount_xlm']),
     amountNgn: String(r['amount_ngn']),
     rate: String(r['rate']),
     status: String(r['status']) as NairaStatus,
@@ -122,7 +131,7 @@ export interface NairaOrderRepo {
     providerOrder: string,
     status: NairaStatus,
     providerStatus: string,
-    settled?: { amountXlm: number; amountNgn: number }
+    settled?: { amountCoin: number; amountNgn: number }
   ) => Promise<void>
   setPaymentHash: (id: string, hash: string) => Promise<void>
 }
@@ -138,8 +147,8 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
         `INSERT INTO naira_orders
           (id, network, email, account, provider_order, idempotency_key, bank_code, bank_name,
            account_number, account_name, deposit_address, amount_xlm, amount_ngn, rate, status,
-           provider_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+           provider_status, coin)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           o.id,
           o.network,
@@ -152,11 +161,12 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
           o.accountNumber,
           o.accountName,
           o.depositAddress,
-          o.amountXlm,
+          o.amount,
           o.amountNgn,
           o.rate,
           o.status,
           o.providerStatus,
+          o.coin,
         ]
       )
     },
@@ -200,7 +210,7 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
           providerOrder,
           status,
           providerStatus,
-          settled !== undefined && settled.amountXlm > 0 ? settled.amountXlm : null,
+          settled !== undefined && settled.amountCoin > 0 ? settled.amountCoin : null,
           settled !== undefined && settled.amountNgn > 0 ? settled.amountNgn : null,
         ]
       )

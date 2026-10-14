@@ -9,7 +9,7 @@ import {
   TransactionBuilder,
 } from '@stellar/stellar-sdk'
 
-import { toBaseUnits } from '../swap/assets'
+import { USDC, toBaseUnits } from '../swap/assets'
 
 /**
  * The XLM payment that funds a naira payout.
@@ -23,11 +23,19 @@ import { toBaseUnits } from '../swap/assets'
 
 const TIMEOUT_SECONDS = 180
 
+export type NairaCoin = 'xlm' | 'usdc'
+
 export interface NairaExpectation {
   /** The order's deposit address, read from the stored order. */
   destination: string
-  /** Display units of XLM, exactly as the order asked for. */
-  amountXlm: string
+  /** What is paid: native XLM, or the app's own USDC and no other. */
+  coin: NairaCoin
+  /** Display units of `coin`, exactly as the order asked for. */
+  amount: string
+}
+
+function assetFor(coin: NairaCoin): Asset {
+  return coin === 'usdc' ? new Asset(USDC.code, USDC.issuer as string) : Asset.native()
 }
 
 async function loadSequence(
@@ -56,7 +64,7 @@ export async function buildNairaPayment(options: {
     throw new Error('the order named a destination that is not an account')
   }
   // Refused here rather than inside the SDK with a message about nothing.
-  toBaseUnits(expectation.amountXlm)
+  toBaseUnits(expectation.amount)
 
   const sequence = await loadSequence(
     account,
@@ -71,8 +79,8 @@ export async function buildNairaPayment(options: {
     .addOperation(
       Operation.payment({
         destination: expectation.destination,
-        asset: Asset.native(),
-        amount: expectation.amountXlm,
+        asset: assetFor(expectation.coin),
+        amount: expectation.amount,
       })
     )
     .setTimeout(TIMEOUT_SECONDS)
@@ -120,18 +128,28 @@ export function assertNairaPayment(
   if (op.destination !== expectation.destination) {
     refuse('destination', `${op.destination ?? 'none'} is not the order's deposit address`)
   }
-  if (op.asset === undefined || !op.asset.isNative()) {
-    refuse('asset', 'only native XLM funds a naira payout')
+  if (expectation.coin === 'xlm') {
+    if (op.asset === undefined || !op.asset.isNative()) {
+      refuse('asset', 'this payout is funded in native XLM')
+    }
+  } else {
+    // USDC is admitted only as the app's own: code and issuer both, because a
+    // look-alike asset with the same code is a payment the provider never sees.
+    if (
+      op.asset === undefined ||
+      op.asset.isNative() ||
+      op.asset.code !== USDC.code ||
+      op.asset.issuer !== USDC.issuer
+    ) {
+      refuse('asset', 'this payout is funded in the app’s USDC and no other asset')
+    }
   }
 
   // Compared in stroops: '6' and '6.0000000' are one amount.
   if (
     op.amount === undefined ||
-    BigInt(toBaseUnits(op.amount)) !== BigInt(toBaseUnits(expectation.amountXlm))
+    BigInt(toBaseUnits(op.amount)) !== BigInt(toBaseUnits(expectation.amount))
   ) {
-    refuse(
-      'amount',
-      `${op.amount ?? 'none'} is not the ${expectation.amountXlm} the order asked for`
-    )
+    refuse('amount', `${op.amount ?? 'none'} is not the ${expectation.amount} the order asked for`)
   }
 }

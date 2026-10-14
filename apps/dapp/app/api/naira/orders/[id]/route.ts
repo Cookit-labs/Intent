@@ -32,7 +32,7 @@ export async function GET(
         row.providerOrder,
         normaliseStatus(live.value.status),
         live.value.status,
-        { amountXlm: live.value.amountXlm, amountNgn: live.value.amountNGN }
+        { amountCoin: live.value.amountCoin, amountNgn: live.value.amountNGN }
       )
       row = (await repo.getForEmail(row.id, guard.email)) ?? row
     }

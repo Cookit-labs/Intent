@@ -8,9 +8,9 @@ import { StrKey } from '@stellar/stellar-sdk'
  * The API key can create orders that pay real naira, so this must only be
  * reached from route handlers. Nothing here is imported by a client component.
  *
- * Every order is forced to native XLM on Stellar and `manualDeposit: true`, so
- * the payout follows what actually arrives and a short payment is never a loss
- * for the operator.
+ * Every order is on Stellar with `manualDeposit: true`, in native XLM or USDC,
+ * so the payout follows what actually arrives and a short payment is never a
+ * loss for the operator.
  */
 
 const DEFAULT_TIMEOUT_MS = 20_000
@@ -26,14 +26,24 @@ export type LinqFailure =
 
 export type LinqResult<T> = { ok: true; value: T } | LinqFailure
 
+export type LinqCoin = 'xlm' | 'usdc'
+
 export interface LinqOrderInput {
-  /** Exact naira the recipient receives. */
-  amountNGN: number
+  /**
+   * The asset the user deposits. XLM is ordered by the naira the recipient
+   * should get; USDC by the amount actually in hand, because it follows a swap
+   * whose output is only known once it settles.
+   */
+  coin: LinqCoin
+  /** Exact naira the recipient receives. Required for XLM. */
+  amountNGN?: number
+  /** USDC to deposit. Required for USDC. */
+  amountStableCoin?: number
   bankCode: string
   bankName: string
   bankAccount: string
   accountName: string
-  /** Where XLM returns if the payout fails. Any Stellar account can receive XLM. */
+  /** Where the deposit returns if the payout fails. A USDC refund needs a USDC trustline. */
   refundAddress: string
   customerRef: string
   /** Minted once per attempt and reused on a retry, so a retry cannot double-order. */
@@ -44,9 +54,11 @@ export interface LinqOrder {
   id: string
   /** Where the user sends XLM. Verified to be a classic Stellar account. */
   depositAddress: string
-  amountXlm: number
+  coin: LinqCoin
+  /** Amount of `coin` to deposit. */
+  amountCoin: number
   amountNGN: number
-  /** Naira per XLM, locked for this order. */
+  /** Naira per unit of `coin`, locked for this order. */
   rate: number
   status: string
 }
@@ -54,7 +66,7 @@ export interface LinqOrder {
 export interface LinqStatus {
   id: string
   status: string
-  amountXlm: number
+  amountCoin: number
   amountNGN: number
 }
 
@@ -82,6 +94,8 @@ export function createLinqClient(options: LinqClientOptions = {}): {
   /** Indicative naira per US dollar. The order locks its own rate. */
   getRate(): Promise<LinqResult<{ ngnPerUsd: number }>>
   createOrder(input: LinqOrderInput): Promise<LinqResult<LinqOrder>>
+  /** Whether a Stellar account can receive USDC. `unknown` when the check could not be made. */
+  hasUsdcTrustline(address: string): Promise<LinqResult<{ trusts: boolean | 'unknown' }>>
   getStatus(id: string): Promise<LinqResult<LinqStatus>>
 } {
   const baseUrl = (options.baseUrl ?? process.env['LINQ_BASE_URL'] ?? '').replace(/\/$/, '')
@@ -182,13 +196,39 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       return { ok: true, value: { ngnPerUsd } }
     },
 
+    async hasUsdcTrustline(address) {
+      const res = await call(`/b2b/stellar/trustline?address=${encodeURIComponent(address)}`, {
+        method: 'GET',
+      })
+      // An unreachable ledger is "not known", not "no": Linq says to accept the
+      // address and carry on, because its refund path checks again before paying.
+      if (!res.ok) {
+        return res.code === 'unavailable' ? { ok: true, value: { trusts: 'unknown' } } : res
+      }
+      return { ok: true, value: { trusts: res.value['trustsUSDC'] === true } }
+    },
+
     async createOrder(input) {
+      // Exactly one amount, matching the asset. A request carrying the wrong
+      // one would be priced as something the caller did not mean.
+      const amount =
+        input.coin === 'usdc'
+          ? input.amountStableCoin !== undefined && input.amountStableCoin > 0
+            ? { amountStableCoin: input.amountStableCoin }
+            : undefined
+          : input.amountNGN !== undefined && input.amountNGN > 0
+            ? { amountNGN: input.amountNGN }
+            : undefined
+      if (amount === undefined) {
+        return { ok: false, code: 'rejected', message: 'The payout amount is missing.' }
+      }
+
       const res = await call('/b2b/offramp', {
         method: 'POST',
         body: {
-          amountNGN: input.amountNGN,
+          ...amount,
           chain: 'stellar',
-          coin: 'xlm',
+          coin: input.coin,
           currency: 'NGN',
           manualDeposit: true,
           bankAccount: input.bankAccount,
@@ -207,12 +247,12 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       // asset or a malformed address all mean funds that cannot be recovered.
       const body = res.value
       const address = str(body['walletAddress'])
-      const amountXlm = num(body['amountStableCoin'])
+      const amountCoin = num(body['amountStableCoin'])
       const matches =
         str(body['chain']).toLowerCase() === 'stellar' &&
-        str(body['coin']).toLowerCase() === 'xlm' &&
+        str(body['coin']).toLowerCase() === input.coin &&
         StrKey.isValidEd25519PublicKey(address) &&
-        amountXlm > 0 &&
+        amountCoin > 0 &&
         str(body['id']) !== ''
       if (!matches) {
         return {
@@ -227,7 +267,8 @@ export function createLinqClient(options: LinqClientOptions = {}): {
         value: {
           id: str(body['id']),
           depositAddress: address,
-          amountXlm,
+          coin: input.coin,
+          amountCoin,
           amountNGN: num(body['amountNGN']),
           rate: num(body['rate']),
           status: str(body['status']),
@@ -243,7 +284,7 @@ export function createLinqClient(options: LinqClientOptions = {}): {
         value: {
           id: str(res.value['id']) || id,
           status: str(res.value['status']),
-          amountXlm: num(res.value['amountStableCoin']),
+          amountCoin: num(res.value['amountStableCoin']),
           amountNGN: num(res.value['amountNGN']),
         },
       }

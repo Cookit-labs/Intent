@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { detectPayout, readPayoutSource, unsupportedCurrencyMessage } from '../naira/currency'
+import {
+  detectPayout,
+  preselectPayoutPath,
+  readPayoutSource,
+  unsupportedCurrencyMessage,
+} from '../naira/currency'
 
 describe('detectPayout', () => {
   it.each([
@@ -68,5 +73,27 @@ describe('readPayoutSource', () => {
       kind: 'other',
       asset: 'USDC',
     })
+  })
+})
+
+describe('preselectPayoutPath', () => {
+  it.each(['swap $30 worth of XLM to naira', 'convert 100 XLM to naira', 'Exchange my XLM to NGN'])(
+    'opens %j on convert-first',
+    (text) => {
+      expect(preselectPayoutPath(text)).toBe('usdc')
+    }
+  )
+
+  it.each([
+    'cash out 100 XLM to naira',
+    'withdraw $30 of XLM to my Nigerian bank',
+    'offramp 50 XLM to naira',
+    'send 50 XLM to naira',
+  ])('opens %j on the direct route', (text) => {
+    expect(preselectPayoutPath(text)).toBe('xlm')
+  })
+
+  it('lets a cash-out cue win over a swap word', () => {
+    expect(preselectPayoutPath('swap my XLM and withdraw to my bank in naira')).toBe('xlm')
   })
 })

@@ -9,13 +9,15 @@ import {
 } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
+import { USDC } from '../swap/assets'
 import { assertNairaPayment, buildNairaPayment } from '../naira/build-payment'
 
 const PAYER = Keypair.random().publicKey()
 const DEPOSIT = Keypair.random().publicKey()
 const OTHER = Keypair.random().publicKey()
 
-const expectation = { destination: DEPOSIT, amountXlm: '6.0000000' }
+const expectation = { destination: DEPOSIT, coin: 'xlm' as const, amount: '6.0000000' }
+const usdcExpectation = { destination: DEPOSIT, coin: 'usdc' as const, amount: '29.8731234' }
 
 function envelope(
   overrides: { destination?: string; amount?: string; asset?: Asset; ops?: number } = {}
@@ -71,6 +73,40 @@ describe('assertNairaPayment', () => {
 
   it('refuses a transaction signed for a different account', () => {
     expect(() => assertNairaPayment(envelope(), OTHER, expectation)).toThrow(/source/)
+  })
+})
+
+describe('assertNairaPayment in USDC', () => {
+  const usdc = new Asset(USDC.code, USDC.issuer as string)
+  const lookAlike = new Asset(USDC.code, Keypair.random().publicKey())
+
+  it('admits the app’s USDC for the exact amount', () => {
+    expect(() =>
+      assertNairaPayment(envelope({ asset: usdc, amount: '29.8731234' }), PAYER, usdcExpectation)
+    ).not.toThrow()
+  })
+
+  it('refuses a look-alike USDC from another issuer', () => {
+    expect(() =>
+      assertNairaPayment(
+        envelope({ asset: lookAlike, amount: '29.8731234' }),
+        PAYER,
+        usdcExpectation
+      )
+    ).toThrow(/asset/)
+  })
+
+  it('refuses native XLM for a USDC order, and USDC for an XLM order', () => {
+    expect(() =>
+      assertNairaPayment(envelope({ amount: '29.8731234' }), PAYER, usdcExpectation)
+    ).toThrow(/asset/)
+    expect(() => assertNairaPayment(envelope({ asset: usdc }), PAYER, expectation)).toThrow(/asset/)
+  })
+
+  it('refuses a different USDC amount', () => {
+    expect(() =>
+      assertNairaPayment(envelope({ asset: usdc, amount: '29.8731235' }), PAYER, usdcExpectation)
+    ).toThrow(/amount/)
   })
 })
 

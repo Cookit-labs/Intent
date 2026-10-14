@@ -22,9 +22,10 @@ import { isLimitType } from '../../lib/intent-kind'
 import { fetchStellarBalances } from '../../lib/stellar-account'
 import { useQuery } from '@tanstack/react-query'
 import { OpenIntentCard } from './open-intent-card'
-import { NairaPayoutCard } from './naira-payout-card'
+import { NairaOrderTracker, NairaPayoutCard } from './naira-payout-card'
 import {
   detectPayout,
+  preselectPayoutPath,
   readPayoutSource,
   unsupportedCurrencyMessage,
 } from '../../lib/naira/currency'
@@ -117,7 +118,17 @@ export function IntentChat(): JSX.Element {
   const [affordError, setAffordError] = useState<string | null>(null)
   // The naira cash-out form, dropped into the thread only once an instruction
   // has been read as one. The counter gives each ask a fresh form.
-  const [nairaForm, setNairaForm] = useState<{ key: number; amountXlm?: number } | null>(null)
+  const [nairaForm, setNairaForm] = useState<{
+    key: number
+    path: 'xlm' | 'usdc'
+    amountXlm?: number
+  } | null>(null)
+  // The bank details of a convert-first payout, held only until the swap is
+  // chosen and signed. In memory: never in history, storage or the URL.
+  const [nairaConvert, setNairaConvert] = useState<{
+    bankCode: string
+    accountNumber: string
+  } | null>(null)
   // A market order held back until it settles, so an unsigned one leaves no
   // trace in history.
   const [pendingInput, setPendingInput] = useState<CreateIntentInput | null>(null)
@@ -522,6 +533,7 @@ export function IntentChat(): JSX.Element {
     setPlacedId(null)
     setAffordError(null)
     setNairaForm(null)
+    setNairaConvert(null)
     setPendingInput(null)
     setTurnId(crypto.randomUUID())
     setHistoryOpen(false)
@@ -559,6 +571,7 @@ export function IntentChat(): JSX.Element {
       }
       setNairaForm({
         key: Date.now(),
+        path: preselectPayoutPath(text),
         ...(source.amountXlm !== undefined ? { amountXlm: source.amountXlm } : {}),
       })
       return
@@ -868,6 +881,7 @@ export function IntentChat(): JSX.Element {
     setPlacedId(null)
     setAffordError(null)
     setNairaForm(null)
+    setNairaConvert(null)
     setPendingInput(null)
     setRestored(null)
     setTurnId(null)
@@ -970,6 +984,26 @@ export function IntentChat(): JSX.Element {
           limitPriceUsd: restingPrice,
         })
       }
+      return
+    }
+
+    // A naira payout that converts first: the swap into USDC the user chose,
+    // then a payout of whatever it delivers. The bank details were collected
+    // before the race, so the order can be made the moment the swap settles.
+    if (slug === 'stellar' && nairaConvert !== null) {
+      const route = routesByAgent[key] ?? winnerRoute
+      if (route === undefined || parsed.input.tokenOut !== 'USDC') {
+        setAffordError('No executable route into USDC was found, so the payout cannot start.')
+        return
+      }
+      sequence.prepare({
+        kind: 'swap-then-naira',
+        quote: route,
+        receiveSymbol: 'USDC',
+        bankCode: nairaConvert.bankCode,
+        accountNumber: nairaConvert.accountNumber,
+        swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for USDC`,
+      })
       return
     }
 
@@ -1401,7 +1435,33 @@ export function IntentChat(): JSX.Element {
                     ? { xlmPriceUsd: swap.usdPrices['XLM'] }
                     : {})}
                   {...(balances?.xlm !== undefined ? { balanceXlm: balances.xlm } : {})}
+                  initialPath={nairaForm.path}
+                  onConvertFirst={({ amountXlm, bankCode, accountNumber }) => {
+                    // The agents compete on XLM to USDC. The bank details wait
+                    // here until one is chosen and the swap is signed.
+                    setNairaConvert({ bankCode, accountNumber })
+                    setNairaForm(null)
+                    setParsed(parseIntent(`Swap ${amountXlm} XLM to USDC`, swap.usdPrices))
+                  }}
                 />
+              ) : null}
+
+              {sequence.kind === 'swap-then-naira' &&
+              sequence.phase === 'settled' &&
+              sequence.naira !== undefined ? (
+                <NairaOrderTracker orderId={sequence.naira.orderId} />
+              ) : null}
+
+              {sequence.kind === 'swap-then-naira' &&
+              sequence.phase === 'failed' &&
+              sequence.steps[0]?.hash !== undefined ? (
+                <button
+                  type="button"
+                  onClick={sequence.retryPayout}
+                  className="border-border hover:border-foreground/40 w-fit rounded-full border px-4 py-2 text-sm transition-colors"
+                >
+                  Try the payout again
+                </button>
               ) : null}
 
               {/* A resting order lives in the thread that placed it, with its

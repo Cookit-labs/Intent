@@ -37,13 +37,14 @@ export async function POST(
   try {
     const built = await buildNairaPayment({
       account: row.account,
-      expectation: { destination: row.depositAddress, amountXlm: row.amountXlm },
+      expectation: { destination: row.depositAddress, coin: row.coin, amount: row.amount },
     })
     return NextResponse.json({
       xdr: built.xdr,
       networkPassphrase: built.networkPassphrase,
       destination: row.depositAddress,
-      amountXlm: row.amountXlm,
+      coin: row.coin,
+      amount: row.amount,
     })
   } catch (e) {
     return NextResponse.json(

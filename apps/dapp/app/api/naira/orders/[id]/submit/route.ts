@@ -47,7 +47,8 @@ export async function POST(
   try {
     assertNairaPayment(signedXdr, row.account, {
       destination: row.depositAddress,
-      amountXlm: row.amountXlm,
+      coin: row.coin,
+      amount: row.amount,
     })
   } catch (e) {
     return NextResponse.json(

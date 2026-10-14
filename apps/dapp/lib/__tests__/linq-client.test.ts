@@ -36,6 +36,7 @@ function server(respond: (seen: Seen) => { status: number; body: unknown } | Pro
 const config = { baseUrl: 'https://linq.test', apiKey: 'biz_live_test' }
 
 const orderInput = {
+  coin: 'xlm' as const,
   amountNGN: 2000,
   bankCode: '033',
   bankName: 'United Bank for Africa',
@@ -45,6 +46,10 @@ const orderInput = {
   customerRef: 'user_1',
   idempotencyKey: 'key-1',
 }
+
+// A USDC order carries no naira amount: it is sized by the USDC in hand.
+const { amountNGN: _naira, ...withoutNaira } = orderInput
+const usdcBase = { ...withoutNaira, coin: 'usdc' as const }
 
 function goodOrder(overrides: Record<string, unknown> = {}): unknown {
   return {
@@ -97,6 +102,56 @@ describe('linq client', () => {
       idempotencyKey: 'key-1',
     })
     expect(sent).not.toHaveProperty('amountStableCoin')
+  })
+
+  it('orders USDC by the amount in hand and sends no naira amount', async () => {
+    const { fetchImpl, calls } = server(() => ({
+      status: 201,
+      body: goodOrder({ coin: 'usdc', coinType: 'USDC:GA5Z', amountStableCoin: 29.87 }),
+    }))
+    const result = await createLinqClient({ ...config, fetchImpl }).createOrder({
+      ...usdcBase,
+      amountStableCoin: 29.87,
+    })
+    expect(result).toMatchObject({ ok: true, value: { coin: 'usdc', amountCoin: 29.87 } })
+    const sent = JSON.parse(calls[0]?.init.body ?? '{}') as Record<string, unknown>
+    expect(sent).toMatchObject({ coin: 'usdc', amountStableCoin: 29.87, manualDeposit: true })
+    expect(sent).not.toHaveProperty('amountNGN')
+  })
+
+  it('refuses a USDC order that comes back as XLM, and an order with no amount', async () => {
+    const wrong = server(() => ({ status: 201, body: goodOrder({ coin: 'xlm' }) }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: wrong.fetchImpl }).createOrder({
+        ...usdcBase,
+        amountStableCoin: 10,
+      })
+    ).toMatchObject({ ok: false, code: 'unexpected_order' })
+
+    const none = server(() => ({ status: 201, body: goodOrder() }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: none.fetchImpl }).createOrder({
+        ...usdcBase,
+      })
+    ).toMatchObject({ ok: false, code: 'rejected' })
+    expect(none.calls).toHaveLength(0)
+  })
+
+  it('checks a USDC trustline, and treats an unreachable ledger as unknown', async () => {
+    const yes = server(() => ({ status: 200, body: { valid: true, trustsUSDC: true } }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: yes.fetchImpl }).hasUsdcTrustline(REFUND)
+    ).toEqual({ ok: true, value: { trusts: true } })
+
+    const no = server(() => ({ status: 200, body: { valid: true, trustsUSDC: false } }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: no.fetchImpl }).hasUsdcTrustline(REFUND)
+    ).toEqual({ ok: true, value: { trusts: false } })
+
+    const down = server(() => ({ status: 503, body: {} }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: down.fetchImpl }).hasUsdcTrustline(REFUND)
+    ).toEqual({ ok: true, value: { trusts: 'unknown' } })
   })
 
   it('refuses an order whose deposit address is not on Stellar, so funds are never sent astray', async () => {
