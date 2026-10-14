@@ -7,6 +7,7 @@ const repo = {
   insert: vi.fn(),
   getForEmail: vi.fn(),
   getByIdempotencyKey: vi.fn(),
+  findHolder: vi.fn(),
   getByProviderOrder: vi.fn(),
   setStatus: vi.fn(),
   setPaymentHash: vi.fn(),

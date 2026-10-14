@@ -126,6 +126,16 @@ export interface NairaOrderRepo {
   /** Scoped by email: an order belongs to whoever was signed in when it was made. */
   getForEmail: (id: string, email: string) => Promise<NairaOrderRow | undefined>
   getByIdempotencyKey: (key: string, email: string) => Promise<NairaOrderRow | undefined>
+  /**
+   * The holder name the provider gave for an account this user has already made
+   * an order to, if recently. Scoped by email, so nobody can read another
+   * person's lookups by guessing account numbers.
+   */
+  findHolder: (
+    email: string,
+    bankCode: string,
+    accountNumber: string
+  ) => Promise<string | undefined>
   getByProviderOrder: (providerOrder: string) => Promise<NairaOrderRow | undefined>
   setStatus: (
     providerOrder: string,
@@ -187,6 +197,18 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
       )
       const row = rows[0]
       return row === undefined ? undefined : fromDb(row)
+    },
+
+    async findHolder(email, bankCode, accountNumber) {
+      const { rows } = await query(
+        `SELECT account_name FROM naira_orders
+          WHERE email = $1 AND bank_code = $2 AND account_number = $3
+            AND created_at > now() - interval '30 days'
+          ORDER BY created_at DESC LIMIT 1`,
+        [email, bankCode, accountNumber]
+      )
+      const name = rows[0]?.['account_name']
+      return typeof name === 'string' && name !== '' ? name : undefined
     },
 
     async getByProviderOrder(providerOrder) {
