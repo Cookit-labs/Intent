@@ -166,6 +166,51 @@ describe('POST /api/naira/orders, USDC', () => {
     expect(toPublic).toBeTypeOf('function')
   })
 
+  it('is what an older page sends: no coin field, an XLM order', async () => {
+    const { POST } = await route()
+    const res = await POST(
+      post({
+        account: ACCOUNT,
+        bankCode: '033',
+        accountNumber: '1234567890',
+        amountNgn: 2000,
+        idempotencyKey: KEY,
+      })
+    )
+    expect(res.status).toBe(200)
+    expect(linq.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ coin: 'xlm', amountNGN: 2000 })
+    )
+  })
+
+  it.each([
+    ['accountNumber', { accountNumber: '12345' }, 'Enter the 10-digit account number.'],
+    ['amountNgn', { amountNgn: 0 }, 'Enter an amount greater than zero.'],
+    ['bankCode', { bankCode: '' }, 'Choose a bank.'],
+    ['idempotencyKey', { idempotencyKey: 'not-a-uuid' }, 'Reload it and try again.'],
+    ['account', { account: 'CNOTAWALLET' }, 'Connect a standard Stellar wallet.'],
+  ])('names the field that was refused: %s', async (field, override, text) => {
+    const { POST } = await route()
+    const res = await POST(
+      post({
+        coin: 'xlm',
+        account: ACCOUNT,
+        bankCode: '033',
+        accountNumber: '1234567890',
+        amountNgn: 2000,
+        idempotencyKey: KEY,
+        ...override,
+      })
+    )
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { field?: string; message: string }
+    expect(body.field).toBe(field)
+    expect(body.message).toContain(text)
+    expect(linq.createOrder).not.toHaveBeenCalled()
+    // The refused value is never echoed back.
+    expect(JSON.stringify(body)).not.toContain('CNOTAWALLET')
+  })
+
   it('still orders XLM by the naira amount', async () => {
     linq.createOrder.mockResolvedValue({
       ok: true,
