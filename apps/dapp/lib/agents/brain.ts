@@ -177,6 +177,13 @@ export interface ProposalRequest {
   market: MarketContext
   /** Chain slug, so venue and settlement talk stays plausible for the chain. */
   chain: string
+  /**
+   * What the user confirmed while the clarifier asked its questions, one fact
+   * per line. The same lines go to every agent, so the race compares models on
+   * identical information. Never holds anything the agents do not need to
+   * choose a route: account numbers stay out.
+   */
+  context?: string[]
   /** Caller-owned cancellation; the brain must honour it. */
   signal?: AbortSignal
 }

@@ -205,6 +205,7 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
         'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
+        ...clarifiedLines(req.context),
         '',
         'Submit your proposal.',
       ]
@@ -212,6 +213,24 @@ function buildMessages(req: ProposalRequest): { role: string; content: string }[
         .join('\n'),
     },
   ]
+}
+
+const MAX_CONTEXT_LINES = 8
+const MAX_CONTEXT_LINE_CHARS = 160
+
+/**
+ * The user's own answers to the clarifying questions, one flat line each.
+ *
+ * Flattened and capped like every other outside string: an answer is text a
+ * person typed, and a newline in it would read as the next line of the brief.
+ */
+function clarifiedLines(context: string[] | undefined): string[] {
+  const lines = (context ?? [])
+    .slice(0, MAX_CONTEXT_LINES)
+    .map((line) => promptSafe(line, MAX_CONTEXT_LINE_CHARS))
+    .filter((line) => line !== '')
+  if (lines.length === 0) return []
+  return ['Confirmed with the user before this race:', ...lines.map((line) => `  ${line}`)]
 }
 
 /**
