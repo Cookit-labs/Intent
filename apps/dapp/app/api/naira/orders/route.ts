@@ -29,10 +29,38 @@ const common = {
   idempotencyKey: z.string().uuid(),
 }
 
-const body = z.discriminatedUnion('coin', [
-  z.object({ ...common, coin: z.literal('xlm'), amountNgn: z.number().positive().finite() }),
-  z.object({ ...common, coin: z.literal('usdc'), amountUsdc: z.number().positive().finite() }),
-])
+const body = z.preprocess(
+  // A request with no `coin` is an XLM order: that is the only shape this route
+  // took before USDC was added, and a page opened before that change still sends
+  // it. Rejecting it left such a page showing a vague error with no way forward.
+  (raw) =>
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw) && !('coin' in raw)
+      ? { ...raw, coin: 'xlm' }
+      : raw,
+  z.discriminatedUnion('coin', [
+    z.object({ ...common, coin: z.literal('xlm'), amountNgn: z.number().positive().finite() }),
+    z.object({ ...common, coin: z.literal('usdc'), amountUsdc: z.number().positive().finite() }),
+  ])
+)
+
+/** What to tell the person about the first field that was refused, in their words. */
+function refusalFor(path: (string | number)[]): string {
+  switch (path[0]) {
+    case 'account':
+      return 'This wallet is not a Stellar account a payout can refund to. Connect a standard Stellar wallet.'
+    case 'accountNumber':
+      return 'Enter the 10-digit account number.'
+    case 'bankCode':
+      return 'Choose a bank.'
+    case 'amountNgn':
+    case 'amountUsdc':
+      return 'Enter an amount greater than zero.'
+    case 'idempotencyKey':
+      return 'This page is out of date. Reload it and try again.'
+    default:
+      return 'This page is out of date. Reload it and try again.'
+  }
+}
 
 function overLimit(): Response {
   return NextResponse.json(
@@ -67,8 +95,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = body.safeParse(await request.json().catch(() => null))
   if (!parsed.success) {
+    const first = parsed.error.issues[0]
     return NextResponse.json(
-      { error: 'invalid_body', message: 'Check the amount and the account number.' },
+      {
+        error: 'invalid_body',
+        // The field is named so a refusal can be told apart from the next one;
+        // the value is never echoed back.
+        ...(first !== undefined && first.path[0] !== undefined
+          ? { field: String(first.path[0]) }
+          : {}),
+        message: refusalFor(first?.path ?? []),
+      },
       { status: 400 }
     )
   }
