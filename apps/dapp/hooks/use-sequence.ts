@@ -1,5 +1,6 @@
 'use client'
 
+import { sequenceSubmitEndpoint } from '../lib/swap/sequence-endpoint'
 import type { NairaOrderView } from '../lib/naira/orders'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -1100,17 +1101,14 @@ export function useSequence(): Sequence {
 
       setState((s) => ({ ...s, phase: 'submitting' }))
 
-      const endpoint = isNairaStep
-        ? `/api/naira/orders/${nairaPlan.current?.orderId ?? ''}/submit`
-        : isSendStep
-          ? '/api/send/submit'
-          : isOfframpStep
-            ? '/api/offramp/submit'
-            : stepIndex === 0
-              ? '/api/plan/submit'
-              : isDefindexStep
-                ? '/api/lend/defindex/submit'
-                : '/api/lend/submit'
+      const endpoint = sequenceSubmitEndpoint({
+        stepIndex,
+        isNairaStep,
+        isSendStep,
+        isOfframpStep,
+        isDefindexStep,
+        orderId: nairaPlan.current?.orderId,
+      })
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
