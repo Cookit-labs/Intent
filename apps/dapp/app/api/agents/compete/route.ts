@@ -154,14 +154,18 @@ export async function POST(request: Request): Promise<Response> {
 
   let text: string
   let chain: string
+  let context: string[]
 
   try {
-    const body = (await request.json()) as { text?: unknown; chain?: unknown }
+    const body = (await request.json()) as { text?: unknown; chain?: unknown; context?: unknown }
     if (typeof body.text !== 'string' || body.text.trim() === '') {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
+    context = Array.isArray(body.context)
+      ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)
+      : []
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
   }
@@ -301,6 +305,7 @@ export async function POST(request: Request): Promise<Response> {
               seat,
               market,
               chain,
+              ...(context.length > 0 ? { context } : {}),
               signal: controllerForAgent.signal,
             })
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
+import { isMainnet } from '@intent/config'
 import { Bell, Clock, Inbox, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -21,6 +22,12 @@ import { isLimitType } from '../../lib/intent-kind'
 import { fetchStellarBalances } from '../../lib/stellar-account'
 import { useQuery } from '@tanstack/react-query'
 import { OpenIntentCard } from './open-intent-card'
+import { NairaPayoutCard } from './naira-payout-card'
+import {
+  detectPayout,
+  readPayoutSource,
+  unsupportedCurrencyMessage,
+} from '../../lib/naira/currency'
 import { ChatHistoryPanel } from './chat-history-panel'
 import { StandingRulesPanel } from './standing-rules-panel'
 import { StandingInboxPanel } from './standing-inbox-panel'
@@ -108,6 +115,9 @@ export function IntentChat(): JSX.Element {
   // price can be watched — and withdrawn — without leaving the chat.
   const [placedId, setPlacedId] = useState<string | null>(null)
   const [affordError, setAffordError] = useState<string | null>(null)
+  // The naira cash-out form, dropped into the thread only once an instruction
+  // has been read as one. The counter gives each ask a fresh form.
+  const [nairaForm, setNairaForm] = useState<{ key: number; amountXlm?: number } | null>(null)
   // A market order held back until it settles, so an unsigned one leaves no
   // trace in history.
   const [pendingInput, setPendingInput] = useState<CreateIntentInput | null>(null)
@@ -511,11 +521,48 @@ export function IntentChat(): JSX.Element {
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
+    setNairaForm(null)
     setPendingInput(null)
     setTurnId(crypto.randomUUID())
     setHistoryOpen(false)
     setRestored(null)
     setPending(null)
+
+    // "Swap $5 of XLM to naira" is a payout to a bank, which no trade parser
+    // below can express. Read first and by a closed list of currencies: a
+    // currency that cannot be paid out is answered with what can, and naira
+    // opens the form that collects the bank details.
+    const payout = detectPayout(text)
+    if (payout.kind !== 'none' && slug === 'stellar') {
+      setParsed(null)
+      setFollowOn(null)
+      supply.reset()
+      perp.reset()
+
+      if (payout.kind === 'unsupported') {
+        setAffordError(unsupportedCurrencyMessage(payout.currency))
+        return
+      }
+      if (!isMainnet()) {
+        setAffordError(
+          'Naira payouts pay real money and run on Stellar mainnet only. Switch to mainnet to cash out.'
+        )
+        return
+      }
+
+      const source = readPayoutSource(text, swap.usdPrices?.['XLM'])
+      if (source.kind === 'other') {
+        setAffordError(
+          `Only XLM can be cashed out to naira right now, not ${source.asset}. Swap it to XLM first.`
+        )
+        return
+      }
+      setNairaForm({
+        key: Date.now(),
+        ...(source.amountXlm !== undefined ? { amountXlm: source.amountXlm } : {}),
+      })
+      return
+    }
 
     // "Send 50 USDC to deon.xlm" is a payment, not a trade, and the trade
     // parser would read it as a buy of USDC. Read first, for the same reason
@@ -820,6 +867,7 @@ export function IntentChat(): JSX.Element {
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
+    setNairaForm(null)
     setPendingInput(null)
     setRestored(null)
     setTurnId(null)
@@ -1341,6 +1389,19 @@ export function IntentChat(): JSX.Element {
                 <div className="border-border rounded-2xl border border-dashed p-4">
                   <p className="text-foreground text-sm">{affordError}</p>
                 </div>
+              ) : null}
+
+              {nairaForm !== null ? (
+                <NairaPayoutCard
+                  key={nairaForm.key}
+                  {...(nairaForm.amountXlm !== undefined
+                    ? { initialXlm: nairaForm.amountXlm }
+                    : {})}
+                  {...(swap.usdPrices?.['XLM'] !== undefined
+                    ? { xlmPriceUsd: swap.usdPrices['XLM'] }
+                    : {})}
+                  {...(balances?.xlm !== undefined ? { balanceXlm: balances.xlm } : {})}
+                />
               ) : null}
 
               {/* A resting order lives in the thread that placed it, with its
