@@ -99,6 +99,10 @@ const SYSTEM_PROMPT = [
   'write it out in instruction ("Send 1 USDC to deon.xlm") using the amounts from the context.',
   'If you cannot work out what "it" is from the context, ask.',
   'facts must never contain an account number or a person’s name.',
+  'Correct obvious typos in the instruction when you write it out: "edge 5 USDC exposure" means "hedge 5 USDC exposure".',
+  'Hedging an asset means moving that exposure into another asset. If the request says hedge or reduce exposure to something',
+  'and does not say what to move into, ask one question for it and offer XLM as an example.',
+  'Never mark a request ready when you cannot tell what the user wants done; ask instead of passing the words along.',
 ].join(' ')
 
 export async function clarifyWithLlm(
