@@ -79,17 +79,27 @@ export type OrchestrateResult =
       context: string[]
     }
   | { status: 'ask'; question: string }
-  /** `answer` is the model's reply from the fact sheet; absent means show the fixed list. */
-  | { status: 'help'; answer?: string }
-  | { status: 'out_of_scope'; reason: string }
+  /**
+   * `reply` is what the model said back, in its own words and in the flow of the
+   * conversation. Absent only when it said nothing usable, and the caller then
+   * falls back to fixed text.
+   */
+  | { status: 'help'; reply?: string }
+  | { status: 'out_of_scope'; reply?: string }
   /** Four questions asked and the request is still not usable. */
-  | { status: 'unclear' }
+  | { status: 'unclear'; reply?: string }
 
 export interface OrchestrateOptions extends ReadIntentOptions {
   /** The chain the user is on, which decides what the fact sheet says Intent does. */
   chain?: string
   /** What the conversation already established, one line each. */
   context?: string[]
+  /**
+   * The earlier turns of this chat, replies included. Sent before `turns` and
+   * never counted as questions asked: it is what lets the model explain
+   * something differently the second time instead of repeating itself.
+   */
+  history?: OrchestrateTurn[]
 }
 
 const ORCHESTRATE_TOOL = {
@@ -110,15 +120,10 @@ const ORCHESTRATE_TOOL = {
           type: 'string',
           description: "One short question for the user when outcome is 'ask'. Empty otherwise.",
         },
-        answer: {
+        reply: {
           type: 'string',
           description:
-            "When outcome is 'help': a short reply, in plain words, to what the person asked about Intent, using only the facts given. Empty otherwise.",
-        },
-        reason: {
-          type: 'string',
-          description:
-            "When outcome is 'out_of_scope': a few words on what the message is about. Empty otherwise.",
+            "When outcome is 'help' or 'out_of_scope': what you say back to the person, in your own words, as a natural reply to their latest message in this conversation. Empty otherwise.",
         },
         instruction: {
           type: 'string',
@@ -153,8 +158,7 @@ const ORCHESTRATE_TOOL = {
       required: [
         'outcome',
         'question',
-        'answer',
-        'reason',
+        'reply',
         'instruction',
         'facts',
         'orderStyle',
@@ -171,7 +175,10 @@ const BASE_PROMPT = [
   "Decide by what the person MEANS, not by which words they used: 'flip', 'turn into', 'get me some', 'move my lumens to dollars' are all trades.",
   "Use outcome 'out_of_scope' for anything unrelated to that work — exercise, weather, recipes, general chat. Do not try to stretch an unrelated message into a trade.",
   "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
-  'For help, write answer yourself from the facts about Intent given below and nothing else. Answer the question they asked: if they ask about one thing, explain that one thing rather than listing everything. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed. Keep it short.',
+  'For help and out_of_scope, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
+  'The facts about Intent below are what is true, not wording to copy. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed.',
+  'Earlier turns of this conversation are given, including your own replies. Never repeat an earlier reply. If they ask you to explain better, or do not understand, explain it a different way: simpler, with a concrete example, or from another angle.',
+  'For an out_of_scope message, answer like a person: acknowledge what they said, say that it is outside what Intent does, and mention one or two things Intent could help with that fit what they said. Do not lecture and do not use a stock sentence.',
   "Use outcome 'ask' whenever you cannot tell what they want done or something it needs is missing. Ask one question, in plain words. Never guess, and never pass unclear words along as an instruction.",
   "Use outcome 'act' as soon as the request is complete. Do not ask for confirmation of something already clear.",
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
@@ -247,7 +254,11 @@ export async function orchestrateWithLlm(
     if (result === null) continue
     // After four questions the user has said all they are going to. A fifth is
     // not asked; the request is reported as not pinned down rather than run.
-    if (result.status === 'ask' && asked >= MAX_QUESTIONS) return { status: 'unclear' }
+    // The model's own last question becomes the reply, so even this ending is
+    // in its words rather than a stock sentence.
+    if (result.status === 'ask' && asked >= MAX_QUESTIONS) {
+      return { status: 'unclear', reply: result.question }
+    }
     return result
   }
   return null
@@ -277,7 +288,7 @@ async function orchestrateWithModel(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify({
         model: config.model,
-        messages: [{ role: 'system', content: system }, ...turns],
+        messages: [{ role: 'system', content: system }, ...(options.history ?? []), ...turns],
         tools: [ORCHESTRATE_TOOL],
         tool_choice: 'auto',
         temperature: 0,
@@ -299,8 +310,7 @@ async function orchestrateWithModel(
 interface OrchestrateArguments extends ToolArguments {
   outcome?: unknown
   question?: unknown
-  answer?: unknown
-  reason?: unknown
+  reply?: unknown
   instruction?: unknown
   facts?: unknown
   orderStyle?: unknown
@@ -330,12 +340,14 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
 
   switch (args.outcome) {
     case 'help': {
-      const answer = text(args.answer)
-      return answer === '' ? { status: 'help' } : { status: 'help', answer }
+      const reply = text(args.reply)
+      return reply === '' ? { status: 'help' } : { status: 'help', reply }
     }
 
-    case 'out_of_scope':
-      return { status: 'out_of_scope', reason: text(args.reason) }
+    case 'out_of_scope': {
+      const reply = text(args.reply)
+      return reply === '' ? { status: 'out_of_scope' } : { status: 'out_of_scope', reply }
+    }
 
     case 'ask': {
       const question = text(args.question)

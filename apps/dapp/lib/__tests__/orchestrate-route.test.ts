@@ -95,19 +95,39 @@ describe('POST /api/intent/orchestrate', () => {
       question: 'Which asset?',
     })
 
-    orchestrateWithLlm.mockResolvedValueOnce({ status: 'help', answer: 'Send moves an asset.' })
+    orchestrateWithLlm.mockResolvedValueOnce({ status: 'help', reply: 'Send moves an asset.' })
     expect(await (await POST(post({ turns: turns('what can I do?') }))).json()).toEqual({
       outcome: 'help',
-      answer: 'Send moves an asset.',
+      reply: 'Send moves an asset.',
     })
 
-    orchestrateWithLlm.mockResolvedValueOnce({ status: 'out_of_scope', reason: 'Exercise.' })
+    orchestrateWithLlm.mockResolvedValueOnce({
+      status: 'out_of_scope',
+      reply: 'That is outside what I do.',
+    })
     expect(await (await POST(post({ turns: turns('go jogging') }))).json()).toEqual({
       outcome: 'out_of_scope',
-      reason: 'Exercise.',
+      reply: 'That is outside what I do.',
     })
     // Understood and declined, so the admin read rate is not dragged down by it.
     expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'out_of_scope' })
+  })
+
+  it('hands the earlier conversation to the model', async () => {
+    orchestrateWithLlm.mockResolvedValue({
+      status: 'help',
+      reply: 'Here is another way to see it.',
+    })
+    const { POST } = await route()
+    const history = [
+      { role: 'user', content: 'explain swapping' },
+      { role: 'assistant', content: 'Swapping trades one asset for another.' },
+    ]
+    await POST(post({ turns: turns('explain better'), history }))
+    expect(orchestrateWithLlm).toHaveBeenCalledWith(
+      [{ role: 'user', content: 'explain better' }],
+      expect.objectContaining({ history })
+    )
   })
 
   it('says unavailable, not an error, when the model could not read it', async () => {

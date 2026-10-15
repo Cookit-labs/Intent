@@ -15,6 +15,7 @@ import {
   unavailableMessage,
   unclearMessage,
 } from '../../lib/chat/orchestrate-copy'
+import { rememberExchange } from '../../lib/chat/dialogue'
 import { fixVerbTypo } from '../../lib/chat/typos'
 import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
@@ -173,6 +174,9 @@ export function IntentChat(): JSX.Element {
   // The rule a fired-rule email linked to, from ?rule=<id>.
   const [linkedRuleId, setLinkedRuleId] = useState<string | null>(null)
   const openedFromLink = useRef(false)
+  // Messages that were answered rather than run, with the replies given. Sent
+  // with the next message so the model answers in the flow of the conversation.
+  const dialogue = useRef<ClarifyTurn[]>([])
 
   function openInbox(): void {
     const items = inbox.items
@@ -1179,15 +1183,11 @@ export function IntentChat(): JSX.Element {
     setClarifying({ turns })
     setClarifyBusy(true)
 
-    // What the chat last said to the user, so "explain that part" has a "that".
-    // Read before it is cleared; collapsed to one line within the route's limit.
-    const lastReply =
-      affordError !== null
-        ? [`You last replied to the user: ${affordError.replace(/\s+/g, ' ').slice(0, 260)}`]
-        : []
     setAffordError(null)
-    const earlier = [...raceContext(thread, []).slice(0, 5), ...lastReply]
-    const answer = await fetchOrchestrate(turns, earlier, slug)
+    const earlier = raceContext(thread, [])
+    // The conversation so far, replies included. Without it every message is
+    // read cold, and "explain that better" has nothing to improve on.
+    const answer = await fetchOrchestrate(turns, earlier, slug, fetch, dialogue.current)
     setClarifyBusy(false)
 
     if (answer.outcome === 'ask') {
@@ -1198,21 +1198,32 @@ export function IntentChat(): JSX.Element {
     setClarifying(null)
 
     // Nothing runs: the message is not an instruction, or could not be read.
-    // The answer is fixed text, so the chat never promises more than it does.
+    // The reply is the model's own, written for this message in this
+    // conversation. Fixed text is only what is shown when there was no model to
+    // write one — an outage, or a reply that came back empty.
     if (answer.outcome !== 'act') {
       setParsed(null)
       setFollowOn(null)
-      setAffordError(
+      const reply =
         answer.outcome === 'help'
-          ? (answer.answer ?? helpMessage(slug))
+          ? (answer.reply ?? helpMessage(slug))
           : answer.outcome === 'out_of_scope'
-            ? outOfScopeMessage()
+            ? (answer.reply ?? outOfScopeMessage())
             : answer.outcome === 'unclear'
-              ? unclearMessage()
+              ? (answer.reply ?? unclearMessage())
               : unavailableMessage(answer.reason, answer.tokens)
-      )
+      setAffordError(reply)
+      // Remembered only when the model wrote it: a stock error line is not
+      // something it said, and feeding it back would teach it to repeat.
+      if (answer.outcome !== 'unavailable' && 'reply' in answer && answer.reply !== undefined) {
+        dialogue.current = rememberExchange(dialogue.current, text, reply)
+      }
       return
     }
+
+    // An instruction starts a trade; what was said before it is no longer the
+    // conversation the next message belongs to.
+    dialogue.current = []
 
     // Tokens the server proved for this request, so the page can trade them
     // without a hand-written entry.
