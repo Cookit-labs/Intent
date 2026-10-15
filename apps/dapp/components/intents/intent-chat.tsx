@@ -34,6 +34,7 @@ import { StandingRulesPanel } from './standing-rules-panel'
 import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
+import { ensureSession } from '../../lib/api/auth'
 import type { StandingRuleRecord } from '../../lib/api/standing-client'
 import { parseStandingIntent } from '../../lib/parse-standing'
 import {
@@ -44,7 +45,6 @@ import {
   updateTurn,
   type ChatTurn,
 } from '../../lib/chat-history'
-import { backfillFromLedger } from '../../lib/swap/backfill'
 import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
 import { SwapConfirm } from './swap-confirm'
@@ -212,20 +212,10 @@ export function IntentChat(): JSX.Element {
       // ledger is consulted and a recorded turn is never mistaken for missing.
       const fromServer = await syncTurns(slug)
       if (cancelled) return
+      // Deliberately no ledger backfill: the account's ledger holds every swap
+      // from every app, and importing them listed other apps' trades here as
+      // Intent conversations. The History tab reads the ledger for that.
       setTurns(fromServer)
-
-      // Then the chain. A trade made before this sync existed, on another
-      // device, or during a session whose sign-in failed, is on Stellar and
-      // nowhere else — and an account with real swaps should not show an empty
-      // history. Writes go through `saveTurn`, so each one reaches the
-      // database like any other.
-      if (address === undefined) return
-      const result = await backfillFromLedger(address, slug)
-      if (cancelled || result.written === 0) return
-
-      // Re-read rather than appending: `saveTurn` has already merged each row
-      // into the store, and reading back keeps one ordering rather than two.
-      setTurns(loadTurns(slug))
     }
 
     void load().catch(() => {
@@ -485,7 +475,7 @@ export function IntentChat(): JSX.Element {
 
   useEffect(() => {
     setTurns(loadTurns(slug))
-  }, [slug])
+  }, [slug, address])
 
   // Record the conversation once the competition settles on a winner, so the
   // agents' reasoning survives a reload even if nothing is ever signed.
@@ -758,6 +748,7 @@ export function IntentChat(): JSX.Element {
             body.followOn?.kind === 'offramp' && isAnchorId(body.followOn.venue)
               ? body.followOn.venue
               : 'testanchor'
+          if (!(await offrampSession())) return
           setParsed(null)
           setFollowOn(null)
           sequence.prepare({
@@ -818,6 +809,7 @@ export function IntentChat(): JSX.Element {
       // already held. Same destination as the branch above: one step, no
       // competition, because there is no trade for agents to compete over.
       if (read === null && regexOfframpOnly !== null && slug === 'stellar') {
+        if (!(await offrampSession())) return
         setParsed(null)
         setFollowOn(null)
         sequence.prepare({
@@ -903,6 +895,27 @@ export function IntentChat(): JSX.Element {
     // read as a stuck transaction that had never existed.
     setFollowOn(null)
     sequence.reset()
+  }
+
+  /**
+   * A withdrawal needs a session before anything is signed.
+   *
+   * Its anchor transaction id lives only in the saved record, and that is the
+   * one thing that cannot be recovered from the ledger. Connecting normally
+   * signs in, but that is allowed to fail so swaps stay usable; a withdrawal is
+   * the case where proceeding unrecorded costs the user their payout status.
+   */
+  async function offrampSession(): Promise<boolean> {
+    if (address === undefined) return false
+    try {
+      await ensureSession(address)
+      return true
+    } catch {
+      setAffordError(
+        'Sign in with your wallet to withdraw. The payout is tracked against your account, and without a session it could not be followed afterwards.'
+      )
+      return false
+    }
   }
 
   function handleExecute(key: string): void {
@@ -1074,6 +1087,7 @@ export function IntentChat(): JSX.Element {
         // the size check below never ran.
         const estimated = estimatedReceiveOf(route)
         void (async () => {
+          if (!(await offrampSession())) return
           // The anchor's limits, so the size is checked before signature one.
           let limits: WithdrawLimits | undefined
           try {
@@ -1418,6 +1432,11 @@ export function IntentChat(): JSX.Element {
                   {message}
                 </div>
               </div>
+              {restored !== null && Object.keys(restored.proposals).length === 0 ? (
+                <p className="text-muted-foreground text-center text-xs">
+                  No agent discussion was recorded for this intent.
+                </p>
+              ) : null}
               <CompetitionPanel
                 state={competition}
                 onExecute={handleExecute}
