@@ -109,10 +109,28 @@ const LEDGER_ROW_WINNER = 'onchain'
  */
 const MAX_TURNS = 50
 
+/**
+ * Turns saved before the cache was kept per wallet sat under the bare key and
+ * stopped showing when the key changed. The first wallet to read claims them and
+ * the bare key is emptied, so a second wallet in the browser never inherits them.
+ */
+function adoptLegacyCache(): string | null {
+  if (historyOwner() === undefined) return null
+  const raw = window.localStorage.getItem(STORAGE_BASE)
+  if (raw === null) return null
+  window.localStorage.setItem(storageKey(), raw)
+  try {
+    window.localStorage.removeItem(STORAGE_BASE)
+  } catch {
+    /* the claim stands even if the old copy cannot be removed */
+  }
+  return raw
+}
+
 function read(): ChatTurn[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(storageKey())
+    const raw = window.localStorage.getItem(storageKey()) ?? adoptLegacyCache()
     if (raw === null) return []
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed)
