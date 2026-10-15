@@ -109,7 +109,7 @@ const NOT_ASSETS = new Set([
  * the server's to say; this only finds the name.
  */
 export function namedPayoutAsset(text: string): { symbol: string; amount: number } | undefined {
-  const re = /(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9]{1,11})/g
+  const re = /(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9]{1,11})\b/g
   for (const m of text.matchAll(re)) {
     const word = (m[2] ?? '').toLowerCase()
     if (NOT_ASSETS.has(word)) continue
