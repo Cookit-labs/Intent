@@ -11,6 +11,7 @@ import type {
 } from '../lib/agents/competition'
 import { DECIDE_AT, RACE_DURATION, WINDOW_SECONDS, revealFloor } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
+import { setAttributedRace } from '../lib/api/network-fetch'
 import { planDecision, planReveal } from '../lib/agents/pacing'
 import type { ParsedIntent } from '../lib/parse-intent'
 
@@ -233,6 +234,7 @@ export function useCompetition(
               // Named while the cards still say "thinking", so the line-up is
               // visible before any of it has answered.
               agentsRef.current = frame.agents
+              setAttributedRace(frame.competitionId)
               setAgents(frame.agents)
               continue
             }

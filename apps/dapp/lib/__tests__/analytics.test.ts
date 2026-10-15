@@ -50,6 +50,41 @@ describe('recording an execution', () => {
     })
   })
 
+  it('credits the race only when it is real, won, on this network and recent', async () => {
+    const RACE = '11111111-1111-4111-8111-111111111111'
+    await repo.recordRace(
+      raceRecordFrom({
+        id: RACE,
+        network: 'mainnet',
+        startedAt: new Date('2026-05-01T10:00:00Z'),
+        durationMs: 900,
+        intent: { type: 'swap', tokenIn: 'XLM', tokenOut: 'USDC', sizeUsd: undefined },
+        attempts: [],
+        scores: {},
+        winner: 'halcyon',
+        unanimous: true,
+      })
+    )
+    const base = {
+      network: 'mainnet' as const,
+      account: ACCOUNT,
+      kind: 'swap' as const,
+      feeSponsored: false,
+      ok: true,
+    }
+    const at = new Date('2026-05-01T10:05:00Z')
+    await repo.recordExecution({ ...base, hash: HASH_A, raceId: RACE, at })
+    await repo.recordExecution({ ...base, hash: HASH_B, raceId: RACE, network: 'testnet', at })
+    await repo.recordExecution({
+      ...base,
+      hash: 'c'.repeat(64),
+      raceId: RACE,
+      at: new Date('2026-05-01T12:00:00Z'),
+    })
+    await repo.recordExecution({ ...base, hash: 'd'.repeat(64), at })
+    expect(db.executions.map((e) => e.race_id)).toEqual([RACE, null, null, null])
+  })
+
   it('records one row for a hash, however many times it is submitted', async () => {
     const row = {
       network: 'testnet' as const,

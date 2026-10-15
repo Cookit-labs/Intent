@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { networkFetch } from '../api/network-fetch'
+import { networkFetch, setAttributedRace } from '../api/network-fetch'
 
 const ORIGIN = 'https://app.test'
 
@@ -51,5 +51,18 @@ describe('networkFetch', () => {
     )
     expect(calls[0]?.headers.get('accept')).toBe('application/json')
     expect(calls[0]?.headers.get('x-intent-network')).toBe('testnet')
+  })
+})
+
+describe('race attribution', () => {
+  it('goes only with submits, and only while a race is set', async () => {
+    const { base, calls } = spy()
+    const f = networkFetch(base, 'mainnet', ORIGIN)
+    await f('/api/swap/submit', { method: 'POST' })
+    setAttributedRace('race-1')
+    await f('/api/swap/submit', { method: 'POST' })
+    await f('/api/swap/quote')
+    setAttributedRace(undefined)
+    expect(calls.map((c) => c.headers.get('x-intent-race'))).toEqual([null, 'race-1', null])
   })
 })

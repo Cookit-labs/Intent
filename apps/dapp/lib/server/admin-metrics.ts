@@ -30,6 +30,13 @@ export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp'] as co
 
 const DAY_MS = 86_400_000
 
+/**
+ * A row's dollar value. Rows logged while the price oracle was slow have no
+ * `volume_usd`; a USDC amount is its own dollar value, so it is read as one
+ * rather than reported as unpriced.
+ */
+const VALUE_USD = `coalesce(volume_usd, CASE WHEN asset_in = 'USDC' THEN amount_in END)`
+
 export interface Scope {
   network: StellarNetworkName
   range: RangeKey
@@ -133,6 +140,9 @@ export interface AgentRow {
   races: number
   answered: number
   wins: number
+  /** Transactions the user signed from a plan this agent won. */
+  executed: number
+  executedUsd: number
   p50Ms: number | null
   p95Ms: number | null
 }
@@ -144,6 +154,8 @@ export interface AgentsReport {
   unanimousRate: number | null
   p50Ms: number | null
   p95Ms: number | null
+  /** Confirmed transactions that followed an agent race, and their value. */
+  executed: { count: number; usd: number }
   agents: AgentRow[]
   failures: { reason: string; count: number }[]
 }
@@ -254,9 +266,9 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
           `SELECT
              count(*) FILTER (WHERE ok)                                         AS txs,
              count(*) FILTER (WHERE NOT ok)                                     AS failed,
-             coalesce(sum(volume_usd) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
-             coalesce(sum(volume_usd) FILTER (WHERE ok AND kind = 'lend'), 0)   AS lend,
-             count(*) FILTER (WHERE ok AND kind = ANY($3) AND volume_usd IS NULL) AS unvalued,
+             coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
+             coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = 'lend'), 0)   AS lend,
+             count(*) FILTER (WHERE ok AND kind = ANY($3) AND ${VALUE_USD} IS NULL) AS unvalued,
              count(DISTINCT account) FILTER (WHERE ok)                          AS wallets,
              count(*) FILTER (WHERE ok AND fee_sponsored)                       AS sponsored
            FROM usage_executions
@@ -312,7 +324,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         `SELECT date_trunc('day', submitted_at AT TIME ZONE 'UTC')                AS day,
                 count(*) FILTER (WHERE ok)                                         AS txs,
                 count(*) FILTER (WHERE NOT ok)                                     AS failed,
-                coalesce(sum(volume_usd) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
+                coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
                 count(DISTINCT account) FILTER (WHERE ok)                          AS wallets
          FROM usage_executions
          WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
@@ -337,7 +349,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         `SELECT kind,
                 count(*) FILTER (WHERE ok)                      AS txs,
                 count(*) FILTER (WHERE NOT ok)                  AS failed,
-                coalesce(sum(volume_usd) FILTER (WHERE ok), 0)  AS volume
+                coalesce(sum(${VALUE_USD}) FILTER (WHERE ok), 0)  AS volume
          FROM usage_executions
          WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY kind ORDER BY volume DESC, txs DESC`,
@@ -353,7 +365,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
 
     async pairs(scope, now) {
       const { rows } = await query(
-        `SELECT asset_in, asset_out, count(*) AS txs, coalesce(sum(volume_usd), 0) AS volume
+        `SELECT asset_in, asset_out, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume
          FROM usage_executions
          WHERE network = $1 AND ok AND asset_in IS NOT NULL AND kind = ANY($3)
            AND ($2::timestamptz IS NULL OR submitted_at >= $2)
@@ -370,7 +382,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
 
     async wallets(scope, now) {
       const { rows } = await query(
-        `SELECT account, count(*) AS txs, coalesce(sum(volume_usd), 0) AS volume,
+        `SELECT account, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume,
                 min(submitted_at) AS first_seen, max(submitted_at) AS last_seen
          FROM usage_executions
          WHERE network = $1 AND ok AND ($2::timestamptz IS NULL OR submitted_at >= $2)
@@ -402,7 +414,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         query(`SELECT count(*) AS n FROM usage_executions WHERE ${where}`, params),
         query(
           `SELECT id, hash, account, kind, ok, failure, fee_sponsored, submitted_at,
-                  asset_in, asset_out, amount_in, volume_usd
+                  asset_in, asset_out, amount_in, ${VALUE_USD} AS volume_usd
            FROM usage_executions WHERE ${where}
            ORDER BY submitted_at DESC, id LIMIT $6 OFFSET $7`,
           [...params, filter.limit, filter.offset]
@@ -430,7 +442,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
     async agents(scope, now) {
       const params = [scope.network, since(scope, now)]
       const range = `r.network = $1 AND ($2::timestamptz IS NULL OR r.started_at >= $2)`
-      const [summary, agents, failures] = await Promise.all([
+      const [summary, agents, failures, executed] = await Promise.all([
         query(
           `SELECT count(*) AS races,
                   coalesce(sum(answered), 0) AS answered, coalesce(sum(agents), 0) AS asked,
@@ -458,10 +470,19 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
            WHERE ${range} AND NOT p.ok GROUP BY 1 ORDER BY n DESC`,
           params
         ),
+        query(
+          `SELECT r.winner AS agent, count(*) AS n, coalesce(sum(${VALUE_USD}), 0) AS usd
+           FROM usage_executions e JOIN agent_races r ON r.id = e.race_id
+           WHERE e.network = $1 AND e.ok AND r.winner IS NOT NULL
+             AND ($2::timestamptz IS NULL OR e.submitted_at >= $2)
+           GROUP BY r.winner`,
+          params
+        ),
       ])
       const s = summary.rows[0] ?? {}
       const asked = num(s['asked'])
       const judged = num(s['judged'])
+      const byAgent = new Map(executed.rows.map((r) => [String(r['agent']), r]))
       const round = (v: unknown): number | null => (maybe(v) === null ? null : Math.round(num(v)))
       return {
         races: num(s['races']),
@@ -470,8 +491,14 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         unanimousRate: judged === 0 ? null : num(s['unanimous']) / judged,
         p50Ms: round(s['p50']),
         p95Ms: round(s['p95']),
+        executed: {
+          count: executed.rows.reduce((t, r) => t + num(r['n']), 0),
+          usd: money(executed.rows.reduce((t, r) => t + num(r['usd']), 0)),
+        },
         agents: agents.rows.map((r) => ({
           agent: String(r['agent']),
+          executed: num(byAgent.get(String(r['agent']))?.['n']),
+          executedUsd: money(byAgent.get(String(r['agent']))?.['usd']),
           model: r['model'] === null ? null : String(r['model']),
           races: num(r['races']),
           answered: num(r['answered']),
@@ -539,8 +566,8 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         ),
         query(
           `SELECT count(*) FILTER (WHERE ok) AS n,
-                  coalesce(sum(volume_usd) FILTER (WHERE ok), 0) AS usd,
-                  count(*) FILTER (WHERE ok AND volume_usd IS NULL) AS unvalued
+                  coalesce(sum(${VALUE_USD}) FILTER (WHERE ok), 0) AS usd,
+                  count(*) FILTER (WHERE ok AND ${VALUE_USD} IS NULL) AS unvalued
            FROM usage_executions
            WHERE network = $1 AND kind = 'offramp'
              AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
