@@ -28,6 +28,7 @@ describe('cash-outs in past intents', () => {
       winner: null,
     })
     expect(row?.text).toContain('Cash out 12 XLM')
+    expect(row?.outcome).toBe('Paid: 12 XLM cashed out as ₦3000 to A B, GTBank ****1234.')
   })
 
   it('leaves out orders never paid and payouts a chat already carries', () => {

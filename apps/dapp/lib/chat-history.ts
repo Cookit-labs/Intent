@@ -54,6 +54,14 @@ export interface ChatTurn {
    * whichever one happened to settle first.
    */
   bundle?: BundleStep[]
+  /**
+   * The exchange around an intent that ran no agent race: what the assistant
+   * asked and what the user answered. A cash-out is one, and without this a
+   * reopened cash-out would show a bare sentence.
+   */
+  conversation?: { role: 'user' | 'assistant'; content: string }[]
+  /** How the intent ended, in words, shown as the last assistant line when reopened. */
+  outcome?: string
 }
 
 /** One transaction inside a bundled intent. */

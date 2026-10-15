@@ -41,7 +41,7 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
-import { CASHOUT_TURN_PREFIX, cashoutTurns, fetchCashouts } from '../../lib/naira/history'
+import { cashoutOutcome, cashoutTurns, fetchCashouts } from '../../lib/naira/history'
 import type { StandingRuleRecord } from '../../lib/api/standing-client'
 import { parseStandingIntent } from '../../lib/parse-standing'
 import {
@@ -591,7 +591,12 @@ export function IntentChat(): JSX.Element {
    */
   function startIntent(
     text: string,
-    options: { shown?: string; brief?: string[]; continuing?: boolean } = {}
+    options: {
+      shown?: string
+      brief?: string[]
+      continuing?: boolean
+      conversation?: ClarifyTurn[]
+    } = {}
   ): void {
     const continuing = options.continuing === true
     const shown = options.shown ?? text
@@ -646,7 +651,8 @@ export function IntentChat(): JSX.Element {
     setNairaForm(null)
     setNairaConvert(null)
     setPendingInput(null)
-    setTurnId(crypto.randomUUID())
+    const newTurnId = crypto.randomUUID()
+    setTurnId(newTurnId)
     setHistoryOpen(false)
     setRestored(null)
     setPending(null)
@@ -672,6 +678,24 @@ export function IntentChat(): JSX.Element {
         )
         return
       }
+
+      // Kept as a chat of its own: no race will write one for a cash-out.
+      saveTurn({
+        id: newTurnId,
+        chain: slug,
+        text: shown,
+        createdAt: new Date().toISOString(),
+        proposals: {},
+        winner: null,
+        ...(options.conversation !== undefined && options.conversation.length > 1
+          ? {
+              conversation: options.conversation
+                .slice(1)
+                .filter((t) => !(t.role === 'assistant' && t.content === ACKNOWLEDGED)),
+            }
+          : {}),
+      })
+      setTurns(loadTurns(slug))
 
       const source = readPayoutSource(text, swap.usdPrices?.['XLM'])
       if (source.kind === 'other') {
@@ -1065,6 +1089,7 @@ export function IntentChat(): JSX.Element {
         shown: first,
         brief: result !== null && result.status === 'ready' ? result.context : [],
         continuing: true,
+        conversation: turns,
       }
     )
   }
@@ -1603,16 +1628,14 @@ export function IntentChat(): JSX.Element {
           <ChatHistoryPanel
             turns={listedTurns}
             onSelect={(turn) => {
-              // A cash-out has no agent discussion to reopen; its row carries the
-              // transaction link.
-              if (turn.id.startsWith(CASHOUT_TURN_PREFIX)) return
               // Reopen exactly what was recorded. This used to resubmit the
               // text, which started a fresh competition and produced different
               // answers — the conversation was not being restored at all.
               setHistoryOpen(false)
               setRestored(turn)
               setMessage(turn.text)
-              setParsed(parseIntent(turn.text, swap.usdPrices))
+              // A cash-out is reopened as the conversation it was, not re-read as a trade.
+              setParsed(turn.outcome !== undefined ? null : parseIntent(turn.text, swap.usdPrices))
               setTurnId(turn.id)
               setExecutingKey(turn.executedBy ?? null)
               setPlacedId(null)
@@ -1703,7 +1726,33 @@ export function IntentChat(): JSX.Element {
                   {message}
                 </div>
               </div>
-              {restored !== null && Object.keys(restored.proposals).length === 0 ? (
+              {restored?.conversation?.map((line, i) => (
+                <div
+                  key={`c-${i}`}
+                  className={cn('flex', line.role === 'user' ? 'justify-end' : 'justify-start')}
+                >
+                  <div
+                    className={cn(
+                      'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
+                      line.role === 'user'
+                        ? 'bg-foreground text-background rounded-br-sm'
+                        : 'bg-muted text-foreground rounded-bl-sm'
+                    )}
+                  >
+                    {line.content}
+                  </div>
+                </div>
+              ))}
+              {restored?.outcome !== undefined ? (
+                <div className="flex justify-start">
+                  <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
+                    {restored.outcome}
+                  </div>
+                </div>
+              ) : null}
+              {restored !== null &&
+              restored.outcome === undefined &&
+              Object.keys(restored.proposals).length === 0 ? (
                 <p className="text-muted-foreground text-center text-xs">
                   No agent discussion was recorded for this intent.
                 </p>
@@ -1815,6 +1864,18 @@ export function IntentChat(): JSX.Element {
                     ? { balanceUsdc: balances.trustlines['USDC'].balance }
                     : {})}
                   initialPath={nairaForm.path}
+                  onOrder={(order) => {
+                    if (turnId === null) return
+                    updateTurn(
+                      turnId,
+                      {
+                        ...(order.paymentHash !== undefined ? { txHash: order.paymentHash } : {}),
+                        outcome: cashoutOutcome(order),
+                      },
+                      { chain: slug, text: message ?? '' }
+                    )
+                    setTurns(loadTurns(slug))
+                  }}
                   {...(nairaForm.asset === 'usdc'
                     ? {}
                     : {
