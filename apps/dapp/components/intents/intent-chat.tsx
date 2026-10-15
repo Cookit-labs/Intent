@@ -41,6 +41,7 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
+import { CASHOUT_TURN_PREFIX, cashoutTurns, fetchCashouts } from '../../lib/naira/history'
 import type { StandingRuleRecord } from '../../lib/api/standing-client'
 import { parseStandingIntent } from '../../lib/parse-standing'
 import {
@@ -250,6 +251,19 @@ export function IntentChat(): JSX.Element {
       cancelled = true
     }
   }, [slug, address])
+
+  const { data: cashouts } = useQuery({
+    queryKey: ['cashouts', address],
+    queryFn: () => fetchCashouts(address as string),
+    enabled: slug === 'stellar' && isConnected && address !== undefined,
+    staleTime: 30_000,
+  })
+  const listedTurns = useMemo(() => {
+    const have = new Set(turns.flatMap((t) => (t.txHash === undefined ? [] : [t.txHash])))
+    return [...turns, ...cashoutTurns(cashouts ?? [], slug, have)].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    )
+  }, [turns, cashouts, slug])
 
   // Balances, so an order can be checked against what the account actually
   // holds before it is placed rather than after it fails.
@@ -1587,8 +1601,11 @@ export function IntentChat(): JSX.Element {
 
         {historyOpen && isConnected ? (
           <ChatHistoryPanel
-            turns={turns}
+            turns={listedTurns}
             onSelect={(turn) => {
+              // A cash-out has no agent discussion to reopen; its row carries the
+              // transaction link.
+              if (turn.id.startsWith(CASHOUT_TURN_PREFIX)) return
               // Reopen exactly what was recorded. This used to resubmit the
               // text, which started a fresh competition and produced different
               // answers — the conversation was not being restored at all.

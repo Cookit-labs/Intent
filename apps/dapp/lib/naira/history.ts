@@ -1,3 +1,4 @@
+import type { ChatTurn } from '../chat-history'
 import type { SwapRecord } from '../swap/history'
 import type { NairaCoin } from './build-payment'
 import type { NairaStatus } from './status'
@@ -75,4 +76,34 @@ export async function fetchCashouts(
   } catch {
     return []
   }
+}
+
+/** Id prefix of a past-intents row that stands for a cash-out rather than a recorded chat. */
+export const CASHOUT_TURN_PREFIX = 'cashout:'
+
+/**
+ * Cash-outs as rows of Past intents.
+ *
+ * A cash-out is an intent, but it never goes through the agent race that writes
+ * a chat turn, so the list would not show it. The order record knows it
+ * happened; this lists it beside the chats.
+ */
+export function cashoutTurns(
+  orders: CashoutOrder[],
+  chain: string,
+  /** Hashes a recorded chat already carries, so one payout is not listed twice. */
+  have: ReadonlySet<string> = new Set()
+): ChatTurn[] {
+  return orders
+    .filter((o) => o.paymentHash !== undefined && o.paymentHash !== '')
+    .filter((o) => !have.has(o.paymentHash as string))
+    .map((o) => ({
+      id: `${CASHOUT_TURN_PREFIX}${o.id}`,
+      chain,
+      text: `Cash out ${o.amount} ${o.coin.toUpperCase()} to ${o.bankName} (${PAYOUT_STATUS_LABEL[o.status]})`,
+      createdAt: o.createdAt,
+      proposals: {},
+      winner: null,
+      txHash: o.paymentHash as string,
+    }))
 }
