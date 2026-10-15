@@ -3,9 +3,9 @@ import Image from 'next/image'
 /**
  * The Intent mark beside its name.
  *
- * The artwork is dark on a transparent ground. This site is always dark, so it
- * is inverted to light unconditionally rather than relying on a theme class
- * that is only applied after the page hydrates.
+ * The artwork is dark on a transparent ground, and this site is a light page,
+ * so it is shown as it is. (An earlier version inverted it and it vanished on
+ * the page's light background.)
  */
 export function BrandMark({
   className = '',
@@ -22,7 +22,7 @@ export function BrandMark({
         width={512}
         height={361}
         priority
-        className="h-5 w-auto invert"
+        className="h-6 w-auto"
       />
       <span className={textClassName}>Intent</span>
     </span>
