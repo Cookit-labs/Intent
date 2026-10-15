@@ -95,6 +95,7 @@ function repo(): MetricsRepo {
       unanimousRate: null,
       p50Ms: null,
       p95Ms: null,
+      executed: { count: 0, usd: 0 },
       agents: [],
       failures: [],
     }),

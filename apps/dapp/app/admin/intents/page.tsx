@@ -2,7 +2,7 @@
 
 import { DonutChart, RankedBars } from '../../../components/admin/charts'
 import { EmptyNote, Kpi, PageTitle, Panel, WithStats } from '../../../components/admin/parts'
-import { formatCount, formatPercent } from '../../../components/admin/stats'
+import { formatCount, formatPercent, formatUsd } from '../../../components/admin/stats'
 
 const TYPE_LABELS: Record<string, string> = {
   swap: 'Swaps',
@@ -39,6 +39,11 @@ export default function AdminIntentsPage(): JSX.Element {
                   label="Agents agreed"
                   value={formatPercent(agents.unanimousRate)}
                   note="Races where every agent picked the same route"
+                />
+                <Kpi
+                  label="Executed from agent plans"
+                  value={formatCount(agents.executed.count)}
+                  note={`${formatUsd(agents.executed.usd)} moved`}
                 />
                 <Kpi
                   label="Median answer time"
@@ -89,6 +94,7 @@ export default function AdminIntentsPage(): JSX.Element {
                           <th className="py-2 pr-4 text-right font-normal">Races</th>
                           <th className="py-2 pr-4 text-right font-normal">Answered</th>
                           <th className="py-2 pr-4 text-right font-normal">Won</th>
+                          <th className="py-2 pr-4 text-right font-normal">Executed</th>
                           <th className="py-2 text-right font-normal">Median time</th>
                         </tr>
                       </thead>
@@ -111,6 +117,14 @@ export default function AdminIntentsPage(): JSX.Element {
                             </td>
                             <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
                               {formatCount(a.wins)}
+                            </td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {formatCount(a.executed)}
+                              {a.executed > 0 ? (
+                                <span className="text-muted-foreground block text-xs">
+                                  {formatUsd(a.executedUsd)}
+                                </span>
+                              ) : null}
                             </td>
                             <td className="py-2.5 text-right font-mono tabular-nums">
                               {a.p50Ms === null ? '—' : `${(a.p50Ms / 1000).toFixed(1)}s`}

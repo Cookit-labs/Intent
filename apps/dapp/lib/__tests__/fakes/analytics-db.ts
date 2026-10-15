@@ -23,6 +23,7 @@ export interface FakeExecution {
   asset_out: string | null
   amount_in: string | null
   volume_usd: number | null
+  race_id: string | null
 }
 
 export interface FakeIntentRead {
@@ -108,6 +109,13 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
         return { rows: [] }
       }
 
+      const matchRace = (id: string | null, network: string, at: string): string | null => {
+        const race = races.find((r) => r.id === id)
+        if (race === undefined || race.network !== network || race.winner === null) return null
+        const age = new Date(at).getTime() - new Date(race.started_at).getTime()
+        return age >= 0 && age < 30 * 60_000 ? race.id : null
+      }
+
       if (sql.startsWith('INSERT INTO usage_executions')) {
         const [
           id,
@@ -123,6 +131,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           assetOut,
           amountIn,
           volumeUsd,
+          raceId,
         ] = p as [
           string,
           string,
@@ -137,6 +146,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           string | null,
           string | null,
           number | null,
+          string | null,
         ]
         const duplicate =
           hash !== null && executions.some((e) => e.network === network && e.hash === hash)
@@ -155,6 +165,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           asset_out: assetOut,
           amount_in: amountIn,
           volume_usd: volumeUsd,
+          race_id: matchRace(raceId, network, submittedAt),
         })
         return { rows: [{ id }] }
       }

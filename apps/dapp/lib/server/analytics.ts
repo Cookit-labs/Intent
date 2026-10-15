@@ -47,6 +47,8 @@ export const ANALYTICS_DDL: readonly string[] = [
   `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS asset_out TEXT`,
   `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS amount_in NUMERIC`,
   `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS volume_usd NUMERIC`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS race_id UUID`,
+  `CREATE INDEX IF NOT EXISTS usage_executions_race_idx ON usage_executions (race_id) WHERE race_id IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS intent_reads (
     id         UUID        PRIMARY KEY,
     network    TEXT        NOT NULL,
@@ -104,6 +106,11 @@ export interface ExecutionRecord {
   failure?: string
   /** What the transaction sold, when it could be read. */
   flow?: ExecutionFlow
+  /**
+   * The agent race whose plan the user signed. Kept only when it names a race
+   * on the same network that had a winner and began shortly before.
+   */
+  raceId?: string
   at?: Date
 }
 
@@ -281,8 +288,12 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       await query(
         `INSERT INTO usage_executions
            (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
-            asset_in, asset_out, amount_in, volume_usd)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            asset_in, asset_out, amount_in, volume_usd, race_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+           (SELECT id FROM agent_races
+             WHERE id = $14::uuid AND network = $2 AND winner IS NOT NULL
+               AND started_at <= $9::timestamptz
+               AND started_at > $9::timestamptz - interval '30 minutes'))
          ON CONFLICT DO NOTHING`,
         [
           randomUUID(),
@@ -298,6 +309,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.assetOut ?? null,
           r.flow?.amountIn ?? null,
           r.flow?.volumeUsd ?? null,
+          r.raceId ?? null,
         ]
       )
     },
@@ -401,6 +413,20 @@ export interface LogExecutionInput {
   signedXdr?: string
 }
 
+export const RACE_HEADER = 'x-intent-race'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** The race a request says it follows, when it is in a request and well formed. */
+async function raceFromRequest(): Promise<string | undefined> {
+  try {
+    const { headers } = await import('next/headers')
+    const value = headers().get(RACE_HEADER)
+    return value !== null && UUID.test(value) ? value.toLowerCase() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** What the transaction sold, or nothing: a failure to read it must never cost the row itself. */
 async function readFlowSafely(input: LogExecutionInput): Promise<ExecutionFlow | undefined> {
   if (!input.result.ok || input.signedXdr === undefined) return undefined
@@ -422,6 +448,7 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
   try {
     const repo = await getAnalyticsRepo()
     const flow = await readFlowSafely(input)
+    const raceId = await raceFromRequest()
     await repo.recordExecution({
       network: activeNetwork(),
       account: input.account,
@@ -429,6 +456,7 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
       feeSponsored: input.feeSponsored,
       ...executionFromResult(input.result),
       ...(flow === undefined ? {} : { flow }),
+      ...(raceId === undefined ? {} : { raceId }),
     })
   } catch (e) {
     reportError('analytics/execution', e, { kind: input.kind })
