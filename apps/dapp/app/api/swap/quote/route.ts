@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { knownSymbols, resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { bestQuote, collectQuotes } from '../../../../lib/swap/quote'
 import type { QuoteRequest } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
@@ -59,6 +60,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'amount must be a decimal string' }, { status: 400 })
   }
 
+  await ensureLiveAssets([body.from, body.to])
   const from = resolveAsset(body.from)
   const to = resolveAsset(body.to)
   if (from === undefined || to === undefined) {

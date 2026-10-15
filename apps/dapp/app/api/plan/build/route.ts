@@ -5,6 +5,7 @@ import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { derivePreview } from '../../../../lib/swap/preview'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { applySlippage } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { collectQuotes } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
 import { assertPlanWithinCap } from '../../../../lib/server/trade-cap'
@@ -52,6 +53,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'actions_required' }, { status: 400 })
   }
 
+  await ensureLiveAssets(tickersIn(JSON.stringify(body.actions)))
   let actions: PlanAction[]
   try {
     actions = await priceSwapFloors(body.actions)
