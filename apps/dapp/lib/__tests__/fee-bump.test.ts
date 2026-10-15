@@ -77,7 +77,10 @@ function sorobanInner(fee: string): string {
 
 describe('sponsorFee', () => {
   it('wraps a signed transaction so the sponsor pays and the user still authorises', () => {
-    const out = sponsorFee(inner(), user.publicKey(), { sponsor, passphrase: Networks.TESTNET })
+    // Built once: each build stamps time bounds from the clock, so two builds a
+    // second apart are different transactions and their hashes would differ.
+    const signed = inner()
+    const out = sponsorFee(signed, user.publicKey(), { sponsor, passphrase: Networks.TESTNET })
     expect(out.ok).toBe(true)
     if (!out.ok) return
 
@@ -87,7 +90,7 @@ describe('sponsorFee', () => {
     expect(fb.feeSource).toBe(sponsor.publicKey())
     // The inner transaction is the user's, byte for byte: same hash, same signature.
     expect(Buffer.from(fb.innerTransaction.hash()).toString('hex')).toBe(
-      Buffer.from(TransactionBuilder.fromXDR(inner(), Networks.TESTNET).hash()).toString('hex')
+      Buffer.from(TransactionBuilder.fromXDR(signed, Networks.TESTNET).hash()).toString('hex')
     )
     expect(fb.innerTransaction.signatures).toHaveLength(1)
     // One sponsor signature on the outer envelope, and nothing else.
