@@ -21,7 +21,7 @@ export interface ActReading {
 export type OrchestrateAnswer =
   | { outcome: 'act'; read: ActReading; instruction: string; context: string[] }
   | { outcome: 'ask'; question: string }
-  | { outcome: 'help' }
+  | { outcome: 'help'; answer?: string }
   | { outcome: 'out_of_scope'; reason: string }
   | { outcome: 'unclear' }
   | { outcome: 'unavailable'; reason: string; tokens: string[] }
@@ -62,7 +62,9 @@ export async function fetchOrchestrate(
           ? { outcome: 'ask', question: a['question'] }
           : UNREACHABLE
       case 'help':
-        return { outcome: 'help' }
+        return typeof a['answer'] === 'string' && a['answer'].trim() !== ''
+          ? { outcome: 'help', answer: a['answer'] }
+          : { outcome: 'help' }
       case 'out_of_scope':
         return {
           outcome: 'out_of_scope',

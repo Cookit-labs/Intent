@@ -1,4 +1,5 @@
 import { intentModels, type IntentModel } from '../llm/intent-models'
+import { capabilitySheet } from './capabilities'
 import {
   READ_INTENT_PROPERTIES,
   READ_INTENT_REQUIRED,
@@ -78,12 +79,15 @@ export type OrchestrateResult =
       context: string[]
     }
   | { status: 'ask'; question: string }
-  | { status: 'help' }
+  /** `answer` is the model's reply from the fact sheet; absent means show the fixed list. */
+  | { status: 'help'; answer?: string }
   | { status: 'out_of_scope'; reason: string }
   /** Four questions asked and the request is still not usable. */
   | { status: 'unclear' }
 
 export interface OrchestrateOptions extends ReadIntentOptions {
+  /** The chain the user is on, which decides what the fact sheet says Intent does. */
+  chain?: string
   /** What the conversation already established, one line each. */
   context?: string[]
 }
@@ -105,6 +109,11 @@ const ORCHESTRATE_TOOL = {
         question: {
           type: 'string',
           description: "One short question for the user when outcome is 'ask'. Empty otherwise.",
+        },
+        answer: {
+          type: 'string',
+          description:
+            "When outcome is 'help': a short reply, in plain words, to what the person asked about Intent, using only the facts given. Empty otherwise.",
         },
         reason: {
           type: 'string',
@@ -144,6 +153,7 @@ const ORCHESTRATE_TOOL = {
       required: [
         'outcome',
         'question',
+        'answer',
         'reason',
         'instruction',
         'facts',
@@ -156,18 +166,15 @@ const ORCHESTRATE_TOOL = {
   },
 }
 
-const SYSTEM_PROMPT = [
+const BASE_PROMPT = [
   'You are the front door of Intent, an app where people state what they want done with their money on the Stellar network and trading agents compete to do it. Call orchestrate exactly once.',
-  'What Intent does: swap or trade one asset for another (market or at a limit price), accumulate over time, hedge or rebalance, send an asset to someone, supply to or borrow from a lending pool, cash out USDC or XLM to a bank in Nigerian naira, and take leveraged long or short positions.',
   "Decide by what the person MEANS, not by which words they used: 'flip', 'turn into', 'get me some', 'move my lumens to dollars' are all trades.",
   "Use outcome 'out_of_scope' for anything unrelated to that work — exercise, weather, recipes, general chat. Do not try to stretch an unrelated message into a trade.",
-  "Use outcome 'help' when the person asks what they can do, what Intent is, or how to get started.",
+  "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
+  'For help, write answer yourself from the facts about Intent given below and nothing else. Answer the question they asked: if they ask about one thing, explain that one thing rather than listing everything. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed. Keep it short.',
   "Use outcome 'ask' whenever you cannot tell what they want done or something it needs is missing. Ask one question, in plain words. Never guess, and never pass unclear words along as an instruction.",
   "Use outcome 'act' as soon as the request is complete. Do not ask for confirmation of something already clear.",
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
-  'Cashing out to a bank is possible only to Nigerian naira (NGN), from XLM or USDC. If the user says off-ramp or cash out',
-  'without an asset, ask which asset they are cashing out and say the payout is to naira.',
-  'If they ask for another currency, ask whether they want naira instead.',
   'Do NOT ask for a bank, an account number or an account name: a form collects those afterwards.',
   'Never ask about price, slippage, venue or route: the agents decide those.',
   'Never ask something the user already answered, or that the earlier conversation already settles.',
@@ -186,6 +193,17 @@ const SYSTEM_PROMPT = [
   'For anything other than act, leave the reading fields at their defaults.',
   'facts must never contain an account number or a person’s name.',
 ].join(' ')
+
+/** Only where a bank cash-out exists; elsewhere naming it would promise what the chain lacks. */
+const CASH_OUT_PROMPT = [
+  'Cashing out to a bank is possible only to Nigerian naira (NGN), from XLM or USDC. If the user says off-ramp or cash out',
+  'without an asset, ask which asset they are cashing out and say the payout is to naira.',
+  'If they ask for another currency, ask whether they want naira instead.',
+].join(' ')
+
+function systemPrompt(chain: string): string {
+  return chain === 'stellar' ? `${BASE_PROMPT} ${CASH_OUT_PROMPT}` : BASE_PROMPT
+}
 
 /** Long enough for any sentence a person types here, short enough to bound what is passed on. */
 const MAX_INSTRUCTION_CHARS = 400
@@ -245,10 +263,12 @@ async function orchestrateWithModel(
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
 
   const context = (options.context ?? []).filter((l) => l.trim() !== '').slice(0, 6)
+  const chain = options.chain ?? 'stellar'
+  const facts = `${systemPrompt(chain)}\nWhat Intent does:\n${capabilitySheet(chain)}`
   const system =
     context.length === 0
-      ? SYSTEM_PROMPT
-      : `${SYSTEM_PROMPT} Context from earlier in this chat:\n${context.join('\n')}`
+      ? facts
+      : `${facts}\nContext from earlier in this chat:\n${context.join('\n')}`
 
   let payload: unknown
   try {
@@ -279,6 +299,7 @@ async function orchestrateWithModel(
 interface OrchestrateArguments extends ToolArguments {
   outcome?: unknown
   question?: unknown
+  answer?: unknown
   reason?: unknown
   instruction?: unknown
   facts?: unknown
@@ -308,8 +329,10 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
   if (args === null) return null
 
   switch (args.outcome) {
-    case 'help':
-      return { status: 'help' }
+    case 'help': {
+      const answer = text(args.answer)
+      return answer === '' ? { status: 'help' } : { status: 'help', answer }
+    }
 
     case 'out_of_scope':
       return { status: 'out_of_scope', reason: text(args.reason) }

@@ -40,6 +40,7 @@ const empty = {
   orderStyle: 'market',
   limitPriceUsd: 0,
   amountOf: 'sent',
+  answer: '',
 }
 const options = { apiKey: 'sk-test', allowedSymbols: ['XLM', 'USDC'] }
 const turn = (content: string) => [{ role: 'user' as const, content }]
@@ -164,6 +165,39 @@ describe('orchestrateWithLlm', () => {
       fetchImpl: reply({ ...empty, outcome: 'help' }),
     })
     expect(result).toEqual({ status: 'help' })
+  })
+
+  it('answers a question about one capability from the fact sheet', async () => {
+    const result = await orchestrateWithLlm(turn('can u explain sending an asset better?'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'help',
+        answer: 'Send moves an asset from your wallet to another Stellar account, and you sign it.',
+      }),
+    })
+    expect(result).toEqual({
+      status: 'help',
+      answer: 'Send moves an asset from your wallet to another Stellar account, and you sign it.',
+    })
+  })
+
+  it('grounds the model in what Intent does on this chain, and nothing it does not', async () => {
+    let stellar: { messages: { content: string }[] } | undefined
+    let other: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('what can I do?'), {
+      ...options,
+      chain: 'stellar',
+      fetchImpl: reply({ ...empty, outcome: 'help' }, (b) => (stellar = b as typeof stellar)),
+    })
+    await orchestrateWithLlm(turn('what can I do?'), {
+      ...options,
+      chain: 'arc',
+      fetchImpl: reply({ ...empty, outcome: 'help' }, (b) => (other = b as typeof other)),
+    })
+    expect(stellar?.messages[0]?.content).toMatch(/naira/i)
+    expect(other?.messages[0]?.content).not.toMatch(/naira/i)
+    expect(other?.messages[0]?.content).toMatch(/send/i)
   })
 
   it('declines a request unrelated to Intent', async () => {

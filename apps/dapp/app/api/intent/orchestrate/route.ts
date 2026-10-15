@@ -66,6 +66,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   await ensureLiveAssets(tickersIn(latest))
 
   const result = await orchestrateWithLlm(turns, {
+    chain,
     ...(context !== undefined ? { context } : {}),
     // The model may only name assets this app can actually trade. Checked here
     // rather than trusted, because a hallucinated ticker reaching the quoter as
@@ -93,7 +94,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     case 'help':
       await logIntentRead({ understood: true, action: 'help' })
-      return NextResponse.json({ outcome: 'help' })
+      return NextResponse.json({
+        outcome: 'help',
+        ...(result.answer !== undefined ? { answer: result.answer } : {}),
+      })
 
     case 'out_of_scope':
       await logIntentRead({ understood: true, action: 'out_of_scope' })

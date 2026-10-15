@@ -48,6 +48,16 @@ describe.skipIf(SKIP)('the live orchestrator', () => {
     20_000
   )
 
+  it('answers a follow-up about one capability rather than repeating the list', async () => {
+    const result = await ask('can u explain this part better: send an asset to someone')
+    expect(result?.status).toBe('help')
+    if (result?.status === 'help') {
+      expect(result.answer).toBeDefined()
+      expect(result.answer?.toLowerCase()).toContain('send')
+      expect(result.answer).not.toMatch(/leveraged/i)
+    }
+  }, 20_000)
+
   it.each(['do something with my money', 'swap my xlm'])(
     'asks when the instruction is not clear: %s',
     async (text) => {

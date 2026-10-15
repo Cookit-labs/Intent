@@ -62,6 +62,14 @@ describe('fetchOrchestrate', () => {
       outcome: 'help',
     })
     expect(
+      await fetchOrchestrate(
+        turns,
+        [],
+        'stellar',
+        json({ outcome: 'help', answer: 'Send moves an asset.' })
+      )
+    ).toEqual({ outcome: 'help', answer: 'Send moves an asset.' })
+    expect(
       await fetchOrchestrate(turns, [], 'stellar', json({ outcome: 'out_of_scope', reason: 'x' }))
     ).toEqual({ outcome: 'out_of_scope', reason: 'x' })
   })

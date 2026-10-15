@@ -1179,8 +1179,14 @@ export function IntentChat(): JSX.Element {
     setClarifying({ turns })
     setClarifyBusy(true)
 
+    // What the chat last said to the user, so "explain that part" has a "that".
+    // Read before it is cleared; collapsed to one line within the route's limit.
+    const lastReply =
+      affordError !== null
+        ? [`You last replied to the user: ${affordError.replace(/\s+/g, ' ').slice(0, 260)}`]
+        : []
     setAffordError(null)
-    const earlier = raceContext(thread, [])
+    const earlier = [...raceContext(thread, []).slice(0, 5), ...lastReply]
     const answer = await fetchOrchestrate(turns, earlier, slug)
     setClarifyBusy(false)
 
@@ -1198,7 +1204,7 @@ export function IntentChat(): JSX.Element {
       setFollowOn(null)
       setAffordError(
         answer.outcome === 'help'
-          ? helpMessage(slug)
+          ? (answer.answer ?? helpMessage(slug))
           : answer.outcome === 'out_of_scope'
             ? outOfScopeMessage()
             : answer.outcome === 'unclear'

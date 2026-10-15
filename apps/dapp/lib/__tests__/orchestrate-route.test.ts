@@ -95,9 +95,10 @@ describe('POST /api/intent/orchestrate', () => {
       question: 'Which asset?',
     })
 
-    orchestrateWithLlm.mockResolvedValueOnce({ status: 'help' })
+    orchestrateWithLlm.mockResolvedValueOnce({ status: 'help', answer: 'Send moves an asset.' })
     expect(await (await POST(post({ turns: turns('what can I do?') }))).json()).toEqual({
       outcome: 'help',
+      answer: 'Send moves an asset.',
     })
 
     orchestrateWithLlm.mockResolvedValueOnce({ status: 'out_of_scope', reason: 'Exercise.' })
