@@ -16,6 +16,8 @@
  * leave the app exactly as capable as it was before this existed.
  */
 
+import { intentModels, type IntentModel } from '../llm/intent-models'
+
 const MODEL = 'deepseek-flash'
 const DEFAULT_BASE_URL = 'https://api.deepseek.com/v1'
 const TIMEOUT_MS = 8_000
@@ -109,15 +111,44 @@ export async function clarifyWithLlm(
   turns: ClarifyTurn[],
   options: ClarifyOptions = {}
 ): Promise<ClarifyResult | null> {
-  const apiKey = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
-  if (apiKey === undefined || apiKey === '') return null
-
   // After this many questions the user has said all they are going to. Carry on
   // with what they said rather than interrogating them.
   const asked = turns.filter((t) => t.role === 'assistant').length
   if (asked >= MAX_QUESTIONS) return null
 
-  const baseUrl = options.baseUrl ?? process.env['DEEPSEEK_BASE_URL'] ?? DEFAULT_BASE_URL
+  // One explicit key is one model, as before. Otherwise each configured model
+  // is tried in turn, so an exhausted free tier hands over instead of failing.
+  const models: IntentModel[] =
+    options.apiKey !== undefined
+      ? options.apiKey === ''
+        ? []
+        : [
+            {
+              id: 'deepseek',
+              apiKey: options.apiKey,
+              baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
+              model: options.model ?? MODEL,
+            },
+          ]
+      : intentModels().map((m) => ({
+          ...m,
+          ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+          ...(options.model !== undefined ? { model: options.model } : {}),
+        }))
+
+  for (const model of models) {
+    const result = await clarifyWithModel(turns, options, model)
+    if (result !== null) return result
+  }
+  return null
+}
+
+async function clarifyWithModel(
+  turns: ClarifyTurn[],
+  options: ClarifyOptions,
+  config: IntentModel
+): Promise<ClarifyResult | null> {
+  const { apiKey, baseUrl } = config
   const doFetch = options.fetchImpl ?? fetch
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
@@ -134,7 +165,7 @@ export async function clarifyWithLlm(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: options.model ?? MODEL,
+        model: config.model,
         messages: [{ role: 'system', content: system }, ...turns],
         tools: [CLARIFY_TOOL],
         tool_choice: 'auto',

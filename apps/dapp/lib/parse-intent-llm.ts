@@ -1,4 +1,5 @@
 import { DEFAULT_LENDING_VENUE } from './lend/venues'
+import { intentModels, type IntentModel } from './llm/intent-models'
 import type { FollowOnAction } from './parse-compound'
 
 /**
@@ -205,8 +206,8 @@ interface ToolArguments {
 
 /** Whether a parse can even be attempted. */
 export function isLlmParseConfigured(options: ReadIntentOptions = {}): boolean {
-  const key = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
-  return key !== undefined && key !== ''
+  if (options.apiKey !== undefined) return options.apiKey !== ''
+  return intentModels().length > 0
 }
 
 /**
@@ -221,11 +222,40 @@ export async function readIntentWithLlm(
   text: string,
   options: ReadIntentOptions = {}
 ): Promise<LlmReadIntent | null> {
-  const apiKey = options.apiKey ?? process.env['DEEPSEEK_API_KEY']
-  if (apiKey === undefined || apiKey === '') return null
+  // An explicit key is one model, as it always was. Otherwise each configured
+  // model is tried in turn: a free tier that is exhausted or down hands the
+  // sentence to the next one rather than to the regex fallback.
+  const models: IntentModel[] =
+    options.apiKey !== undefined
+      ? options.apiKey === ''
+        ? []
+        : [
+            {
+              id: 'deepseek',
+              apiKey: options.apiKey,
+              baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
+              model: options.model ?? PARSE_MODEL,
+            },
+          ]
+      : intentModels().map((m) => ({
+          ...m,
+          ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+          ...(options.model !== undefined ? { model: options.model } : {}),
+        }))
 
-  const baseUrl = options.baseUrl ?? process.env['DEEPSEEK_BASE_URL'] ?? DEFAULT_BASE_URL
-  const model = options.model ?? PARSE_MODEL
+  for (const model of models) {
+    const read = await readWithModel(text, options, model)
+    if (read !== null) return read
+  }
+  return null
+}
+
+async function readWithModel(
+  text: string,
+  options: ReadIntentOptions,
+  config: IntentModel
+): Promise<LlmReadIntent | null> {
+  const { apiKey, baseUrl, model } = config
   const doFetch = options.fetchImpl ?? fetch
 
   // Abandoned rather than awaited indefinitely. A parse that arrives after the
