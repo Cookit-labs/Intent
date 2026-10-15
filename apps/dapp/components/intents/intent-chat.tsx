@@ -8,6 +8,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
+import { fetchClarify } from '../../lib/chat/clarify-client'
+import { fallbackInstruction, isSelfContained } from '../../lib/chat/clarify-flow'
+import type { ClarifyTurn } from '../../lib/clarify/clarify'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
 
@@ -199,6 +202,12 @@ export function IntentChat(): JSX.Element {
   // every agent is given on a re-run.
   const [thread, setThread] = useState<ThreadTurn[]>([])
   const [notes, setNotes] = useState<string[]>([])
+  // A question put to the user before any agent runs. While set, the next
+  // message is the answer to it, not a new instruction.
+  const [clarifying, setClarifying] = useState<{ turns: ClarifyTurn[] } | null>(null)
+  const [clarifyBusy, setClarifyBusy] = useState(false)
+  // What the questions established, handed to every agent unchanged.
+  const [brief, setBrief] = useState<string[]>([])
 
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
@@ -275,7 +284,10 @@ export function IntentChat(): JSX.Element {
   // toggle used to select a mock competition here, and a stale bundle once
   // ran it silently while the server's agents worked — every check passed and
   // the screen showed canned proposals nobody could execute.
-  const live = useCompetition(restored === null ? parsed : null, slug, raceContext(thread, notes))
+  const live = useCompetition(restored === null ? parsed : null, slug, [
+    ...raceContext(thread, notes),
+    ...brief,
+  ])
   const liveCompetition = live
 
   // A restored turn is already decided: every agent revealed, a winner picked.
@@ -526,11 +538,56 @@ export function IntentChat(): JSX.Element {
   /** Something came of the open intent: a trade settled, or an order was placed. */
   const turnExecuted = swap.phase === 'settled' || sequence.phase === 'settled' || placedId !== null
 
-  function handleSubmit(text: string): void {
+  /** Puts the open turn behind the user, so the next one reads as the chat's next line. */
+  function archiveOpenTurn(): void {
+    if (message === null) return
+    const previous = message
+    setThread((t) => [
+      ...t,
+      { id: turnId ?? crypto.randomUUID(), text: previous, executed: turnExecuted },
+    ])
+    setNotes([])
+  }
+
+  /** What a previous attempt left on screen, which a new turn must not inherit. */
+  function resetTurnState(): void {
+    sequence.reset()
+    swap.reset()
+    supply.reset()
+    perp.reset()
+    setExecutingKey(null)
+    setPlacedId(null)
+    setAffordError(null)
+    setNairaForm(null)
+    setNairaConvert(null)
+    setPendingInput(null)
+    setFollowOn(null)
+    setHistoryOpen(false)
+    setRestored(null)
+    setPending(null)
+    setBrief([])
+  }
+
+  /**
+   * Runs an instruction: the standing-rule check, the payout form, the parsers
+   * and the race.
+   *
+   * `continuing` is set when a question was asked first and the answers have
+   * made this the same turn, so it is neither a note nor a new line of the
+   * chat. `shown` is what the user typed, which stays in the bubble even when
+   * the instruction that runs is the clarifier's rewrite of it.
+   */
+  function startIntent(
+    text: string,
+    options: { shown?: string; brief?: string[]; continuing?: boolean } = {}
+  ): void {
+    const continuing = options.continuing === true
+    const shown = options.shown ?? text
+
     // While an intent is open and unexecuted, a message that only adjusts it is
     // a note: the agents are given it and race again, instead of the chat
     // starting over and discarding what they said.
-    if (message !== null && parsed !== null && restored === null && !turnExecuted) {
+    if (!continuing && message !== null && parsed !== null && restored === null && !turnExecuted) {
       if (classifyFollowUp(text) === 'note') {
         if (executionInFlight) {
           setAffordError('Finish or cancel the signature first, then continue the chat.')
@@ -547,14 +604,8 @@ export function IntentChat(): JSX.Element {
 
     // Anything else is a new turn. The one before it stays in view, so a
     // follow-up after a trade reads as the next line of the same chat.
-    if (message !== null) {
-      const previous = message
-      setThread((t) => [
-        ...t,
-        { id: turnId ?? crypto.randomUUID(), text: previous, executed: turnExecuted },
-      ])
-      setNotes([])
-    }
+    if (!continuing) archiveOpenTurn()
+    setBrief(options.brief ?? [])
 
     // A rule is not a trade. "Buy XLM if it drops to $0.16" describes when to
     // act, and running a competition on it now would execute at a price the
@@ -566,13 +617,13 @@ export function IntentChat(): JSX.Element {
     const rule = parseStandingIntent(text, swap.usdPrices ?? {}, slug)
     if (rule !== null) {
       standing.add(rule)
-      setMessage(text)
+      setMessage(shown)
       setParsed(null)
       setRulesOpen(true)
       return
     }
 
-    setMessage(text)
+    setMessage(shown)
     // Anything left from a previous attempt goes now. Nothing was signed, so
     // nothing should survive the restart.
     sequence.reset()
@@ -898,6 +949,74 @@ export function IntentChat(): JSX.Element {
   }
 
   /**
+   * One request or answer from the composer.
+   *
+   * A complete instruction goes straight to the agents. Anything missing
+   * something material goes to the clarifier first, which asks one question at
+   * a time and, once nothing is missing, hands back the request written out on
+   * its own. The clarifier failing or running out of questions means the user's
+   * own words run, so asking never makes the chat less capable than before.
+   */
+  function handleSubmit(text: string): void {
+    // An answer to a question already asked.
+    if (clarifying !== null) {
+      void clarify(text, clarifying.turns)
+      return
+    }
+
+    // A note on an open intent refines it and needs no question of its own.
+    const open = message !== null && parsed !== null && restored === null && !turnExecuted
+    if (open && classifyFollowUp(text) === 'note') {
+      startIntent(text)
+      return
+    }
+
+    if (isSelfContained(text, thread.length > 0)) {
+      startIntent(text)
+      return
+    }
+    void clarify(text, [])
+  }
+
+  async function clarify(text: string, prior: ClarifyTurn[]): Promise<void> {
+    const turns: ClarifyTurn[] = [...prior, { role: 'user', content: text }]
+
+    if (prior.length === 0) {
+      // A new turn: the one before it is put away and the screen cleared, so the
+      // question is asked on an empty page rather than under the last answer.
+      archiveOpenTurn()
+      resetTurnState()
+      setParsed(null)
+      setMessage(text)
+      setTurnId(crypto.randomUUID())
+    }
+    setClarifying({ turns })
+    setClarifyBusy(true)
+
+    const earlier = raceContext(thread, [])
+    const result = await fetchClarify(turns, earlier)
+    setClarifyBusy(false)
+
+    if (result !== null && result.status === 'ask') {
+      setClarifying({ turns: [...turns, { role: 'assistant', content: result.question }] })
+      return
+    }
+
+    setClarifying(null)
+    const first = turns[0]?.content ?? text
+    startIntent(
+      result !== null && result.status === 'ready'
+        ? result.instruction
+        : fallbackInstruction(turns),
+      {
+        shown: first,
+        brief: result !== null && result.status === 'ready' ? result.context : [],
+        continuing: true,
+      }
+    )
+  }
+
+  /**
    * Runs a confirmed reading.
    *
    * `withFollowOn` is false when the user said they meant only the trade, which
@@ -937,6 +1056,9 @@ export function IntentChat(): JSX.Element {
     handleReset()
     setThread([])
     setNotes([])
+    setClarifying(null)
+    setClarifyBusy(false)
+    setBrief([])
   }
 
   function handleReset(): void {
@@ -1503,6 +1625,27 @@ export function IntentChat(): JSX.Element {
                   </div>
                 </div>
               ))}
+              {/* The questions asked before the agents ran, and the answers. */}
+              {clarifying !== null
+                ? clarifying.turns.slice(1).map((turn, i) =>
+                    turn.role === 'assistant' ? (
+                      <div key={`q-${i}`} className="flex justify-start">
+                        <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
+                          {turn.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={`a-${i}`} className="flex justify-end">
+                        <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+                          {turn.content}
+                        </div>
+                      </div>
+                    )
+                  )
+                : null}
+              {clarifyBusy ? (
+                <p className="text-muted-foreground text-center text-xs">Thinking…</p>
+              ) : null}
               {notes.length > 0 && competition.phase === 'competing' ? (
                 <p className="text-muted-foreground text-center text-xs">
                   Agents are working again with your note.
@@ -1752,7 +1895,11 @@ export function IntentChat(): JSX.Element {
         <ComposerInput
           onSubmit={handleSubmit}
           showExamples={!parsed && thread.length === 0}
-          {...(message !== null ? { placeholder: 'Continue the chat…' } : {})}
+          {...(clarifying !== null
+            ? { placeholder: 'Type your answer…' }
+            : message !== null
+              ? { placeholder: 'Continue the chat…' }
+              : {})}
           {...(parsed ? { onReset: handleReset } : {})}
         />
         <TradeCapNote />
