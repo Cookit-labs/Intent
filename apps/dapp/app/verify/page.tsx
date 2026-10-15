@@ -49,6 +49,8 @@ function VerifyForm(): JSX.Element {
         setStage('not_accepted')
       } else if (data.status === 'rate_limited') {
         setError(`Too many requests. Try again in ${data.retryAfter ?? 60}s.`)
+      } else if (data.status === 'send_failed') {
+        setError('We could not send the email just now. Please try again shortly.')
       } else setError('Could not send a code. Check the address and try again.')
     } catch {
       setError('Network error. Is the app still running?')

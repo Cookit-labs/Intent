@@ -68,6 +68,8 @@ export interface OtpStore {
   /** Issues a code and returns the plaintext, which only the email may contain. */
   issueCode: (email: string) => Promise<string>
   verifyCode: (email: string, submitted: string) => Promise<VerifyResult>
+  /** Voids a code whose email never went out, so the address is not left in cooldown. */
+  releaseSend: (email: string) => Promise<void>
 }
 
 const num = (value: unknown): number => {
@@ -123,6 +125,15 @@ export function createOtpStore(query: QueryFn): OtpStore {
         [email, hashCode(code)]
       )
       return code
+    },
+
+    async releaseSend(email) {
+      await query(
+        `UPDATE otp_codes
+         SET code_hash = NULL, sends = 0, last_sent_at = now() - interval '${HOUR_SECONDS} seconds'
+         WHERE email = $1`,
+        [email]
+      )
     },
 
     /**
@@ -201,6 +212,10 @@ export async function checkSendRateLimit(email: string): Promise<RateLimitResult
 
 export async function issueCode(email: string): Promise<string> {
   return (await getOtpStore()).issueCode(email)
+}
+
+export async function releaseSend(email: string): Promise<void> {
+  return (await getOtpStore()).releaseSend(email)
 }
 
 export async function verifyCode(email: string, submitted: string): Promise<VerifyResult> {
