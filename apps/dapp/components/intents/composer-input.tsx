@@ -36,11 +36,13 @@ export function ComposerInput({
   disabled = false,
   showExamples = false,
   onReset,
+  placeholder = 'Describe the outcome you want…',
 }: {
   onSubmit: (text: string) => void
   disabled?: boolean
   showExamples?: boolean
   onReset?: () => void
+  placeholder?: string
 }): JSX.Element {
   const [text, setText] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -121,7 +123,7 @@ export function ComposerInput({
           onKeyDown={onKeyDown}
           disabled={disabled}
           rows={1}
-          placeholder="Describe the outcome you want…"
+          placeholder={placeholder}
           className="placeholder:text-muted-foreground max-h-40 min-h-[2.25rem] flex-1 resize-none self-center bg-transparent px-2 py-1.5 text-sm outline-none"
           aria-label="Describe your intent"
         />

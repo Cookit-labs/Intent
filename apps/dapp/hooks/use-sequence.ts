@@ -198,6 +198,8 @@ export interface SendOnly {
 /** A swap, then a payment of whatever it delivered. */
 export interface SwapThenSend {
   kind: 'swap-then-send'
+  /** The tolerance the user chose for the swap, in basis points. */
+  slippageBps?: number
   quote: unknown
   /** The symbol the swap delivers, so its arrival can be measured. */
   receiveSymbol: string
@@ -209,6 +211,8 @@ export interface SwapThenSend {
 /** A swap, then a supply of whatever it delivered. */
 export interface SwapThenLend {
   kind: 'swap-then-lend'
+  /** The tolerance the user chose for the swap, in basis points. */
+  slippageBps?: number
   /** The symbol the swap delivers, so its arrival can be measured. */
   receiveSymbol: string
   /**
@@ -232,6 +236,8 @@ export interface SwapThenLend {
 /** A swap into USDC, then a withdrawal of whatever it delivered to fiat. */
 export interface SwapThenOfframp {
   kind: 'swap-then-offramp'
+  /** The tolerance the user chose for the swap, in basis points. */
+  slippageBps?: number
   quote: unknown
   /** Always USDC today; carried so the balance delta can be measured. */
   receiveSymbol: string
@@ -258,6 +264,8 @@ export interface SwapThenOfframp {
  */
 export interface SwapThenNaira {
   kind: 'swap-then-naira'
+  /** The tolerance the user chose for the swap, in basis points. */
+  slippageBps?: number
   quote: unknown
   /** Always USDC; carried so the balance change can be measured. */
   receiveSymbol: string
@@ -619,7 +627,11 @@ export function useSequence(): Sequence {
           const res = await fetch('/api/swap/build', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account: signer, quote: req.quote }),
+            body: JSON.stringify({
+              account: signer,
+              quote: req.quote,
+              ...(req.slippageBps !== undefined ? { slippageBps: req.slippageBps } : {}),
+            }),
           })
           const built = (await res.json()) as { xdr?: string; error?: string }
 

@@ -51,7 +51,11 @@ export interface SwapExecution extends SwapExecutionState {
   reset: () => void
 }
 
-export function useSwapExecution(route: unknown): SwapExecution {
+export function useSwapExecution(
+  route: unknown,
+  /** A tolerance the user chose, in basis points. Absent means the server's default. */
+  slippageBps?: number
+): SwapExecution {
   const { adapter } = useChain()
   const { address, isConnected } = useWallet()
   const [state, setState] = useState<SwapExecutionState>({ phase: 'idle' })
@@ -103,7 +107,11 @@ export function useSwapExecution(route: unknown): SwapExecution {
     void fetch('/api/swap/build', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: address, quote }),
+      body: JSON.stringify({
+        account: address,
+        quote,
+        ...(slippageBps !== undefined ? { slippageBps } : {}),
+      }),
     })
       .then((r) => r.json())
       .then((built: { preview?: LedgerPreview }) => {
@@ -115,7 +123,7 @@ export function useSwapExecution(route: unknown): SwapExecution {
     return () => {
       cancelled = true
     }
-  }, [route, address])
+  }, [route, address, slippageBps])
 
   const reset = useCallback(() => setState({ phase: 'idle' }), [])
 
@@ -139,7 +147,11 @@ export function useSwapExecution(route: unknown): SwapExecution {
         const buildRes = await fetch('/api/swap/build', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ account: address, quote }),
+          body: JSON.stringify({
+            account: address,
+            quote,
+            ...(slippageBps !== undefined ? { slippageBps } : {}),
+          }),
         })
         const built = (await buildRes.json()) as { xdr?: string; error?: string }
 
@@ -220,7 +232,7 @@ export function useSwapExecution(route: unknown): SwapExecution {
     }
 
     void run()
-  }, [state.quote, address, isConnected, adapter])
+  }, [state.quote, address, isConnected, adapter, slippageBps])
 
   return {
     ...state,
