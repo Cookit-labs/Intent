@@ -12,6 +12,7 @@ import {
 } from '../../../../lib/send/prepare'
 import { feePaidBy } from '../../../../lib/sponsor/sponsor'
 import { resolveAsset } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { derivePreview } from '../../../../lib/swap/preview'
 import { fetchMarketPrices } from '../../../../lib/swap/prices'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
@@ -69,6 +70,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   // Refused before the name is asked about: an asset the app cannot send is
   // a refusal whatever the name resolves to, and a registry read is not free.
+  await ensureLiveAssets([symbol])
   const asset = resolveAsset(symbol)
   if (asset === undefined) {
     return NextResponse.json(

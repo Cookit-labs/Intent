@@ -8,8 +8,6 @@ export async function GET(): Promise<NextResponse> {
   const token = cookies().get(SESSION_COOKIE)?.value
   const session = readSession(token)
   return NextResponse.json(
-    session === undefined
-      ? { authenticated: false }
-      : { authenticated: true, email: session.email }
+    session === undefined ? { authenticated: false } : { authenticated: true, email: session.email }
   )
 }

@@ -17,6 +17,7 @@ import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
 import { createSoroswapAggregatorQuoter } from '../../../../lib/swap/sources/soroswap-aggregator-quoter'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
 import { applySlippage, fromBaseUnits } from '../../../../lib/swap/assets'
+import { ensureLiveAssets } from '../../../../lib/swap/live-assets'
 import { checkSlippageBps } from '../../../../lib/swap/slippage'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
@@ -77,6 +78,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const submitted = body.quote as SwapQuote
+  await ensureLiveAssets([submitted.from?.code, submitted.to?.code])
   const age = Date.now() - new Date(submitted.quotedAt).getTime()
   if (Number.isNaN(age) || age > MAX_QUOTE_AGE_MS) {
     return NextResponse.json({ error: 'quote_expired' }, { status: 409 })

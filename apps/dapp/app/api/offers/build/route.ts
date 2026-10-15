@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { reportError } from '../../../../lib/server/report'
 import { resolveAsset } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { buildOfferTransaction } from '../../../../lib/swap/build-offer'
 import { fetchOrderBookTop, offerPriceFromUsd } from '../../../../lib/swap/limit-price'
 import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
@@ -58,6 +59,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
   }
 
+  await ensureLiveAssets([sellSymbol, buySymbol])
   const selling = resolveAsset(sellSymbol)
   const buying = resolveAsset(buySymbol)
   if (selling === undefined || buying === undefined) {

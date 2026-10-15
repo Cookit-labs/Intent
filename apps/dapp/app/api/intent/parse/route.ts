@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 
 import { configuredLendingVenues } from '../../../../lib/lend/venues'
 import { isLlmParseConfigured, readIntentWithLlm } from '../../../../lib/parse-intent-llm'
-import { tradeableSymbols } from '../../../../lib/swap/asset-registry'
+import { tradeableSymbols, resolveVerifiedAsset } from '../../../../lib/swap/asset-registry'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { logIntentRead } from '../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
@@ -59,6 +60,43 @@ interface ParseBody {
   chain?: string
 }
 
+/** Words people capitalise that are not tokens. */
+const NOT_TOKENS = new Set([
+  'SWAP',
+  'BUY',
+  'SELL',
+  'SEND',
+  'FOR',
+  'THE',
+  'AND',
+  'ALL',
+  'MAX',
+  'NOW',
+  'USD',
+  'USDS',
+  'LIMIT',
+  'ORDER',
+  'WORTH',
+  'CASH',
+  'OUT',
+  'NGN',
+  'APY',
+  'TVL',
+  'DEX',
+  'ETF',
+  'ASAP',
+])
+
+/** Capitalised 3-8 letter words that are not known assets, in the order they appear. */
+function unknownTickers(text: string): string[] {
+  const seen = new Set<string>()
+  for (const word of text.match(/[A-Z][A-Z0-9]{2,7}/g) ?? []) {
+    if (NOT_TOKENS.has(word) || resolveVerifiedAsset(word) !== undefined) continue
+    seen.add(word)
+  }
+  return [...seen].slice(0, 3)
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'compete')
   if (limited !== undefined) return limited
@@ -82,6 +120,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const chain = typeof body.chain === 'string' ? body.chain : 'stellar'
 
+  // A token named in the sentence that the app does not hold by hand is looked
+  // up and, only if its issuer proves itself, admitted for this request.
+  await ensureLiveAssets(tickersIn(body.text))
+
   const read = await readIntentWithLlm(body.text, {
     // The model may only name assets this app can actually trade. Checked here
     // rather than trusted, because a hallucinated ticker reaching the quoter as
@@ -92,6 +134,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   })
 
   if (read === null) {
+    // A ticker typed in capitals that nothing here recognises is most likely
+    // the reason. Saying so lets the chat ask which token was meant, instead of
+    // the sentence silently going to a parser that cannot read it either.
+    const unknown = unknownTickers(body.text)
+    if (unknown.length > 0) {
+      await logIntentRead({ understood: false, reason: 'unknown_token' })
+      return NextResponse.json({ understood: false, reason: 'unknown_token', tokens: unknown })
+    }
     await logIntentRead({ understood: false, reason: 'unreadable' })
     return NextResponse.json({ understood: false, reason: 'unreadable' })
   }
@@ -133,5 +183,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Null rather than omitted, so the client distinguishes "no follow-on" from
     // a field that failed to serialise.
     followOn: read.followOn,
+    // Tokens admitted live, so the page can trade them without a second lookup.
+    // Absent for the hand-written ones, which the page already knows.
+    liveAssets: [read.tokenIn, read.tokenOut].flatMap((symbol) => {
+      const asset = resolveVerifiedAsset(symbol)
+      return asset !== undefined && asset.category === 'token' ? [asset] : []
+    }),
   })
 }

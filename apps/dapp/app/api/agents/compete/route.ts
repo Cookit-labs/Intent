@@ -14,6 +14,7 @@ import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { parseIntent } from '../../../../lib/parse-intent'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
 import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
@@ -162,6 +163,7 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
+    await ensureLiveAssets(tickersIn(text))
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
     context = Array.isArray(body.context)
       ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)

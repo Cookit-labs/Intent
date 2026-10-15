@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { resolveRecipient } from '../../../../lib/names/resolve'
 import { CannotReceive, assertCanReceive, resolutionFailure } from '../../../../lib/send/prepare'
 import { resolveAsset } from '../../../../lib/swap/assets'
+import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -33,6 +34,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (typeof body.recipient !== 'string' || body.recipient.trim() === '') {
     return NextResponse.json({ error: 'recipient is required' }, { status: 400 })
   }
+  if (body.asset !== undefined) await ensureLiveAssets([String(body.asset)])
   const asset = body.asset === undefined ? undefined : resolveAsset(String(body.asset))
   if (body.asset !== undefined && asset === undefined) {
     return NextResponse.json(

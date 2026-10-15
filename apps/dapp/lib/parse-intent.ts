@@ -1,6 +1,7 @@
 import type { CreateIntentInput, IntentType } from '@intent/types'
 
 import { detectRealWorldAsset } from './rwa-phrases'
+import { liveSymbols } from './swap/asset-registry'
 
 export interface ParsedIntent {
   outcome: string
@@ -28,7 +29,7 @@ export interface ParsedIntent {
   limitPriceUsd?: number
 }
 
-const TOKEN_ALIASES: Record<string, string> = {
+const STATIC_TOKEN_ALIASES: Record<string, string> = {
   xlm: 'XLM',
   lumens: 'XLM',
   eth: 'WETH',
@@ -43,6 +44,20 @@ const TOKEN_ALIASES: Record<string, string> = {
   cetes: 'CETES',
   ustry: 'USTRY',
   ktb: 'KTB',
+}
+
+/**
+ * The names a sentence can use for a token: the fixed ones, plus any ticker
+ * admitted live after its issuer proved itself. Read at call time because the
+ * live set changes while the server runs.
+ */
+function tokenAliases(): Record<string, string> {
+  const out: Record<string, string> = { ...STATIC_TOKEN_ALIASES }
+  for (const symbol of liveSymbols()) {
+    const key = symbol.toLowerCase()
+    if (out[key] === undefined) out[key] = symbol
+  }
+  return out
 }
 
 /**
@@ -125,7 +140,7 @@ function detectSwapPair(text: string): { from: string; to: string } | undefined 
   // matching around a connector word: "worth of" and "for" both look like
   // connectors and picking the wrong one reverses the trade.
   const found: { symbol: string; at: number }[] = []
-  for (const [alias, symbol] of Object.entries(TOKEN_ALIASES)) {
+  for (const [alias, symbol] of Object.entries(tokenAliases())) {
     const m = new RegExp(`\\b${alias}\\b`).exec(t)
     if (m !== null) found.push({ symbol, at: m.index })
   }
@@ -164,7 +179,7 @@ function detectToken(text: string, fallback: string): string {
   if (rwa !== undefined) return rwa
 
   const t = text.toLowerCase()
-  for (const [alias, symbol] of Object.entries(TOKEN_ALIASES)) {
+  for (const [alias, symbol] of Object.entries(tokenAliases())) {
     if (symbol !== 'USDC' && symbol !== 'USDT' && new RegExp(`\\b${alias}\\b`).test(t)) {
       return symbol
     }
@@ -181,7 +196,7 @@ function detectToken(text: string, fallback: string): string {
  * token, so the caller can fall back rather than guess.
  */
 function amountForToken(text: string, symbol: string): number | undefined {
-  const aliases = Object.entries(TOKEN_ALIASES)
+  const aliases = Object.entries(tokenAliases())
     .filter(([, sym]) => sym === symbol)
     .map(([alias]) => alias)
   if (aliases.length === 0) return undefined
@@ -308,7 +323,7 @@ export function parseIntent(
   // Requires an actual token name after the figure, not merely a letter:
   // "$0.25 or better" would otherwise read as a budget because "or" starts
   // with one, turning a limit price into an order size.
-  const symbols = Object.keys(TOKEN_ALIASES).join('|')
+  const symbols = Object.keys(tokenAliases()).join('|')
   const budgetForm = new RegExp(
     `\\$\\s*[\\d,.]+\\s*(?:worth\\s+)?(?:of\\s+)?(?:${symbols})\\b`,
     'i'

@@ -30,7 +30,7 @@ import type { ClassicAsset } from './assets'
  * before being written down. Each entry says which networks it is for.
  */
 
-export type AssetKind = 'native' | 'stablecoin' | 'rwa'
+export type AssetKind = 'native' | 'stablecoin' | 'rwa' | 'token'
 
 export interface VerifiedAsset {
   /** 'XLM' for the native asset. */
@@ -209,12 +209,38 @@ const here = new Map<StellarNetworkName, Record<string, VerifiedAsset>>()
 function assetsHere(): Record<string, VerifiedAsset> {
   const network = activeNetwork()
   const held = here.get(network)
-  if (held !== undefined) return held
-  const built = Object.fromEntries(
-    Object.entries(knownAssetsFor(network)).filter(([, a]) => a.networks.includes(network))
-  )
-  here.set(network, built)
-  return built
+  const built =
+    held ??
+    Object.fromEntries(
+      Object.entries(knownAssetsFor(network)).filter(([, a]) => a.networks.includes(network))
+    )
+  if (held === undefined) here.set(network, built)
+  const live = liveAssets.get(network)
+  // The hand-written entries always win a name, so a live admission can never
+  // redefine XLM, USDC or an Etherfuse bond.
+  return live === undefined ? built : { ...live, ...built }
+}
+
+const liveAssets = new Map<StellarNetworkName, Record<string, VerifiedAsset>>()
+
+/**
+ * Admits an asset whose issuer has been proved by `live-assets.ts`.
+ *
+ * Only that module calls this, after the domain round trip. Kept apart from
+ * the static catalogue so nothing read from a list ever sits where the
+ * hand-verified entries do.
+ */
+export function registerLiveAsset(network: StellarNetworkName, asset: VerifiedAsset): void {
+  if (knownAssetsFor(network)[asset.code.toUpperCase()] !== undefined) return
+  liveAssets.set(network, {
+    ...(liveAssets.get(network) ?? {}),
+    [asset.code.toUpperCase()]: asset,
+  })
+}
+
+/** Tickers admitted live on this network, beyond the hand-written catalogue. */
+export function liveSymbols(): string[] {
+  return Object.keys(liveAssets.get(activeNetwork()) ?? {})
 }
 
 /** The Stellar-encoding view, for code that only cares how to send it. */

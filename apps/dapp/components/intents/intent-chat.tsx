@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { isMainnet, stellarNetwork } from '@intent/config'
+import { activeNetwork, isMainnet, stellarNetwork } from '@intent/config'
 import { Bell, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -80,7 +80,11 @@ import { SupplyConfirm } from './supply-confirm'
 import { usePerp } from '../../hooks/use-perp'
 import { PerpConfirm } from './perp-confirm'
 import { parsePerpIntent } from '../../lib/parse-perp'
-import { tradeableSymbols } from '../../lib/swap/asset-registry'
+import {
+  registerLiveAsset,
+  tradeableSymbols,
+  type VerifiedAsset,
+} from '../../lib/swap/asset-registry'
 import { blendXlm } from '../../lib/lend/reserves'
 import { lendingVenueName } from '../../lib/lend/venues'
 import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
@@ -875,6 +879,14 @@ export function IntentChat(): JSX.Element {
           amountStated?: boolean
           amountIsUsd?: boolean
           followOn?: FollowOnAction | null
+          liveAssets?: VerifiedAsset[]
+          reason?: string
+          tokens?: string[]
+        }
+        // Tokens the server proved this request, so the page can trade them
+        // without a hand-written entry.
+        for (const asset of body.liveAssets ?? []) {
+          registerLiveAsset(activeNetwork(), asset)
         }
 
         // A supply is not a trade, and the trade path below would read it as
@@ -953,6 +965,16 @@ export function IntentChat(): JSX.Element {
           setParsed(null)
           setFollowOn(null)
           supply.prepare({ assetId: blendXlm(), symbol, amount: toBaseUnits(units) })
+          return
+        }
+        // A token the app cannot vouch for: ask rather than guess. Nothing is run.
+        if (body.understood === false && body.reason === 'unknown_token' && slug === 'stellar') {
+          const names = (body.tokens ?? []).join(', ')
+          setParsed(null)
+          setFollowOn(null)
+          setAffordError(
+            `I can't confirm ${names} as a verified token on Stellar, so I won't trade it. Which token do you mean? You can name it another way, or paste its issuer account if you know it.`
+          )
           return
         }
         if (body.understood === true && body.tokenIn !== undefined && body.tokenOut !== undefined) {
