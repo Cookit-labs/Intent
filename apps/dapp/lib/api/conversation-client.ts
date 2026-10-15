@@ -2,6 +2,7 @@ import type { BundleStep, ChatTurn } from '../chat-history'
 
 import { apiRequest } from './http-client'
 import { currentToken } from './auth'
+import { historyOwner } from '../history-owner'
 
 /**
  * Conversation history, kept on the server rather than in the browser.
@@ -58,7 +59,25 @@ function toChatTurn(row: ApiTurn): ChatTurn {
 
 /** Whether a call can be attempted at all. */
 export function canSyncTurns(): boolean {
-  return currentToken() !== undefined
+  return ownToken() !== undefined
+}
+
+/**
+ * The session, only if it is the connected wallet's. A token left over from the
+ * previous wallet would otherwise fetch that wallet's turns.
+ */
+function ownToken(): string | undefined {
+  return currentToken(historyOwner())
+}
+
+/**
+ * Writes throw without a session instead of returning quietly. A silent return
+ * read as "saved", so the caller could not queue the turn for a later retry.
+ */
+function requireToken(): string {
+  const token = ownToken()
+  if (token === undefined) throw new Error('No session: sign in to save history.')
+  return token
 }
 
 /**
@@ -68,7 +87,7 @@ export function canSyncTurns(): boolean {
  * history panel should read as empty, not as broken.
  */
 export async function listTurns(chain: string): Promise<ChatTurn[]> {
-  const token = currentToken()
+  const token = ownToken()
   if (token === undefined) return []
 
   const body = await apiRequest<ListTurnsResponse>(
@@ -86,8 +105,7 @@ export async function listTurns(chain: string): Promise<ChatTurn[]> {
  * correction, not a duplicate.
  */
 export async function saveTurnRemote(turn: ChatTurn): Promise<void> {
-  const token = currentToken()
-  if (token === undefined) return
+  const token = requireToken()
 
   await apiRequest('/conversations', {
     method: 'POST',
@@ -115,8 +133,7 @@ export async function saveTurnRemote(turn: ChatTurn): Promise<void> {
  * readable in between.
  */
 export async function updateTurnRemote(id: string, patch: Partial<ChatTurn>): Promise<void> {
-  const token = currentToken()
-  if (token === undefined) return
+  const token = requireToken()
 
   await apiRequest(`/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -135,7 +152,7 @@ export async function updateTurnRemote(id: string, patch: Partial<ChatTurn>): Pr
 
 /** Deletes a wallet's turns on one chain, leaving the other chain's intact. */
 export async function clearTurnsRemote(chain: string): Promise<void> {
-  const token = currentToken()
+  const token = ownToken()
   if (token === undefined) return
 
   await apiRequest(`/conversations?chain=${encodeURIComponent(chain)}`, {
