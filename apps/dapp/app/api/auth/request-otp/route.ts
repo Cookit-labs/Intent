@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server'
 
 import { findByEmail, normalizeEmail } from '../../../../lib/server/db'
 import { getEmailSender } from '../../../../lib/server/email'
-import { CODE_TTL_SECONDS, checkSendRateLimit, issueCode } from '../../../../lib/server/otp'
+import {
+  CODE_TTL_SECONDS,
+  checkSendRateLimit,
+  issueCode,
+  releaseSend,
+} from '../../../../lib/server/otp'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -52,8 +57,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
 
-  const code = await issueCode(email)
-  await getEmailSender().sendOtp(email, code, CODE_TTL_SECONDS / 60)
+  try {
+    const code = await issueCode(email)
+    await getEmailSender().sendOtp(email, code, CODE_TTL_SECONDS / 60)
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[auth] could not send access code', e)
+    await releaseSend(email).catch(() => undefined)
+    return NextResponse.json({ status: 'send_failed' }, { status: 503 })
+  }
 
   return NextResponse.json({ status: 'sent', expiresIn: CODE_TTL_SECONDS })
 }
