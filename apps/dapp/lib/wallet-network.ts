@@ -81,3 +81,24 @@ export function refusesToSign(
 ): boolean {
   return walletPassphrase !== undefined && walletPassphrase !== selectedPassphrase
 }
+
+/**
+ * The network a connected wallet reports, or the page's own when it cannot say.
+ *
+ * Lobstr and xBull do not implement `getNetwork` at all: the kit rejects with
+ * "does not support" for both. Treating that as a failed connection turned
+ * two of the main Stellar wallets away after they had already handed over an
+ * address. A wallet that cannot say is taken to be on the page's network, and a
+ * wrong guess is caught where it matters, by the wallet refusing to sign.
+ */
+export async function walletPassphrase(
+  getNetwork: () => Promise<{ networkPassphrase: string }>,
+  fallback: string
+): Promise<string> {
+  try {
+    const net = await getNetwork()
+    return net.networkPassphrase !== '' ? net.networkPassphrase : fallback
+  } catch {
+    return fallback
+  }
+}
