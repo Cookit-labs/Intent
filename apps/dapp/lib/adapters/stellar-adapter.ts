@@ -16,6 +16,7 @@ import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../cha
 import { Networks } from '@creit.tech/stellar-wallets-kit/types'
 
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
+import { walletPassphrase } from '../wallet-network'
 import { fetchStellarBalances } from '../stellar-account'
 import { clearSession, ensureSession } from '../api/auth'
 import { networkKey } from '../network-storage-key'
@@ -185,8 +186,11 @@ function useStellarWallet(): ChainWallet {
 
         if (current === session.address) {
           setSharedAddress(current)
-          const net = await StellarWalletsKit.getNetwork()
-          if (!cancelled) setSharedNetwork(net.networkPassphrase)
+          const passphrase = await walletPassphrase(
+            () => StellarWalletsKit.getNetwork(),
+            stellarNetwork.networkPassphrase
+          )
+          if (!cancelled) setSharedNetwork(passphrase)
         } else {
           // The wallet switched accounts while we were away; the old record
           // does not describe the new one.
@@ -243,8 +247,12 @@ function useStellarWallet(): ChainWallet {
           writeSession({ address: picked, verified: false })
         }
 
-        const net = await StellarWalletsKit.getNetwork()
-        setSharedNetwork(net.networkPassphrase)
+        setSharedNetwork(
+          await walletPassphrase(
+            () => StellarWalletsKit.getNetwork(),
+            stellarNetwork.networkPassphrase
+          )
+        )
       } catch (e) {
         // The kit throws when the user closes the modal or rejects the
         // signature — both are ordinary outcomes, not faults.
