@@ -1686,6 +1686,11 @@ export function IntentChat(): JSX.Element {
                   {message}
                 </div>
               </div>
+              {restored !== null && Object.keys(restored.proposals).length === 0 ? (
+                <p className="text-muted-foreground text-center text-xs">
+                  No agent discussion was recorded for this intent.
+                </p>
+              ) : null}
 
               {/* What was added to the open intent while it was being decided. */}
               {notes.map((note, i) => (
@@ -1757,11 +1762,6 @@ export function IntentChat(): JSX.Element {
                     )
                   }
                 />
-              ) : null}
-              {restored !== null && Object.keys(restored.proposals).length === 0 ? (
-                <p className="text-muted-foreground text-center text-xs">
-                  No agent discussion was recorded for this intent.
-                </p>
               ) : null}
               <CompetitionPanel
                 state={competition}
