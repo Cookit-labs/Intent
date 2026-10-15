@@ -37,6 +37,8 @@ const empty = {
   amountStated: false,
   followOn: 'none',
   followOnVenue: '',
+  orderStyle: 'market',
+  limitPriceUsd: 0,
 }
 const options = { apiKey: 'sk-test', allowedSymbols: ['XLM', 'USDC'] }
 const turn = (content: string) => [{ role: 'user' as const, content }]
@@ -68,8 +70,47 @@ describe('orchestrateWithLlm', () => {
         amountStated: true,
         followOn: null,
       },
+      style: 'market',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Sell: XLM', 'Receive: USDC'],
+    })
+  })
+
+  it('carries a limit price and an order style the words alone would not give', async () => {
+    const result = await orchestrateWithLlm(turn('get me $20 of lumens if it dips to 19 cents'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'act',
+        tokenIn: 'USDC',
+        tokenOut: 'XLM',
+        amountUsd: 20,
+        amountIsUsd: true,
+        amountStated: true,
+        orderStyle: 'limit',
+        limitPriceUsd: 0.19,
+        instruction: 'Buy $20 of XLM at $0.19',
+      }),
+    })
+    expect(result).toMatchObject({ status: 'act', style: 'limit', limitPriceUsd: 0.19 })
+  })
+
+  it('asks for a size when a trade names none, rather than guessing one', async () => {
+    const result = await orchestrateWithLlm(turn('swap my xlm to usdc'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'act',
+        tokenIn: 'XLM',
+        tokenOut: 'USDC',
+        amountStated: false,
+        instruction: 'Swap XLM to USDC',
+      }),
+    })
+    expect(result).toEqual({
+      status: 'ask',
+      question:
+        'How much would you like to trade? A dollar amount or an amount of the asset works.',
     })
   })
 

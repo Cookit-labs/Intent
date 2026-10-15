@@ -136,6 +136,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         // Null rather than omitted, so the client distinguishes "no follow-on"
         // from a field that failed to serialise.
         followOn: reading.followOn,
+        style: result.style,
+        ...(result.limitPriceUsd !== undefined ? { limitPriceUsd: result.limitPriceUsd } : {}),
         instruction: result.instruction,
         context: result.context,
         // Tokens admitted live, so the page can trade them without a second lookup.

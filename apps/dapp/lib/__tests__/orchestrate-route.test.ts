@@ -58,6 +58,8 @@ describe('POST /api/intent/orchestrate', () => {
     orchestrateWithLlm.mockResolvedValue({
       status: 'act',
       reading,
+      style: 'limit',
+      limitPriceUsd: 0.19,
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
     })
@@ -72,6 +74,8 @@ describe('POST /api/intent/orchestrate', () => {
       amountStated: true,
       amountIsUsd: true,
       followOn: null,
+      style: 'limit',
+      limitPriceUsd: 0.19,
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
     })

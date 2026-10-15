@@ -36,10 +36,31 @@ export interface OrchestrateTurn {
   content: string
 }
 
+/** How the trade is to be placed. The words for each vary without limit; the meaning does not. */
+export type OrderStyle =
+  | 'market'
+  | 'limit'
+  | 'accumulate'
+  | 'hedge'
+  | 'rebalance'
+  | 'route_liquidity'
+
+const ORDER_STYLES: readonly OrderStyle[] = [
+  'market',
+  'limit',
+  'accumulate',
+  'hedge',
+  'rebalance',
+  'route_liquidity',
+]
+
 export type OrchestrateResult =
   | {
       status: 'act'
       reading: LlmReadIntent
+      style: OrderStyle
+      /** The price the user named for a limit order, and nothing else. */
+      limitPriceUsd?: number
       /** The latest request as one sentence that needs nothing before it to be understood. */
       instruction: string
       /** What was confirmed, one line each. The brief every agent receives. */
@@ -90,9 +111,29 @@ const ORCHESTRATE_TOOL = {
           description:
             "When 'act': what the user confirmed, one 'Label: value' line each, such as the asset, the amount or the destination currency. Never an account number or a name.",
         },
+        orderStyle: {
+          type: 'string',
+          enum: ORDER_STYLES,
+          description:
+            "When 'act': how the trade is placed. 'market' trades now at the going price. 'limit' only at or beyond a named price. 'accumulate' spreads buying over time. 'hedge' moves exposure into another asset. 'rebalance' restores a target mix. 'route_liquidity' asks for the best route.",
+        },
+        limitPriceUsd: {
+          type: 'number',
+          description:
+            "The price in US dollars the user named as a ceiling or floor, when orderStyle is 'limit'. 0 when none was named. Never the size.",
+        },
         ...READ_INTENT_PROPERTIES,
       },
-      required: ['outcome', 'question', 'reason', 'instruction', 'facts', ...READ_INTENT_REQUIRED],
+      required: [
+        'outcome',
+        'question',
+        'reason',
+        'instruction',
+        'facts',
+        'orderStyle',
+        'limitPriceUsd',
+        ...READ_INTENT_REQUIRED,
+      ],
     },
   },
 }
@@ -223,6 +264,8 @@ interface OrchestrateArguments extends ToolArguments {
   reason?: unknown
   instruction?: unknown
   facts?: unknown
+  orderStyle?: unknown
+  limitPriceUsd?: unknown
 }
 
 function argumentsOf(payload: unknown): OrchestrateArguments | null {
@@ -261,6 +304,16 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
       const reading = readingFromArguments(args, options)
       if (reading === null) return null
 
+      // A trade with no size cannot be quoted, and the old reading filled one
+      // in. Asked for instead.
+      if (reading.action === 'swap' && !reading.amountStated) {
+        return {
+          status: 'ask',
+          question:
+            'How much would you like to trade? A dollar amount or an amount of the asset works.',
+        }
+      }
+
       const instruction = text(args.instruction).slice(0, MAX_INSTRUCTION_CHARS)
       // Without a usable sentence there is nothing to hand the agents.
       if (instruction === '') return null
@@ -273,7 +326,22 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
         .filter((f) => f !== '' && !LONG_NUMBER.test(f))
         .slice(0, 8)
 
-      return { status: 'act', reading, instruction, context }
+      const style = ORDER_STYLES.find((known) => known === args.orderStyle) ?? 'market'
+      const limit =
+        typeof args.limitPriceUsd === 'number' &&
+        Number.isFinite(args.limitPriceUsd) &&
+        args.limitPriceUsd > 0
+          ? args.limitPriceUsd
+          : undefined
+
+      return {
+        status: 'act',
+        reading,
+        style,
+        ...(style === 'limit' && limit !== undefined ? { limitPriceUsd: limit } : {}),
+        instruction,
+        context,
+      }
     }
 
     default:
