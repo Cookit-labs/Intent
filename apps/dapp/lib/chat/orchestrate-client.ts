@@ -13,6 +13,8 @@ export interface ActReading {
   followOn: FollowOnAction | null
   style: 'market' | 'limit' | 'accumulate' | 'hedge' | 'rebalance' | 'route_liquidity'
   limitPriceUsd?: number
+  /** What a bare quantity counts; absent when the model did not say. */
+  amountOf?: 'sent' | 'received'
   liveAssets: VerifiedAsset[]
 }
 
@@ -98,6 +100,9 @@ export async function fetchOrchestrate(
             amountIsUsd: a['amountIsUsd'] === true,
             followOn: (a['followOn'] as FollowOnAction | null | undefined) ?? null,
             style,
+            ...(a['amountOf'] === 'sent' || a['amountOf'] === 'received'
+              ? { amountOf: a['amountOf'] }
+              : {}),
             ...(typeof a['limitPriceUsd'] === 'number'
               ? { limitPriceUsd: a['limitPriceUsd'] }
               : {}),

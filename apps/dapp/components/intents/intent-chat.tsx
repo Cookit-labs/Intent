@@ -901,6 +901,7 @@ export function IntentChat(): JSX.Element {
               tokenOut: given.tokenOut,
               amount: given.amountUsd,
               amountIsUsd: given.amountIsUsd,
+              ...(given.amountOf !== undefined ? { amountOf: given.amountOf } : {}),
               style: given.style,
               ...(given.limitPriceUsd !== undefined ? { limitPriceUsd: given.limitPriceUsd } : {}),
             },

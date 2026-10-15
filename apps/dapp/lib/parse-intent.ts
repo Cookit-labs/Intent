@@ -410,6 +410,12 @@ export interface ReadingForIntent {
   /** A dollar figure when `amountIsUsd`, otherwise a quantity of an asset. */
   amount: number
   amountIsUsd: boolean
+  /**
+   * What a quantity that is not in dollars counts, when the model said.
+   * Absent falls back to a structural guess, which is wrong for "turn 20 USDC
+   * into XLM" and is why the model is asked.
+   */
+  amountOf?: 'sent' | 'received'
   style: 'market' | 'limit' | 'accumulate' | 'hedge' | 'rebalance' | 'route_liquidity'
   limitPriceUsd?: number
 }
@@ -453,7 +459,10 @@ export function buildParsedIntent(
 
   // A bare quantity names what is bought when a stablecoin is spent
   // ("buy 300 XLM"), and what is sold otherwise ("swap 100 XLM to USDC").
-  const quantityIsOutput = STABLES.has(tokenIn) && !STABLES.has(tokenOut)
+  const quantityIsOutput =
+    reading.amountOf !== undefined
+      ? reading.amountOf === 'received'
+      : STABLES.has(tokenIn) && !STABLES.has(tokenOut)
   const sentUsd = reading.amountIsUsd
     ? reading.amount
     : reading.amount * (quantityIsOutput ? referencePriceUsd : sendPrice)

@@ -31,6 +31,7 @@ describe('fetchOrchestrate', () => {
         amountIsUsd: true,
         followOn: null,
         style: 'market',
+        amountOf: 'sent',
         instruction: 'Swap $5 of XLM to USDC',
         context: ['Asset: XLM'],
         liveAssets: [],
@@ -40,7 +41,13 @@ describe('fetchOrchestrate', () => {
       outcome: 'act',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
-      read: { action: 'swap', tokenIn: 'XLM', tokenOut: 'USDC', style: 'market' },
+      read: {
+        action: 'swap',
+        tokenIn: 'XLM',
+        tokenOut: 'USDC',
+        style: 'market',
+        amountOf: 'sent',
+      },
     })
   })
 

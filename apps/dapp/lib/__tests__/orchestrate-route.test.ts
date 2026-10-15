@@ -60,6 +60,7 @@ describe('POST /api/intent/orchestrate', () => {
       reading,
       style: 'limit',
       limitPriceUsd: 0.19,
+      amountOf: 'received',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
     })
@@ -76,6 +77,7 @@ describe('POST /api/intent/orchestrate', () => {
       followOn: null,
       style: 'limit',
       limitPriceUsd: 0.19,
+      amountOf: 'received',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
     })

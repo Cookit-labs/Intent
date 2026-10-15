@@ -39,6 +39,7 @@ const empty = {
   followOnVenue: '',
   orderStyle: 'market',
   limitPriceUsd: 0,
+  amountOf: 'sent',
 }
 const options = { apiKey: 'sk-test', allowedSymbols: ['XLM', 'USDC'] }
 const turn = (content: string) => [{ role: 'user' as const, content }]
@@ -71,6 +72,7 @@ describe('orchestrateWithLlm', () => {
         followOn: null,
       },
       style: 'market',
+      amountOf: 'sent',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Sell: XLM', 'Receive: USDC'],
     })
@@ -93,6 +95,40 @@ describe('orchestrateWithLlm', () => {
       }),
     })
     expect(result).toMatchObject({ status: 'act', style: 'limit', limitPriceUsd: 0.19 })
+  })
+
+  it('says which asset a bare quantity counts, so it is not guessed from the stablecoin', async () => {
+    const sent = await orchestrateWithLlm(turn('turn 20 USDC into XLM'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'act',
+        tokenIn: 'USDC',
+        tokenOut: 'XLM',
+        amountUsd: 20,
+        amountIsUsd: false,
+        amountStated: true,
+        amountOf: 'sent',
+        instruction: 'Swap 20 USDC to XLM',
+      }),
+    })
+    expect(sent).toMatchObject({ status: 'act', amountOf: 'sent' })
+
+    const received = await orchestrateWithLlm(turn('buy 300 XLM'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'act',
+        tokenIn: 'USDC',
+        tokenOut: 'XLM',
+        amountUsd: 300,
+        amountIsUsd: false,
+        amountStated: true,
+        amountOf: 'received',
+        instruction: 'Buy 300 XLM',
+      }),
+    })
+    expect(received).toMatchObject({ status: 'act', amountOf: 'received' })
   })
 
   it('asks for a size when a trade names none, rather than guessing one', async () => {

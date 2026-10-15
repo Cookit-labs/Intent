@@ -137,6 +137,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         // from a field that failed to serialise.
         followOn: reading.followOn,
         style: result.style,
+        ...(result.amountOf !== undefined ? { amountOf: result.amountOf } : {}),
         ...(result.limitPriceUsd !== undefined ? { limitPriceUsd: result.limitPriceUsd } : {}),
         instruction: result.instruction,
         context: result.context,

@@ -54,11 +54,22 @@ const ORDER_STYLES: readonly OrderStyle[] = [
   'route_liquidity',
 ]
 
+/** Which asset a bare quantity counts: the one given up, or the one received. */
+export type AmountOf = 'sent' | 'received'
+
+const AMOUNT_OF: readonly AmountOf[] = ['sent', 'received']
+
 export type OrchestrateResult =
   | {
       status: 'act'
       reading: LlmReadIntent
       style: OrderStyle
+      /**
+       * What a size that is not in dollars counts. "turn 20 USDC into XLM" is 20
+       * of what is sent; "buy 300 XLM" is 300 of what is received. Guessing it
+       * from which side is a stablecoin sized the first as 20 XLM.
+       */
+      amountOf?: AmountOf
       /** The price the user named for a limit order, and nothing else. */
       limitPriceUsd?: number
       /** The latest request as one sentence that needs nothing before it to be understood. */
@@ -111,6 +122,12 @@ const ORCHESTRATE_TOOL = {
           description:
             "When 'act': what the user confirmed, one 'Label: value' line each, such as the asset, the amount or the destination currency. Never an account number or a name.",
         },
+        amountOf: {
+          type: 'string',
+          enum: AMOUNT_OF,
+          description:
+            'When amountIsUsd is false: which asset the number counts. \'sent\' is the asset the user gives up ("sell 100 XLM", "turn 20 USDC into XLM", "swap 5 XLM to USDC"). \'received\' is the asset they get ("buy 300 XLM", "get me 50 USDC"). Use \'sent\' when amountIsUsd is true.',
+        },
         orderStyle: {
           type: 'string',
           enum: ORDER_STYLES,
@@ -132,6 +149,7 @@ const ORCHESTRATE_TOOL = {
         'facts',
         'orderStyle',
         'limitPriceUsd',
+        'amountOf',
         ...READ_INTENT_REQUIRED,
       ],
     },
@@ -266,6 +284,7 @@ interface OrchestrateArguments extends ToolArguments {
   facts?: unknown
   orderStyle?: unknown
   limitPriceUsd?: unknown
+  amountOf?: unknown
 }
 
 function argumentsOf(payload: unknown): OrchestrateArguments | null {
@@ -327,6 +346,7 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
         .slice(0, 8)
 
       const style = ORDER_STYLES.find((known) => known === args.orderStyle) ?? 'market'
+      const amountOf = AMOUNT_OF.find((known) => known === args.amountOf)
       const limit =
         typeof args.limitPriceUsd === 'number' &&
         Number.isFinite(args.limitPriceUsd) &&
@@ -338,6 +358,7 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
         status: 'act',
         reading,
         style,
+        ...(amountOf !== undefined ? { amountOf } : {}),
         ...(style === 'limit' && limit !== undefined ? { limitPriceUsd: limit } : {}),
         instruction,
         context,

@@ -13,6 +13,7 @@ import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/age
 import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { buildParsedIntent, parseIntent, type ReadingForIntent } from '../../../../lib/parse-intent'
+import { readingFromBody } from '../../../../lib/reading-from-body'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
 import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
@@ -149,36 +150,6 @@ function errorStream(code: 'agents_offline' | 'chain_unsupported', message: stri
   })
 }
 
-const STYLES = ['market', 'limit', 'accumulate', 'hedge', 'rebalance', 'route_liquidity'] as const
-
-/** A reading the chat sent, or undefined when it is absent or not usable. */
-function readingOf(value: unknown, text: string): ReadingForIntent | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const r = value as Record<string, unknown>
-  const style = STYLES.find((known) => known === r['style'])
-  if (
-    typeof r['tokenIn'] !== 'string' ||
-    typeof r['tokenOut'] !== 'string' ||
-    typeof r['amount'] !== 'number' ||
-    !Number.isFinite(r['amount']) ||
-    r['amount'] <= 0 ||
-    style === undefined
-  ) {
-    return undefined
-  }
-  return {
-    text,
-    tokenIn: r['tokenIn'],
-    tokenOut: r['tokenOut'],
-    amount: r['amount'],
-    amountIsUsd: r['amountIsUsd'] === true,
-    style,
-    ...(typeof r['limitPriceUsd'] === 'number' && r['limitPriceUsd'] > 0
-      ? { limitPriceUsd: r['limitPriceUsd'] }
-      : {}),
-  }
-}
-
 export async function POST(request: Request): Promise<Response> {
   const limited = await enforceRateLimit(request, 'compete')
   if (limited !== undefined) return limited
@@ -201,7 +172,7 @@ export async function POST(request: Request): Promise<Response> {
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
     await ensureLiveAssets(tickersIn(text))
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
-    reading = readingOf(body.reading, text)
+    reading = readingFromBody(body.reading, text)
     context = Array.isArray(body.context)
       ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)
       : []
