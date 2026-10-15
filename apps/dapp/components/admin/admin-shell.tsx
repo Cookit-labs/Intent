@@ -23,6 +23,7 @@ import { ThemeToggle } from '../layout/theme-toggle'
 
 import { RANGE_OPTIONS, SCOPES, ScopeProvider, useScope, type AdminRange } from './scope'
 import { StatsProvider, useStats } from './stats'
+import { BrandMark } from '../layout/brand-mark'
 
 interface NavItem {
   href: string
@@ -195,7 +196,7 @@ function Workspace({
       <aside className="border-border flex shrink-0 flex-col gap-4 border-b px-4 py-3 md:sticky md:top-0 md:h-screen md:w-56 md:border-b-0 md:border-r md:py-5">
         <div className="flex items-center justify-between md:block">
           <div className="flex items-baseline gap-2">
-            <span className="font-display text-lg">Intent</span>
+            <BrandMark textClassName="font-normal" />
             <span className="text-muted-foreground text-sm">Admin</span>
           </div>
           <div className="flex items-center md:hidden">
@@ -280,7 +281,7 @@ function SignIn({ onDone }: { onDone: () => void }): JSX.Element {
     <div className="app-canvas bg-surface-base flex min-h-screen flex-col">
       <header className="flex h-16 shrink-0 items-center justify-between px-4 sm:px-6">
         <div className="flex items-baseline gap-2">
-          <span className="font-display text-lg">Intent</span>
+          <BrandMark textClassName="font-normal" />
           <span className="text-muted-foreground text-sm">Admin</span>
         </div>
         <ThemeToggle />

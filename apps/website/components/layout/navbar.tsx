@@ -5,6 +5,7 @@ import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { LaunchDapp } from './launch-dapp'
+import { BrandMark } from './brand-mark'
 
 const NAV_LINKS = [
   { label: 'Docs', href: '#' },
@@ -18,7 +19,7 @@ export function Navbar() {
   return (
     <nav className="border-border bg-background/80 fixed left-0 right-0 top-0 z-50 border-b backdrop-blur-md">
       <div className="mx-auto flex h-16 items-center justify-between px-6 md:max-w-[1600px]">
-        <span className="font-sans text-lg font-bold tracking-tight">Intent</span>
+        <BrandMark />
 
         <div className="flex items-center gap-4 md:gap-6">
           <div className="hidden items-center gap-6 md:flex">

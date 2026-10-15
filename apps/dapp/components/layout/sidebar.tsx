@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation'
 
 import { useChain } from '../../providers/chain-provider'
 import { MobileAppCard } from './mobile-app-card'
+import { BrandMark } from './brand-mark'
 
 const nav = [
   { href: '/intents', label: 'Intents', icon: Sparkles },
@@ -37,7 +38,7 @@ export function Sidebar({
       )}
     >
       <div className="flex h-16 items-center px-6">
-        <span className="font-display text-lg font-semibold tracking-tight">Intent</span>
+        <BrandMark />
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
