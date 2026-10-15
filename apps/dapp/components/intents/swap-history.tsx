@@ -119,7 +119,7 @@ export function SwapHistory(): JSX.Element | null {
   // say what it was. A failed or empty list leaves the ledger as it was.
   const { data: cashouts } = useQuery({
     queryKey: ['cashouts', slug, address],
-    queryFn: () => fetchCashouts(),
+    queryFn: () => fetchCashouts(address as string),
     enabled: supported && isConnected && address !== undefined,
     staleTime: 30_000,
     refetchOnMount: 'always',

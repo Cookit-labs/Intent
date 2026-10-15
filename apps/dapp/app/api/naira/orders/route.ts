@@ -79,9 +79,19 @@ export async function GET(request: Request): Promise<Response> {
   }
   if (!isMainnet() || !databaseConfigured()) return NextResponse.json({ orders: [] })
 
+  // Narrowed to the wallet that is connected. One sign-in can own several
+  // wallets, and each should see only its own cash-outs. The wallet is a filter
+  // on this user's own orders, never a way to reach another user's: the email
+  // scope is applied first and always.
+  const asked = new URL(request.url).searchParams.get('account')
+  const account = asked !== null && StrKey.isValidEd25519PublicKey(asked) ? asked : undefined
+  if (asked !== null && account === undefined) {
+    return NextResponse.json({ orders: [] })
+  }
+
   try {
     const repo = await getNairaOrderRepo()
-    const rows = await repo.listPaidForEmail(session.email, orderNetwork(), 50)
+    const rows = await repo.listPaidForEmail(session.email, orderNetwork(), 50, account)
     return NextResponse.json({
       orders: rows.map((row) => ({ ...toPublic(row), createdAt: row.createdAt })),
     })

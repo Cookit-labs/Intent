@@ -62,9 +62,13 @@ export function cashoutRecords(orders: CashoutOrder[], explorerBase: string): Sw
 }
 
 /** The signed-in user's paid cash-outs. An unavailable list is an empty one: History still shows the ledger. */
-export async function fetchCashouts(fetchImpl: typeof fetch = fetch): Promise<CashoutOrder[]> {
+export async function fetchCashouts(
+  /** The connected wallet. History is per wallet, so only its cash-outs are asked for. */
+  account: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<CashoutOrder[]> {
   try {
-    const res = await fetchImpl('/api/naira/orders')
+    const res = await fetchImpl(`/api/naira/orders?account=${encodeURIComponent(account)}`)
     if (!res.ok) return []
     const body = (await res.json()) as { orders?: CashoutOrder[] }
     return Array.isArray(body.orders) ? body.orders : []

@@ -1,3 +1,4 @@
+import { Keypair } from '@stellar/stellar-sdk'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cashoutRecords, type CashoutOrder } from '../naira/history'
@@ -79,10 +80,24 @@ describe('the repository list', () => {
       return { rows: [] }
     })
     await real.listPaidForEmail('user@example.com', 'mainnet', 50)
-    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50])
+    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50, null])
     expect(seen[0]?.sql).toMatch(/email = \$1/)
     expect(seen[0]?.sql).toMatch(/network = \$2/)
     expect(seen[0]?.sql).toMatch(/payment_hash IS NOT NULL/)
+  })
+})
+
+describe('the repository list, per wallet', () => {
+  it('narrows to one wallet when asked, and still applies the user scope first', async () => {
+    const seen: { sql: string; params: unknown[] | undefined }[] = []
+    const real = createNairaOrderRepo(async (sql, params) => {
+      seen.push({ sql, params })
+      return { rows: [] }
+    })
+    await real.listPaidForEmail('user@example.com', 'mainnet', 50, 'GWALLET')
+    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50, 'GWALLET'])
+    expect(seen[0]?.sql).toMatch(/email = \$1/)
+    expect(seen[0]?.sql).toMatch(/account = \$4/)
   })
 })
 
@@ -100,10 +115,22 @@ describe('GET /api/naira/orders', () => {
     repo.listPaidForEmail.mockResolvedValue([])
   })
 
-  async function list() {
+  async function list(query = '') {
     const { GET } = await import('../../app/api/naira/orders/route')
-    return GET(new Request('http://localhost/api/naira/orders'))
+    return GET(new Request(`http://localhost/api/naira/orders${query}`))
   }
+
+  it('asks the store for the connected wallet’s orders only', async () => {
+    const wallet = Keypair.random().publicKey()
+    await list(`?account=${wallet}`)
+    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50, wallet)
+  })
+
+  it('answers nothing for a wallet that is not a Stellar account, without touching the store', async () => {
+    const res = await list('?account=not-an-address')
+    expect(await res.json()).toEqual({ orders: [] })
+    expect(repo.listPaidForEmail).not.toHaveBeenCalled()
+  })
 
   it('answers 401 without a session', async () => {
     session.current = undefined
@@ -143,7 +170,7 @@ describe('GET /api/naira/orders', () => {
       },
     ])
     const res = await list()
-    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50)
+    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50, undefined)
     const body = (await res.json()) as { orders: Record<string, unknown>[] }
     expect(body.orders).toHaveLength(1)
     expect(body.orders[0]).toMatchObject({ accountMask: '••••3682', createdAt: expect.any(String) })
