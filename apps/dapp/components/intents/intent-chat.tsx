@@ -9,7 +9,9 @@ import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
 import { fetchClarify } from '../../lib/chat/clarify-client'
-import { fallbackInstruction, isSelfContained } from '../../lib/chat/clarify-flow'
+import { StrategyEditor, type StrategyEdits } from './strategy-editor'
+import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
+import { ACKNOWLEDGED, fallbackInstruction, isSelfContained } from '../../lib/chat/clarify-flow'
 import type { ClarifyTurn } from '../../lib/clarify/clarify'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
@@ -208,6 +210,11 @@ export function IntentChat(): JSX.Element {
   const [clarifyBusy, setClarifyBusy] = useState(false)
   // What the questions established, handed to every agent unchanged.
   const [brief, setBrief] = useState<string[]>([])
+  // What the user changed about how the recommendation is carried out. Per
+  // turn: a new intent starts from the agents' own proposal again.
+  const [strategy, setStrategy] = useState<StrategyEdits>({})
+  const slippageEdit =
+    strategy.slippageBps !== undefined ? { slippageBps: strategy.slippageBps } : {}
 
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
@@ -323,7 +330,7 @@ export function IntentChat(): JSX.Element {
     return routesByAgent[executingKey] ?? winnerRoute
   }, [executingKey, routesByAgent, winnerRoute])
 
-  const swap = useSwapExecution(chosenRoute)
+  const swap = useSwapExecution(chosenRoute, strategy.slippageBps)
 
   // A resting order is a different transaction from a swap and has its own
   // state: it can be refused before it is ever built, which a swap cannot.
@@ -566,6 +573,7 @@ export function IntentChat(): JSX.Element {
     setRestored(null)
     setPending(null)
     setBrief([])
+    setStrategy({})
   }
 
   /**
@@ -606,6 +614,7 @@ export function IntentChat(): JSX.Element {
     // follow-up after a trade reads as the next line of the same chat.
     if (!continuing) archiveOpenTurn()
     setBrief(options.brief ?? [])
+    setStrategy({})
 
     // A rule is not a trade. "Buy XLM if it drops to $0.16" describes when to
     // act, and running a competition on it now would execute at a price the
@@ -967,7 +976,7 @@ export function IntentChat(): JSX.Element {
     // A note on an open intent refines it and needs no question of its own.
     const open = message !== null && parsed !== null && restored === null && !turnExecuted
     if (open && classifyFollowUp(text) === 'note') {
-      startIntent(text)
+      void refine(text)
       return
     }
 
@@ -978,7 +987,35 @@ export function IntentChat(): JSX.Element {
     void clarify(text, [])
   }
 
-  async function clarify(text: string, prior: ClarifyTurn[]): Promise<void> {
+  /**
+   * A note on the open intent, written back into the instruction when it can be.
+   *
+   * "Make it $5" given to the agents as context does not change what they are
+   * quoting: the amount, the pair and the routes were fixed by the sentence
+   * that opened the turn. So the model rewrites the open request with the
+   * change applied, and that is what races again. If it cannot, the note still
+   * goes to every agent as context, which is all it did before.
+   */
+  async function refine(note: string): Promise<void> {
+    if (executionInFlight) {
+      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      return
+    }
+    await clarify(
+      note,
+      [
+        { role: 'user', content: message ?? '' },
+        { role: 'assistant', content: ACKNOWLEDGED },
+      ],
+      { note }
+    )
+  }
+
+  async function clarify(
+    text: string,
+    prior: ClarifyTurn[],
+    options: { note?: string } = {}
+  ): Promise<void> {
     const turns: ClarifyTurn[] = [...prior, { role: 'user', content: text }]
 
     if (prior.length === 0) {
@@ -1003,6 +1040,16 @@ export function IntentChat(): JSX.Element {
     }
 
     setClarifying(null)
+
+    // A note the model could not write into the instruction is kept as context.
+    if (options.note !== undefined) {
+      if (result === null || result.status !== 'ready') {
+        startIntent(options.note)
+        return
+      }
+      setNotes((n) => [...n, options.note as string])
+      setExecutingKey(null)
+    }
     const first = turns[0]?.content ?? text
     startIntent(
       result !== null && result.status === 'ready'
@@ -1059,6 +1106,7 @@ export function IntentChat(): JSX.Element {
     setClarifying(null)
     setClarifyBusy(false)
     setBrief([])
+    setStrategy({})
   }
 
   function handleReset(): void {
@@ -1137,9 +1185,13 @@ export function IntentChat(): JSX.Element {
     // A price the user typed still wins over the agent's: that is the one part
     // of an intent a model does not get to move.
     const chosenPlan = competition.proposals[key]
+    // How to execute is the user's call when they made one, and the agent's
+    // proposal otherwise. A price the user typed in the sentence still wins
+    // over both: that is the one part of an intent a model does not move.
+    const mode = strategy.mode ?? chosenPlan?.executionMode
     const restingPrice =
-      chosenPlan?.executionMode === 'rest'
-        ? (parsed.limitPriceUsd ?? chosenPlan.restPriceUsd)
+      mode === 'rest'
+        ? (parsed.limitPriceUsd ?? strategy.restPriceUsd ?? chosenPlan?.restPriceUsd)
         : undefined
 
     const input = {
@@ -1185,6 +1237,7 @@ export function IntentChat(): JSX.Element {
       }
       sequence.prepare({
         kind: 'swap-then-naira',
+        ...slippageEdit,
         quote: route,
         receiveSymbol: 'USDC',
         bankCode: nairaConvert.bankCode,
@@ -1222,6 +1275,7 @@ export function IntentChat(): JSX.Element {
 
         sequence.prepare({
           kind: 'swap-then-lend',
+          ...slippageEdit,
           quote: route,
           receiveSymbol: parsed.input.tokenOut,
           lendAsset: blendXlm(),
@@ -1282,6 +1336,7 @@ export function IntentChat(): JSX.Element {
           if (latestPickRef.current !== key) return
           sequence.prepare({
             kind: 'swap-then-offramp',
+            ...slippageEdit,
             quote: route,
             receiveSymbol: 'USDC',
             anchor,
@@ -1311,6 +1366,7 @@ export function IntentChat(): JSX.Element {
       if (route !== undefined) {
         sequence.prepare({
           kind: 'swap-then-send',
+          ...slippageEdit,
           quote: route,
           receiveSymbol: parsed.input.tokenOut,
           recipient: followOn.recipient,
@@ -1627,21 +1683,24 @@ export function IntentChat(): JSX.Element {
               ))}
               {/* The questions asked before the agents ran, and the answers. */}
               {clarifying !== null
-                ? clarifying.turns.slice(1).map((turn, i) =>
-                    turn.role === 'assistant' ? (
-                      <div key={`q-${i}`} className="flex justify-start">
-                        <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
-                          {turn.content}
+                ? clarifying.turns
+                    .slice(1)
+                    .filter((t) => !(t.role === 'assistant' && t.content === ACKNOWLEDGED))
+                    .map((turn, i) =>
+                      turn.role === 'assistant' ? (
+                        <div key={`q-${i}`} className="flex justify-start">
+                          <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
+                            {turn.content}
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div key={`a-${i}`} className="flex justify-end">
-                        <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
-                          {turn.content}
+                      ) : (
+                        <div key={`a-${i}`} className="flex justify-end">
+                          <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
+                            {turn.content}
+                          </div>
                         </div>
-                      </div>
+                      )
                     )
-                  )
                 : null}
               {clarifyBusy ? (
                 <p className="text-muted-foreground text-center text-xs">Thinking…</p>
@@ -1650,6 +1709,40 @@ export function IntentChat(): JSX.Element {
                 <p className="text-muted-foreground text-center text-xs">
                   Agents are working again with your note.
                 </p>
+              ) : null}
+              {/* Changes to how the recommendation is carried out, offered once
+                  the agents have answered and before anything is signed. */}
+              {competition.phase === 'decided' &&
+              parsed !== null &&
+              restored === null &&
+              !turnExecuted &&
+              !executionInFlight &&
+              nairaForm === null ? (
+                <StrategyEditor
+                  edits={strategy}
+                  onChange={setStrategy}
+                  defaultSlippageBps={DEFAULT_SLIPPAGE_BPS}
+                  receiveBase={(winnerRoute as { destAmount?: string } | undefined)?.destAmount}
+                  receiveSymbol={parsed.input.tokenOut}
+                  agentMode={
+                    competition.winner !== null
+                      ? competition.proposals[competition.winner]?.executionMode
+                      : undefined
+                  }
+                  agentRestPriceUsd={
+                    competition.winner !== null
+                      ? competition.proposals[competition.winner]?.restPriceUsd
+                      : undefined
+                  }
+                  canRest={slug === 'stellar'}
+                  onAmount={(amount) =>
+                    handleSubmit(
+                      amount.startsWith('$')
+                        ? `make it ${amount}`
+                        : `make it ${amount} ${parsed.input.tokenIn}`
+                    )
+                  }
+                />
               ) : null}
               <CompetitionPanel
                 state={competition}

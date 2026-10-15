@@ -4,6 +4,13 @@ import type { ClarifyTurn } from '../clarify/clarify'
  * The parts of asking a question first that do not need a page.
  */
 
+/**
+ * The stand-in for an assistant turn the user never saw: when a note on an open
+ * intent is sent for rewriting, the open intent is the first user turn and this
+ * is the reply between it and the note. It is not drawn.
+ */
+export const ACKNOWLEDGED = 'Understood.'
+
 /** Assets and currencies a request can name. */
 const TICKER = /\b(xlm|usdc|usd|eth|btc|wbtc|weth|cetes|eurc|naira|ngn)\b/gi
 

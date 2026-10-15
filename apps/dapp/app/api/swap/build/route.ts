@@ -95,14 +95,20 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
 
+  // The tolerance the user chose, validated and capped above, or the default.
+  // Every venue's floor is derived from it, so a chosen tolerance is the floor
+  // on a Soroswap or Aquarius route as much as on the classic order book: a
+  // setting that only some routes honoured would be worse than none.
+  const chosenBps = slippage.bps
+
   if (venue === 'soroban') {
-    return await buildViaSoroban(body.account, submitted)
+    return await buildViaSoroban(body.account, submitted, chosenBps ?? DEFAULT_SLIPPAGE_BPS)
   }
   if (venue === 'aquarius') {
-    return await buildViaAquarius(body.account, submitted)
+    return await buildViaAquarius(body.account, submitted, chosenBps ?? DEFAULT_SLIPPAGE_BPS)
   }
   if (venue === 'aggregator') {
-    return await buildViaAggregator(body.account, submitted)
+    return await buildViaAggregator(body.account, submitted, chosenBps)
   }
 
   // Re-price from the source of truth. The client's numbers are treated as a
@@ -204,7 +210,11 @@ async function overCap(symbol: string, baseAmount: string): Promise<NextResponse
  * route has moved past the floor, it fails here — before a wallet prompt —
  * rather than on-chain after one.
  */
-async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<NextResponse> {
+async function buildViaSoroban(
+  account: string,
+  submitted: SwapQuote,
+  slippageBps: number
+): Promise<NextResponse> {
   // Re-quoted rather than taken from the client, for the same reason the
   // classic path re-prices: the submitted numbers state intent, not amounts.
   const fresh = await createSoroswapQuoter().quote({
@@ -221,7 +231,7 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
   const capped = await overCap(fresh.quote.from.code, fresh.quote.sendAmount)
   if (capped !== undefined) return capped
 
-  const minReceive = applySlippage(fresh.quote.destAmount, DEFAULT_SLIPPAGE_BPS)
+  const minReceive = applySlippage(fresh.quote.destAmount, slippageBps)
 
   let built
   try {
@@ -267,7 +277,7 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
     },
     destMin: minReceive,
     sendAmount: built.sendAmount,
-    slippageBps: DEFAULT_SLIPPAGE_BPS,
+    slippageBps,
     quote: fresh.quote,
   })
 }
@@ -295,8 +305,12 @@ async function buildViaSoroban(account: string, submitted: SwapQuote): Promise<N
  * — are what the wallet signs. A classic-DEX plan is a path payment and
  * needs neither step.
  */
-async function buildViaAggregator(account: string, submitted: SwapQuote): Promise<NextResponse> {
-  const quoter = createSoroswapAggregatorQuoter()
+async function buildViaAggregator(
+  account: string,
+  submitted: SwapQuote,
+  slippageBps: number | undefined
+): Promise<NextResponse> {
+  const quoter = createSoroswapAggregatorQuoter(slippageBps !== undefined ? { slippageBps } : {})
   if (!quoter.isConfigured()) {
     // A route quoted by a deployment with a key, submitted to one without.
     return NextResponse.json({ error: 'no_route', reason: 'unavailable' }, { status: 200 })
@@ -371,7 +385,11 @@ async function buildViaAggregator(account: string, submitted: SwapQuote): Promis
  * nobody had reviewed. So the quoted pool index selects which fresh quote is
  * used, and a quote without an index is refused rather than defaulted.
  */
-async function buildViaAquarius(account: string, submitted: SwapQuote): Promise<NextResponse> {
+async function buildViaAquarius(
+  account: string,
+  submitted: SwapQuote,
+  slippageBps: number
+): Promise<NextResponse> {
   if (submitted.poolIndex === undefined) {
     return NextResponse.json(
       { error: 'an Aquarius route must name the pool it was quoted from' },
@@ -407,7 +425,7 @@ async function buildViaAquarius(account: string, submitted: SwapQuote): Promise<
   const capped = await overCap(fresh.from.code, fresh.sendAmount)
   if (capped !== undefined) return capped
 
-  const minReceive = applySlippage(fresh.destAmount, DEFAULT_SLIPPAGE_BPS)
+  const minReceive = applySlippage(fresh.destAmount, slippageBps)
 
   let built
   try {
@@ -439,7 +457,7 @@ async function buildViaAquarius(account: string, submitted: SwapQuote): Promise<
     xdr: prepared.xdr,
     destMin: minReceive,
     sendAmount: built.sendAmount,
-    slippageBps: DEFAULT_SLIPPAGE_BPS,
+    slippageBps,
     quote: fresh,
   })
 }
