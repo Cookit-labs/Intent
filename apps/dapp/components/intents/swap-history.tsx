@@ -1,5 +1,6 @@
 'use client'
 
+import { stellarNetwork } from '@intent/config'
 import { Card, cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, ChevronDown, ExternalLink } from 'lucide-react'
@@ -8,6 +9,7 @@ import { useState } from 'react'
 import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
 import { fetchSwapHistory } from '../../lib/swap/history'
+import { cashoutRecords, fetchCashouts } from '../../lib/naira/history'
 import type { SwapKind, SwapRecord } from '../../lib/swap/history'
 import { bundlesByTxHash, syncTurns, type BundleStep } from '../../lib/chat-history'
 import { TokenIcon } from '../ui/token-icon'
@@ -40,6 +42,7 @@ const KIND_LABELS: Record<SwapKind, string> = {
   limit: 'Limit order',
   bundle: 'Bundled swap',
   pool: 'Liquidity',
+  cashout: 'Cash-out',
 }
 
 function amount(value: string): string {
@@ -111,6 +114,17 @@ export function SwapHistory(): JSX.Element | null {
     refetchOnMount: 'always',
   })
 
+  // Cash-outs are the app's own record, not the ledger's: a payout is a plain
+  // payment to a one-time address that no longer exists, so the chain cannot
+  // say what it was. A failed or empty list leaves the ledger as it was.
+  const { data: cashouts } = useQuery({
+    queryKey: ['cashouts', slug, address],
+    queryFn: () => fetchCashouts(address as string),
+    enabled: supported && isConnected && address !== undefined,
+    staleTime: 30_000,
+    refetchOnMount: 'always',
+  })
+
   if (!supported) {
     return (
       <Card className="text-muted-foreground p-6 text-sm">
@@ -131,9 +145,16 @@ export function SwapHistory(): JSX.Element | null {
     return <Card className="bg-muted/40 h-20 animate-pulse" />
   }
 
-  const ledger = data ?? []
+  const ledger = [
+    ...(data ?? []),
+    ...cashoutRecords(cashouts ?? [], stellarNetwork.blockExplorerUrl),
+  ].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
   if (ledger.length === 0) {
-    return <Card className="text-muted-foreground p-6 text-sm">No swaps yet for this account.</Card>
+    return (
+      <Card className="text-muted-foreground p-6 text-sm">
+        No swaps or cash-outs yet for this account.
+      </Card>
+    )
   }
 
   // Two sources, and the order between them matters.
@@ -166,7 +187,7 @@ export function SwapHistory(): JSX.Element | null {
       <div className="text-muted-foreground flex items-baseline justify-between text-xs">
         {/* Named by chain: history is per-network, and saying so removes any
             doubt about which ledger these came from. */}
-        <span>On-chain swaps · {descriptor.name}</span>
+        <span>Swaps and cash-outs · {descriptor.name}</span>
         <span>{swaps.length}</span>
       </div>
 
@@ -219,9 +240,14 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
             </span>
             <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
             <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
-              <TokenIcon symbol={swap.receivedAsset} size={18} />
+              {swap.kind === 'cashout' ? null : <TokenIcon symbol={swap.receivedAsset} size={18} />}
               <span className="truncate">
-                {amount(swap.receivedAmount)} {swap.receivedAsset}
+                {swap.kind === 'cashout'
+                  ? `₦${Number(swap.receivedAmount).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`}
               </span>
             </span>
           </div>
@@ -248,13 +274,24 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
             <div>
               <p className="text-muted-foreground text-xs">Received</p>
               <p className="text-foreground">
-                {amount(swap.receivedAmount)} {swap.receivedAsset}
+                {swap.kind === 'cashout'
+                  ? `₦${Number(swap.receivedAmount).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`
+                  : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`}
               </p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Route</p>
+              <p className="text-muted-foreground text-xs">
+                {swap.payout !== undefined ? 'Payout' : 'Route'}
+              </p>
               <p className="text-foreground">
-                {swap.hops === 0 ? 'direct' : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}
+                {swap.payout !== undefined
+                  ? `${swap.payout.statusLabel}, ${swap.payout.bankName} ${swap.payout.accountMask}`
+                  : swap.hops === 0
+                    ? 'direct'
+                    : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}
               </p>
             </div>
             <div>

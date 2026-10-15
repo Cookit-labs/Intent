@@ -425,6 +425,9 @@ export function buildMarketContext(
       .filter((v) => v.category !== 'perps')
       // Nor is a name service: it resolves recipients, it fills nothing.
       .filter((v) => v.category !== 'names')
+      // Nor is the network's own API: it is how routes are read and
+      // submitted, not a venue a proposal can name.
+      .filter((v) => v.category !== 'infrastructure')
       .map((v) => ({ id: v.id, name: v.name, category: v.category })),
     // Static until a feed exists. Stated plainly so the prompt is not implying
     // a signal the app does not actually have.

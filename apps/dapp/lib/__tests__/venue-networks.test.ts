@@ -44,6 +44,8 @@ describe('which venues are on mainnet at launch', () => {
         'aquarius',
         'blend',
         'etherfuse',
+        'horizon',
+        'linq',
         'sorobandomains',
         'soroswap',
         'soroswap-aggregator',
@@ -53,9 +55,13 @@ describe('which venues are on mainnet at launch', () => {
     )
   })
 
-  it('keeps every Stellar venue on testnet', () => {
+  it('keeps every Stellar venue on testnet, except one that has no testnet', () => {
+    // Linq pays real naira against mainnet XLM and USDC. There is no testnet
+    // service behind it, so it is deliberately absent there rather than listed
+    // and unusable.
+    const mainnetOnly = new Set(['linq'])
     for (const v of stellar) {
-      expect(isVenueOn(v, 'testnet'), `${v.id} should be on testnet`).toBe(true)
+      expect(isVenueOn(v, 'testnet'), `${v.id} on testnet`).toBe(!mainnetOnly.has(v.id))
     }
   })
 
@@ -206,9 +212,9 @@ describe('what the Apps page may call available, decided on the server', () => {
     expect(configured.has('testanchor')).toBe(false)
   })
 
-  it('has every Stellar venue on testnet', () => {
+  it('has every Stellar venue on testnet, except the one that has no testnet', () => {
     const ids = availableVenueIds('testnet', {})
-    for (const v of stellar) expect(ids.has(v.id), v.id).toBe(true)
+    for (const v of stellar) expect(ids.has(v.id), v.id).toBe(v.id !== 'linq')
   })
 
   it('labels by that decision, not by the static list alone', () => {
