@@ -31,6 +31,7 @@ import { OpenIntentCard } from './open-intent-card'
 import { NairaOrderTracker, NairaPayoutCard } from './naira-payout-card'
 import {
   detectPayout,
+  namedPayoutAsset,
   preselectPayoutPath,
   readPayoutSource,
   unsupportedCurrencyMessage,
@@ -136,6 +137,8 @@ export function IntentChat(): JSX.Element {
     path: 'xlm' | 'usdc'
     /** What is paid out: XLM, or USDC that is already held. */
     asset: 'xlm' | 'usdc'
+    /** A verified asset other than XLM or USDC, converted to USDC before the payout. */
+    symbol?: string
     amountXlm?: number
   } | null>(null)
   // The bank details of a convert-first payout, held only until the swap is
@@ -729,12 +732,42 @@ export function IntentChat(): JSX.Element {
       }
 
       const source = readPayoutSource(text, swap.usdPrices?.['XLM'])
-      if (source.kind === 'other') {
-        setAffordError(
-          `Only XLM can be cashed out to naira right now, not ${source.asset}. Swap it to XLM first.`
-        )
+      // Any other asset is paid out by converting it to USDC first. Whether the
+      // name is a real, verified asset is the server's answer, not the page's.
+      const other =
+        source.kind === 'other'
+          ? { symbol: source.asset, amount: undefined }
+          : namedPayoutAsset(text)
+      const mentionsBase = /(xlm|usdc)/i.test(text)
+      if (other !== undefined && (source.kind === 'other' || !mentionsBase)) {
+        const wanted = other.symbol
+        void (async () => {
+          let found: VerifiedAsset | undefined
+          try {
+            const res = await fetch(`/api/assets/resolve?symbols=${encodeURIComponent(wanted)}`)
+            const body = (await res.json()) as { assets?: VerifiedAsset[] }
+            found = body.assets?.find((a) => a.code === wanted)
+          } catch {
+            found = undefined
+          }
+          if (found === undefined) {
+            setAffordError(
+              `I can't confirm ${wanted} as a verified token on Stellar, so I won't cash it out. Which token do you mean?`
+            )
+            return
+          }
+          registerLiveAsset(activeNetwork(), found)
+          setNairaForm({
+            key: Date.now(),
+            path: 'usdc',
+            asset: 'xlm',
+            symbol: wanted,
+            ...(other.amount !== undefined ? { amountXlm: other.amount } : {}),
+          })
+        })()
         return
       }
+      if (source.kind === 'other') return
       if (source.kind === 'usdc') {
         // USDC already held goes out as it is: no swap, so no route to choose.
         setNairaForm({
@@ -1919,6 +1952,11 @@ export function IntentChat(): JSX.Element {
                     : {})}
                   {...(balances?.xlm !== undefined ? { balanceXlm: balances.xlm } : {})}
                   asset={nairaForm.asset}
+                  {...(nairaForm.symbol !== undefined ? { sourceSymbol: nairaForm.symbol } : {})}
+                  {...(nairaForm.symbol !== undefined &&
+                  balances?.trustlines?.[nairaForm.symbol]?.balance !== undefined
+                    ? { balanceOther: balances.trustlines[nairaForm.symbol]?.balance as string }
+                    : {})}
                   {...(balances?.trustlines?.['USDC']?.balance !== undefined
                     ? { balanceUsdc: balances.trustlines['USDC'].balance }
                     : {})}
@@ -1951,7 +1989,12 @@ export function IntentChat(): JSX.Element {
                           // here until one is chosen and the swap is signed.
                           setNairaConvert({ bankCode, accountNumber })
                           setNairaForm(null)
-                          setParsed(parseIntent(`Swap ${amountXlm} XLM to USDC`, swap.usdPrices))
+                          setParsed(
+                            parseIntent(
+                              `Swap ${amountXlm} ${nairaForm.symbol ?? 'XLM'} to USDC`,
+                              swap.usdPrices
+                            )
+                          )
                         },
                       })}
                 />

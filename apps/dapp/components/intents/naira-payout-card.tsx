@@ -47,6 +47,8 @@ export function NairaPayoutCard({
   initialPath = 'xlm',
   onConvertFirst,
   onOrder,
+  sourceSymbol,
+  balanceOther,
 }: {
   /** The amount asked for, in `asset`. */
   initialXlm?: number
@@ -55,6 +57,12 @@ export function NairaPayoutCard({
   /** What is being paid out: XLM, or USDC that is already held. */
   asset?: 'xlm' | 'usdc'
   balanceUsdc?: string
+  /**
+   * A verified asset other than XLM or USDC. It is always converted to USDC
+   * first, since only XLM and USDC reach the payout provider.
+   */
+  sourceSymbol?: string
+  balanceOther?: string
   /** Which route the form opens on; the user can change it. */
   initialPath?: 'xlm' | 'usdc'
   /**
@@ -76,8 +84,9 @@ export function NairaPayoutCard({
   const [amount, setAmount] = useState(initialXlm !== undefined ? String(initialXlm) : '')
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
+  const other = sourceSymbol !== undefined
   const [path, setPath] = useState<'xlm' | 'usdc'>(
-    onConvertFirst !== undefined ? initialPath : 'xlm'
+    other ? 'usdc' : onConvertFirst !== undefined ? initialPath : 'xlm'
   )
 
   const banks = useQuery({
@@ -119,17 +128,17 @@ export function NairaPayoutCard({
     retry: false,
   })
 
-  const symbol = asset === 'usdc' ? 'USDC' : 'XLM'
+  const symbol = other ? sourceSymbol : asset === 'usdc' ? 'USDC' : 'XLM'
   const xlm = Number(amount)
   // XLM keeps a reserve back for fees and the account; USDC does not, because
   // fees are paid in XLM.
-  const balance = asset === 'usdc' ? balanceUsdc : balanceXlm
+  const balance = other ? balanceOther : asset === 'usdc' ? balanceUsdc : balanceXlm
   const maxXlm =
     balance !== undefined
-      ? Math.max(0, Number(balance) - (asset === 'usdc' ? 0 : KEEP_XLM))
+      ? Math.max(0, Number(balance) - (asset === 'usdc' || other ? 0 : KEEP_XLM))
       : undefined
   // A dollar of USDC is a dollar; XLM is priced.
-  const unitUsd = asset === 'usdc' ? 1 : xlmPriceUsd
+  const unitUsd = other ? undefined : asset === 'usdc' ? 1 : xlmPriceUsd
   const estimateNgn =
     rate.data !== undefined && unitUsd !== undefined && xlm > 0
       ? Math.floor(xlm * unitUsd * rate.data * 100) / 100
@@ -138,8 +147,7 @@ export function NairaPayoutCard({
   const overBalance = maxXlm !== undefined && xlm > maxXlm
   const canReview =
     xlm > 0 &&
-    estimateNgn !== undefined &&
-    estimateNgn > 0 &&
+    (other || (estimateNgn !== undefined && estimateNgn > 0)) &&
     !overBalance &&
     holder.data !== undefined
 
@@ -278,11 +286,11 @@ export function NairaPayoutCard({
       <div className="flex items-center gap-2 text-sm font-medium">
         <Banknote className="h-4 w-4" />{' '}
         {path === 'usdc'
-          ? 'Convert XLM to USDC, then pay out naira'
+          ? `Convert ${symbol} to USDC, then pay out naira`
           : `Cash out ${symbol} to naira`}
       </div>
 
-      {onConvertFirst !== undefined ? (
+      {onConvertFirst !== undefined && !other ? (
         <div className="flex flex-col gap-1.5">
           <div role="radiogroup" aria-label="How to pay" className="flex gap-2">
             {(
@@ -343,15 +351,17 @@ export function NairaPayoutCard({
           className="border-border bg-background rounded-xl border px-3 py-2.5 text-sm tabular-nums"
         />
         <p className="text-muted-foreground text-xs">
-          {estimateNgn !== undefined
-            ? `About ${naira(estimateNgn)}. ${
-                path === 'usdc'
-                  ? 'The swap result and the final figure are shown before you sign the payout.'
-                  : 'The final rate is locked when you review.'
-              }`
-            : rate.isError
-              ? (rate.error as Error).message
-              : 'Enter an amount to see what the bank receives.'}
+          {other
+            ? 'Agents compete on the swap into USDC, then the USDC is paid out. The final figure is shown before you sign the payout.'
+            : estimateNgn !== undefined
+              ? `About ${naira(estimateNgn)}. ${
+                  path === 'usdc'
+                    ? 'The swap result and the final figure are shown before you sign the payout.'
+                    : 'The final rate is locked when you review.'
+                }`
+              : rate.isError
+                ? (rate.error as Error).message
+                : 'Enter an amount to see what the bank receives.'}
         </p>
         {overBalance ? (
           <p className="text-xs">
@@ -421,11 +431,12 @@ export function NairaPayoutCard({
         type="button"
         disabled={!canReview || phase === 'creating'}
         onClick={() => {
-          if (estimateNgn === undefined) return
+          if (estimateNgn === undefined && !other) return
           if (path === 'usdc' && onConvertFirst !== undefined) {
             onConvertFirst({ amountXlm: xlm, bankCode, accountNumber })
             return
           }
+          if (estimateNgn === undefined) return
           create({
             amountNgn: estimateNgn,
             bankCode,
