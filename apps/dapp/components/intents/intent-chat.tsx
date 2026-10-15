@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { isMainnet } from '@intent/config'
+import { isMainnet, stellarNetwork } from '@intent/config'
 import { Bell, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -42,6 +42,8 @@ import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
 import { cashoutOutcome, cashoutTurns, fetchCashouts } from '../../lib/naira/history'
+import { fetchSwapHistory } from '../../lib/swap/history'
+import { ledgerTurns } from '../../lib/chat/ledger-turns'
 import type { StandingRuleRecord } from '../../lib/api/standing-client'
 import { parseStandingIntent } from '../../lib/parse-standing'
 import {
@@ -258,12 +260,25 @@ export function IntentChat(): JSX.Element {
     enabled: slug === 'stellar' && isConnected && address !== undefined,
     staleTime: 30_000,
   })
+  const { data: ledger } = useQuery({
+    queryKey: ['swap-history', slug, address],
+    queryFn: () => fetchSwapHistory(address as string),
+    enabled: slug === 'stellar' && isConnected && address !== undefined,
+    staleTime: 30_000,
+  })
   const listedTurns = useMemo(() => {
-    const have = new Set(turns.flatMap((t) => (t.txHash === undefined ? [] : [t.txHash])))
-    return [...turns, ...cashoutTurns(cashouts ?? [], slug, have)].sort((a, b) =>
+    const have = new Set(
+      turns.flatMap((t) => [
+        ...(t.txHash === undefined ? [] : [t.txHash]),
+        ...(t.bundle ?? []).flatMap((s) => (s.hash === undefined ? [] : [s.hash])),
+      ])
+    )
+    const cashoutRows = cashoutTurns(cashouts ?? [], slug, have)
+    for (const row of cashoutRows) if (row.txHash !== undefined) have.add(row.txHash)
+    return [...turns, ...cashoutRows, ...ledgerTurns(ledger ?? [], slug, have)].sort((a, b) =>
       b.createdAt.localeCompare(a.createdAt)
     )
-  }, [turns, cashouts, slug])
+  }, [turns, cashouts, ledger, slug])
 
   // Balances, so an order can be checked against what the account actually
   // holds before it is placed rather than after it fails.
@@ -634,6 +649,16 @@ export function IntentChat(): JSX.Element {
     // book rather than a promise this app has to stay open to keep.
     const rule = parseStandingIntent(text, swap.usdPrices ?? {}, slug)
     if (rule !== null) {
+      saveTurn({
+        id: crypto.randomUUID(),
+        chain: slug,
+        text: shown,
+        createdAt: new Date().toISOString(),
+        proposals: {},
+        winner: null,
+        outcome: 'Saved as a standing rule.',
+      })
+      setTurns(loadTurns(slug))
       standing.add(rule)
       setMessage(shown)
       setParsed(null)
@@ -657,6 +682,26 @@ export function IntentChat(): JSX.Element {
     setRestored(null)
     setPending(null)
 
+    // Every instruction is kept as a chat the moment it starts. Most are then
+    // rewritten by the race that follows; a payout, a send, a supply or a rule
+    // has no race, and this is the only record that it was asked.
+    saveTurn({
+      id: newTurnId,
+      chain: slug,
+      text: shown,
+      createdAt: new Date().toISOString(),
+      proposals: {},
+      winner: null,
+      ...(options.conversation !== undefined && options.conversation.length > 1
+        ? {
+            conversation: options.conversation
+              .slice(1)
+              .filter((t) => !(t.role === 'assistant' && t.content === ACKNOWLEDGED)),
+          }
+        : {}),
+    })
+    setTurns(loadTurns(slug))
+
     // "Swap $5 of XLM to naira" is a payout to a bank, which no trade parser
     // below can express. Read first and by a closed list of currencies: a
     // currency that cannot be paid out is answered with what can, and naira
@@ -678,24 +723,6 @@ export function IntentChat(): JSX.Element {
         )
         return
       }
-
-      // Kept as a chat of its own: no race will write one for a cash-out.
-      saveTurn({
-        id: newTurnId,
-        chain: slug,
-        text: shown,
-        createdAt: new Date().toISOString(),
-        proposals: {},
-        winner: null,
-        ...(options.conversation !== undefined && options.conversation.length > 1
-          ? {
-              conversation: options.conversation
-                .slice(1)
-                .filter((t) => !(t.role === 'assistant' && t.content === ACKNOWLEDGED)),
-            }
-          : {}),
-      })
-      setTurns(loadTurns(slug))
 
       const source = readPayoutSource(text, swap.usdPrices?.['XLM'])
       if (source.kind === 'other') {
@@ -1747,6 +1774,16 @@ export function IntentChat(): JSX.Element {
                 <div className="flex justify-start">
                   <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
                     {restored.outcome}
+                    {restored.txHash !== undefined ? (
+                      <a
+                        href={`${stellarNetwork.blockExplorerUrl}/tx/${restored.txHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted-foreground mt-1 block text-xs underline underline-offset-2"
+                      >
+                        View transaction
+                      </a>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

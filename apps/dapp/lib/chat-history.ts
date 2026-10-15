@@ -346,6 +346,12 @@ export function saveTurn(incoming: ChatTurn): void {
           ...(incoming.bundle === undefined && previous.bundle !== undefined
             ? { bundle: previous.bundle }
             : {}),
+          ...(incoming.conversation === undefined && previous.conversation !== undefined
+            ? { conversation: previous.conversation }
+            : {}),
+          ...(incoming.outcome === undefined && previous.outcome !== undefined
+            ? { outcome: previous.outcome }
+            : {}),
         }
   write([turn, ...all.filter((t) => t.id !== turn.id)])
   notifyTurnsChanged()
