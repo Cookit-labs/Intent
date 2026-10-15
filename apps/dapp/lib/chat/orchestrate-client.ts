@@ -21,15 +21,20 @@ export interface ActReading {
 export type OrchestrateAnswer =
   | { outcome: 'act'; read: ActReading; instruction: string; context: string[] }
   | { outcome: 'ask'; question: string }
-  | { outcome: 'help' }
-  | { outcome: 'out_of_scope'; reason: string }
-  | { outcome: 'unclear' }
+  | { outcome: 'help'; reply?: string }
+  | { outcome: 'out_of_scope'; reply?: string }
+  | { outcome: 'unclear'; reply?: string }
   | { outcome: 'unavailable'; reason: string; tokens: string[] }
 
 const UNREACHABLE: OrchestrateAnswer = { outcome: 'unavailable', reason: 'unreachable', tokens: [] }
 
 const ACTIONS = ['swap', 'supply', 'borrow', 'repay', 'offramp'] as const
 const STYLES = ['market', 'limit', 'accumulate', 'hedge', 'rebalance', 'route_liquidity'] as const
+
+/** The model's reply when it wrote one, as a spreadable fragment. */
+function replyOf(value: unknown): { reply?: string } {
+  return typeof value === 'string' && value.trim() !== '' ? { reply: value.trim() } : {}
+}
 
 function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
@@ -45,13 +50,20 @@ export async function fetchOrchestrate(
   turns: OrchestrateTurn[],
   context: string[],
   chain: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  /** The conversation before these turns, replies included. */
+  history: OrchestrateTurn[] = []
 ): Promise<OrchestrateAnswer> {
   try {
     const res = await fetchImpl('/api/intent/orchestrate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ turns, chain, ...(context.length > 0 ? { context } : {}) }),
+      body: JSON.stringify({
+        turns,
+        chain,
+        ...(history.length > 0 ? { history } : {}),
+        ...(context.length > 0 ? { context } : {}),
+      }),
     })
     if (!res.ok) return UNREACHABLE
     const a = (await res.json()) as Record<string, unknown>
@@ -62,14 +74,11 @@ export async function fetchOrchestrate(
           ? { outcome: 'ask', question: a['question'] }
           : UNREACHABLE
       case 'help':
-        return { outcome: 'help' }
+        return { outcome: 'help', ...replyOf(a['reply']) }
       case 'out_of_scope':
-        return {
-          outcome: 'out_of_scope',
-          reason: typeof a['reason'] === 'string' ? a['reason'] : '',
-        }
+        return { outcome: 'out_of_scope', ...replyOf(a['reply']) }
       case 'unclear':
-        return { outcome: 'unclear' }
+        return { outcome: 'unclear', ...replyOf(a['reply']) }
       case 'unavailable':
         return {
           outcome: 'unavailable',

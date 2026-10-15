@@ -26,7 +26,7 @@ function reply(args: Record<string, unknown>, onBody?: (b: unknown) => void): ty
 
 const empty = {
   question: '',
-  reason: '',
+  reply: '',
   instruction: '',
   facts: [],
   action: 'swap',
@@ -166,12 +166,52 @@ describe('orchestrateWithLlm', () => {
     expect(result).toEqual({ status: 'help' })
   })
 
+  it('answers a question about one capability from the fact sheet', async () => {
+    const result = await orchestrateWithLlm(turn('can u explain sending an asset better?'), {
+      ...options,
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'help',
+        reply: 'Send moves an asset from your wallet to another Stellar account, and you sign it.',
+      }),
+    })
+    expect(result).toEqual({
+      status: 'help',
+      reply: 'Send moves an asset from your wallet to another Stellar account, and you sign it.',
+    })
+  })
+
+  it('grounds the model in what Intent does on this chain, and nothing it does not', async () => {
+    let stellar: { messages: { content: string }[] } | undefined
+    let other: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('what can I do?'), {
+      ...options,
+      chain: 'stellar',
+      fetchImpl: reply({ ...empty, outcome: 'help' }, (b) => (stellar = b as typeof stellar)),
+    })
+    await orchestrateWithLlm(turn('what can I do?'), {
+      ...options,
+      chain: 'arc',
+      fetchImpl: reply({ ...empty, outcome: 'help' }, (b) => (other = b as typeof other)),
+    })
+    expect(stellar?.messages[0]?.content).toMatch(/naira/i)
+    expect(other?.messages[0]?.content).not.toMatch(/naira/i)
+    expect(other?.messages[0]?.content).toMatch(/send/i)
+  })
+
   it('declines a request unrelated to Intent', async () => {
     const result = await orchestrateWithLlm(turn('I would like to go jogging'), {
       ...options,
-      fetchImpl: reply({ ...empty, outcome: 'out_of_scope', reason: 'Exercise, not finance.' }),
+      fetchImpl: reply({
+        ...empty,
+        outcome: 'out_of_scope',
+        reply: 'Jogging is outside what I do, but I can help you swap or send.',
+      }),
     })
-    expect(result).toEqual({ status: 'out_of_scope', reason: 'Exercise, not finance.' })
+    expect(result).toEqual({
+      status: 'out_of_scope',
+      reply: 'Jogging is outside what I do, but I can help you swap or send.',
+    })
   })
 
   it('refuses an act that names an asset the app cannot trade', async () => {
@@ -218,7 +258,7 @@ describe('orchestrateWithLlm', () => {
       ...options,
       fetchImpl: reply({ ...empty, outcome: 'ask', question: 'Q5?' }),
     })
-    expect(result).toEqual({ status: 'unclear' })
+    expect(result).toEqual({ status: 'unclear', reply: 'Q5?' })
   })
 
   it('still acts at the cap when the last answer completed the request', async () => {
@@ -263,6 +303,40 @@ describe('orchestrateWithLlm', () => {
       role: 'user',
       content: 'now send half of it to deon.xlm',
     })
+  })
+
+  it('sends the earlier conversation, and does not count it against the question cap', async () => {
+    let sent: { messages: { role: string; content: string }[] } | undefined
+    const history = [
+      { role: 'user' as const, content: 'what can I do?' },
+      { role: 'assistant' as const, content: 'You can swap, send and lend.' },
+      { role: 'user' as const, content: 'and?' },
+      { role: 'assistant' as const, content: 'You can also cash out to naira.' },
+      { role: 'user' as const, content: 'and?' },
+      { role: 'assistant' as const, content: 'And open leveraged positions.' },
+      { role: 'user' as const, content: 'and?' },
+      { role: 'assistant' as const, content: 'That is everything.' },
+    ]
+    const result = await orchestrateWithLlm(turn('explain swapping better'), {
+      ...options,
+      history,
+      fetchImpl: reply({ ...empty, outcome: 'ask', question: 'Which part?' }, (b) => {
+        sent = b as typeof sent
+      }),
+    })
+    expect(result).toEqual({ status: 'ask', question: 'Which part?' })
+    const roles = sent?.messages.map((m) => m.content) ?? []
+    expect(roles.slice(1, 9)).toEqual(history.map((h) => h.content))
+    expect(roles.at(-1)).toBe('explain swapping better')
+  })
+
+  it('tells the model to answer in its own words and never repeat itself', async () => {
+    let sent: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('explain better'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'help' }, (b) => (sent = b as typeof sent)),
+    })
+    expect(sent?.messages[0]?.content).toMatch(/never repeat/i)
   })
 
   it('keeps account numbers out of the brief', async () => {
