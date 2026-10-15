@@ -104,6 +104,18 @@ describe('buildParsedIntent', () => {
     expect(market.targetPriceUsd).toBe(0.2)
   })
 
+  it('keeps the reading on the result so the race can be given the same one', () => {
+    const reading = {
+      text: 'x',
+      tokenIn: 'USDC',
+      tokenOut: 'XLM',
+      amount: 30,
+      amountIsUsd: true,
+      style: 'market' as const,
+    }
+    expect(buildParsedIntent(reading, prices).reading).toEqual(reading)
+  })
+
   it('maps the other order styles onto intent types', () => {
     const base = { text: 'x', tokenIn: 'USDC', tokenOut: 'XLM', amount: 10, amountIsUsd: true }
     expect(buildParsedIntent({ ...base, style: 'accumulate' }, prices).input.type).toBe(

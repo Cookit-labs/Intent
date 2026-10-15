@@ -103,7 +103,8 @@ describe('POST /api/intent/orchestrate', () => {
       outcome: 'out_of_scope',
       reason: 'Exercise.',
     })
-    expect(logIntentRead).toHaveBeenCalledWith({ understood: false, reason: 'out_of_scope' })
+    // Understood and declined, so the admin read rate is not dragged down by it.
+    expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'out_of_scope' })
   })
 
   it('says unavailable, not an error, when the model could not read it', async () => {

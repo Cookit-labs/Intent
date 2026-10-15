@@ -4,6 +4,7 @@ import { Button, Card } from '@intent/ui'
 import { Loader2 } from 'lucide-react'
 
 import { describeFollowOn, type FollowOnAction } from '../../lib/parse-compound'
+import type { ParsedIntent } from '../../lib/parse-intent'
 
 /**
  * Showing what was understood, before anything runs.
@@ -31,6 +32,8 @@ export interface UnderstoodIntent {
   amountUsd: number
   amountStated: boolean
   followOn: FollowOnAction | null
+  /** The intent built from the structured reading, when there was one. */
+  parsed?: ParsedIntent
 }
 
 export function IntentConfirm({

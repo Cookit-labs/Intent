@@ -27,6 +27,14 @@ export interface ParsedIntent {
    * market order wearing a limit order's label.
    */
   limitPriceUsd?: number
+  /**
+   * The structured reading this was built from, when a model supplied one.
+   *
+   * Carried so the competition can be given the same reading rather than
+   * re-deriving the trade from the words, which is how a paraphrase lost its
+   * meaning on the way to the agents.
+   */
+  reading?: ReadingForIntent
 }
 
 const STATIC_TOKEN_ALIASES: Record<string, string> = {
@@ -464,6 +472,7 @@ export function buildParsedIntent(
     referencePriceUsd,
     targetPriceUsd: stated ?? referencePriceUsd,
     ...(stated !== undefined ? { limitPriceUsd: stated } : {}),
+    reading,
     input: {
       type,
       tokenIn,

@@ -12,7 +12,7 @@ import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
 import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
-import { parseIntent } from '../../../../lib/parse-intent'
+import { buildParsedIntent, parseIntent, type ReadingForIntent } from '../../../../lib/parse-intent'
 import { resolveAsset, toBaseUnits } from '../../../../lib/swap/assets'
 import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
@@ -149,6 +149,36 @@ function errorStream(code: 'agents_offline' | 'chain_unsupported', message: stri
   })
 }
 
+const STYLES = ['market', 'limit', 'accumulate', 'hedge', 'rebalance', 'route_liquidity'] as const
+
+/** A reading the chat sent, or undefined when it is absent or not usable. */
+function readingOf(value: unknown, text: string): ReadingForIntent | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const r = value as Record<string, unknown>
+  const style = STYLES.find((known) => known === r['style'])
+  if (
+    typeof r['tokenIn'] !== 'string' ||
+    typeof r['tokenOut'] !== 'string' ||
+    typeof r['amount'] !== 'number' ||
+    !Number.isFinite(r['amount']) ||
+    r['amount'] <= 0 ||
+    style === undefined
+  ) {
+    return undefined
+  }
+  return {
+    text,
+    tokenIn: r['tokenIn'],
+    tokenOut: r['tokenOut'],
+    amount: r['amount'],
+    amountIsUsd: r['amountIsUsd'] === true,
+    style,
+    ...(typeof r['limitPriceUsd'] === 'number' && r['limitPriceUsd'] > 0
+      ? { limitPriceUsd: r['limitPriceUsd'] }
+      : {}),
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   const limited = await enforceRateLimit(request, 'compete')
   if (limited !== undefined) return limited
@@ -156,15 +186,22 @@ export async function POST(request: Request): Promise<Response> {
   let text: string
   let chain: string
   let context: string[]
+  let reading: ReadingForIntent | undefined
 
   try {
-    const body = (await request.json()) as { text?: unknown; chain?: unknown; context?: unknown }
+    const body = (await request.json()) as {
+      text?: unknown
+      chain?: unknown
+      context?: unknown
+      reading?: unknown
+    }
     if (typeof body.text !== 'string' || body.text.trim() === '') {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
     await ensureLiveAssets(tickersIn(text))
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
+    reading = readingOf(body.reading, text)
     context = Array.isArray(body.context)
       ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)
       : []
@@ -204,7 +241,12 @@ export async function POST(request: Request): Promise<Response> {
   // Prices are fetched first so the parser can size "$30 of XLM" against the
   // real market rather than an indicative table.
   const market = await buildMarketContextAsync(chain)
-  const intent = parseIntent(text, market.prices)
+  // A structured reading, when the chat has one, is what the agents are given.
+  // Re-reading the words would lose a paraphrase that no keyword recognises.
+  const intent =
+    reading !== undefined
+      ? buildParsedIntent(reading, market.prices)
+      : parseIntent(text, market.prices)
 
   // Priced before the agents run, so they choose between real routes rather
   // than describing hypothetical ones. Failing to quote is not fatal: the

@@ -92,11 +92,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ outcome: 'ask', question: result.question })
 
     case 'help':
-      await logIntentRead({ understood: false, reason: 'help' })
+      await logIntentRead({ understood: true, action: 'help' })
       return NextResponse.json({ outcome: 'help' })
 
     case 'out_of_scope':
-      await logIntentRead({ understood: false, reason: 'out_of_scope' })
+      await logIntentRead({ understood: true, action: 'out_of_scope' })
       return NextResponse.json({ outcome: 'out_of_scope', reason: result.reason })
 
     case 'unclear':
