@@ -33,6 +33,7 @@ beforeEach(() => {
     localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
     },
   })
 })
@@ -66,6 +67,17 @@ describe('chat history', () => {
 
     setHistoryOwner('GAAA')
     expect(loadTurns('stellar').map((t) => t.id)).toEqual(['mine'])
+    setHistoryOwner(undefined)
+  })
+
+  it('shows turns saved before history was kept per wallet, to the first wallet only', () => {
+    store.set('intent.chat.v1', JSON.stringify([turn({ id: 'old', text: 'Swap 5 XLM to USDC' })]))
+    setHistoryOwner('GFIRST')
+    expect(loadTurns('stellar').map((t) => t.id)).toEqual(['old'])
+    setHistoryOwner('GSECOND')
+    expect(loadTurns('stellar')).toEqual([])
+    setHistoryOwner('GFIRST')
+    expect(loadTurns('stellar').map((t) => t.id)).toEqual(['old'])
     setHistoryOwner(undefined)
   })
 
