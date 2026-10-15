@@ -9,6 +9,7 @@ import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
 import { fetchClarify } from '../../lib/chat/clarify-client'
+import { fixVerbTypo } from '../../lib/chat/typos'
 import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
 import { ACKNOWLEDGED, fallbackInstruction, isSelfContained } from '../../lib/chat/clarify-flow'
@@ -1045,7 +1046,9 @@ export function IntentChat(): JSX.Element {
    * its own. The clarifier failing or running out of questions means the user's
    * own words run, so asking never makes the chat less capable than before.
    */
-  function handleSubmit(text: string): void {
+  function handleSubmit(typed: string): void {
+    // A misspelled verb is corrected before anything reads the sentence.
+    const text = fixVerbTypo(typed)
     // An answer to a question already asked.
     if (clarifying !== null) {
       void clarify(text, clarifying.turns)
