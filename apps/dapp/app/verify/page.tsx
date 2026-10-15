@@ -13,6 +13,8 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
 
+import { BrandMark } from '../../components/layout/brand-mark'
+
 type Stage = 'email' | 'code' | 'not_accepted'
 
 function VerifyForm(): JSX.Element {
@@ -201,7 +203,8 @@ function VerifyForm(): JSX.Element {
 
 export default function VerifyPage(): JSX.Element {
   return (
-    <main className="bg-surface-base flex min-h-screen items-center justify-center px-6 py-16">
+    <main className="bg-surface-base flex min-h-screen flex-col items-center justify-center gap-8 px-6 py-16">
+      <BrandMark />
       <Suspense fallback={null}>
         <VerifyForm />
       </Suspense>

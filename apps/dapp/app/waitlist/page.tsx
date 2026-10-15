@@ -11,6 +11,8 @@ import { Button, Card, Input, Label } from '@intent/ui'
 import Link from 'next/link'
 import { useState } from 'react'
 
+import { BrandMark } from '../../components/layout/brand-mark'
+
 export default function WaitlistPage(): JSX.Element {
   const [email, setEmail] = useState('')
   const [note, setNote] = useState('')
@@ -38,7 +40,8 @@ export default function WaitlistPage(): JSX.Element {
   }
 
   return (
-    <main className="bg-surface-base flex min-h-screen items-center justify-center px-6 py-16">
+    <main className="bg-surface-base flex min-h-screen flex-col items-center justify-center gap-8 px-6 py-16">
+      <BrandMark />
       <Card className="flex w-full max-w-md flex-col gap-5 p-8">
         {done ? (
           <div className="flex flex-col gap-3">

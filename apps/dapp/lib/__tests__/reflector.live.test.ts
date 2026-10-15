@@ -98,7 +98,7 @@ describe.skipIf(SKIP)('Blend still liquidates against its own oracle', () => {
   }, 60_000)
 })
 
-describe('the live FX feed', () => {
+describe.skipIf(SKIP)('the live FX feed', () => {
   it('prices the peso, the real and gold in dollars', async () => {
     // The bonds the app trades settle in MXN and BRL. The bounds below are
     // wide on purpose: they catch a wrong-decimals read (a 10^7 error) and a

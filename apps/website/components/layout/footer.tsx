@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { Github, MessageCircle, Twitter } from 'lucide-react'
+import { BrandMark } from './brand-mark'
 
 const NAV_LINKS = [
   { label: 'Docs', href: '#' },
@@ -25,7 +26,7 @@ export function Footer() {
     >
       <div className="mx-auto max-w-7xl px-6 py-10">
         <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
-          <span className="font-sans text-sm font-medium tracking-tight">Intent</span>
+          <BrandMark textClassName="font-sans text-sm font-medium tracking-tight" />
 
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-6">
