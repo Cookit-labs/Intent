@@ -81,12 +81,26 @@ export async function fetchCashouts(
 /** Id prefix of a past-intents row that stands for a cash-out rather than a recorded chat. */
 export const CASHOUT_TURN_PREFIX = 'cashout:'
 
+/** What a cash-out came to, as the assistant would say it. */
+export function cashoutOutcome(o: {
+  coin: string
+  amount: string
+  amountNgn: string
+  bankName: string
+  accountName: string
+  accountMask: string
+  status: NairaStatus
+}): string {
+  return `${PAYOUT_STATUS_LABEL[o.status]}: ${o.amount} ${o.coin.toUpperCase()} cashed out as ₦${o.amountNgn} to ${o.accountName}, ${o.bankName} ${o.accountMask}.`
+}
+
 /**
  * Cash-outs as rows of Past intents.
  *
  * A cash-out is an intent, but it never goes through the agent race that writes
- * a chat turn, so the list would not show it. The order record knows it
- * happened; this lists it beside the chats.
+ * a chat turn, so the list would not show it. This lists the order record's
+ * payouts beside the chats, with enough to reopen as a conversation when the
+ * chat itself was not kept.
  */
 export function cashoutTurns(
   orders: CashoutOrder[],
@@ -100,10 +114,11 @@ export function cashoutTurns(
     .map((o) => ({
       id: `${CASHOUT_TURN_PREFIX}${o.id}`,
       chain,
-      text: `Cash out ${o.amount} ${o.coin.toUpperCase()} to ${o.bankName} (${PAYOUT_STATUS_LABEL[o.status]})`,
+      text: `Cash out ${o.amount} ${o.coin.toUpperCase()} to ${o.bankName}`,
       createdAt: o.createdAt,
       proposals: {},
       winner: null,
       txHash: o.paymentHash as string,
+      outcome: cashoutOutcome(o),
     }))
 }

@@ -2,9 +2,10 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Banknote, Check, Loader2, TriangleAlert } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { useNairaPayout } from '../../hooks/use-naira-payout'
+import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
 
 /**
@@ -45,6 +46,7 @@ export function NairaPayoutCard({
   balanceUsdc,
   initialPath = 'xlm',
   onConvertFirst,
+  onOrder,
 }: {
   /** The amount asked for, in `asset`. */
   initialXlm?: number
@@ -60,8 +62,16 @@ export function NairaPayoutCard({
    * route is not offered and the form only pays XLM directly.
    */
   onConvertFirst?: (v: { amountXlm: number; bankCode: string; accountNumber: string }) => void
+  /** Told each time the order changes, so the chat can keep how the cash-out went. */
+  onOrder?: (order: NairaOrderView) => void
 }): JSX.Element {
   const { state, create, pay, edit } = useNairaPayout()
+  const seenOrder = state.order
+  useEffect(() => {
+    if (seenOrder !== undefined) onOrder?.(seenOrder)
+    // The order object is replaced on every change; the callback is not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seenOrder])
 
   const [amount, setAmount] = useState(initialXlm !== undefined ? String(initialXlm) : '')
   const [bankCode, setBankCode] = useState('')
