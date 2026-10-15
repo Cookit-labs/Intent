@@ -167,7 +167,10 @@ export function summariseFlow(
   let priced = false
   for (const leg of legs) {
     if (!leg.verified) continue
-    const usd = usdValue(leg.asset, leg.amount, prices)
+    // USDC is a dollar by definition, so it never waits on the price oracle. A
+    // slow oracle used to leave a payment of USDC with no value at all, which
+    // read as a transaction "with no price" and added nothing to the volume.
+    const usd = leg.asset === 'USDC' ? Number(leg.amount) : usdValue(leg.asset, leg.amount, prices)
     if (Number.isFinite(usd)) {
       total += usd
       priced = true

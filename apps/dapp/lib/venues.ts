@@ -145,6 +145,23 @@ export const venues: Venue[] = [
     capability:
       'Swaps and resting limit orders settle on the network’s own order book, read and written directly.',
   },
+  // The network's own API, not a venue. Listed because everything on Stellar
+  // classic goes through it: balances and history are read from it, path
+  // payments and orders are built against its order book, and every signed
+  // transaction is submitted to it.
+  {
+    id: 'horizon',
+    name: 'Stellar Horizon',
+    family: 'stellar' as const,
+    category: 'infrastructure',
+    chains: ['Stellar'],
+    bestFor: 'The network API the app reads and submits through',
+    url: 'https://developers.stellar.org/docs/data/apis/horizon',
+    integration: 'executes',
+    networks: ['testnet', 'mainnet'],
+    capability:
+      'Account balances and history, the order book that classic swaps and resting orders fill against, and submission of every signed transaction.',
+  },
   {
     id: 'etherfuse',
     name: 'Etherfuse',
@@ -204,6 +221,21 @@ export const venues: Venue[] = [
     integration: 'quotes',
     capability:
       'Vault APYs are read live once DEFINDEX_API_KEY is set. Deposits are built by DeFindex’s API and checked here before signing; a key is still needed to verify that end to end.',
+  },
+  // A payout service, not a trading venue: the agents' venue list drops the
+  // off-ramp category, and a payout is a follow-on the user fills in a form.
+  {
+    id: 'linq',
+    name: 'Linq',
+    family: 'stellar' as const,
+    category: 'offramp',
+    chains: ['Stellar'],
+    bestFor: 'Cash out XLM or USDC to a Nigerian bank in naira',
+    url: 'https://switch.uselinq.xyz',
+    integration: 'executes',
+    networks: ['mainnet'],
+    capability:
+      'Naira payouts to Nigerian bank accounts: XLM paid straight in, or swapped to USDC first. The holder is looked up from the bank, and the payment goes only to the deposit address of the order Linq made.',
   },
   {
     id: 'testanchor',

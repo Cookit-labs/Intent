@@ -18,6 +18,7 @@ const categoryLabel: Record<VenueCategory, string> = {
   offramp: 'Off-ramp',
   perps: 'Perpetuals',
   names: 'Names',
+  infrastructure: 'Network',
 }
 
 /**

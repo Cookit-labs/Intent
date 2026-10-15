@@ -14,9 +14,11 @@ import { reportError } from './report'
  *
  * Definitions, fixed here so the page and any export agree:
  *   - a transaction counts only if the network accepted it;
- *   - headline volume is the dollar value of what the user sold or sent, for
- *     swaps, plans, offers and sends. Lending and cash-outs are reported as their
- *     own lines and are not added to it;
+ *   - headline volume is the dollar value of what the user sold, sent or cashed
+ *     out, for swaps, plans, offers, sends and cash-outs. Each transaction is
+ *     counted at its own value, so a convert-first payout appears as its swap
+ *     and its deposit, as two transactions. Lending is its own line and is not
+ *     added to it;
  *   - a transaction with no price is counted but marked unvalued, never guessed.
  */
 
@@ -24,7 +26,7 @@ export type RangeKey = '7d' | '30d' | '90d' | 'all'
 
 export const RANGES: readonly RangeKey[] = ['7d', '30d', '90d', 'all']
 
-export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send'] as const
+export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp'] as const
 
 const DAY_MS = 86_400_000
 
@@ -178,6 +180,13 @@ export interface NairaAttentionRow {
 export interface NairaReport {
   orders: number
   paid: { count: number; ngn: number }
+  /**
+   * What left the wallets as cash-outs, in dollars, from the usage log. It is
+   * the figure to set beside the provider's own volume. `unvalued` counts
+   * cash-outs whose value could not be priced, so a short total is explained
+   * rather than silent.
+   */
+  cashedOut: { count: number; usd: number; unvalued: number }
   /** Orders by status, and how many of them had their payment sent. */
   byStatus: { status: string; count: number; sent: number; ngn: number }[]
   /** Which asset the deposit was made in: XLM direct, or USDC after a swap. */
@@ -513,7 +522,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       const from = since(scope, now)
       const params = [scope.network, from]
       const inRange = `network = $1 AND ($2::timestamptz IS NULL OR created_at >= $2)`
-      const [status, coin, attention] = await Promise.all([
+      const [status, coin, cashed, attention] = await Promise.all([
         query(
           `SELECT status, count(*) AS n,
                   count(*) FILTER (WHERE payment_hash IS NOT NULL) AS sent,
@@ -526,6 +535,15 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                   count(*) FILTER (WHERE status = 'paid') AS paid,
                   coalesce(sum(amount_ngn) FILTER (WHERE status = 'paid'), 0) AS paid_ngn
            FROM naira_orders WHERE ${inRange} GROUP BY coin ORDER BY orders DESC`,
+          params
+        ),
+        query(
+          `SELECT count(*) FILTER (WHERE ok) AS n,
+                  coalesce(sum(volume_usd) FILTER (WHERE ok), 0) AS usd,
+                  count(*) FILTER (WHERE ok AND volume_usd IS NULL) AS unvalued
+           FROM usage_executions
+           WHERE network = $1 AND kind = 'offramp'
+             AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
           params
         ),
         query(
@@ -548,6 +566,11 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       return {
         orders: byStatus.reduce((total, s) => total + s.count, 0),
         paid: { count: paidRow?.count ?? 0, ngn: paidRow?.ngn ?? 0 },
+        cashedOut: {
+          count: num(cashed.rows[0]?.['n']),
+          usd: money(cashed.rows[0]?.['usd']),
+          unvalued: num(cashed.rows[0]?.['unvalued']),
+        },
         byStatus,
         byCoin: coin.rows.map((r) => ({
           coin: String(r['coin']),

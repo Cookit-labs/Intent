@@ -136,6 +136,8 @@ export interface NairaOrderRepo {
     bankCode: string,
     accountNumber: string
   ) => Promise<string | undefined>
+  /** This user's orders whose payment was sent, newest first. Never another user's. */
+  listPaidForEmail: (email: string, network: string, limit: number) => Promise<NairaOrderRow[]>
   getByProviderOrder: (providerOrder: string) => Promise<NairaOrderRow | undefined>
   setStatus: (
     providerOrder: string,
@@ -209,6 +211,16 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
       )
       const name = rows[0]?.['account_name']
       return typeof name === 'string' && name !== '' ? name : undefined
+    },
+
+    async listPaidForEmail(email, network, limit) {
+      const { rows } = await query(
+        `SELECT * FROM naira_orders
+          WHERE email = $1 AND network = $2 AND payment_hash IS NOT NULL
+          ORDER BY created_at DESC LIMIT $3`,
+        [email, network, limit]
+      )
+      return rows.map(fromDb)
     },
 
     async getByProviderOrder(providerOrder) {

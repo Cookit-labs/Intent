@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { EmptyNote, Kpi, PageTitle, Panel } from '../../../components/admin/parts'
 import { useScope } from '../../../components/admin/scope'
-import { formatCount } from '../../../components/admin/stats'
+import { formatCount, formatUsd } from '../../../components/admin/stats'
 import type { NairaAttentionRow, NairaReport } from '../../../lib/server/admin-metrics'
 
 type Attention = NairaAttentionRow & { explorerUrl: string }
@@ -111,10 +111,19 @@ export default function AdminPayoutsPage(): JSX.Element {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Kpi label="Orders" value={formatCount(report.orders)} />
             <Kpi label="Paid out" value={formatCount(report.paid.count)} />
             <Kpi label="Naira paid out" value={naira(report.paid.ngn)} />
+            <Kpi
+              label="Cashed out"
+              value={formatUsd(report.cashedOut.usd)}
+              note={
+                report.cashedOut.unvalued > 0
+                  ? `${report.cashedOut.unvalued} cash-out${report.cashedOut.unvalued === 1 ? '' : 's'} could not be priced`
+                  : `${formatCount(report.cashedOut.count)} payment${report.cashedOut.count === 1 ? '' : 's'} sent`
+              }
+            />
             <Kpi
               label="Needs attention"
               value={formatCount(report.attention.length)}
