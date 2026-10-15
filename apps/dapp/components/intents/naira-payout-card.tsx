@@ -191,9 +191,27 @@ export function NairaPayoutCard({
           <dd className="text-right">
             {order.bankName} {order.accountMask}
           </dd>
+          <dt className="text-muted-foreground">Pays to</dt>
+          <dd className="text-right">
+            <a
+              href={`https://stellar.expert/explorer/public/account/${order.depositAddress}`}
+              target="_blank"
+              rel="noreferrer"
+              title={order.depositAddress}
+              className="font-mono text-xs underline underline-offset-2"
+            >
+              {order.depositAddress.slice(0, 6)}…{order.depositAddress.slice(-6)}
+            </a>
+          </dd>
         </dl>
         <p className="text-muted-foreground text-xs">
           The rate is locked for this order. Send the payment within 10 minutes or it is cancelled.
+        </p>
+        <p className="text-muted-foreground text-xs">
+          This is a one-time deposit address made for this payout. A wallet security scan can flag a
+          new address like this one. Before you sign, check that the address your wallet shows
+          starts with {order.depositAddress.slice(0, 6)} and ends with{' '}
+          {order.depositAddress.slice(-6)}.
         </p>
         <div className="flex gap-2">
           <button
