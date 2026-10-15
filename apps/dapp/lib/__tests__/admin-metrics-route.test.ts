@@ -44,6 +44,7 @@ function repo(): MetricsRepo {
     naira: record('naira', {
       orders: 0,
       paid: { count: 0, ngn: 0 },
+      cashedOut: { count: 0, usd: 0, unvalued: 0 },
       byStatus: [],
       byCoin: [],
       attention: [],
@@ -202,6 +203,7 @@ describe('GET /api/admin/metrics', () => {
         return {
           orders: 2,
           paid: { count: 1, ngn: 2000 },
+          cashedOut: { count: 1, usd: 2, unvalued: 0 },
           byStatus: [],
           byCoin: [],
           attention: [

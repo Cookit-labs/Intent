@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { clearTurnsRemote } from '../api/conversation-client'
-import { clearTurns, loadTurns, saveTurn, updateTurn, type ChatTurn } from '../chat-history'
+import { clearTurnsRemote, saveTurnRemote } from '../api/conversation-client'
+import { setHistoryOwner } from '../history-owner'
+import {
+  clearTurns,
+  flushPendingTurns,
+  loadTurns,
+  saveTurn,
+  updateTurn,
+  type ChatTurn,
+} from '../chat-history'
 
 vi.mock('../api/conversation-client', () => ({
   listTurns: vi.fn().mockResolvedValue([]),
@@ -47,6 +55,58 @@ describe('chat history', () => {
     const [first] = loadTurns('stellar')
     expect(first?.text).toBe('Swap $50 of USDC to XLM')
     expect(first?.winner).toBe('shadow')
+  })
+
+  it("keeps each wallet's turns apart in the same browser", () => {
+    setHistoryOwner('GAAA')
+    saveTurn(turn({ id: 'mine' }))
+    setHistoryOwner('GBBB')
+
+    expect(loadTurns('stellar')).toEqual([])
+
+    setHistoryOwner('GAAA')
+    expect(loadTurns('stellar').map((t) => t.id)).toEqual(['mine'])
+    setHistoryOwner(undefined)
+  })
+
+  it('never lists rows reconstructed from the ledger', () => {
+    saveTurn(turn({ id: 'onchain:abc', winner: 'onchain' }))
+    saveTurn(turn({ id: 'real' }))
+
+    expect(loadTurns('stellar').map((t) => t.id)).toEqual(['real'])
+  })
+
+  it('keeps a settled outcome when the decision is saved afterwards', () => {
+    saveTurn(turn({ id: 'late', txHash: 'h'.repeat(64), executedBy: 'shadow' }))
+    saveTurn(turn({ id: 'late' }))
+
+    const [found] = loadTurns('stellar')
+    expect(found?.txHash).toBe('h'.repeat(64))
+    expect(found?.executedBy).toBe('shadow')
+  })
+
+  it('queues a turn the server refused and delivers it on the next flush', async () => {
+    vi.mocked(saveTurnRemote).mockRejectedValueOnce(new Error('No session'))
+    saveTurn(turn({ id: 'offline', txHash: 'o'.repeat(64) }))
+    await vi.waitFor(() => expect(store.get('intent.chat.pending.v1')).toBe('["offline"]'))
+
+    vi.mocked(saveTurnRemote).mockClear()
+    const delivered = await flushPendingTurns()
+
+    expect(delivered).toBe(1)
+    expect(saveTurnRemote).toHaveBeenCalledWith(expect.objectContaining({ id: 'offline' }))
+    expect(store.get('intent.chat.pending.v1')).toBe('[]')
+  })
+
+  it('keeps the queue when the flush still fails', async () => {
+    vi.mocked(saveTurnRemote).mockRejectedValue(new Error('No session'))
+    saveTurn(turn({ id: 'stuck' }))
+    await vi.waitFor(() => expect(store.get('intent.chat.pending.v1')).toBe('["stuck"]'))
+
+    expect(await flushPendingTurns()).toBe(0)
+    expect(store.get('intent.chat.pending.v1')).toBe('["stuck"]')
+
+    vi.mocked(saveTurnRemote).mockResolvedValue(undefined)
   })
 
   it('scopes turns to their chain', () => {

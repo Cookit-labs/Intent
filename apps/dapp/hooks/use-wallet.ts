@@ -1,6 +1,7 @@
 'use client'
 
 import type { ChainWallet } from '../lib/chain-adapter'
+import { setHistoryOwner } from '../lib/history-owner'
 import { useChain } from '../providers/chain-provider'
 
 /**
@@ -17,5 +18,7 @@ export type WalletState = ChainWallet
 
 export function useWallet(): WalletState {
   const { adapter } = useChain()
-  return adapter.useWallet()
+  const wallet = adapter.useWallet()
+  setHistoryOwner(wallet.isConnected ? wallet.address : undefined)
+  return wallet
 }

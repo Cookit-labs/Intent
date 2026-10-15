@@ -831,7 +831,8 @@ export function useSequence(): Sequence {
         })
         const label =
           `Send ${order.amount} USDC so ${order.accountName} receives ₦${ngn} ` +
-          `at ${order.bankName} ${order.accountMask}`
+          `at ${order.bankName} ${order.accountMask}, to the one-time deposit address ` +
+          `${order.depositAddress.slice(0, 6)}…${order.depositAddress.slice(-6)}`
         setState((s) => ({
           ...s,
           phase: 'review',

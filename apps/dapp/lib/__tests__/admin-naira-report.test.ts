@@ -5,12 +5,13 @@ import { createMetricsRepo } from '../server/admin-metrics'
 type Row = Record<string, unknown>
 
 /** Answers each of the report's three statements by what it selects from. */
-function fakeQuery(answers: { status: Row[]; coin: Row[]; attention: Row[] }) {
+function fakeQuery(answers: { status: Row[]; coin: Row[]; attention: Row[]; cashed?: Row[] }) {
   const seen: { sql: string; params: unknown[] | undefined }[] = []
   const query = async (sql: string, params?: unknown[]): Promise<{ rows: Row[] }> => {
     seen.push({ sql, params })
     if (/GROUP BY status/.test(sql)) return { rows: answers.status }
     if (/GROUP BY coin/.test(sql)) return { rows: answers.coin }
+    if (/FROM usage_executions/.test(sql)) return { rows: answers.cashed ?? [] }
     return { rows: answers.attention }
   }
   return { query, seen }
@@ -91,11 +92,25 @@ describe('metrics repo, naira payouts', () => {
     expect(JSON.stringify(report)).not.toMatch(/1234567890/)
   })
 
+  it('reports what was cashed out in dollars, and how many could not be priced', async () => {
+    const { query, seen } = fakeQuery({
+      status: [],
+      coin: [],
+      attention: [],
+      cashed: [{ n: '3', usd: '7.5', unvalued: '1' }],
+    })
+    const report = await createMetricsRepo(query).naira(scope, now)
+    expect(report.cashedOut).toEqual({ count: 3, usd: 7.5, unvalued: 1 })
+    const sql = seen.find((s) => /FROM usage_executions/.test(s.sql))
+    expect(sql?.sql).toMatch(/kind = 'offramp'/)
+    expect(sql?.params?.[0]).toBe('mainnet')
+  })
+
   it('scopes everything to the network, and the attention list to no date range', async () => {
     const { query, seen } = fakeQuery({ status: [], coin: [], attention: [] })
     await createMetricsRepo(query).naira(scope, now)
 
-    expect(seen).toHaveLength(3)
+    expect(seen).toHaveLength(4)
     for (const call of seen) expect(call.params?.[0]).toBe('mainnet')
 
     const attention = seen.find((s) => /payment_hash IS NOT NULL AND status/.test(s.sql))
@@ -109,6 +124,7 @@ describe('metrics repo, naira payouts', () => {
     expect(await createMetricsRepo(query).naira(scope, now)).toEqual({
       orders: 0,
       paid: { count: 0, ngn: 0 },
+      cashedOut: { count: 0, usd: 0, unvalued: 0 },
       byStatus: [],
       byCoin: [],
       attention: [],

@@ -1,6 +1,7 @@
 import type { AgentProposalView } from './agents/competition'
 
 import { listTurns, saveTurnRemote, updateTurnRemote } from './api/conversation-client'
+import { historyOwner, onHistoryOwnerChanged } from './history-owner'
 
 /**
  * Past conversations, kept across reloads — and across devices.
@@ -82,7 +83,24 @@ export interface BundleStep {
   anchor?: { id: string; transactionId: string; moreInfoUrl?: string; lastStatus?: string }
 }
 
-const STORAGE_KEY = 'intent.chat.v1'
+const STORAGE_BASE = 'intent.chat.v1'
+
+/**
+ * One cache per wallet. A single shared key let a second wallet in the same
+ * browser read the first one's turns, withdrawals included.
+ */
+function storageKey(): string {
+  const owner = historyOwner()
+  return owner === undefined ? STORAGE_BASE : `${STORAGE_BASE}:${owner}`
+}
+
+/**
+ * Winner stamped on rows reconstructed from the ledger by the old backfill.
+ *
+ * Those rows were every swap the account ever made, from any app, with no
+ * competition behind them. They are not intents and are never shown as such.
+ */
+const LEDGER_ROW_WINNER = 'onchain'
 
 /**
  * Enough to look back over a session's work without letting the cache grow
@@ -94,10 +112,12 @@ const MAX_TURNS = 50
 function read(): ChatTurn[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKey())
     if (raw === null) return []
     const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? (parsed as ChatTurn[]) : []
+    return Array.isArray(parsed)
+      ? (parsed as ChatTurn[]).filter((t) => t.winner !== LEDGER_ROW_WINNER)
+      : []
   } catch {
     // Private-mode browsers throw on access. The server still has everything;
     // only the instant read is lost.
@@ -108,7 +128,7 @@ function read(): ChatTurn[] {
 function write(turns: ChatTurn[]): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(turns.slice(0, MAX_TURNS)))
+    window.localStorage.setItem(storageKey(), JSON.stringify(turns.slice(0, MAX_TURNS)))
   } catch {
     /* see read() */
   }
@@ -128,8 +148,11 @@ const turnsListeners = new Set<TurnsListener>()
 
 export function onTurnsChanged(listener: TurnsListener): () => void {
   turnsListeners.add(listener)
+  // Switching wallets swaps the whole cache, which is a change to every list.
+  const stopOwner = onHistoryOwnerChanged(listener)
   return () => {
     turnsListeners.delete(listener)
+    stopOwner()
   }
 }
 
@@ -156,6 +179,89 @@ function reportSyncFailure(what: string, e: unknown): void {
   console.warn(`[history] ${what} was not saved to the server:`, e)
 }
 
+const PENDING_BASE = 'intent.chat.pending.v1'
+
+/**
+ * Turns whose latest state has not reached the server.
+ *
+ * Ids only, not payloads: a write is always "make the server's row match the
+ * local one", and the local cache already holds the merged truth. Storing ids
+ * means a second failed write to the same turn is one entry, not two that could
+ * be replayed out of order.
+ */
+function pendingKey(): string {
+  const owner = historyOwner()
+  return owner === undefined ? PENDING_BASE : `${PENDING_BASE}:${owner}`
+}
+
+function readPending(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(pendingKey())
+    if (raw === null) return []
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writePending(ids: string[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(pendingKey(), JSON.stringify([...new Set(ids)]))
+  } catch {
+    /* see read() */
+  }
+}
+
+function markPending(id: string): void {
+  writePending([...readPending(), id])
+}
+
+function clearPending(id: string): void {
+  const ids = readPending()
+  if (ids.includes(id)) writePending(ids.filter((p) => p !== id))
+}
+
+let flushing: Promise<number> | undefined
+
+/**
+ * Sends every turn the server is missing. Returns how many were delivered.
+ *
+ * Runs before each sync, so a trade made while signed out, or while the server
+ * was unreachable, is recorded as soon as the wallet next has a session. Stops
+ * at the first failure: the rest would fail for the same reason and the queue
+ * keeps them for next time.
+ */
+export function flushPendingTurns(): Promise<number> {
+  if (flushing !== undefined) return flushing
+
+  flushing = (async () => {
+    let delivered = 0
+    for (const id of readPending()) {
+      const turn = read().find((t) => t.id === id)
+      if (turn === undefined) {
+        clearPending(id)
+        continue
+      }
+      try {
+        await saveTurnRemote(turn)
+        clearPending(id)
+        delivered += 1
+      } catch (e) {
+        reportSyncFailure('a queued conversation', e)
+        break
+      }
+    }
+    return delivered
+  })().finally(() => {
+    flushing = undefined
+  })
+
+  return flushing
+}
+
 /**
  * Replaces the local cache with what the server holds.
  *
@@ -164,6 +270,9 @@ function reportSyncFailure(what: string, e: unknown): void {
  * Returns what it loaded, so a caller can render without a second read.
  */
 export async function syncTurns(chain: string): Promise<ChatTurn[]> {
+  // First, so the server has what this device recorded before it is read back.
+  await flushPendingTurns()
+
   let remote: ChatTurn[]
   try {
     remote = await listTurns(chain)
@@ -175,9 +284,11 @@ export async function syncTurns(chain: string): Promise<ChatTurn[]> {
   // Merged rather than replaced. A turn recorded moments ago may not have
   // reached the server yet, and dropping it here would make it vanish from the
   // panel it was just added to.
-  const byId = new Map(remote.map((t) => [t.id, t]))
+  const byId = new Map(remote.filter((t) => t.winner !== LEDGER_ROW_WINNER).map((t) => [t.id, t]))
+  const pending = new Set(readPending())
   for (const local of read()) {
-    if (!byId.has(local.id)) byId.set(local.id, local)
+    // A turn still queued is newer than the server's copy of it.
+    if (!byId.has(local.id) || pending.has(local.id)) byId.set(local.id, local)
   }
 
   const merged = [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -190,12 +301,40 @@ export function loadTurns(chain: string): ChatTurn[] {
 }
 
 /** Records a conversation, newest first, locally and on the server. */
-export function saveTurn(turn: ChatTurn): void {
-  const existing = read().filter((t) => t.id !== turn.id)
-  write([turn, ...existing])
+export function saveTurn(incoming: ChatTurn): void {
+  const all = read()
+  const previous = all.find((t) => t.id === incoming.id)
+  // A settled trade can be recorded before its competition is decided. Saving
+  // the decision must not erase the outcome that already arrived.
+  const turn: ChatTurn =
+    previous === undefined
+      ? incoming
+      : {
+          ...incoming,
+          ...(incoming.txHash === undefined && previous.txHash !== undefined
+            ? { txHash: previous.txHash }
+            : {}),
+          ...(incoming.executedBy === undefined && previous.executedBy !== undefined
+            ? { executedBy: previous.executedBy }
+            : {}),
+          ...(incoming.bundle === undefined && previous.bundle !== undefined
+            ? { bundle: previous.bundle }
+            : {}),
+        }
+  write([turn, ...all.filter((t) => t.id !== turn.id)])
   notifyTurnsChanged()
 
-  void saveTurnRemote(turn).catch((e) => reportSyncFailure('a conversation', e))
+  sendTurn(turn, 'a conversation')
+}
+
+/** Writes a turn to the server, queueing it for retry when that fails. */
+function sendTurn(turn: ChatTurn, what: string): void {
+  void saveTurnRemote(turn)
+    .then(() => clearPending(turn.id))
+    .catch((e) => {
+      markPending(turn.id)
+      reportSyncFailure(what, e)
+    })
 }
 
 /**
@@ -235,13 +374,24 @@ export function updateTurn(
     }
     write([created, ...all])
     notifyTurnsChanged()
-    void saveTurnRemote(created).catch((e) => reportSyncFailure('a settled trade', e))
+    sendTurn(created, 'a settled trade')
     return
   }
 
   write(all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
   notifyTurnsChanged()
-  void updateTurnRemote(id, patch).catch((e) => reportSyncFailure('a trade outcome', e))
+
+  // A turn the server has never seen cannot be patched: the PATCH would 404 and
+  // the outcome would be lost. Queued turns are re-sent whole instead.
+  if (readPending().includes(id)) {
+    markPending(id)
+    void flushPendingTurns()
+    return
+  }
+  void updateTurnRemote(id, patch).catch((e) => {
+    markPending(id)
+    reportSyncFailure('a trade outcome', e)
+  })
 }
 
 /**

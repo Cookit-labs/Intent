@@ -10,6 +10,8 @@ export type VenueCategory =
   | 'offramp'
   | 'perps'
   | 'names'
+  /** How the app reads and writes the network. Not a place a trade is chosen. */
+  | 'infrastructure'
 
 /**
  * How far a venue is wired into the app.

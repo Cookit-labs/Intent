@@ -40,7 +40,7 @@ import { INTENT_MEMO } from './build-tx'
  * memo, and the supply that follows it is a separate transaction the chain does
  * not associate with it. The caller joins that in from the app's own record.
  */
-export type SwapKind = 'swap' | 'limit' | 'bundle' | 'pool'
+export type SwapKind = 'swap' | 'limit' | 'bundle' | 'pool' | 'cashout'
 
 export interface SwapRecord {
   txHash: string
@@ -86,6 +86,18 @@ export interface SwapRecord {
    * cleared browser.
    */
   bundledWith?: LedgerBundleStep[]
+  /**
+   * Set on a cash-out: where the naira went and how the payout stands. The
+   * ledger only shows a payment, so this comes from the app's own record of
+   * the order.
+   */
+  payout?: {
+    status: string
+    statusLabel: string
+    bankName: string
+    accountName: string
+    accountMask: string
+  }
   explorerUrl: string
 }
 

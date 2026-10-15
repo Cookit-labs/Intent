@@ -1,3 +1,4 @@
+import { isMainnet } from '@intent/config'
 import { StrKey } from '@stellar/stellar-sdk'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
@@ -8,7 +9,9 @@ import { bankByCode } from '../../../../lib/naira/banks'
 import { guardNaira } from '../../../../lib/naira/guard'
 import { getNairaOrderRepo, orderNetwork, toPublic } from '../../../../lib/naira/orders'
 import { normaliseStatus } from '../../../../lib/naira/status'
+import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
+import { readSessionFromRequest } from '../../../../lib/server/session'
 import { fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
 
@@ -59,6 +62,41 @@ function refusalFor(path: (string | number)[]): string {
       return 'This page is out of date. Reload it and try again.'
     default:
       return 'This page is out of date. Reload it and try again.'
+  }
+}
+
+/**
+ * The signed-in user's cash-outs, for History.
+ *
+ * Only orders whose payment was sent, only this user's, only this network. It
+ * answers an empty list rather than an error where cash-outs cannot exist
+ * (testnet, no database), so the History page needs no special case.
+ */
+export async function GET(request: Request): Promise<Response> {
+  const session = readSessionFromRequest(request)
+  if (session === undefined) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+  if (!isMainnet() || !databaseConfigured()) return NextResponse.json({ orders: [] })
+
+  // Narrowed to the wallet that is connected. One sign-in can own several
+  // wallets, and each should see only its own cash-outs. The wallet is a filter
+  // on this user's own orders, never a way to reach another user's: the email
+  // scope is applied first and always.
+  const asked = new URL(request.url).searchParams.get('account')
+  const account = asked !== null && StrKey.isValidEd25519PublicKey(asked) ? asked : undefined
+  if (asked !== null && account === undefined) {
+    return NextResponse.json({ orders: [] })
+  }
+
+  try {
+    const repo = await getNairaOrderRepo()
+    const rows = await repo.listPaidForEmail(session.email, orderNetwork(), 50, account)
+    return NextResponse.json({
+      orders: rows.map((row) => ({ ...toPublic(row), createdAt: row.createdAt })),
+    })
+  } catch {
+    return NextResponse.json({ orders: [] })
   }
 }
 
