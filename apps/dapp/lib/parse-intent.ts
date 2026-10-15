@@ -27,6 +27,14 @@ export interface ParsedIntent {
    * market order wearing a limit order's label.
    */
   limitPriceUsd?: number
+  /**
+   * The structured reading this was built from, when a model supplied one.
+   *
+   * Carried so the competition can be given the same reading rather than
+   * re-deriving the trade from the words, which is how a paraphrase lost its
+   * meaning on the way to the agents.
+   */
+  reading?: ReadingForIntent
 }
 
 const STATIC_TOKEN_ALIASES: Record<string, string> = {
@@ -382,6 +390,89 @@ export function parseIntent(
     referencePriceUsd,
     targetPriceUsd: stated ?? referencePriceUsd,
     ...(stated !== undefined ? { limitPriceUsd: stated } : {}),
+    input: {
+      type,
+      tokenIn,
+      tokenOut,
+      amountIn,
+      minAmountOut,
+      deadline: new Date(Date.now() + 30 * 60_000).toISOString(),
+    },
+  }
+}
+
+/** What a model's reading of an instruction supplies; everything else is derived here. */
+export interface ReadingForIntent {
+  /** The user's own words, kept for display and for the agents' prompt. */
+  text: string
+  tokenIn: string
+  tokenOut: string
+  /** A dollar figure when `amountIsUsd`, otherwise a quantity of an asset. */
+  amount: number
+  amountIsUsd: boolean
+  style: 'market' | 'limit' | 'accumulate' | 'hedge' | 'rebalance' | 'route_liquidity'
+  limitPriceUsd?: number
+}
+
+/**
+ * The same `ParsedIntent` the regex parser produces, built from a structured
+ * reading instead of from the words.
+ *
+ * The model decides which assets, how much, and what kind of order; prices,
+ * escrow, base units and deadlines are derived here, as they always were. A
+ * model asked to compute is a model inventing numbers.
+ */
+export function buildParsedIntent(
+  reading: ReadingForIntent,
+  livePrices?: Record<string, number>
+): ParsedIntent {
+  const { tokenIn, tokenOut } = reading
+  const priceOf = (symbol: string): number | undefined =>
+    livePrices?.[symbol] ?? REFERENCE_PRICES_USD[symbol]
+
+  // Same last-resort divisor as `parseIntent`; see the note there.
+  const referencePriceUsd = priceOf(tokenOut) ?? 3500
+  const sendPrice = priceOf(tokenIn) ?? 1
+
+  const type = ((): IntentType => {
+    switch (reading.style) {
+      case 'hedge':
+        return 'hedge'
+      case 'rebalance':
+        return 'rebalance'
+      case 'route_liquidity':
+        return 'route_liquidity'
+      case 'accumulate':
+        return 'accumulate'
+      case 'limit':
+        return STABLES.has(tokenOut) ? 'limit_sell' : 'limit_buy'
+      default:
+        return STABLES.has(tokenOut) ? 'market_sell' : 'market_buy'
+    }
+  })()
+
+  // A bare quantity names what is bought when a stablecoin is spent
+  // ("buy 300 XLM"), and what is sold otherwise ("swap 100 XLM to USDC").
+  const quantityIsOutput = STABLES.has(tokenIn) && !STABLES.has(tokenOut)
+  const sentUsd = reading.amountIsUsd
+    ? reading.amount
+    : reading.amount * (quantityIsOutput ? referencePriceUsd : sendPrice)
+
+  const escrowUsd = Math.round(sentUsd)
+  const amountIn = (sendPrice > 0 ? sentUsd / sendPrice : escrowUsd)
+    .toFixed(7)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '')
+  const minAmountOut = (escrowUsd / referencePriceUsd).toFixed(4)
+
+  const stated = reading.limitPriceUsd
+  return {
+    outcome: reading.text.trim(),
+    escrowUsd,
+    referencePriceUsd,
+    targetPriceUsd: stated ?? referencePriceUsd,
+    ...(stated !== undefined ? { limitPriceUsd: stated } : {}),
+    reading,
     input: {
       type,
       tokenIn,

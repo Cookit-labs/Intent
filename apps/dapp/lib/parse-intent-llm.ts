@@ -117,6 +117,10 @@ const READ_INTENT_TOOL = {
   },
 }
 
+/** The reading fields, reused by the orchestrator's tool so the two cannot drift. */
+export const READ_INTENT_PROPERTIES = READ_INTENT_TOOL.function.parameters.properties
+export const READ_INTENT_REQUIRED = READ_INTENT_TOOL.function.parameters.required
+
 /**
  * The instruction that decides the hard case.
  *
@@ -193,7 +197,7 @@ export interface ReadIntentOptions {
   allowedAnchors?: string[]
 }
 
-interface ToolArguments {
+export interface ToolArguments {
   action?: unknown
   amountIsUsd?: unknown
   tokenIn?: unknown
@@ -303,7 +307,20 @@ async function readWithModel(
 function interpret(payload: unknown, options: ReadIntentOptions): LlmReadIntent | null {
   const args = toolArgumentsOf(payload)
   if (args === null) return null
+  return readingFromArguments(args, options)
+}
 
+/**
+ * Validates the fields of a reading, wherever the model produced them.
+ *
+ * Shared with the orchestrator, which asks for the same fields inside a larger
+ * answer. One validation means a reading is held to the same allowlists whichever
+ * call produced it.
+ */
+export function readingFromArguments(
+  args: ToolArguments,
+  options: ReadIntentOptions
+): LlmReadIntent | null {
   // Anything unrecognised falls back to a swap rather than to a lending
   // action. A malformed reply must not silently open a liability.
   const ACTIONS = ['swap', 'supply', 'borrow', 'repay', 'offramp'] as const

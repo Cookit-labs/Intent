@@ -8,11 +8,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
-import { fetchClarify } from '../../lib/chat/clarify-client'
+import { fetchOrchestrate, type ActReading } from '../../lib/chat/orchestrate-client'
+import {
+  helpMessage,
+  outOfScopeMessage,
+  unavailableMessage,
+  unclearMessage,
+} from '../../lib/chat/orchestrate-copy'
 import { fixVerbTypo } from '../../lib/chat/typos'
 import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
-import { ACKNOWLEDGED, fallbackInstruction, isSelfContained } from '../../lib/chat/clarify-flow'
+import { ACKNOWLEDGED } from '../../lib/chat/clarify-flow'
 import type { ClarifyTurn } from '../../lib/clarify/clarify'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
@@ -56,7 +62,7 @@ import {
   updateTurn,
   type ChatTurn,
 } from '../../lib/chat-history'
-import { parseIntent, type ParsedIntent } from '../../lib/parse-intent'
+import { buildParsedIntent, parseIntent, type ParsedIntent } from '../../lib/parse-intent'
 import { CompetitionPanel } from './competition-panel'
 import { SwapConfirm } from './swap-confirm'
 import { useSwapExecution } from '../../hooks/use-swap-execution'
@@ -619,6 +625,8 @@ export function IntentChat(): JSX.Element {
       brief?: string[]
       continuing?: boolean
       conversation?: ClarifyTurn[]
+      /** The orchestrator's structured reading of `text`, when it is the one that wrote it. */
+      reading?: ActReading
     } = {}
   ): void {
     const continuing = options.continuing === true
@@ -883,7 +891,22 @@ export function IntentChat(): JSX.Element {
     // fell back to an indicative table that had XLM at $0.58 against a real
     // ~$0.18, so the same sentence produced one size here and a different one
     // in the competition.
-    const single = parseIntent(text, swap.usdPrices)
+    const given = options.reading
+    const single =
+      given !== undefined && given.action === 'swap'
+        ? buildParsedIntent(
+            {
+              text,
+              tokenIn: given.tokenIn,
+              tokenOut: given.tokenOut,
+              amount: given.amountUsd,
+              amountIsUsd: given.amountIsUsd,
+              style: given.style,
+              ...(given.limitPriceUsd !== undefined ? { limitPriceUsd: given.limitPriceUsd } : {}),
+            },
+            swap.usdPrices
+          )
+        : parseIntent(text, swap.usdPrices)
     const regexFollowOn = parseCompoundIntent(text, swap.usdPrices ?? {})?.followOn ?? null
     // "Withdraw 2 USDC to my bank" is not a trade at all, and the trade parser
     // reads it as one. Computed here with the rest of the fallback reading, so
@@ -899,12 +922,19 @@ export function IntentChat(): JSX.Element {
       setParsing(true)
       let read: UnderstoodIntent | null = null
       try {
-        const res = await fetch('/api/intent/parse', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, chain: slug }),
-        })
-        const body = (await res.json()) as {
+        // Already read when the orchestrator wrote this instruction. Asking the
+        // parser again would be a second opinion on words it has just rewritten.
+        const raw: unknown =
+          options.reading !== undefined
+            ? { understood: true, ...options.reading }
+            : await (
+                await fetch('/api/intent/parse', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text, chain: slug }),
+                })
+              ).json()
+        const body = raw as {
           understood?: boolean
           action?: 'swap' | 'supply' | 'borrow' | 'repay' | 'offramp'
           tokenIn?: string
@@ -1049,7 +1079,10 @@ export function IntentChat(): JSX.Element {
       // A second action is worth confirming, whichever parser found it. The
       // instruction carries more than a swap, and a follow-on silently dropped
       // or silently added is the misreading that costs the user real money.
-      const readFollowOn = read?.followOn ?? regexFollowOn
+      // When the orchestrator read the instruction, its answer on the follow-on
+      // stands: falling back to the regex would add one it decided was not asked.
+      const readFollowOn =
+        options.reading !== undefined ? (read?.followOn ?? null) : (read?.followOn ?? regexFollowOn)
       if (readFollowOn !== null) {
         setPending({
           text,
@@ -1058,6 +1091,7 @@ export function IntentChat(): JSX.Element {
           amountUsd: read?.amountStated === true ? read.amountUsd : single.escrowUsd,
           amountStated: read?.amountStated ?? true,
           followOn: readFollowOn,
+          ...(options.reading !== undefined ? { parsed: single } : {}),
         })
         return
       }
@@ -1095,10 +1129,9 @@ export function IntentChat(): JSX.Element {
       return
     }
 
-    if (isSelfContained(text, thread.length > 0)) {
-      startIntent(text)
-      return
-    }
+    // Every message goes to the orchestrator first. Nothing decides by wording
+    // whether it is worth asking: "flip my lumens into dollars" has no verb a
+    // list would know, and "I want to go jogging" has none either.
     void clarify(text, [])
   }
 
@@ -1145,38 +1178,52 @@ export function IntentChat(): JSX.Element {
     setClarifying({ turns })
     setClarifyBusy(true)
 
+    setAffordError(null)
     const earlier = raceContext(thread, [])
-    const result = await fetchClarify(turns, earlier)
+    const answer = await fetchOrchestrate(turns, earlier, slug)
     setClarifyBusy(false)
 
-    if (result !== null && result.status === 'ask') {
-      setClarifying({ turns: [...turns, { role: 'assistant', content: result.question }] })
+    if (answer.outcome === 'ask') {
+      setClarifying({ turns: [...turns, { role: 'assistant', content: answer.question }] })
       return
     }
 
     setClarifying(null)
 
-    // A note the model could not write into the instruction is kept as context.
+    // Nothing runs: the message is not an instruction, or could not be read.
+    // The answer is fixed text, so the chat never promises more than it does.
+    if (answer.outcome !== 'act') {
+      setParsed(null)
+      setFollowOn(null)
+      setAffordError(
+        answer.outcome === 'help'
+          ? helpMessage(slug)
+          : answer.outcome === 'out_of_scope'
+            ? outOfScopeMessage()
+            : answer.outcome === 'unclear'
+              ? unclearMessage()
+              : unavailableMessage(answer.reason, answer.tokens)
+      )
+      return
+    }
+
+    // Tokens the server proved for this request, so the page can trade them
+    // without a hand-written entry.
+    for (const asset of answer.read.liveAssets) {
+      registerLiveAsset(activeNetwork(), asset)
+    }
+
     if (options.note !== undefined) {
-      if (result === null || result.status !== 'ready') {
-        startIntent(options.note)
-        return
-      }
       setNotes((n) => [...n, options.note as string])
       setExecutingKey(null)
     }
-    const first = turns[0]?.content ?? text
-    startIntent(
-      result !== null && result.status === 'ready'
-        ? result.instruction
-        : fallbackInstruction(turns),
-      {
-        shown: first,
-        brief: result !== null && result.status === 'ready' ? result.context : [],
-        continuing: true,
-        conversation: turns,
-      }
-    )
+    startIntent(answer.instruction, {
+      shown: turns[0]?.content ?? text,
+      brief: answer.context,
+      continuing: true,
+      conversation: turns,
+      reading: answer.read,
+    })
   }
 
   /**
@@ -1211,7 +1258,7 @@ export function IntentChat(): JSX.Element {
     // every downstream consumer expects a `ParsedIntent`, and the deterministic
     // parser is what derives escrow, base units and deadlines. The model
     // answers only what needs judgement.
-    setParsed(parseIntent(confirmed.text, swap.usdPrices))
+    setParsed(confirmed.parsed ?? parseIntent(confirmed.text, swap.usdPrices))
   }
 
   /** A clean slate: the open intent, the turns before it and any notes. */
@@ -1940,7 +1987,7 @@ export function IntentChat(): JSX.Element {
                 then fail. */}
               {affordError !== null ? (
                 <div className="border-border rounded-2xl border border-dashed p-4">
-                  <p className="text-foreground text-sm">{affordError}</p>
+                  <p className="text-foreground whitespace-pre-line text-sm">{affordError}</p>
                 </div>
               ) : null}
 

@@ -194,6 +194,7 @@ export function useCompetition(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             text: parsed?.outcome ?? '',
+            ...(parsed?.reading !== undefined ? { reading: parsed.reading } : {}),
             chain,
             ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
           }),
