@@ -7,6 +7,8 @@
  * production uses Resend. The choice is made by configuration, not by
  * scattered `if (dev)` checks at the call sites.
  */
+import { renderOtpEmail, renderRuleFiredEmail } from './email-templates'
+
 export interface EmailSender {
   sendOtp: (to: string, code: string, ttlMinutes: number) => Promise<void>
   sendRuleFired: (to: string, fired: RuleFiredMail) => Promise<void>
@@ -104,14 +106,14 @@ const consoleSender: EmailSender = {
 }
 
 function resendSender(apiKey: string, from: string): EmailSender {
-  async function send(to: string, subject: string, text: string): Promise<void> {
+  async function send(to: string, subject: string, text: string, html?: string): Promise<void> {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from, to, subject, text }),
+      body: JSON.stringify({ from, to, subject, text, ...(html !== undefined ? { html } : {}) }),
     })
 
     if (!res.ok) {
@@ -123,21 +125,18 @@ function resendSender(apiKey: string, from: string): EmailSender {
 
   return {
     async sendOtp(to, code, ttlMinutes) {
-      await send(
-        to,
-        `${code} is your Intent access code`,
-        [
-          `Your Intent access code is ${code}.`,
-          ``,
-          `It expires in ${ttlMinutes} minutes.`,
-          `If you did not request this, you can ignore this email.`,
-        ].join('\n')
-      )
+      const mail = renderOtpEmail(code, ttlMinutes)
+      await send(to, `${code} is your Intent access code`, mail.text, mail.html)
     },
 
     async sendRuleFired(to, fired) {
       const { subject, text } = ruleFiredMessage(fired)
-      await send(to, subject, text)
+      const priceLine =
+        fired.price === undefined
+          ? 'It is due now.'
+          : `The price that crossed it was $${fired.price}.`
+      const mail = renderRuleFiredEmail(fired.description, priceLine, fired.link)
+      await send(to, subject, text, mail.html)
     },
 
     async sendAlert(to, { subject, text }) {
