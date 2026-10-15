@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   detectPayout,
+  namedPayoutAsset,
   preselectPayoutPath,
   readPayoutSource,
   unsupportedCurrencyMessage,
@@ -115,5 +116,18 @@ describe('preselectPayoutPath', () => {
 
   it('lets a cash-out cue win over a swap word', () => {
     expect(preselectPayoutPath('swap my XLM and withdraw to my bank in naira')).toBe('xlm')
+  })
+})
+
+describe('namedPayoutAsset', () => {
+  it('finds the asset and amount beside it', () => {
+    expect(namedPayoutAsset('offramp 20 SHX to naira')).toEqual({ symbol: 'SHX', amount: 20 })
+    expect(namedPayoutAsset('cash out 1,5 aqua to naira')?.symbol).toBe('AQUA')
+  })
+
+  it('ignores XLM, USDC and the words around a dollar figure', () => {
+    expect(namedPayoutAsset('cash out 100 XLM to naira')).toBeUndefined()
+    expect(namedPayoutAsset('offramp 5 USDC to naira')).toBeUndefined()
+    expect(namedPayoutAsset('withdraw $30 worth of XLM to naira')).toBeUndefined()
   })
 })

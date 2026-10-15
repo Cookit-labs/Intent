@@ -83,6 +83,41 @@ export type PayoutSource =
  * asks. Any other named asset is refused with its name, not silently treated
  * as XLM.
  */
+const NOT_ASSETS = new Set([
+  'xlm',
+  'usdc',
+  'usd',
+  'ngn',
+  'naira',
+  'dollars',
+  'dollar',
+  'worth',
+  'of',
+  'to',
+  'in',
+  'into',
+  'for',
+  'my',
+  'cash',
+  'out',
+  'the',
+])
+
+/**
+ * The first asset the sentence names with an amount that is not XLM or USDC,
+ * such as the SHX in "offramp 20 SHX to naira". Whether it is a real asset is
+ * the server's to say; this only finds the name.
+ */
+export function namedPayoutAsset(text: string): { symbol: string; amount: number } | undefined {
+  const re = /(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9]{1,11})\b/g
+  for (const m of text.matchAll(re)) {
+    const word = (m[2] ?? '').toLowerCase()
+    if (NOT_ASSETS.has(word)) continue
+    return { symbol: word.toUpperCase(), amount: Number(m[1]) }
+  }
+  return undefined
+}
+
 export function readPayoutSource(text: string, xlmPriceUsd: number | undefined): PayoutSource {
   const lower = text.toLowerCase()
 
