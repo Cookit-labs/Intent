@@ -2,11 +2,12 @@
 
 import { cn } from '@intent/ui'
 import { isMainnet } from '@intent/config'
-import { Bell, Clock, Inbox, Sparkles } from 'lucide-react'
+import { Bell, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
+import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
 
@@ -192,6 +193,12 @@ export function IntentChat(): JSX.Element {
   // about a trade that was never the one asked for.
   const [pending, setPending] = useState<UnderstoodIntent | null>(null)
   const [parsing, setParsing] = useState(false)
+  // The conversation around the open intent. `thread` holds the turns that came
+  // before it, kept in view so the chat reads as one; `notes` are things the
+  // user added to the open intent while it was still being decided, which
+  // every agent is given on a re-run.
+  const [thread, setThread] = useState<ThreadTurn[]>([])
+  const [notes, setNotes] = useState<string[]>([])
 
   const { slug } = useChain()
   const { address, isConnected } = useWallet()
@@ -268,7 +275,7 @@ export function IntentChat(): JSX.Element {
   // toggle used to select a mock competition here, and a stale bundle once
   // ran it silently while the server's agents worked — every check passed and
   // the screen showed canned proposals nobody could execute.
-  const live = useCompetition(restored === null ? parsed : null, slug)
+  const live = useCompetition(restored === null ? parsed : null, slug, raceContext(thread, notes))
   const liveCompetition = live
 
   // A restored turn is already decided: every agent revealed, a winner picked.
@@ -510,7 +517,45 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decided, turnId, message, slug])
 
+  /** A signature is with the wallet or the network, so nothing may change under it. */
+  const executionInFlight =
+    swap.phase === 'signing' ||
+    swap.phase === 'submitting' ||
+    sequence.phase === 'signing' ||
+    sequence.phase === 'submitting'
+  /** Something came of the open intent: a trade settled, or an order was placed. */
+  const turnExecuted = swap.phase === 'settled' || sequence.phase === 'settled' || placedId !== null
+
   function handleSubmit(text: string): void {
+    // While an intent is open and unexecuted, a message that only adjusts it is
+    // a note: the agents are given it and race again, instead of the chat
+    // starting over and discarding what they said.
+    if (message !== null && parsed !== null && restored === null && !turnExecuted) {
+      if (classifyFollowUp(text) === 'note') {
+        if (executionInFlight) {
+          setAffordError('Finish or cancel the signature first, then continue the chat.')
+          return
+        }
+        setNotes((n) => [...n, text])
+        setExecutingKey(null)
+        swap.reset()
+        sequence.reset()
+        setAffordError(null)
+        return
+      }
+    }
+
+    // Anything else is a new turn. The one before it stays in view, so a
+    // follow-up after a trade reads as the next line of the same chat.
+    if (message !== null) {
+      const previous = message
+      setThread((t) => [
+        ...t,
+        { id: turnId ?? crypto.randomUUID(), text: previous, executed: turnExecuted },
+      ])
+      setNotes([])
+    }
+
     // A rule is not a trade. "Buy XLM if it drops to $0.16" describes when to
     // act, and running a competition on it now would execute at a price the
     // user explicitly said they did not want.
@@ -887,6 +932,13 @@ export function IntentChat(): JSX.Element {
     setParsed(parseIntent(confirmed.text, swap.usdPrices))
   }
 
+  /** A clean slate: the open intent, the turns before it and any notes. */
+  function newChat(): void {
+    handleReset()
+    setThread([])
+    setNotes([])
+  }
+
   function handleReset(): void {
     setMessage(null)
     setParsed(null)
@@ -1225,6 +1277,18 @@ export function IntentChat(): JSX.Element {
         {/* Past conversations. The chat keeps nothing across a reload on its
             own, so without this the agents' reasoning is lost the moment the
             page refreshes or a second intent is composed. */}
+        {/* A new chat, kept apart from the intent in front of the user: it also
+            drops the earlier turns, so it is the one way to start from nothing. */}
+        <button
+          type="button"
+          onClick={newChat}
+          aria-label="New chat"
+          title="New chat"
+          className="text-muted-foreground hover:text-foreground hover:bg-muted/60 ml-auto rounded-full p-1.5 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+
         {isConnected ? (
           <button
             type="button"
@@ -1232,7 +1296,7 @@ export function IntentChat(): JSX.Element {
             aria-label="Past intents"
             aria-expanded={historyOpen}
             className={cn(
-              'ml-auto rounded-full p-1.5 transition-colors',
+              'rounded-full p-1.5 transition-colors',
               historyOpen
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1413,11 +1477,37 @@ export function IntentChat(): JSX.Element {
                 </div>
               ) : null}
 
+              {/* The turns before this one, quieter than the open intent. */}
+              {thread.map((turn) => (
+                <div key={turn.id} className="flex flex-col items-end gap-1">
+                  <div className="bg-muted text-muted-foreground max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-sm">
+                    {turn.text}
+                  </div>
+                  <span className="text-muted-foreground text-xs">
+                    {turn.executed ? 'Done' : 'Not executed'}
+                  </span>
+                </div>
+              ))}
+
               <div className="flex justify-end">
                 <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
                   {message}
                 </div>
               </div>
+
+              {/* What was added to the open intent while it was being decided. */}
+              {notes.map((note, i) => (
+                <div key={`${i}-${note}`} className="flex justify-end">
+                  <div className="border-border text-foreground max-w-[85%] rounded-2xl rounded-br-sm border px-4 py-2 text-sm">
+                    {note}
+                  </div>
+                </div>
+              ))}
+              {notes.length > 0 && competition.phase === 'competing' ? (
+                <p className="text-muted-foreground text-center text-xs">
+                  Agents are working again with your note.
+                </p>
+              ) : null}
               <CompetitionPanel
                 state={competition}
                 onExecute={handleExecute}
@@ -1661,7 +1751,8 @@ export function IntentChat(): JSX.Element {
       <div className="border-border shrink-0 border-t p-3">
         <ComposerInput
           onSubmit={handleSubmit}
-          showExamples={!parsed}
+          showExamples={!parsed && thread.length === 0}
+          {...(message !== null ? { placeholder: 'Continue the chat…' } : {})}
           {...(parsed ? { onReset: handleReset } : {})}
         />
         <TradeCapNote />

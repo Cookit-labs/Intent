@@ -45,7 +45,21 @@ export interface CompetitionWithRoute extends CompetitionState {
   routesByAgent: Record<string, unknown>
 }
 
-export function useCompetition(parsed: ParsedIntent | null, chain: string): CompetitionWithRoute {
+export function useCompetition(
+  parsed: ParsedIntent | null,
+  chain: string,
+  /**
+   * What the conversation has added to the intent: earlier turns, and notes the
+   * user made while agents were working. Sent to the server for every agent
+   * alike. A change restarts the race, which is what "re-run with this" means.
+   */
+  context: string[] = []
+): CompetitionWithRoute {
+  // The effect reads the latest context through a ref and restarts on its
+  // content, not on the array's identity, which is new every render.
+  const contextRef = useRef(context)
+  contextRef.current = context
+  const contextKey = context.join('\u0001')
   const [proposals, setProposals] = useState<Record<string, AgentProposalView>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
@@ -177,7 +191,11 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
         const res = await fetch('/api/agents/compete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: parsed?.outcome ?? '', chain }),
+          body: JSON.stringify({
+            text: parsed?.outcome ?? '',
+            chain,
+            ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
+          }),
           signal: abort.signal,
         })
 
@@ -324,7 +342,8 @@ export function useCompetition(parsed: ParsedIntent | null, chain: string): Comp
       cancelAnimationFrame(raf)
       for (const t of timeouts) clearTimeout(t)
     }
-  }, [parsed, chain])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed, chain, contextKey])
 
   return {
     proposals,
