@@ -322,6 +322,23 @@ describe('orchestrateWithLlm', () => {
     })
   })
 
+  it('reads a request to see the wallet as a balance, not a trade', async () => {
+    const result = await orchestrateWithLlm(turn('what is in my wallet?'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'balance' }),
+    })
+    expect(result).toEqual({ status: 'balance' })
+  })
+
+  it('tells the model that asking for a balance is the balance outcome', async () => {
+    let sent: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('show my balance'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'balance' }, (b) => (sent = b as typeof sent)),
+    })
+    expect(sent?.messages[0]?.content).toMatch(/outcome 'balance'/i)
+  })
+
   it('refuses an act that names an asset the app cannot trade', async () => {
     const result = await orchestrateWithLlm(turn('swap $5 of XLM to DOGE'), {
       ...options,

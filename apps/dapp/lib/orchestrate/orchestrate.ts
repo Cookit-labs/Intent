@@ -86,6 +86,8 @@ export type OrchestrateResult =
    */
   | { status: 'help'; reply?: string }
   | { status: 'out_of_scope'; reply?: string }
+  /** The person asked what their wallet holds. The chat lists it from the balances it already has. */
+  | { status: 'balance' }
   /** Four questions asked and the request is still not usable. */
   | { status: 'unclear'; reply?: string }
 
@@ -112,9 +114,9 @@ const ORCHESTRATE_TOOL = {
       properties: {
         outcome: {
           type: 'string',
-          enum: ['act', 'ask', 'help', 'out_of_scope'],
+          enum: ['act', 'ask', 'help', 'out_of_scope', 'balance'],
           description:
-            "'act' when the message is a complete instruction Intent can carry out. 'ask' when it is about Intent's work but something it cannot be carried out without is missing or unclear. 'help' when the user asks what they can do or how Intent works. 'out_of_scope' when it has nothing to do with Intent's work.",
+            "'act' when the message is a complete instruction Intent can carry out. 'ask' when it is about Intent's work but something it cannot be carried out without is missing or unclear. 'help' when the user asks what they can do or how Intent works. 'out_of_scope' when it has nothing to do with Intent's work. 'balance' when the user asks to see what their wallet holds: their balance, their tokens, their assets, what they have.",
         },
         question: {
           type: 'string',
@@ -174,6 +176,7 @@ const BASE_PROMPT = [
   'You are the front door of Intent, an app where people state what they want done with their money on the Stellar network and trading agents compete to do it. Call orchestrate exactly once.',
   "Decide by what the person MEANS, not by which words they used: 'flip', 'turn into', 'get me some', 'move my lumens to dollars' are all trades.",
   "Use outcome 'out_of_scope' for anything unrelated to that work — exercise, weather, recipes, general chat. Do not try to stretch an unrelated message into a trade.",
+  "Use outcome 'balance' when the person asks to see what is in their wallet: their balance, their tokens or assets, how much they have. Leave reply empty; the app lists the wallet itself. A question about the price of an asset is not a balance request.",
   "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
   'For help, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
   'The facts about Intent below are what is true, not wording to copy. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed.',
@@ -382,6 +385,9 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
       const reply = text(args.reply)
       return reply === '' ? { status: 'help' } : { status: 'help', reply }
     }
+
+    case 'balance':
+      return { status: 'balance' }
 
     case 'out_of_scope': {
       const reply = text(args.reply)

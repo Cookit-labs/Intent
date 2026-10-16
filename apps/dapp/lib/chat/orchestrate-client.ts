@@ -23,6 +23,7 @@ export type OrchestrateAnswer =
   | { outcome: 'ask'; question: string }
   | { outcome: 'help'; reply?: string }
   | { outcome: 'out_of_scope'; reply?: string }
+  | { outcome: 'balance' }
   | { outcome: 'unclear'; reply?: string }
   | { outcome: 'unavailable'; reason: string; tokens: string[] }
 
@@ -75,6 +76,8 @@ export async function fetchOrchestrate(
           : UNREACHABLE
       case 'help':
         return { outcome: 'help', ...replyOf(a['reply']) }
+      case 'balance':
+        return { outcome: 'balance' }
       case 'out_of_scope':
         return { outcome: 'out_of_scope', ...replyOf(a['reply']) }
       case 'unclear':

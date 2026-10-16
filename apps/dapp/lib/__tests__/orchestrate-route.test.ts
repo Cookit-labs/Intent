@@ -109,6 +109,11 @@ describe('POST /api/intent/orchestrate', () => {
       outcome: 'out_of_scope',
       reply: 'That is outside what I do.',
     })
+    orchestrateWithLlm.mockResolvedValueOnce({ status: 'balance' })
+    expect(await (await POST(post({ turns: turns('what is in my wallet') }))).json()).toEqual({
+      outcome: 'balance',
+    })
+    expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'balance' })
     // Understood and declined, so the admin read rate is not dragged down by it.
     expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'out_of_scope' })
   })
