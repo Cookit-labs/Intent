@@ -10,6 +10,7 @@ import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
 import { fetchOrchestrate, type ActReading } from '../../lib/chat/orchestrate-client'
 import {
+  balanceMessage,
   helpMessage,
   outOfScopeMessage,
   unavailableMessage,
@@ -238,7 +239,7 @@ export function IntentChat(): JSX.Element {
     strategy.slippageBps !== undefined ? { slippageBps: strategy.slippageBps } : {}
 
   const { slug } = useChain()
-  const { address, isConnected } = useWallet()
+  const { address, isConnected, balance: nativeBalance, balanceSymbol } = useWallet()
   // Past intents belong to a wallet. With none connected there is nothing
   // to attribute them to, so the overlay closes and its button goes away.
   useEffect(() => {
@@ -1164,6 +1165,13 @@ export function IntentChat(): JSX.Element {
     )
   }
 
+  /** What the wallet holds, from balances already read: Stellar lists every asset, other chains their native one. */
+  function walletBalanceReply(): string {
+    if (slug === 'stellar') return balanceMessage(isConnected ? balances : undefined)
+    if (!isConnected || nativeBalance === undefined) return balanceMessage(undefined)
+    return `Your wallet holds:${String.fromCharCode(10)}• ${nativeBalance} ${balanceSymbol}`
+  }
+
   async function clarify(
     text: string,
     prior: ClarifyTurn[],
@@ -1207,11 +1215,13 @@ export function IntentChat(): JSX.Element {
       const reply =
         answer.outcome === 'help'
           ? (answer.reply ?? helpMessage(slug))
-          : answer.outcome === 'out_of_scope'
-            ? outOfScopeMessage(slug, answer.reply)
-            : answer.outcome === 'unclear'
-              ? (answer.reply ?? unclearMessage())
-              : unavailableMessage(answer.reason, answer.tokens)
+          : answer.outcome === 'balance'
+            ? walletBalanceReply()
+            : answer.outcome === 'out_of_scope'
+              ? outOfScopeMessage(slug, answer.reply)
+              : answer.outcome === 'unclear'
+                ? (answer.reply ?? unclearMessage())
+                : unavailableMessage(answer.reason, answer.tokens)
       setAffordError(reply)
       // Remembered only when the model wrote it: a stock error line is not
       // something it said, and feeding it back would teach it to repeat.

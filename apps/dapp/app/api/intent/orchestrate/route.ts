@@ -113,6 +113,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         ...(result.reply !== undefined ? { reply: result.reply } : {}),
       })
 
+    case 'balance':
+      await logIntentRead({ understood: true, action: 'balance' })
+      return NextResponse.json({ outcome: 'balance' })
+
     case 'out_of_scope':
       await logIntentRead({ understood: true, action: 'out_of_scope' })
       return NextResponse.json({

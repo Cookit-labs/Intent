@@ -1,3 +1,5 @@
+import type { StellarBalances } from '../stellar-account'
+
 /**
  * What the chat says when the orchestrator decides a message is not an
  * instruction.
@@ -66,4 +68,31 @@ export function unavailableMessage(reason: string, tokens: string[]): string {
     return 'That asset can be borrowed here but not traded. Pick a different asset to trade.'
   }
   return "I can't read that right now. Please try again in a moment."
+}
+
+function figure(raw: string): string {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return raw
+  return n.toLocaleString('en-US', { maximumFractionDigits: 7 })
+}
+
+/**
+ * What the wallet holds, one asset a line, the native asset first.
+ *
+ * Built from the balances the page has already read rather than asked of the
+ * model, which has no way to know them and would invent figures.
+ */
+export function balanceMessage(balances: StellarBalances | undefined): string {
+  if (balances === undefined) {
+    return "I can't read your balance yet. Connect your wallet if you haven't, then ask again in a moment."
+  }
+  if (!balances.exists) {
+    return 'This wallet is not funded yet, so it holds nothing. Send it some XLM to activate it.'
+  }
+  const issued = Object.entries(balances.trustlines).sort(([a], [b]) => a.localeCompare(b))
+  return [
+    'Your wallet holds:',
+    `• ${figure(balances.xlm)} XLM`,
+    ...issued.map(([code, held]) => `• ${figure(held.balance)} ${code}`),
+  ].join(String.fromCharCode(10))
 }

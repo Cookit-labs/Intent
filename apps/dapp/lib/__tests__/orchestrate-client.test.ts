@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { fetchOrchestrate } from '../chat/orchestrate-client'
 import {
+  balanceMessage,
   helpMessage,
   outOfScopeMessage,
   unavailableMessage,
@@ -151,5 +152,49 @@ describe('orchestrator copy', () => {
     expect(unavailableMessage('unknown_token', ['DOGE'])).toMatch(/DOGE/)
     expect(unavailableMessage('unreadable', [])).toMatch(/can't read that right now/i)
     expect(unavailableMessage('not_tradeable', [])).toMatch(/borrowed/i)
+  })
+
+  it('passes a balance request through', async () => {
+    expect(await fetchOrchestrate(turns, [], 'stellar', json({ outcome: 'balance' }))).toEqual({
+      outcome: 'balance',
+    })
+  })
+})
+
+describe('balanceMessage', () => {
+  it('lists every token the wallet holds, native first', () => {
+    const text = balanceMessage({
+      exists: true,
+      xlm: '125.5000000',
+      usdc: '40.1200000',
+      hasUsdcTrustline: true,
+      trustlines: {
+        USDC: { balance: '40.1200000', issuer: 'GA' },
+        AQUA: { balance: '9000.0000000', issuer: 'GB' },
+      },
+    })
+    expect(text).toContain('XLM')
+    expect(text).toContain('125.5')
+    expect(text).toContain('USDC')
+    expect(text).toContain('40.12')
+    expect(text).toContain('AQUA')
+    expect(text).toContain('9,000')
+    expect(text.indexOf('XLM')).toBeLessThan(text.indexOf('USDC'))
+  })
+
+  it('says so when the account holds nothing or does not exist yet', () => {
+    expect(
+      balanceMessage({
+        exists: false,
+        xlm: '0',
+        usdc: undefined,
+        hasUsdcTrustline: false,
+        trustlines: {},
+      })
+    ).toMatch(/not funded|no balance|empty/i)
+  })
+
+  it('says the wallet must be connected when there are no balances to read', () => {
+    expect(balanceMessage(undefined)).toMatch(/connect/i)
   })
 })
