@@ -41,6 +41,13 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const entry = await findByEmail(email)
   if (entry === undefined || entry.status !== 'accepted') {
+    const [local = '', domain = ''] = email.split('@')
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[auth] code refused for ${local.slice(0, 2)}***@${domain} (${email.length} chars): ${
+        entry === undefined ? 'no waitlist row' : `status ${entry.status}`
+      }`
+    )
     return NextResponse.json(
       { status: 'not_accepted', onWaitlist: entry !== undefined },
       { status: 200 }
