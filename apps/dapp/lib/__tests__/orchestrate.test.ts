@@ -203,6 +203,61 @@ describe('orchestrateWithLlm', () => {
     expect(sent?.messages[0]?.content).toMatch(/other side|ask what/i)
   })
 
+  it('tries once more when the model answers with something unusable', async () => {
+    let calls = 0
+    const act = {
+      ...empty,
+      outcome: 'act',
+      tokenIn: 'USDC',
+      tokenOut: 'XLM',
+      amountUsd: 20,
+      amountStated: true,
+      amountOf: 'sent',
+      instruction: 'Swap 20 USDC to XLM',
+    }
+    const flaky = ((url: string, init: { body: string }) => {
+      calls += 1
+      return (calls === 1 ? reply({ ...empty, outcome: 'shrug' }) : reply(act))(url, init)
+    }) as unknown as typeof fetch
+
+    const result = await orchestrateWithLlm(turn('turn 20 USDC into XLM'), {
+      ...options,
+      fetchImpl: flaky,
+    })
+    expect(result?.status).toBe('act')
+    expect(calls).toBe(2)
+  })
+
+  it('gives up after the second unusable answer', async () => {
+    let calls = 0
+    const bad = ((url: string, init: { body: string }) => {
+      calls += 1
+      return reply({ ...empty, outcome: 'shrug' })(url, init)
+    }) as unknown as typeof fetch
+
+    expect(await orchestrateWithLlm(turn('hi'), { ...options, fetchImpl: bad })).toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  it('does not retry a request that failed outright, so a timeout is not doubled', async () => {
+    let calls = 0
+    const down = (() => {
+      calls += 1
+      return Promise.reject(new Error('offline'))
+    }) as unknown as typeof fetch
+
+    expect(await orchestrateWithLlm(turn('hi'), { ...options, fetchImpl: down })).toBeNull()
+    expect(calls).toBe(1)
+
+    calls = 0
+    const refused = (() => {
+      calls += 1
+      return Promise.resolve(new Response('{}', { status: 503 }))
+    }) as unknown as typeof fetch
+    expect(await orchestrateWithLlm(turn('hi'), { ...options, fetchImpl: refused })).toBeNull()
+    expect(calls).toBe(1)
+  })
+
   it('asks one question when the meaning is unclear', async () => {
     const result = await orchestrateWithLlm(turn('do the thing with my coins'), {
       ...options,
