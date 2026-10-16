@@ -251,25 +251,39 @@ export async function orchestrateWithLlm(
   const asked = turns.filter((t) => t.role === 'assistant').length
 
   for (const model of models) {
-    const result = await orchestrateWithModel(turns, options, model)
-    if (result === null) continue
+    let result = await orchestrateWithModel(turns, options, model)
+    // A small model now and then returns a reply that cannot be used: a tool
+    // call with an unknown outcome, or a reading with a side left empty. The
+    // same request usually succeeds the second time. Only a reply that arrived
+    // is retried — a timeout or a refused request is not, or the wait doubles
+    // for someone whose model is down.
+    if (result.kind === 'unusable') result = await orchestrateWithModel(turns, options, model)
+    if (result.kind !== 'ok') continue
     // After four questions the user has said all they are going to. A fifth is
     // not asked; the request is reported as not pinned down rather than run.
     // The model's own last question becomes the reply, so even this ending is
     // in its words rather than a stock sentence.
-    if (result.status === 'ask' && asked >= MAX_QUESTIONS) {
-      return { status: 'unclear', reply: result.question }
+    if (result.value.status === 'ask' && asked >= MAX_QUESTIONS) {
+      return { status: 'unclear', reply: result.value.question }
     }
-    return result
+    return result.value
   }
   return null
 }
+
+/** What one call to one model came to. */
+type Attempt =
+  | { kind: 'ok'; value: OrchestrateResult }
+  /** A reply arrived and could not be used. Worth asking again. */
+  | { kind: 'unusable' }
+  /** No reply arrived: a timeout, a refusal, an unreachable host. */
+  | { kind: 'failed' }
 
 async function orchestrateWithModel(
   turns: OrchestrateTurn[],
   options: OrchestrateOptions,
   config: IntentModel
-): Promise<OrchestrateResult | null> {
+): Promise<Attempt> {
   const doFetch = options.fetchImpl ?? fetch
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
@@ -297,15 +311,16 @@ async function orchestrateWithModel(
       }),
       signal: controller.signal,
     })
-    if (!res.ok) return null
+    if (!res.ok) return { kind: 'failed' }
     payload = await res.json()
   } catch {
-    return null
+    return { kind: 'failed' }
   } finally {
     clearTimeout(timer)
   }
 
-  return interpret(payload, options)
+  const value = interpret(payload, options)
+  return value === null ? { kind: 'unusable' } : { kind: 'ok', value }
 }
 
 interface OrchestrateArguments extends ToolArguments {
