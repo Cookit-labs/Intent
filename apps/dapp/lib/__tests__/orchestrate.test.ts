@@ -24,6 +24,14 @@ function reply(args: Record<string, unknown>, onBody?: (b: unknown) => void): ty
   }) as unknown as typeof fetch
 }
 
+/** A model that answered in plain words and never called the tool. */
+function plain(content: string | null): typeof fetch {
+  return (() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
+    )) as unknown as typeof fetch
+}
+
 const empty = {
   question: '',
   reply: '',
@@ -148,6 +156,41 @@ describe('orchestrateWithLlm', () => {
       question:
         'How much would you like to trade? A dollar amount or an amount of the asset works.',
     })
+  })
+
+  it('shows a plain-words answer as the reply when the model never called the tool', async () => {
+    const result = await orchestrateWithLlm(turn('can you explain it better'), {
+      ...options,
+      fetchImpl: plain('Think of it as handing over one thing and getting another back.'),
+    })
+    expect(result).toEqual({
+      status: 'help',
+      reply: 'Think of it as handing over one thing and getting another back.',
+    })
+  })
+
+  it('returns null when the model said nothing at all', async () => {
+    expect(await orchestrateWithLlm(turn('hi'), { ...options, fetchImpl: plain(null) })).toBeNull()
+    expect(await orchestrateWithLlm(turn('hi'), { ...options, fetchImpl: plain('  ') })).toBeNull()
+  })
+
+  it('uses the reply as the question when it asked in the wrong field', async () => {
+    const result = await orchestrateWithLlm(turn('swap some'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'ask', reply: 'Which asset do you want to swap?' }),
+    })
+    expect(result).toEqual({ status: 'ask', question: 'Which asset do you want to swap?' })
+  })
+
+  it('tells the model never to leave a side of a trade empty', async () => {
+    let sent: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('buy 300 XLM'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'ask', question: 'Pay with what?' }, (b) => {
+        sent = b as typeof sent
+      }),
+    })
+    expect(sent?.messages[0]?.content).toMatch(/other side|ask what/i)
   })
 
   it('asks one question when the meaning is unclear', async () => {

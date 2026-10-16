@@ -182,6 +182,7 @@ const BASE_PROMPT = [
   "Use outcome 'ask' whenever you cannot tell what they want done or something it needs is missing. Ask one question, in plain words. Never guess, and never pass unclear words along as an instruction.",
   "Use outcome 'act' as soon as the request is complete. Do not ask for confirmation of something already clear.",
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
+  'If the person names only one side of a trade, ask what the other side is, in one question. Never leave tokenIn or tokenOut empty in an act.',
   'Do NOT ask for a bank, an account number or an account name: a form collects those afterwards.',
   'Never ask about price, slippage, venue or route: the agents decide those.',
   'Never ask something the user already answered, or that the earlier conversation already settles.',
@@ -334,9 +335,26 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/** What the model said in plain words, when it did not call the tool. */
+function plainContentOf(payload: unknown): string {
+  try {
+    const choices = (payload as { choices?: { message?: { content?: unknown } }[] }).choices
+    const content = choices?.[0]?.message?.content
+    return typeof content === 'string' ? content.trim().slice(0, 1500) : ''
+  } catch {
+    return ''
+  }
+}
+
 function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateResult | null {
   const args = argumentsOf(payload)
-  if (args === null) return null
+  if (args === null) {
+    // A small model sometimes answers instead of calling the tool, most often to
+    // a follow-up inside a conversation. That is a reply to the person, and it
+    // can never run anything, so it is shown rather than reported as unreadable.
+    const said = plainContentOf(payload)
+    return said === '' ? null : { status: 'help', reply: said }
+  }
 
   switch (args.outcome) {
     case 'help': {
@@ -350,7 +368,8 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
     }
 
     case 'ask': {
-      const question = text(args.question)
+      // The model sometimes puts the question in the reply field.
+      const question = text(args.question) || text(args.reply)
       return question === '' ? null : { status: 'ask', question }
     }
 
