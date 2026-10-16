@@ -5,6 +5,7 @@ import { type ReactNode } from 'react'
 import { ChainSwitcher } from './chain-switcher'
 import { ConnectWallet } from './connect-wallet'
 import { NetworkStatus } from './network-status'
+import { SignOutButton } from './sign-out-button'
 import { ThemeToggle } from './theme-toggle'
 
 /**
@@ -43,6 +44,7 @@ export function Header({
 
       <div className="flex shrink-0 items-center gap-2">
         <ThemeToggle />
+        <SignOutButton />
         <ConnectWallet />
       </div>
     </header>
