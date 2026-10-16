@@ -48,6 +48,38 @@ describe.skipIf(SKIP)('the live orchestrator', () => {
     20_000
   )
 
+  it('answers a follow-up about one capability rather than repeating the list', async () => {
+    const result = await ask('can u explain this part better: send an asset to someone')
+    expect(result?.status).toBe('help')
+    if (result?.status === 'help') {
+      expect(result.reply).toBeDefined()
+      expect(result.reply?.toLowerCase()).toContain('send')
+      expect(result.reply).not.toMatch(/leveraged/i)
+    }
+  }, 20_000)
+
+  it('explains differently when asked to explain better, instead of repeating', async () => {
+    const first = await ask('explain what you mean by swapping between assets')
+    expect(first?.status).toBe('help')
+    if (first?.status !== 'help' || first.reply === undefined) return
+
+    const second = await orchestrateWithLlm(
+      [{ role: 'user', content: 'can you explain it better' }],
+      {
+        ...options,
+        history: [
+          { role: 'user', content: 'explain what you mean by swapping between assets' },
+          { role: 'assistant', content: first.reply },
+        ],
+      }
+    )
+    expect(second?.status).toBe('help')
+    if (second?.status === 'help') {
+      expect(second.reply).toBeDefined()
+      expect(second.reply).not.toBe(first.reply)
+    }
+  }, 40_000)
+
   it.each(['do something with my money', 'swap my xlm'])(
     'asks when the instruction is not clear: %s',
     async (text) => {

@@ -72,6 +72,40 @@ describe('buildParsedIntent', () => {
     expect(parsed.input.amountIn).toBe('100')
   })
 
+  it('sizes a quantity of the stablecoin sold as dollars, not as a quantity of the asset bought', () => {
+    const parsed = buildParsedIntent(
+      {
+        text: 'turn 20 USDC into XLM',
+        tokenIn: 'USDC',
+        tokenOut: 'XLM',
+        amount: 20,
+        amountIsUsd: false,
+        amountOf: 'sent',
+        style: 'market',
+      },
+      prices
+    )
+    expect(parsed.escrowUsd).toBe(20)
+    expect(parsed.input.amountIn).toBe('20')
+  })
+
+  it('sizes a quantity of the asset received at its price when the model says so', () => {
+    const parsed = buildParsedIntent(
+      {
+        text: 'buy 300 XLM',
+        tokenIn: 'USDC',
+        tokenOut: 'XLM',
+        amount: 300,
+        amountIsUsd: false,
+        amountOf: 'received',
+        style: 'market',
+      },
+      prices
+    )
+    expect(parsed.escrowUsd).toBe(60)
+    expect(parsed.input.amountIn).toBe('60')
+  })
+
   it('keeps the price the user named apart from the fallback', () => {
     const limit = buildParsedIntent(
       {

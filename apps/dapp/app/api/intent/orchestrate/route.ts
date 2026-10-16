@@ -38,6 +38,19 @@ const body = z.object({
     )
     .min(1)
     .max(12),
+  /**
+   * The conversation so far, replies included, so the model can answer the next
+   * message in the flow of it and not repeat what it already said.
+   */
+  history: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().min(1).max(700),
+      })
+    )
+    .max(8)
+    .optional(),
   /** What earlier turns of the chat established, one line each. */
   context: z.array(z.string().max(300)).max(6).optional(),
   chain: z.string().max(32).optional(),
@@ -51,7 +64,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!parsed.success) {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
   }
-  const { turns, context } = parsed.data
+  const { turns, context, history } = parsed.data
   const chain = parsed.data.chain ?? 'stellar'
 
   if (!isLlmParseConfigured()) {
@@ -66,6 +79,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   await ensureLiveAssets(tickersIn(latest))
 
   const result = await orchestrateWithLlm(turns, {
+    chain,
+    ...(history !== undefined ? { history } : {}),
     ...(context !== undefined ? { context } : {}),
     // The model may only name assets this app can actually trade. Checked here
     // rather than trusted, because a hallucinated ticker reaching the quoter as
@@ -93,15 +108,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     case 'help':
       await logIntentRead({ understood: true, action: 'help' })
-      return NextResponse.json({ outcome: 'help' })
+      return NextResponse.json({
+        outcome: 'help',
+        ...(result.reply !== undefined ? { reply: result.reply } : {}),
+      })
 
     case 'out_of_scope':
       await logIntentRead({ understood: true, action: 'out_of_scope' })
-      return NextResponse.json({ outcome: 'out_of_scope', reason: result.reason })
+      return NextResponse.json({
+        outcome: 'out_of_scope',
+        ...(result.reply !== undefined ? { reply: result.reply } : {}),
+      })
 
     case 'unclear':
       await logIntentRead({ understood: false, reason: 'unclear' })
-      return NextResponse.json({ outcome: 'unclear' })
+      return NextResponse.json({
+        outcome: 'unclear',
+        ...(result.reply !== undefined ? { reply: result.reply } : {}),
+      })
 
     case 'act': {
       const { reading } = result
@@ -137,6 +161,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         // from a field that failed to serialise.
         followOn: reading.followOn,
         style: result.style,
+        ...(result.amountOf !== undefined ? { amountOf: result.amountOf } : {}),
         ...(result.limitPriceUsd !== undefined ? { limitPriceUsd: result.limitPriceUsd } : {}),
         instruction: result.instruction,
         context: result.context,

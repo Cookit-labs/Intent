@@ -31,6 +31,7 @@ describe('fetchOrchestrate', () => {
         amountIsUsd: true,
         followOn: null,
         style: 'market',
+        amountOf: 'sent',
         instruction: 'Swap $5 of XLM to USDC',
         context: ['Asset: XLM'],
         liveAssets: [],
@@ -40,7 +41,13 @@ describe('fetchOrchestrate', () => {
       outcome: 'act',
       instruction: 'Swap $5 of XLM to USDC',
       context: ['Asset: XLM'],
-      read: { action: 'swap', tokenIn: 'XLM', tokenOut: 'USDC', style: 'market' },
+      read: {
+        action: 'swap',
+        tokenIn: 'XLM',
+        tokenOut: 'USDC',
+        style: 'market',
+        amountOf: 'sent',
+      },
     })
   })
 
@@ -55,8 +62,16 @@ describe('fetchOrchestrate', () => {
       outcome: 'help',
     })
     expect(
-      await fetchOrchestrate(turns, [], 'stellar', json({ outcome: 'out_of_scope', reason: 'x' }))
-    ).toEqual({ outcome: 'out_of_scope', reason: 'x' })
+      await fetchOrchestrate(
+        turns,
+        [],
+        'stellar',
+        json({ outcome: 'help', reply: 'Send moves an asset.' })
+      )
+    ).toEqual({ outcome: 'help', reply: 'Send moves an asset.' })
+    expect(
+      await fetchOrchestrate(turns, [], 'stellar', json({ outcome: 'out_of_scope', reply: 'x' }))
+    ).toEqual({ outcome: 'out_of_scope', reply: 'x' })
   })
 
   it('reports unavailable when the request fails or the reply is not recognisable', async () => {
@@ -76,6 +91,21 @@ describe('fetchOrchestrate', () => {
       reason: 'unreachable',
       tokens: [],
     })
+  })
+
+  it('sends the earlier conversation with the turns', async () => {
+    let sent: { history?: unknown; turns?: unknown } | undefined
+    const spy = ((_url: string, init: { body: string }) => {
+      sent = JSON.parse(init.body)
+      return Promise.resolve(new Response(JSON.stringify({ outcome: 'help' })))
+    }) as unknown as typeof fetch
+    const history = [
+      { role: 'user' as const, content: 'what can I do?' },
+      { role: 'assistant' as const, content: 'You can swap.' },
+    ]
+    await fetchOrchestrate(turns, [], 'stellar', spy, history)
+    expect(sent?.history).toEqual(history)
+    expect(sent?.turns).toEqual(turns)
   })
 
   it('keeps the reason and tokens the server gave', async () => {
