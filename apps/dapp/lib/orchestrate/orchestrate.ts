@@ -198,6 +198,7 @@ const BASE_PROMPT = [
   'Venue names are often misspelled. "Blende", "blnd" and "blend protocol" all mean Blend.',
   "Use followOnVenue 'blend' when Blend is named or clearly implied, 'defindex' when DeFindex is, 'moneygram' or 'testanchor' for those anchors, otherwise an empty string.",
   'amountStated is false when the user named no size; set amountUsd to 0 in that case.',
+  'When a size is named, amountUsd holds the number the user wrote, in whichever unit they used: "1 XLM" is amountUsd 1 with amountIsUsd false, and "$5 of XLM" is amountUsd 5 with amountIsUsd true. It is never 0 when amountStated is true.',
   'For anything other than act, leave the reading fields at their defaults.',
   'facts must never contain an account number or a person’s name.',
 ].join(' ')
@@ -308,6 +309,11 @@ async function orchestrateWithModel(
         tool_choice: 'auto',
         temperature: 0,
         max_tokens: MAX_OUTPUT_TOKENS,
+        // DeepSeek reasons before it answers, and that reasoning counts against
+        // max_tokens: on a naira or off-ramp sentence it used all 700 and the
+        // tool call was cut off (finish_reason "length"), which read as
+        // "unreadable". Reading one sentence needs no reasoning.
+        ...(config.id === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
       }),
       signal: controller.signal,
     })
