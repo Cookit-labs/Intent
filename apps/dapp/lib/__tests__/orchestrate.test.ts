@@ -182,6 +182,16 @@ describe('orchestrateWithLlm', () => {
     expect(result).toEqual({ status: 'ask', question: 'Which asset do you want to swap?' })
   })
 
+  it('tells the model to say nothing of its own about an unrelated message', async () => {
+    let sent: { messages: { content: string }[] } | undefined
+    await orchestrateWithLlm(turn('hello I think I am in love'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'out_of_scope' }, (b) => (sent = b as typeof sent)),
+    })
+    expect(sent?.messages[0]?.content).toMatch(/out_of_scope[^.]*leave reply empty/i)
+    expect(sent?.messages[0]?.content).not.toMatch(/answer like a person/i)
+  })
+
   it('tells the model never to leave a side of a trade empty', async () => {
     let sent: { messages: { content: string }[] } | undefined
     await orchestrateWithLlm(turn('buy 300 XLM'), {
