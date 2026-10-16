@@ -35,10 +35,10 @@ describe('the cap itself', () => {
     expect(tradeCapUsd({ MAINNET_MAX_TRADE_USD: '5' }, 'testnet')).toBeUndefined()
   })
 
-  it('is fifty dollars on mainnet unless configured', () => {
-    expect(DEFAULT_MAINNET_MAX_TRADE_USD).toBe(50)
-    expect(tradeCapUsd({}, 'mainnet')).toBe(50)
-    expect(tradeCapUsd({ MAINNET_MAX_TRADE_USD: '' }, 'mainnet')).toBe(50)
+  it('is five hundred dollars on mainnet unless configured', () => {
+    expect(DEFAULT_MAINNET_MAX_TRADE_USD).toBe(500)
+    expect(tradeCapUsd({}, 'mainnet')).toBe(500)
+    expect(tradeCapUsd({ MAINNET_MAX_TRADE_USD: '' }, 'mainnet')).toBe(500)
     expect(tradeCapUsd({ MAINNET_MAX_TRADE_USD: '200' }, 'mainnet')).toBe(200)
   })
 
@@ -59,21 +59,21 @@ describe('checking a dollar value against it', () => {
   })
 
   it('passes at or under the cap on mainnet', () => {
-    expect(() => assertWithinCap(49.99, {}, 'mainnet')).not.toThrow()
-    expect(() => assertWithinCap(50, {}, 'mainnet')).not.toThrow()
+    expect(() => assertWithinCap(499.99, {}, 'mainnet')).not.toThrow()
+    expect(() => assertWithinCap(500, {}, 'mainnet')).not.toThrow()
   })
 
   it('refuses over the cap, saying the cap and how to change it', () => {
     let caught: unknown
     try {
-      assertWithinCap(50.01, {}, 'mainnet')
+      assertWithinCap(500.01, {}, 'mainnet')
     } catch (e) {
       caught = e
     }
     expect(caught).toBeInstanceOf(TradeCapExceeded)
-    expect((caught as Error).message).toMatch(/\$50/)
+    expect((caught as Error).message).toMatch(/\$500/)
     expect((caught as Error).message).toMatch(/MAINNET_MAX_TRADE_USD/)
-    expect((caught as Error).message).toMatch(/\$50\.01/)
+    expect((caught as Error).message).toMatch(/\$500\.01/)
   })
 
   it('refuses a trade it cannot value, because an unchecked cap is no cap', () => {
@@ -107,13 +107,25 @@ describe('checking a trade end to end', () => {
   it('passes a small mainnet trade and refuses a large one', async () => {
     const prices = () => Promise.resolve(table)
     await expect(
-      assertTradeWithinCap('XLM', '200', { env: {}, network: 'mainnet', prices })
+      assertTradeWithinCap('XLM', '200', {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+      })
     ).resolves.toBeUndefined()
     await expect(
-      assertTradeWithinCap('XLM', '300', { env: {}, network: 'mainnet', prices })
+      assertTradeWithinCap('XLM', '300', {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+      })
     ).rejects.toThrow(/caps each trade at \$50/)
     await expect(
-      assertTradeWithinCap('USDC', '51', { env: {}, network: 'mainnet', prices })
+      assertTradeWithinCap('USDC', '51', {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+      })
     ).rejects.toThrow(TradeCapExceeded)
   })
 
@@ -155,7 +167,7 @@ describe('checking a plan, step by step', () => {
           { kind: 'swap', from: USDC, to: XLM, sendAmount: '400000000', minReceive: '1' },
           { kind: 'rest', selling: XLM, buying: USDC, amount: '100', price: { n: 1, d: 5 } },
         ],
-        { env: {}, network: 'mainnet', prices, pools }
+        { env: { MAINNET_MAX_TRADE_USD: '50' }, network: 'mainnet', prices, pools }
       )
     ).resolves.toBeUndefined()
   })
@@ -167,7 +179,7 @@ describe('checking a plan, step by step', () => {
           { kind: 'swap', from: USDC, to: XLM, sendAmount: '100000000', minReceive: '1' },
           { kind: 'rest', selling: XLM, buying: USDC, amount: '300', price: { n: 1, d: 5 } },
         ],
-        { env: {}, network: 'mainnet', prices, pools }
+        { env: { MAINNET_MAX_TRADE_USD: '50' }, network: 'mainnet', prices, pools }
       )
     ).rejects.toThrow(/caps each trade at \$50/)
   })
@@ -182,15 +194,25 @@ describe('checking a plan, step by step', () => {
       maxPrice: { n: 1, d: 1 },
     })
     await expect(
-      assertPlanWithinCap([deposit('100', '20')], { env: {}, network: 'mainnet', prices, pools })
+      assertPlanWithinCap([deposit('100', '20')], {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+        pools,
+      })
     ).resolves.toBeUndefined()
     await expect(
-      assertPlanWithinCap([deposit('200', '30')], { env: {}, network: 'mainnet', prices, pools })
+      assertPlanWithinCap([deposit('200', '30')], {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+        pools,
+      })
     ).rejects.toThrow(/caps each trade at \$50/)
     // A pool it cannot find cannot be valued, and is refused for that.
     await expect(
       assertPlanWithinCap([{ ...deposit('1', '1'), poolId: 'pool-9' }], {
-        env: {},
+        env: { MAINNET_MAX_TRADE_USD: '50' },
         network: 'mainnet',
         prices,
         pools,
@@ -225,7 +247,7 @@ describe('a plan cannot move more than the cap in one asset across its steps', (
     // Ten steps of $30 would be $300 out of one account on one signature.
     await expect(
       assertPlanWithinCap([swap('300000000'), swap('300000000')], {
-        env: {},
+        env: { MAINNET_MAX_TRADE_USD: '50' },
         network: 'mainnet',
         prices,
       })
@@ -239,7 +261,7 @@ describe('a plan cannot move more than the cap in one asset across its steps', (
           swap('300000000'),
           { kind: 'rest', selling: XLM, buying: USDC, amount: '150', price: { n: 1, d: 5 } },
         ],
-        { env: {}, network: 'mainnet', prices }
+        { env: { MAINNET_MAX_TRADE_USD: '50' }, network: 'mainnet', prices }
       )
     ).resolves.toBeUndefined()
   })

@@ -26,7 +26,7 @@ type Env = Record<string, string | undefined>
 
 export const TRADE_CAP_ENV = 'MAINNET_MAX_TRADE_USD'
 
-export const DEFAULT_MAINNET_MAX_TRADE_USD = 50
+export const DEFAULT_MAINNET_MAX_TRADE_USD = 500
 
 /** The cap in dollars, or nothing on testnet, where there is none. */
 export function tradeCapUsd(

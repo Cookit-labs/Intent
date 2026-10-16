@@ -81,6 +81,7 @@ let calls: string[]
 beforeEach(() => {
   calls = []
   vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORK', 'mainnet')
+  vi.stubEnv('MAINNET_MAX_TRADE_USD', '50')
   vi.stubGlobal('fetch', horizon(calls))
   resolve.mockReset()
 })
