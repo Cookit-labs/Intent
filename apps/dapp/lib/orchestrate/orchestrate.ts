@@ -123,7 +123,7 @@ const ORCHESTRATE_TOOL = {
         reply: {
           type: 'string',
           description:
-            "When outcome is 'help' or 'out_of_scope': what you say back to the person, in your own words, as a natural reply to their latest message in this conversation. Empty otherwise.",
+            "When outcome is 'help': what you say back to the person, in your own words, as a natural reply to their latest message in this conversation. When outcome is 'out_of_scope': empty, unless the person sounds genuinely distressed, then one short caring sentence with no advice. Empty otherwise.",
         },
         instruction: {
           type: 'string',
@@ -175,13 +175,14 @@ const BASE_PROMPT = [
   "Decide by what the person MEANS, not by which words they used: 'flip', 'turn into', 'get me some', 'move my lumens to dollars' are all trades.",
   "Use outcome 'out_of_scope' for anything unrelated to that work — exercise, weather, recipes, general chat. Do not try to stretch an unrelated message into a trade.",
   "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
-  'For help and out_of_scope, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
+  'For help, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
   'The facts about Intent below are what is true, not wording to copy. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed.',
   'Earlier turns of this conversation are given, including your own replies. Never repeat an earlier reply. If they ask you to explain better, or do not understand, explain it a different way: simpler, with a concrete example, or from another angle.',
-  'For an out_of_scope message, answer like a person: acknowledge what they said, say that it is outside what Intent does, and mention one or two things Intent could help with that fit what they said. Do not lecture and do not use a stock sentence.',
+  'For an out_of_scope message, leave reply empty: the app states the boundary and lists what Intent does. Do not comment on the message, give advice, or suggest a trade because of it. The one exception is a message that expresses genuine distress, where reply is a single short caring sentence and nothing more.',
   "Use outcome 'ask' whenever you cannot tell what they want done or something it needs is missing. Ask one question, in plain words. Never guess, and never pass unclear words along as an instruction.",
   "Use outcome 'act' as soon as the request is complete. Do not ask for confirmation of something already clear.",
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
+  'If the person names only one side of a trade, ask what the other side is, in one question. Never leave tokenIn or tokenOut empty in an act.',
   'Do NOT ask for a bank, an account number or an account name: a form collects those afterwards.',
   'Never ask about price, slippage, venue or route: the agents decide those.',
   'Never ask something the user already answered, or that the earlier conversation already settles.',
@@ -334,9 +335,26 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/** What the model said in plain words, when it did not call the tool. */
+function plainContentOf(payload: unknown): string {
+  try {
+    const choices = (payload as { choices?: { message?: { content?: unknown } }[] }).choices
+    const content = choices?.[0]?.message?.content
+    return typeof content === 'string' ? content.trim().slice(0, 1500) : ''
+  } catch {
+    return ''
+  }
+}
+
 function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateResult | null {
   const args = argumentsOf(payload)
-  if (args === null) return null
+  if (args === null) {
+    // A small model sometimes answers instead of calling the tool, most often to
+    // a follow-up inside a conversation. That is a reply to the person, and it
+    // can never run anything, so it is shown rather than reported as unreadable.
+    const said = plainContentOf(payload)
+    return said === '' ? null : { status: 'help', reply: said }
+  }
 
   switch (args.outcome) {
     case 'help': {
@@ -350,7 +368,8 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
     }
 
     case 'ask': {
-      const question = text(args.question)
+      // The model sometimes puts the question in the reply field.
+      const question = text(args.question) || text(args.reply)
       return question === '' ? null : { status: 'ask', question }
     }
 

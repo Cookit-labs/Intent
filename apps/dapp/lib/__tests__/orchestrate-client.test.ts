@@ -127,7 +127,20 @@ describe('orchestrator copy', () => {
   })
 
   it('tells the user a request is outside Intent without running anything', () => {
-    expect(outOfScopeMessage()).toMatch(/outside what Intent does/i)
+    const message = outOfScopeMessage('stellar')
+    expect(message).toMatch(/^That's outside what Intent does\./)
+  })
+
+  it('follows the boundary with what Intent can do, for the chain the user is on', () => {
+    expect(outOfScopeMessage('stellar')).toMatch(/swap/i)
+    expect(outOfScopeMessage('stellar')).toMatch(/naira/i)
+    expect(outOfScopeMessage('arc')).not.toMatch(/naira/i)
+  })
+
+  it('puts a short note first when the model gave one, and does not repeat the boundary', () => {
+    const message = outOfScopeMessage('stellar', 'That sounds hard.')
+    expect(message.startsWith('That sounds hard.')).toBe(true)
+    expect(message.match(/outside what Intent does/gi)).toHaveLength(1)
   })
 
   it('asks for a rephrase when the request could not be pinned down', () => {

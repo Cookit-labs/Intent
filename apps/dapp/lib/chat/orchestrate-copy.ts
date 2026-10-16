@@ -9,9 +9,9 @@
 
 const EXAMPLE = '"swap $5 of XLM to USDC"'
 
-export function helpMessage(chain: string): string {
+/** What Intent can do on a chain, one bullet each. */
+function capabilityBullets(chain: string): string[] {
   const common = [
-    'Tell Intent what you want done and trading agents compete to do it best. You can:',
     '• Swap one asset for another, at the market or at a price you set',
     '• Accumulate an asset over time, or hedge into another',
     '• Send an asset to someone',
@@ -21,12 +21,36 @@ export function helpMessage(chain: string): string {
     '• Cash out USDC or XLM to a Nigerian bank, paid in naira',
     '• Open a leveraged long or short position',
   ]
-  const close = `Try ${EXAMPLE}.`
-  return [...common, ...(chain === 'stellar' ? stellar : []), close].join('\n')
+  return chain === 'stellar' ? [...common, ...stellar] : common
 }
 
-export function outOfScopeMessage(): string {
-  return `That is outside what Intent does. Intent moves and grows money on-chain: swaps, sends, lending and cashing out. Ask what you can do here to see the list, or try ${EXAMPLE}.`
+export function helpMessage(chain: string): string {
+  return [
+    'Tell Intent what you want done and trading agents compete to do it best. You can:',
+    ...capabilityBullets(chain),
+    `Try ${EXAMPLE}.`,
+  ].join(String.fromCharCode(10))
+}
+
+/**
+ * A message that has nothing to do with Intent.
+ *
+ * Deliberately not conversational. A boundary that is the same every time is
+ * clear, cannot be talked around, and never wanders into advice on a subject
+ * this app has no business with. What it can do follows automatically, so the
+ * person is not left at a dead end.
+ *
+ * `note` is the model's few words of acknowledgement, which it is asked to give
+ * only when someone sounds genuinely distressed.
+ */
+export function outOfScopeMessage(chain: string, note?: string): string {
+  const lead = note !== undefined && note.trim() !== '' ? [note.trim(), ''] : []
+  return [
+    ...lead,
+    "That's outside what Intent does. Here's what it can do:",
+    ...capabilityBullets(chain),
+    `Try ${EXAMPLE}.`,
+  ].join(String.fromCharCode(10))
 }
 
 export function unclearMessage(): string {

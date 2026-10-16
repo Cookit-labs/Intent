@@ -58,6 +58,15 @@ describe.skipIf(SKIP)('the live orchestrator', () => {
     }
   }, 20_000)
 
+  it('states the boundary without commenting on an unrelated message', async () => {
+    const result = await ask("hello, I think I'm in love")
+    expect(result?.status).toBe('out_of_scope')
+    if (result?.status === 'out_of_scope') {
+      // Empty, or at most a single short sentence.
+      expect((result.reply ?? '').length).toBeLessThan(160)
+    }
+  }, 20_000)
+
   it('explains differently when asked to explain better, instead of repeating', async () => {
     const first = await ask('explain what you mean by swapping between assets')
     expect(first?.status).toBe('help')

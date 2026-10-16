@@ -1208,14 +1208,26 @@ export function IntentChat(): JSX.Element {
         answer.outcome === 'help'
           ? (answer.reply ?? helpMessage(slug))
           : answer.outcome === 'out_of_scope'
-            ? (answer.reply ?? outOfScopeMessage())
+            ? outOfScopeMessage(slug, answer.reply)
             : answer.outcome === 'unclear'
               ? (answer.reply ?? unclearMessage())
               : unavailableMessage(answer.reason, answer.tokens)
       setAffordError(reply)
       // Remembered only when the model wrote it: a stock error line is not
       // something it said, and feeding it back would teach it to repeat.
-      if (answer.outcome !== 'unavailable' && 'reply' in answer && answer.reply !== undefined) {
+      if (answer.outcome === 'out_of_scope') {
+        // The boundary, not the list that follows it: the list is fixed copy and
+        // would only crowd the conversation the model is shown.
+        dialogue.current = rememberExchange(
+          dialogue.current,
+          text,
+          [answer.reply, "That's outside what Intent does."].filter(Boolean).join(' ')
+        )
+      } else if (
+        answer.outcome !== 'unavailable' &&
+        'reply' in answer &&
+        answer.reply !== undefined
+      ) {
         dialogue.current = rememberExchange(dialogue.current, text, reply)
       }
       return
