@@ -21,17 +21,25 @@ describe('capping a Blend amount', () => {
   it('passes an XLM amount under the cap and refuses one over it', async () => {
     // 200 XLM = $40; 300 XLM = $60 against a $50 cap. Base units: 7 decimals.
     await expect(
-      assertReserveWithinCap(blendXlm(), '2000000000', { env: {}, network: 'mainnet', prices })
+      assertReserveWithinCap(blendXlm(), '2000000000', {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+      })
     ).resolves.toBeUndefined()
     await expect(
-      assertReserveWithinCap(blendXlm(), '3000000000', { env: {}, network: 'mainnet', prices })
+      assertReserveWithinCap(blendXlm(), '3000000000', {
+        env: { MAINNET_MAX_TRADE_USD: '50' },
+        network: 'mainnet',
+        prices,
+      })
     ).rejects.toThrow(TradeCapExceeded)
   })
 
   it('refuses a reserve it cannot price', async () => {
     await expect(
       assertReserveWithinCap('CNOTAPRICEDRESERVE', '10000000', {
-        env: {},
+        env: { MAINNET_MAX_TRADE_USD: '50' },
         network: 'mainnet',
         prices,
       })

@@ -19,7 +19,7 @@ const STELLAR_ONLY = [
   'Borrow and repay: done from your position in the History tab, where you can see what it can support and the price at which it would be liquidated. Not run from the chat.',
   'Cash out: send USDC or XLM to a Nigerian bank account, paid in naira, through an anchor. A form collects the bank details. Mainnet only.',
   'Leveraged positions: open a long or short on an asset with leverage, for example "long XLM 10x with 50 USDC".',
-  'Each trade is capped at $50 on mainnet.',
+  'Each trade is capped at $500 on mainnet.',
 ]
 
 /** The facts about Intent that apply on a chain, one per line. */

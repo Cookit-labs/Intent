@@ -62,7 +62,7 @@ export function PhoneScreen(): JSX.Element {
         <div className="border-border bg-card rounded-3xl border p-4">
           <p className="text-[17px] leading-snug">Swap 50 XLM to USDC at the best price</p>
           <div className="mt-6 flex items-center justify-between">
-            <span className="text-muted-foreground text-sm">Up to $50 a trade</span>
+            <span className="text-muted-foreground text-sm">Up to $500 a trade</span>
             <span className="bg-brand text-brand-foreground flex h-10 w-10 items-center justify-center rounded-full">
               <ArrowUp className="h-5 w-5" />
             </span>
