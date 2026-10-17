@@ -1,7 +1,7 @@
 import { isMainnet } from '@intent/config'
 import { NextResponse } from 'next/server'
 
-import { readSessionFromRequest } from '../server/session'
+import { requesterOf } from '../server/requester'
 import { createLinqClient } from '../linq/client'
 
 /**
@@ -27,12 +27,12 @@ export function guardNaira(request: Request): NairaGuard {
     }
   }
 
-  const session = readSessionFromRequest(request)
-  if (session === undefined) {
+  const who = requesterOf(request)
+  if (who === undefined) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'unauthenticated', message: 'Sign in to cash out.' },
+        { error: 'unauthenticated', message: 'Connect your wallet to cash out.' },
         { status: 401 }
       ),
     }
@@ -48,5 +48,5 @@ export function guardNaira(request: Request): NairaGuard {
     }
   }
 
-  return { ok: true, email: session.email }
+  return { ok: true, email: who.email }
 }

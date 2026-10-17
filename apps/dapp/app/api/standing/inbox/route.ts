@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { readSessionFromRequest } from '../../../../lib/server/session'
+import { requesterOf } from '../../../../lib/server/requester'
 import { getStandingRulesRepo } from '../../../../lib/server/standing-rules'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
@@ -23,7 +23,7 @@ const unauthorised = (): NextResponse =>
   NextResponse.json({ error: 'unauthorised' }, { status: 401 })
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   const chain = new URL(request.url).searchParams.get('chain')
@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'standing')
   if (limited !== undefined) return limited
 
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   let body: z.infer<typeof seenSchema>

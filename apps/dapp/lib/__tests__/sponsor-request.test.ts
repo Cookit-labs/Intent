@@ -130,15 +130,22 @@ describe('sponsorForRequest', () => {
     }
   })
 
-  it('follows the gate default, so on mainnet a session is needed unless the gate is off', async () => {
+  it('needs a session only while the gate is on; paused, mainnet sponsors without one', async () => {
     const xdr = signedByUser()
-    const out = await sponsorForRequest(
+    const paused = await sponsorForRequest(
       post(),
       xdr,
       user.publicKey(),
       options([], { NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' })
     )
-    expect(out).toEqual({ xdr, sponsored: false, reason: 'no_session' })
+    expect(paused).not.toEqual({ xdr, sponsored: false, reason: 'no_session' })
+    const gated = await sponsorForRequest(
+      post(),
+      xdr,
+      user.publicKey(),
+      options([], { NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet', ACCESS_GATE: 'on' })
+    )
+    expect(gated).toEqual({ xdr, sponsored: false, reason: 'no_session' })
   })
 
   it('sponsors nobody when the gate is on and no secret can verify a session', async () => {

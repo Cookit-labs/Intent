@@ -6,8 +6,7 @@ import { gateEnabled } from '../server/access-gate'
 /**
  * Whether the OTP access gate is on.
  *
- * `ACCESS_GATE` decides outright; unset, the gate follows the network — on
- * for mainnet, off for testnet. The decision is a pure function so the
+ * The gate is paused: only `ACCESS_GATE=on` turns it on, on any network. The decision is a pure function so the
  * table below is the whole contract. The middleware test underneath checks
  * that the function is actually consulted: `matcher` is static, so a gate
  * that is off has to be off inside the handler, not in the config.
@@ -19,13 +18,13 @@ describe('gateEnabled', () => {
     [{ ACCESS_GATE: 'on', NEXT_PUBLIC_STELLAR_NETWORK: 'testnet' }, true],
     [{ ACCESS_GATE: 'off' }, false],
     [{ ACCESS_GATE: 'off', NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, false],
-    [{ NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, true],
+    [{ NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, false],
     [{ NEXT_PUBLIC_STELLAR_NETWORK: 'testnet' }, false],
     [{}, false],
     [{ ACCESS_GATE: ' ON ' }, true],
     [{ ACCESS_GATE: 'Off' }, false],
-    [{ ACCESS_GATE: '', NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, true],
-    [{ ACCESS_GATE: 'maybe', NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, true],
+    [{ ACCESS_GATE: '', NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, false],
+    [{ ACCESS_GATE: 'maybe', NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' }, false],
     [{ ACCESS_GATE: 'maybe', NEXT_PUBLIC_STELLAR_NETWORK: 'testnet' }, false],
   ])('%j → %s', (env, expected) => {
     expect(gateEnabled(env)).toBe(expected)
@@ -98,10 +97,10 @@ describe('the middleware', () => {
     expect(res.headers.get('location')).toBe('http://localhost/verify?next=%2Fstellar%2Fapps')
   })
 
-  it('is on by default on mainnet', async () => {
+  it('is paused: open on mainnet unless ACCESS_GATE is set to on', async () => {
     process.env['NEXT_PUBLIC_STELLAR_NETWORK'] = 'mainnet'
     process.env['AUTH_SECRET'] = 'a'.repeat(48)
-    expect((await run()).status).toBe(307)
+    expect((await run()).status).toBe(200)
   })
 
   it('is off by default on testnet', async () => {

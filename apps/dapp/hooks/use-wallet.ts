@@ -1,5 +1,6 @@
 'use client'
 
+import { setConnectedWallet } from '../lib/api/network-fetch'
 import type { ChainWallet } from '../lib/chain-adapter'
 import { setHistoryOwner } from '../lib/history-owner'
 import { useChain } from '../providers/chain-provider'
@@ -20,5 +21,6 @@ export function useWallet(): WalletState {
   const { adapter } = useChain()
   const wallet = adapter.useWallet()
   setHistoryOwner(wallet.isConnected ? wallet.address : undefined)
+  setConnectedWallet(wallet.isConnected ? wallet.address : undefined)
   return wallet
 }

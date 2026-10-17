@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { readSessionFromRequest } from '../../../lib/server/session'
+import { requesterOf } from '../../../lib/server/requester'
 import { getStandingRulesRepo } from '../../../lib/server/standing-rules'
 import type { StandingIntent } from '../../../lib/standing-intent'
 import { enforceRateLimit } from '../../../lib/server/rate-limit'
@@ -83,7 +83,7 @@ const unauthorised = (): NextResponse =>
   NextResponse.json({ error: 'unauthorised' }, { status: 401 })
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   const url = new URL(request.url)
@@ -104,7 +104,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(request, 'standing')
   if (limited !== undefined) return limited
 
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   let body: z.infer<typeof createSchema>
@@ -128,7 +128,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 export async function PATCH(request: Request): Promise<NextResponse> {
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   let body: z.infer<typeof firedSchema>
@@ -158,7 +158,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) return unauthorised()
 
   const id = new URL(request.url).searchParams.get('id')

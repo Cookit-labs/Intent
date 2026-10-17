@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { networkFetch, setAttributedRace } from '../api/network-fetch'
+import { networkFetch, setAttributedRace, setConnectedWallet } from '../api/network-fetch'
 
 const ORIGIN = 'https://app.test'
 
@@ -64,5 +64,24 @@ describe('race attribution', () => {
     await f('/api/swap/quote')
     setAttributedRace(undefined)
     expect(calls.map((c) => c.headers.get('x-intent-race'))).toEqual([null, 'race-1', null])
+  })
+})
+
+describe('networkFetch wallet header', () => {
+  it('names the connected wallet on the app’s own API calls, and only while one is connected', async () => {
+    const calls: Request[] = []
+    const base = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(new Request(input, init))
+      return new Response('{}')
+    }) as typeof fetch
+    const f = networkFetch(base, 'mainnet', ORIGIN)
+
+    setConnectedWallet('GWALLET')
+    await f(`${ORIGIN}/api/naira/rate`)
+    await f('https://elsewhere.example/api/x')
+    setConnectedWallet(undefined)
+    await f(`${ORIGIN}/api/naira/rate`)
+
+    expect(calls.map((c) => c.headers.get('x-intent-wallet'))).toEqual(['GWALLET', null, null])
   })
 })

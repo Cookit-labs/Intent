@@ -80,18 +80,22 @@ describe('the network header', () => {
 })
 
 describe('the gate, per network', () => {
-  it('sends an anonymous visitor to verify on mainnet, and lets testnet through', async () => {
-    const mainnet = await run('http://app.test/stellar-mainnet/apps', { env: BOTH })
-    expect(mainnet.status).toBe(307)
-    expect(new URL(mainnet.headers.get('location') as string).pathname).toBe('/verify')
-
-    const testnet = await run('http://app.test/stellar-testnet/apps', { env: BOTH })
-    expect(testnet.status).toBe(200)
+  it('lets an anonymous visitor into either network while the gate is paused', async () => {
+    expect((await run('http://app.test/stellar-mainnet/apps', { env: BOTH })).status).toBe(200)
+    expect((await run('http://app.test/stellar-testnet/apps', { env: BOTH })).status).toBe(200)
   })
 
-  it('does not let a request pick testnet to reach mainnet pages', async () => {
+  it('with the gate on, sends an anonymous visitor to verify on every network', async () => {
+    const on = { ...BOTH, ACCESS_GATE: 'on' }
+    const mainnet = await run('http://app.test/stellar-mainnet/apps', { env: on })
+    expect(mainnet.status).toBe(307)
+    expect(new URL(mainnet.headers.get('location') as string).pathname).toBe('/verify')
+    expect((await run('http://app.test/stellar-testnet/apps', { env: on })).status).toBe(307)
+  })
+
+  it('does not let a request pick testnet to reach mainnet pages when the gate is on', async () => {
     const res = await run('http://app.test/stellar-mainnet/apps', {
-      env: BOTH,
+      env: { ...BOTH, ACCESS_GATE: 'on' },
       headers: { 'x-intent-network': 'testnet' },
     })
     expect(res.status).toBe(307)
@@ -134,7 +138,9 @@ describe('where the root and the old unprefixed addresses go', () => {
   it('does not put the root behind the gate: the visitor lands on mainnet and is then asked to verify', async () => {
     const root = await run('http://app.test/', { env: BOTH })
     expect(location(root).pathname).toBe('/stellar-mainnet/intents')
-    const page = await run('http://app.test/stellar-mainnet/intents', { env: BOTH })
+    const page = await run('http://app.test/stellar-mainnet/intents', {
+      env: { ...BOTH, ACCESS_GATE: 'on' },
+    })
     expect(location(page).pathname).toBe('/verify')
     expect(location(page).searchParams.get('next')).toBe('/stellar-mainnet/intents')
   })
