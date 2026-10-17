@@ -137,13 +137,12 @@ export interface NairaOrderRepo {
     accountNumber: string
   ) => Promise<string | undefined>
   /** This user's orders whose payment was sent, newest first. Never another user's. */
-  listPaidForEmail: (
-    email: string,
-    network: string,
-    limit: number,
-    /** Only this wallet's orders, when given. */
-    account?: string
-  ) => Promise<NairaOrderRow[]>
+  listPaidForEmail: (email: string, network: string, limit: number) => Promise<NairaOrderRow[]>
+  /**
+   * Orders paid from this wallet, whichever email made them, newest first.
+   * Callers must not show an order's bank details to an email that did not make it.
+   */
+  listPaidForWallet: (network: string, limit: number, account: string) => Promise<NairaOrderRow[]>
   getByProviderOrder: (providerOrder: string) => Promise<NairaOrderRow | undefined>
   setStatus: (
     providerOrder: string,
@@ -219,13 +218,12 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
       return typeof name === 'string' && name !== '' ? name : undefined
     },
 
-    async listPaidForEmail(email, network, limit, account) {
+    async listPaidForEmail(email, network, limit) {
       const { rows } = await query(
         `SELECT * FROM naira_orders
           WHERE email = $1 AND network = $2 AND payment_hash IS NOT NULL
-            AND ($4::text IS NULL OR account = $4)
           ORDER BY created_at DESC LIMIT $3`,
-        [email, network, limit, account ?? null]
+        [email, network, limit]
       )
       return rows.map(fromDb)
     },
@@ -255,6 +253,16 @@ export function createNairaOrderRepo(query: QueryFn): NairaOrderRepo {
           settled !== undefined && settled.amountNgn > 0 ? settled.amountNgn : null,
         ]
       )
+    },
+
+    async listPaidForWallet(network, limit, account) {
+      const { rows } = await query(
+        `SELECT * FROM naira_orders
+          WHERE network = $1 AND account = $2 AND payment_hash IS NOT NULL
+          ORDER BY created_at DESC LIMIT $3`,
+        [network, account, limit]
+      )
+      return rows.map(fromDb)
     },
 
     async setPaymentHash(id, hash) {

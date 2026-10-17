@@ -6,6 +6,7 @@ import { createNairaOrderRepo } from '../naira/orders'
 
 const repo = {
   listPaidForEmail: vi.fn(),
+  listPaidForWallet: vi.fn(),
 }
 const session = { current: { email: 'user@example.com' } as { email: string } | undefined }
 const mainnet = { current: true }
@@ -80,24 +81,26 @@ describe('the repository list', () => {
       return { rows: [] }
     })
     await real.listPaidForEmail('user@example.com', 'mainnet', 50)
-    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50, null])
+    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50])
     expect(seen[0]?.sql).toMatch(/email = \$1/)
     expect(seen[0]?.sql).toMatch(/network = \$2/)
     expect(seen[0]?.sql).toMatch(/payment_hash IS NOT NULL/)
   })
 })
 
-describe('the repository list, per wallet', () => {
-  it('narrows to one wallet when asked, and still applies the user scope first', async () => {
+describe('the repository list, by wallet alone', () => {
+  it('is scoped to the wallet and the network, not to an email', async () => {
     const seen: { sql: string; params: unknown[] | undefined }[] = []
     const real = createNairaOrderRepo(async (sql, params) => {
       seen.push({ sql, params })
       return { rows: [] }
     })
-    await real.listPaidForEmail('user@example.com', 'mainnet', 50, 'GWALLET')
-    expect(seen[0]?.params).toEqual(['user@example.com', 'mainnet', 50, 'GWALLET'])
-    expect(seen[0]?.sql).toMatch(/email = \$1/)
-    expect(seen[0]?.sql).toMatch(/account = \$4/)
+    await real.listPaidForWallet('mainnet', 50, 'GWALLET')
+    expect(seen[0]?.params).toEqual(['mainnet', 'GWALLET', 50])
+    expect(seen[0]?.sql).toMatch(/network = \$1/)
+    expect(seen[0]?.sql).toMatch(/account = \$2/)
+    expect(seen[0]?.sql).toMatch(/payment_hash IS NOT NULL/)
+    expect(seen[0]?.sql).not.toMatch(/email/)
   })
 })
 
@@ -113,6 +116,30 @@ describe('GET /api/naira/orders', () => {
     session.current = { email: 'user@example.com' }
     mainnet.current = true
     repo.listPaidForEmail.mockResolvedValue([])
+    repo.listPaidForWallet.mockResolvedValue([])
+  })
+
+  const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'ord-1',
+    network: 'mainnet',
+    email: 'user@example.com',
+    account: 'GACCOUNT',
+    providerOrder: 'prov-1',
+    idempotencyKey: 'k',
+    bankCode: '100004',
+    bankName: 'Access Bank',
+    accountNumber: '1234567890',
+    accountName: 'JOSHUA KELECHI UDO',
+    depositAddress: 'GDEPOSIT',
+    coin: 'usdc',
+    amount: '20.0000000',
+    amountNgn: '27045',
+    rate: '1352.25',
+    status: 'paid',
+    providerStatus: 'Settled in treasury',
+    paymentHash: 'ab'.repeat(32),
+    createdAt: '2026-10-15T20:32:00.000Z',
+    ...over,
   })
 
   async function list(query = '') {
@@ -123,13 +150,15 @@ describe('GET /api/naira/orders', () => {
   it('asks the store for the connected wallet’s orders only', async () => {
     const wallet = Keypair.random().publicKey()
     await list(`?account=${wallet}`)
-    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50, wallet)
+    expect(repo.listPaidForWallet).toHaveBeenCalledWith('mainnet', 50, wallet)
+    expect(repo.listPaidForEmail).not.toHaveBeenCalled()
   })
 
   it('answers nothing for a wallet that is not a Stellar account, without touching the store', async () => {
     const res = await list('?account=not-an-address')
     expect(await res.json()).toEqual({ orders: [] })
     expect(repo.listPaidForEmail).not.toHaveBeenCalled()
+    expect(repo.listPaidForWallet).not.toHaveBeenCalled()
   })
 
   it('answers 401 without a session', async () => {
@@ -170,7 +199,7 @@ describe('GET /api/naira/orders', () => {
       },
     ])
     const res = await list()
-    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50, undefined)
+    expect(repo.listPaidForEmail).toHaveBeenCalledWith('user@example.com', 'mainnet', 50)
     const body = (await res.json()) as { orders: Record<string, unknown>[] }
     expect(body.orders).toHaveLength(1)
     expect(body.orders[0]).toMatchObject({ accountMask: '••••3682', createdAt: expect.any(String) })
@@ -182,5 +211,42 @@ describe('GET /api/naira/orders', () => {
     const res = await list()
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ orders: [] })
+  })
+
+  it('lists a wallet’s cash-outs ordered under another email, without the bank details', async () => {
+    const wallet = Keypair.random().publicKey()
+    repo.listPaidForWallet.mockResolvedValue([row({ email: 'other@example.com' })])
+    const body = (await (await list(`?account=${wallet}`)).json()) as {
+      orders: Record<string, unknown>[]
+    }
+    expect(body.orders).toHaveLength(1)
+    expect(body.orders[0]).toMatchObject({
+      amount: '20.0000000',
+      amountNgn: '27045',
+      status: 'paid',
+      paymentHash: 'ab'.repeat(32),
+      bankName: '',
+      accountName: '',
+      accountMask: '',
+    })
+    const text = JSON.stringify(body)
+    expect(text).not.toContain('JOSHUA')
+    expect(text).not.toContain('Access Bank')
+    expect(text).not.toContain('7890')
+    expect(text).not.toContain('other@example.com')
+  })
+
+  it('keeps the bank details for orders the signed-in email made itself', async () => {
+    const wallet = Keypair.random().publicKey()
+    repo.listPaidForWallet.mockResolvedValue([row()])
+    const body = (await (await list(`?account=${wallet}`)).json()) as {
+      orders: Record<string, unknown>[]
+    }
+    expect(body.orders[0]).toMatchObject({
+      bankName: 'Access Bank',
+      accountName: 'JOSHUA KELECHI UDO',
+      accountMask: '••••7890',
+    })
+    expect(JSON.stringify(body)).not.toContain('1234567890')
   })
 })

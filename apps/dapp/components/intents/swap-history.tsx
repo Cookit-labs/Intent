@@ -288,7 +288,12 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
               </p>
               <p className="text-foreground">
                 {swap.payout !== undefined
-                  ? `${swap.payout.statusLabel}, ${swap.payout.bankName} ${swap.payout.accountMask}`
+                  ? [
+                      swap.payout.statusLabel,
+                      `${swap.payout.bankName} ${swap.payout.accountMask}`.trim(),
+                    ]
+                      .filter((part) => part !== '')
+                      .join(', ')
                   : swap.hops === 0
                     ? 'direct'
                     : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}

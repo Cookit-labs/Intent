@@ -9,6 +9,7 @@ const repo = {
   getByIdempotencyKey: vi.fn(),
   findHolder: vi.fn(),
   listPaidForEmail: vi.fn(),
+  listPaidForWallet: vi.fn(),
   getByProviderOrder: vi.fn(),
   setStatus: vi.fn(),
   setPaymentHash: vi.fn(),

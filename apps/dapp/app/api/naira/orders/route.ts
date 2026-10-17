@@ -91,7 +91,22 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const repo = await getNairaOrderRepo()
-    const rows = await repo.listPaidForEmail(session.email, orderNetwork(), 50, account)
+    // A wallet's history belongs to the wallet, not to whichever email signed
+    // in when it cashed out. An order another email made is listed for its
+    // amounts and status but without the bank, holder and account digits: a
+    // wallet address is public and nothing here proves who is connected.
+    if (account !== undefined) {
+      const rows = await repo.listPaidForWallet(orderNetwork(), 50, account)
+      return NextResponse.json({
+        orders: rows.map((row) => {
+          const view = { ...toPublic(row), createdAt: row.createdAt }
+          return row.email === session.email
+            ? view
+            : { ...view, bankName: '', accountName: '', accountMask: '' }
+        }),
+      })
+    }
+    const rows = await repo.listPaidForEmail(session.email, orderNetwork(), 50)
     return NextResponse.json({
       orders: rows.map((row) => ({ ...toPublic(row), createdAt: row.createdAt })),
     })
