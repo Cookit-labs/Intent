@@ -1,5 +1,7 @@
 import { NETWORK_HEADER, type StellarNetworkName } from '@intent/config'
 
+import { WALLET_HEADER } from '../wallet-header'
+
 const RACE_HEADER = 'x-intent-race'
 
 /**
@@ -22,6 +24,12 @@ function ownApiPath(input: RequestInfo | URL, origin: string): string | undefine
 }
 
 let raceInFlight: string | undefined
+let connectedWallet: string | undefined
+
+/** The wallet connected on this page, sent so the server can tell wallets apart while sign-in is paused. */
+export function setConnectedWallet(address: string | undefined): void {
+  connectedWallet = address
+}
 
 /** The race whose plan the user is about to sign; sent with submits so the log can credit the agent. */
 export function setAttributedRace(id: string | undefined): void {
@@ -40,6 +48,7 @@ export function networkFetch(
     const headers = new Headers(input instanceof Request ? input.headers : undefined)
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
     headers.set(NETWORK_HEADER, network)
+    if (connectedWallet !== undefined) headers.set(WALLET_HEADER, connectedWallet)
     if (raceInFlight !== undefined && path.endsWith('/submit')) {
       headers.set(RACE_HEADER, raceInFlight)
     }

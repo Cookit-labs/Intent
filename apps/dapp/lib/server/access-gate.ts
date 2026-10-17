@@ -1,11 +1,10 @@
 /**
  * Whether the OTP access gate is on.
  *
- * `ACCESS_GATE=on|off` decides outright. Unset, the gate follows the
- * network: on for mainnet, where an open dApp fronting real funds needs a
- * door, and off for testnet, where it only gets in the way. Any other value
- * is treated as unset rather than as either answer, so a typo on mainnet
- * leaves the door shut.
+ * PAUSED. Anyone can open the app and connect a wallet; the email waitlist is
+ * not asked for. Only `ACCESS_GATE=on` turns it back on, on any network.
+ * To restore the old behaviour (on for mainnet, off for testnet), swap the body
+ * of `gateEnabled` for the commented one below.
  *
  * Decided at request time in the middleware, because `matcher` is static
  * and cannot carry a decision. Pure and free of Node imports: the
@@ -14,14 +13,16 @@
 
 type Env = Record<string, string | undefined>
 
-/**
- * `network` is the one the request is for. With several networks served the
- * gate follows it: mainnet is behind the door and testnet stays open. Without
- * it, the deployment's own network decides, as before.
- */
-export function gateEnabled(env: Env, network?: 'testnet' | 'mainnet'): boolean {
-  const flag = env['ACCESS_GATE']?.trim().toLowerCase()
-  if (flag === 'on') return true
-  if (flag === 'off') return false
-  return (network ?? env['NEXT_PUBLIC_STELLAR_NETWORK']?.trim()) === 'mainnet'
+/** `network` is kept so callers need no change when the gate is restored; it is unused while paused. */
+export function gateEnabled(env: Env, _network?: 'testnet' | 'mainnet'): boolean {
+  return env['ACCESS_GATE']?.trim().toLowerCase() === 'on'
 }
+
+// The gate as it was, to restore when the waitlist comes back:
+//
+// export function gateEnabled(env: Env, network?: 'testnet' | 'mainnet'): boolean {
+//   const flag = env['ACCESS_GATE']?.trim().toLowerCase()
+//   if (flag === 'on') return true
+//   if (flag === 'off') return false
+//   return (network ?? env['NEXT_PUBLIC_STELLAR_NETWORK']?.trim()) === 'mainnet'
+// }

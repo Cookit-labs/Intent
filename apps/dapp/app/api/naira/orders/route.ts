@@ -11,7 +11,7 @@ import { getNairaOrderRepo, orderNetwork, toPublic } from '../../../../lib/naira
 import { normaliseStatus } from '../../../../lib/naira/status'
 import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
-import { readSessionFromRequest } from '../../../../lib/server/session'
+import { requesterOf } from '../../../../lib/server/requester'
 import { fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
 
@@ -73,7 +73,7 @@ function refusalFor(path: (string | number)[]): string {
  * (testnet, no database), so the History page needs no special case.
  */
 export async function GET(request: Request): Promise<Response> {
-  const session = readSessionFromRequest(request)
+  const session = requesterOf(request)
   if (session === undefined) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   }

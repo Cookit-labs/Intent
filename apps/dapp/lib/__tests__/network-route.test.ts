@@ -75,22 +75,23 @@ describe('isGateFree', () => {
 })
 
 describe('gateEnabled for a network', () => {
-  it('follows the network when the flag is unset: mainnet shut, testnet open', () => {
-    expect(gateEnabled({}, 'mainnet')).toBe(true)
+  it('is paused: open on every network unless the flag is on', () => {
+    expect(gateEnabled({}, 'mainnet')).toBe(false)
     expect(gateEnabled({}, 'testnet')).toBe(false)
   })
 
-  it('lets ACCESS_GATE decide outright, for any network', () => {
+  it('turns on only when ACCESS_GATE is on, for any network', () => {
     expect(gateEnabled({ ACCESS_GATE: 'on' }, 'testnet')).toBe(true)
+    expect(gateEnabled({ ACCESS_GATE: 'on' }, 'mainnet')).toBe(true)
     expect(gateEnabled({ ACCESS_GATE: 'off' }, 'mainnet')).toBe(false)
   })
 
-  it('without a network, still follows the deployment network as before', () => {
-    expect(gateEnabled({ NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' })).toBe(true)
+  it('does not follow the deployment network while paused', () => {
+    expect(gateEnabled({ NEXT_PUBLIC_STELLAR_NETWORK: 'mainnet' })).toBe(false)
     expect(gateEnabled({ NEXT_PUBLIC_STELLAR_NETWORK: 'testnet' })).toBe(false)
   })
 
-  it('treats a typo in the flag like unset, so a mistake on mainnet leaves the door shut', () => {
-    expect(gateEnabled({ ACCESS_GATE: 'maybe' }, 'mainnet')).toBe(true)
+  it('treats a typo in the flag like unset: off', () => {
+    expect(gateEnabled({ ACCESS_GATE: 'maybe' }, 'mainnet')).toBe(false)
   })
 })
