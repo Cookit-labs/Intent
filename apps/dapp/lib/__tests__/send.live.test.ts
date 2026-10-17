@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { resolveRecipient } from '../names/resolve'
 import { assertSendPayment, buildSendPayment } from '../send/build-payment'
 import { expectationFor } from '../send/prepare'
+import { createSponsorLedger } from '../server/sponsor-ledger'
 import { sponsorForSubmission } from '../sponsor/sponsor'
 import { fundWithFriendbot } from '../stellar-account'
 import { submitSignedSwap } from '../swap/submit'
+import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
 
 /**
  * A send settling on testnet, by raw address, through every piece the routes
@@ -60,6 +62,7 @@ describe.skipIf(!LIVE)('a send on testnet', () => {
 
     const sent = await sponsorForSubmission(signedXdr, payer.publicKey(), {
       env: { SPONSOR_SECRET_KEY: sponsor.secret() },
+      ledger: createSponsorLedger(fakeSponsorLedgerDb().query),
     })
     expect(sent.sponsored).toBe(true)
 
