@@ -9,9 +9,11 @@ import {
 } from '@stellar/stellar-sdk'
 import { describe, expect, it } from 'vitest'
 
+import { createSponsorLedger } from '../server/sponsor-ledger'
 import { sponsorForSubmission } from '../sponsor/sponsor'
 import { fundWithFriendbot } from '../stellar-account'
 import { submitSignedSwap } from '../swap/submit'
+import { fakeSponsorLedgerDb } from './fakes/sponsor-ledger-db'
 
 /**
  * A sponsored transaction settling on testnet, with the fee charged to the
@@ -63,6 +65,7 @@ describe.skipIf(!LIVE)('fee sponsorship on testnet', () => {
 
     const sent = await sponsorForSubmission(tx.toXDR(), user.publicKey(), {
       env: { SPONSOR_SECRET_KEY: sponsor.secret() },
+      ledger: createSponsorLedger(fakeSponsorLedgerDb().query),
     })
     expect(sent.sponsored).toBe(true)
 

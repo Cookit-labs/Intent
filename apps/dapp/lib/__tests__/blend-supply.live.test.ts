@@ -17,7 +17,10 @@ const SKIP = process.env['SKIP_LIVE'] === '1'
 /** A funded testnet account. Simulation never spends from it. */
 const FUNDED = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVVUX'
 
-describe.skipIf(SKIP)('supplying to the live Blend pool', () => {
+// Retried because the pool is reached through a shared public RPC, which now and
+// then refuses a simulation when the whole suite is hitting the network at once.
+// A real mistake in the call fails every attempt.
+describe.skipIf(SKIP)('supplying to the live Blend pool', { retry: 2 }, () => {
   it('builds a supply the pool accepts', async () => {
     const [xlm] = await readReserveList()
     expect(xlm).toBeDefined()
