@@ -3,6 +3,7 @@
 import { cn } from '@intent/ui'
 import { activeNetwork, isMainnet, stellarNetwork } from '@intent/config'
 import { motion } from 'framer-motion'
+import Image from 'next/image'
 import { CheckCheck, Clock, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -134,8 +135,14 @@ function nairaSymbol(form: { asset: 'xlm' | 'usdc'; symbol?: string }): string {
 function ChatIdentity(): JSX.Element {
   return (
     <div className="flex items-center gap-2.5">
-      <span className="bg-brand text-brand-foreground relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
-        <Sparkles className="h-4 w-4" />
+      <span className="bg-brand relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
+        <Image
+          src="/images/intent-logo.png"
+          alt="Intent"
+          width={512}
+          height={361}
+          className="h-[15px] w-auto invert"
+        />
         <span className="border-card bg-success absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2" />
       </span>
       <div className="flex flex-col leading-tight">
@@ -1865,8 +1872,14 @@ export function IntentChat(): JSX.Element {
               was as invisible as a success. */}
           {!message ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-              <span className="bg-bubble-me text-bubble-me-foreground flex h-14 w-14 items-center justify-center rounded-full">
-                <Sparkles className="h-6 w-6" />
+              <span className="bg-brand flex h-14 w-14 items-center justify-center rounded-full">
+                <Image
+                  src="/images/intent-logo.png"
+                  alt=""
+                  width={512}
+                  height={361}
+                  className="h-6 w-auto invert"
+                />
               </span>
               <p className="text-muted-foreground max-w-sm text-sm">
                 Say what you want to happen. Autonomous agents compete to find the best execution —
@@ -1913,7 +1926,7 @@ export function IntentChat(): JSX.Element {
                   {turn.reply !== undefined ? (
                     <div className="flex flex-col gap-1">
                       {turn.reply.agentName !== undefined ? (
-                        <span className="text-foreground ml-11 text-xs font-semibold">
+                        <span className="text-foreground ml-[50px] text-xs font-semibold">
                           {turn.reply.agentName}
                         </span>
                       ) : null}
@@ -1922,7 +1935,7 @@ export function IntentChat(): JSX.Element {
                           <AgentAvatar
                             seed={turn.reply.agentKey}
                             name={turn.reply.agentName ?? ''}
-                            className="h-8 w-8"
+                            className="h-10 w-10"
                           />
                         ) : null}
                         <div className={cn(agentBubble, 'whitespace-pre-line')}>
@@ -2005,6 +2018,16 @@ export function IntentChat(): JSX.Element {
               {notes.length > 0 && competition.phase === 'competing' ? (
                 <p className={systemPill}>Agents are working again with your note.</p>
               ) : null}
+              <CompetitionPanel
+                state={competition}
+                onExecute={handleExecute}
+                executingKey={executingKey}
+                locked={
+                  swap.phase === 'signing' ||
+                  swap.phase === 'submitting' ||
+                  swap.phase === 'settled'
+                }
+              />
               {/* Changes to how the recommendation is carried out, offered once
                   the agents have answered and before anything is signed. */}
               {competition.phase === 'decided' &&
@@ -2039,16 +2062,6 @@ export function IntentChat(): JSX.Element {
                   }
                 />
               ) : null}
-              <CompetitionPanel
-                state={competition}
-                onExecute={handleExecute}
-                executingKey={executingKey}
-                locked={
-                  swap.phase === 'signing' ||
-                  swap.phase === 'submitting' ||
-                  swap.phase === 'settled'
-                }
-              />
 
               {/* Said before anything is signed. An order the account cannot
                 fund is refused here rather than allowed to rest for hours and

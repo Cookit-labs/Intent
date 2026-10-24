@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.6.0",
+    "@dicebear/core": "9.2.2",
+    "@dicebear/pixel-art": "9.2.2",
     "@hookform/resolvers": "^3.9.0",
     "@intent/config": "workspace:*",
     "@intent/sdk": "workspace:*",

@@ -158,7 +158,7 @@ export function CompetitionPanel({
               transition={{ duration: 0.3, ease: 'easeOut' }}
               className="flex flex-col gap-1"
             >
-              <div className="text-muted-foreground ml-11 flex flex-wrap items-center gap-x-1.5 text-xs">
+              <div className="text-muted-foreground ml-[50px] flex flex-wrap items-center gap-x-1.5 text-xs">
                 <span className="text-foreground font-semibold">{agent.name}</span>
                 {/* Which model actually answered. Shown because four
                     agents reaching the same conclusion means something
@@ -176,7 +176,7 @@ export function CompetitionPanel({
               </div>
 
               <div className="flex items-end gap-2.5">
-                <AgentAvatar seed={agent.key} name={agent.name} className="h-8 w-8" />
+                <AgentAvatar seed={agent.key} name={agent.name} className="h-10 w-10" />
 
                 {failed ? (
                   <div
@@ -279,14 +279,14 @@ export function CompetitionPanel({
 
       {pendingAgents.map((agent) => (
         <div key={`pending-${agent.key}`} className="flex flex-col gap-1">
-          <div className="text-muted-foreground ml-11 text-xs">
+          <div className="text-muted-foreground ml-[50px] text-xs">
             <span className="text-foreground font-semibold">{agent.name}</span>
             {shortModel(agent.model) !== '' ? (
               <span className="opacity-70"> · {shortModel(agent.model)}</span>
             ) : null}
           </div>
           <div className="flex items-end gap-2.5">
-            <AgentAvatar seed={agent.key} name={agent.name} className="h-8 w-8" pending />
+            <AgentAvatar seed={agent.key} name={agent.name} className="h-10 w-10" pending />
             <div
               className={cn(agentBubble, 'flex w-fit items-center px-4 py-3')}
               role="status"
