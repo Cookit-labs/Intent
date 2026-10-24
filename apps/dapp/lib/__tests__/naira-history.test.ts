@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { CASHOUT_TURN_PREFIX, cashoutTurns, type CashoutOrder } from '../naira/history'
+import {
+  CASHOUT_TURN_PREFIX,
+  cashoutFormOutcome,
+  cashoutTurns,
+  type CashoutOrder,
+} from '../naira/history'
 
 function order(over: Partial<CashoutOrder> = {}): CashoutOrder {
   return {
@@ -38,5 +43,17 @@ describe('cash-outs in past intents', () => {
       new Set(['h2'])
     )
     expect(rows).toEqual([])
+  })
+})
+
+describe('cashoutFormOutcome', () => {
+  it('names the amount and says nothing was paid', () => {
+    expect(cashoutFormOutcome('USDC', 40)).toBe(
+      'I opened the cash-out form to pay 40 USDC out to a Nigerian bank account. No payout was made from it.'
+    )
+  })
+
+  it('reads without an amount', () => {
+    expect(cashoutFormOutcome('XLM', undefined)).toContain('pay XLM out')
   })
 })

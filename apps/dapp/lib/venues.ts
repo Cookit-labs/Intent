@@ -235,7 +235,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['mainnet'],
     capability:
-      'Naira payouts to Nigerian bank accounts: XLM paid straight in, or swapped to USDC first. The holder is looked up from the bank, and the payment goes only to the deposit address of the order Linq made.',
+      'Naira payouts to Nigerian bank accounts, paid out from USDC: XLM is swapped to USDC first. The holder is looked up from the bank, and the payment goes only to the deposit address of the order Linq made.',
   },
   {
     id: 'testanchor',

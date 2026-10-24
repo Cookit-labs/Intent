@@ -1,3 +1,4 @@
+import { tidyProse } from '../../chat/prose'
 import type {
   AgentBrain,
   BrainErrorCode,
@@ -569,7 +570,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           // Empty means the agent had nothing to choose from; omitted rather
           // than stored as '' so downstream code checks presence, not value.
           ...(validated.value.routeId !== '' ? { routeId: validated.value.routeId } : {}),
-          reasoning: validated.value.reasoning,
+          reasoning: tidyProse(validated.value.reasoning),
           projectedAvgPriceUsd: validated.value.projectedAvgPriceUsd,
           projectedSlippagePct: validated.value.projectedSlippagePct,
           venues: validated.value.venues,

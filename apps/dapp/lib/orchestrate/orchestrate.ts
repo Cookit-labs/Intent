@@ -1,3 +1,4 @@
+import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
 import { capabilitySheet } from './capabilities'
 import {
@@ -179,6 +180,7 @@ const BASE_PROMPT = [
   "Use outcome 'balance' when the person asks to see what is in their wallet: their balance, their tokens or assets, how much they have. Leave reply empty; the app lists the wallet itself. A question about the price of an asset is not a balance request.",
   "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
   'For help, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
+  'Write reply in flowing paragraphs, the way a person writes a chat message: two or three sentences each, separated by a blank line. Weave several things into sentences rather than listing them; group related abilities together ("you can swap, send, or lend what you hold"). Use a bulleted list only when the person explicitly asks for a list or for steps. Never use an em dash or an en dash; use a period, a comma or a colon instead.',
   'The facts about Intent below are what is true, not wording to copy. If what they ask for is not in the facts, say plainly that Intent does not do it. Never promise a feature that is not listed.',
   'Earlier turns of this conversation are given, including your own replies. Never repeat an earlier reply. If they ask you to explain better, or do not understand, explain it a different way: simpler, with a concrete example, or from another angle.',
   'For an out_of_scope message, leave reply empty: the app states the boundary and lists what Intent does. Do not comment on the message, give advice, or suggest a trade because of it. The one exception is a message that expresses genuine distress, where reply is a single short caring sentence and nothing more.',
@@ -364,7 +366,7 @@ function plainContentOf(payload: unknown): string {
   try {
     const choices = (payload as { choices?: { message?: { content?: unknown } }[] }).choices
     const content = choices?.[0]?.message?.content
-    return typeof content === 'string' ? content.trim().slice(0, 1500) : ''
+    return typeof content === 'string' ? tidyProse(content.slice(0, 1500)) : ''
   } catch {
     return ''
   }
@@ -382,7 +384,7 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
 
   switch (args.outcome) {
     case 'help': {
-      const reply = text(args.reply)
+      const reply = tidyProse(text(args.reply))
       return reply === '' ? { status: 'help' } : { status: 'help', reply }
     }
 
@@ -390,13 +392,13 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
       return { status: 'balance' }
 
     case 'out_of_scope': {
-      const reply = text(args.reply)
+      const reply = tidyProse(text(args.reply))
       return reply === '' ? { status: 'out_of_scope' } : { status: 'out_of_scope', reply }
     }
 
     case 'ask': {
       // The model sometimes puts the question in the reply field.
-      const question = text(args.question) || text(args.reply)
+      const question = tidyProse(text(args.question) || text(args.reply))
       return question === '' ? null : { status: 'ask', question }
     }
 

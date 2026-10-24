@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MarketContext, ProposalRequest } from '../agents/brain'
 import { createBrain } from '../agents/brains/openai-compatible'
-import { validateProposal } from '../agents/tool-schema'
+import { MAX_REASONING_CHARS, validateProposal } from '../agents/tool-schema'
 import { parseIntent } from '../parse-intent'
 
 /**
@@ -250,7 +250,7 @@ describe('validateProposal', () => {
   it('truncates an over-long reasoning to fit the bubble', () => {
     const result = validateProposal(JSON.parse(goodArguments({ reasoning: 'x'.repeat(1000) })), ctx)
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.value.reasoning.length).toBeLessThanOrEqual(240)
+    if (result.ok) expect(result.value.reasoning.length).toBeLessThanOrEqual(MAX_REASONING_CHARS)
   })
 })
 

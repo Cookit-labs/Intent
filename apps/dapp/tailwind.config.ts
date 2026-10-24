@@ -39,6 +39,13 @@ const config: Config = {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
+        bubble: {
+          me: 'hsl(var(--bubble-me))',
+          'me-foreground': 'hsl(var(--bubble-me-foreground))',
+          agent: 'hsl(var(--bubble-agent))',
+          'agent-foreground': 'hsl(var(--bubble-agent-foreground))',
+          'agent-border': 'hsl(var(--bubble-agent-border))',
+        },
         success: 'hsl(var(--success))',
         warning: 'hsl(var(--warning))',
         surface: {

@@ -12,19 +12,19 @@ test.skip(
 
 test('the menu switches the page from testnet to mainnet and back', async ({ page }) => {
   await page.goto('/stellar-testnet/apps')
-  await expect(page.locator('header')).toContainText('Stellar testnet')
+  await expect(page.getByRole('button', { name: /^Chain: Stellar testnet/ })).toBeVisible()
   await expect(page.locator('header')).not.toContainText('Trades up to')
 
   await page.getByRole('button', { name: /^Chain: / }).click()
   await page.getByRole('menuitem', { name: /Stellar mainnet/ }).click()
   await page.waitForURL('**/stellar-mainnet/apps')
-  await expect(page.locator('header')).toContainText('Stellar mainnet')
+  await expect(page.getByRole('button', { name: /^Chain: Stellar mainnet/ })).toBeVisible()
   await expect(page.locator('header')).toContainText('Trades up to')
 
   await page.getByRole('button', { name: /^Chain: / }).click()
   await page.getByRole('menuitem', { name: /Stellar testnet/ }).click()
   await page.waitForURL('**/stellar-testnet/apps')
-  await expect(page.locator('header')).toContainText('Stellar testnet')
+  await expect(page.getByRole('button', { name: /^Chain: Stellar testnet/ })).toBeVisible()
 })
 
 test('mainnet shows only the venues that are on mainnet, and testnet shows them all', async ({
@@ -42,7 +42,7 @@ test('the root opens on Stellar mainnet, and the menu still reaches the other ch
 }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/stellar-mainnet\/intents$/)
-  await expect(page.locator('header')).toContainText('Stellar mainnet')
+  await expect(page.getByRole('button', { name: /^Chain: Stellar mainnet/ })).toBeVisible()
 
   await page.getByRole('button', { name: /^Chain: / }).click()
   await expect(page.getByRole('menuitem', { name: /^Arc\b/ })).toBeEnabled()

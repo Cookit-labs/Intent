@@ -16,6 +16,7 @@
  * leave the app exactly as capable as it was before this existed.
  */
 
+import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
 
 const MODEL = 'deepseek-flash'
@@ -89,7 +90,7 @@ const CLARIFY_TOOL = {
 const SYSTEM_PROMPT = [
   'You prepare a user request for a group of trading agents on the Stellar network. Call clarify exactly once.',
   'If the request is complete, set status to ready right away. Do not ask for confirmation of something already clear.',
-  'Ask only for what the request cannot be carried out without, one question at a time, in plain words.',
+  'Ask only for what the request cannot be carried out without, one question at a time, in plain words. Never use an em dash or an en dash.',
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
   'Cashing out to a bank is possible only to Nigerian naira (NGN), from XLM or USDC. If the user says off-ramp or cash out',
   'without a currency, ask which asset they are cashing out and say the payout is to naira.',
@@ -219,7 +220,7 @@ function interpret(payload: unknown): ClarifyResult | null {
   if (args === null) return null
 
   if (args.status === 'ask') {
-    const question = text(args.question)
+    const question = tidyProse(text(args.question))
     return question === '' ? null : { status: 'ask', question }
   }
   if (args.status !== 'ready') return null

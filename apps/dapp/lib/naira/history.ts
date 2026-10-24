@@ -81,6 +81,15 @@ export async function fetchCashouts(
 /** Id prefix of a past-intents row that stands for a cash-out rather than a recorded chat. */
 export const CASHOUT_TURN_PREFIX = 'cashout:'
 
+/**
+ * What the assistant did when it opened the cash-out form, kept so a reopened
+ * chat shows the reply even when no order was ever made.
+ */
+export function cashoutFormOutcome(symbol: string, amount: number | undefined): string {
+  const what = amount !== undefined ? `${amount} ${symbol}` : symbol
+  return `I opened the cash-out form to pay ${what} out to a Nigerian bank account. No payout was made from it.`
+}
+
 /** What a cash-out came to, as the assistant would say it. */
 export function cashoutOutcome(o: {
   coin: string

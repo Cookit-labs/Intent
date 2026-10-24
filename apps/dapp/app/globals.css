@@ -11,13 +11,13 @@
     --border: 60 10% 85%;
     --input: 60 10% 85%;
     --ring: 240 4.9% 83.9%;
-    /* Controls: the purple the page glow reads as, lifted enough to stay
-       clearly clickable. `--glow` is the same hue at the strength the canvas
-       has always used; the two were one token until the buttons looked
-       brighter and bluer than the glow they were meant to match. */
+    /* One purple for the whole app: controls, the page glow and the chat all
+       use this value or a tint of it. `--glow` is kept as its own token only
+       so the canvas can be tuned separately; it holds the same colour, because
+       a brighter glow read as a different, bluer purple on the dark page. */
     --brand: 237 45% 45%;
     --brand-foreground: 0 0% 98%;
-    --glow: 239 84% 67%;
+    --glow: 237 45% 45%;
     --accent: 189 94% 43%;
     --accent-foreground: 0 0% 98%;
     --muted: 60 10% 90%;
@@ -30,6 +30,12 @@
     --surface-elevated: 60 20% 95.7%;
     --surface-card: 60 20% 95.7%;
     --radius: 0.4rem;
+    /* Chat bubbles: the user's in a light brand purple, the agents' in white. */
+    --bubble-me: 237 45% 91%;
+    --bubble-me-foreground: 237 45% 30%;
+    --bubble-agent: 0 0% 100%;
+    --bubble-agent-foreground: 60 5% 10%;
+    --bubble-agent-border: 237 30% 92%;
   }
 
   /*
@@ -67,7 +73,7 @@
     /* Unchanged from light. The one colour that carries meaning. */
     --brand: 237 45% 45%;
     --brand-foreground: 0 0% 98%;
-    --glow: 239 84% 67%;
+    --glow: 237 45% 45%;
     --accent: 189 94% 43%;
     --accent-foreground: 0 0% 98%;
 
@@ -85,6 +91,14 @@
     --surface-base: 0 0% 6%;
     --surface-elevated: 0 0% 11%;
     --surface-card: 0 0% 9%;
+
+    /* Agents go purple-black rather than grey, so a reply still reads as the
+       brand's side of the thread. */
+    --bubble-me: 237 45% 82%;
+    --bubble-me-foreground: 237 45% 22%;
+    --bubble-agent: 238 35% 29%; /* #303263 */
+    --bubble-agent-foreground: 237 45% 96%;
+    --bubble-agent-border: 238 30% 37%;
   }
 }
 
@@ -126,11 +140,11 @@
   background-image:
     radial-gradient(
       ellipse 90% 70% at 50% -15%,
-      hsl(var(--glow) / 0.5) 0%,
-      hsl(var(--glow) / 0.22) 35%,
+      hsl(var(--glow) / 0.6) 0%,
+      hsl(var(--glow) / 0.28) 35%,
       hsl(var(--glow) / 0) 72%
     ),
-    radial-gradient(ellipse 60% 40% at 50% 0%, hsl(var(--glow) / 0.2), transparent 60%);
+    radial-gradient(ellipse 60% 40% at 50% 0%, hsl(var(--glow) / 0.25), transparent 60%);
 }
 
 .app-canvas::before {
@@ -142,6 +156,14 @@
   opacity: 0.11;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   background-size: 240px 240px;
+}
+
+/* Scrolls without drawing a bar, for panes whose content already shows where it ends. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* RainbowKit connect button: normal weight to match the flat, no-bold rule. */

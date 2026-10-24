@@ -2,10 +2,12 @@
 
 import { cn } from '@intent/ui'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bot, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
+import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
 import { describePlan } from '../../lib/agents/competition'
+import { AgentAvatar } from '../agents/agent-avatar'
+import { agentBubble, systemPill } from './bubble'
 
 /**
  * Three dots that keep moving while an agent reasons.
@@ -20,9 +22,9 @@ function ThinkingDots(): JSX.Element {
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
-          className="bg-muted-foreground/60 h-1.5 w-1.5 rounded-full motion-reduce:animate-none"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
+          className="h-1.5 w-1.5 rounded-full bg-current opacity-60 motion-reduce:animate-none"
+          animate={{ y: [0, -3, 0], opacity: [0.35, 0.9, 0.35] }}
+          transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.15, ease: 'easeInOut' }}
         />
       ))}
     </span>
@@ -106,17 +108,17 @@ export function CompetitionPanel({
 
   if (error !== undefined) {
     return (
-      <div className="border-border flex items-start gap-3 rounded-2xl border border-dashed p-4">
-        <WifiOff className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0" />
+      <div className={cn(agentBubble, 'flex items-start gap-3 border-dashed')}>
+        <WifiOff className="mt-0.5 h-4 w-4 shrink-0 opacity-60" />
         <div>
-          <p className="text-sm font-medium">
+          <p className="font-medium">
             {error.code === 'chain_unsupported'
               ? 'Agents cannot execute here'
               : error.code === 'no_agent_answered'
                 ? 'No agent answered'
                 : 'Agents are not online'}
           </p>
-          <p className="text-muted-foreground mt-1 text-sm">{error.message}</p>
+          <p className="mt-1 opacity-70">{error.message}</p>
         </div>
       </div>
     )
@@ -128,10 +130,10 @@ export function CompetitionPanel({
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {revealedAgents.length === 0 && !decided ? (
-        <div className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Radio className="h-4 w-4 animate-pulse motion-reduce:animate-none" />
+        <div className={systemPill}>
+          <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
           Broadcasting to the agent network…
         </div>
       ) : null}
@@ -151,67 +153,63 @@ export function CompetitionPanel({
           return (
             <motion.div
               key={agent.key}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: dimmed || failed ? 0.55 : 1, y: 0 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="flex items-start gap-3"
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: dimmed || failed ? 0.6 : 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="flex flex-col gap-1"
             >
-              <span
-                className="mt-0.5 h-9 w-9 shrink-0 rounded-full"
-                style={{ backgroundImage: agent.gradient }}
-                aria-hidden
-              />
-              <div
-                className={cn(
-                  'flex-1 rounded-2xl rounded-tl-sm border p-4 transition-colors',
-                  failed
-                    ? 'border-border border-dashed'
-                    : isExecuting
-                      ? 'border-foreground ring-foreground/20 ring-1'
-                      : isWinner
-                        ? 'border-brand'
-                        : 'border-border'
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-sm font-semibold">{agent.name}</span>
-                    {/* Which model actually answered. Shown because four
-                        agents reaching the same conclusion means something
-                        different when they are one model than when they are
-                        three, and the user cannot tell those apart otherwise. */}
-                    {shortModel(agent.model) !== '' ? (
-                      <span className="text-muted-foreground/70 font-mono text-[11px]">
-                        {shortModel(agent.model)}
-                      </span>
-                    ) : null}
+              <div className="text-muted-foreground ml-[50px] flex flex-wrap items-center gap-x-1.5 text-xs">
+                <span className="text-foreground font-semibold">{agent.name}</span>
+                {/* Which model actually answered. Shown because four
+                    agents reaching the same conclusion means something
+                    different when they are one model than when they are
+                    three, and the user cannot tell those apart otherwise. */}
+                {shortModel(agent.model) !== '' ? (
+                  <span className="opacity-70">· {shortModel(agent.model)}</span>
+                ) : null}
+                {isWinner ? (
+                  <span className="bg-brand text-brand-foreground ml-1 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium">
+                    <Crown className="h-3 w-3" />
+                    Recommended
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="flex items-end gap-2.5">
+                <AgentAvatar seed={agent.key} name={agent.name} className="h-10 w-10" />
+
+                {failed ? (
+                  <div
+                    className={cn(
+                      agentBubble,
+                      'flex items-center gap-2 border-dashed bg-transparent shadow-none'
+                    )}
+                  >
+                    <TriangleAlert className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    <span className="opacity-75">
+                      {failureText(proposal?.failed ?? 'upstream_error')} Nothing to review.
+                    </span>
+                  </div>
+                ) : (
+                  <div
+                    className={cn(
+                      agentBubble,
+                      'flex-1 transition-shadow',
+                      isExecuting
+                        ? 'ring-brand ring-2'
+                        : isWinner
+                          ? 'ring-brand/50 ring-1'
+                          : undefined
+                    )}
+                  >
                     {/* What this agent proposed, not what it "is". The tag is
                         derived from the proposal, so it cannot contradict it. */}
                     {tag !== '' ? (
-                      <span className="text-muted-foreground text-xs">{tag}</span>
+                      <p className="mb-1 text-[11px] font-medium uppercase tracking-wide opacity-55">
+                        {tag}
+                      </p>
                     ) : null}
-                  </div>
-                  {failed ? (
-                    <span className="border-border text-muted-foreground flex shrink-0 items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px]">
-                      <TriangleAlert className="h-3 w-3" />
-                      Did not respond
-                    </span>
-                  ) : isWinner ? (
-                    <span className="bg-foreground text-background flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium">
-                      <Bot className="h-3 w-3" />
-                      Recommended
-                    </span>
-                  ) : null}
-                </div>
-
-                {failed ? (
-                  <p className="text-muted-foreground mt-2 text-sm">
-                    {failureText(proposal?.failed ?? 'upstream_error')} Nothing was proposed, so
-                    there is nothing to review.
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-foreground mt-2 text-sm">{proposal?.reasoning}</p>
+                    <p className="leading-relaxed">{proposal?.reasoning}</p>
 
                     {/* Why the score fell short, in the plan's own terms. A number
                         that drops with no stated reason reads as arbitrary, which
@@ -222,7 +220,7 @@ export function CompetitionPanel({
                         {(proposal?.penalties ?? []).map((p) => (
                           <li
                             key={p.reason}
-                            className="text-muted-foreground flex items-start gap-1.5 text-xs"
+                            className="flex items-start gap-1.5 text-xs opacity-70"
                           >
                             <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
                             <span>
@@ -233,24 +231,27 @@ export function CompetitionPanel({
                       </ul>
                     ) : null}
 
-                    <div className="text-muted-foreground mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-                      {proposal?.executionMode === 'rest' &&
-                      proposal.horizonMinutes !== undefined &&
-                      proposal.horizonMinutes > 0 ? (
-                        <span>over {proposal.horizonMinutes}m</span>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+                    <div className="border-bubble-agent-foreground/10 mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
                       {/* Measured from the route, not reported by the agent:
                           what a unit cost, and how that compares with the
                           oracle's fair value. */}
-                      <span className="bg-muted text-foreground rounded-full px-2.5 py-1 font-mono text-xs tabular-nums">
-                        {money(proposal?.avgPriceUsd ?? 0)} avg
-                        {vsOracle(proposal?.vsOraclePct) !== ''
-                          ? ` · ${vsOracle(proposal?.vsOraclePct)}`
-                          : ''}
-                      </span>
+                      <div className="flex flex-col text-xs tabular-nums">
+                        <span className="font-semibold">
+                          {money(proposal?.avgPriceUsd ?? 0)} avg
+                        </span>
+                        <span className="opacity-60">
+                          {[
+                            vsOracle(proposal?.vsOraclePct),
+                            proposal?.executionMode === 'rest' &&
+                            proposal.horizonMinutes !== undefined &&
+                            proposal.horizonMinutes > 0
+                              ? `over ${proposal.horizonMinutes}m`
+                              : '',
+                          ]
+                            .filter((s) => s !== '')
+                            .join(' · ')}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => onExecute(agent.key)}
@@ -258,8 +259,8 @@ export function CompetitionPanel({
                         className={cn(
                           'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
                           isExecuting || isWinner
-                            ? 'bg-foreground text-background hover:bg-foreground/90'
-                            : 'border-border text-foreground hover:border-foreground/40 border'
+                            ? 'bg-brand text-brand-foreground hover:bg-brand/90'
+                            : 'border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 border'
                         )}
                       >
                         {locked && isExecuting ? (
@@ -268,7 +269,7 @@ export function CompetitionPanel({
                         {isExecuting ? 'Selected' : 'Review'}
                       </button>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -277,26 +278,21 @@ export function CompetitionPanel({
       </AnimatePresence>
 
       {pendingAgents.map((agent) => (
-        <div key={`pending-${agent.key}`} className="flex items-start gap-3">
-          <span
-            className="mt-0.5 h-9 w-9 shrink-0 animate-pulse rounded-full opacity-40 motion-reduce:animate-none"
-            style={{ backgroundImage: agent.gradient }}
-            aria-hidden
-          />
-          <div className="border-border flex-1 rounded-2xl rounded-tl-sm border border-dashed p-4">
-            <span className="text-sm font-semibold">{agent.name}</span>
+        <div key={`pending-${agent.key}`} className="flex flex-col gap-1">
+          <div className="text-muted-foreground ml-[50px] text-xs">
+            <span className="text-foreground font-semibold">{agent.name}</span>
             {shortModel(agent.model) !== '' ? (
-              <span className="text-muted-foreground/70 ml-2 font-mono text-[11px]">
-                {shortModel(agent.model)}
-              </span>
+              <span className="opacity-70"> · {shortModel(agent.model)}</span>
             ) : null}
+          </div>
+          <div className="flex items-end gap-2.5">
+            <AgentAvatar seed={agent.key} name={agent.name} className="h-10 w-10" pending />
             <div
-              className="mt-2 flex items-center gap-1.5"
+              className={cn(agentBubble, 'flex w-fit items-center px-4 py-3')}
               role="status"
               aria-label={`${agent.name} is thinking`}
             >
               <ThinkingDots />
-              <span className="text-muted-foreground text-xs">thinking…</span>
             </div>
           </div>
         </div>
@@ -306,20 +302,15 @@ export function CompetitionPanel({
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="border-border mx-auto mt-1 flex items-center gap-2 rounded-full border px-3 py-1.5"
+          className={systemPill}
         >
-          <span className="bg-muted text-muted-foreground flex h-5 w-5 items-center justify-center rounded-full">
-            <Bot className="h-3 w-3" />
-          </span>
           {/* Recommended on the measured fill, which is the only thing scored.
               "Strongest strategy" implied a judgement of the reasoning; there
               is none — the route's real output decides, and a tie is broken
               by a draw the agents cannot influence. */}
-          <span className="text-muted-foreground text-xs">
-            {unanimous
-              ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree — ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
-              : `Recommended: ${proposals[winner]?.name} — best measured fill. You pick who executes.`}
-          </span>
+          {unanimous
+            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+            : `Recommended: ${proposals[winner]?.name}, best measured fill. You pick who executes.`}
         </motion.div>
       ) : null}
     </div>
