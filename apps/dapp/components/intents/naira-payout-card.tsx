@@ -43,14 +43,14 @@ const STATUS_COPY: Record<NairaStatus, string> = {
 /**
  * The card sits in the thread as the agents' side of it. In dark mode it steps
  * out of the purple bubbles onto a near-black grey (#1a1a1a), with its fields
- * in a deep purple (#191a33) of the brand's hue, so the form reads as a tool
+ * in a soft black (#121212), so the form reads as a tool
  * rather than another message.
  */
 const SHELL =
   'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)] dark:border-white/[0.06] dark:bg-[#1a1a1a] dark:text-foreground dark:shadow-[0_12px_40px_-16px_rgb(0_0_0/0.7)]'
 
 const FIELD =
-  'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[#191a33]'
+  'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[#121212]'
 
 /** "DANIEL EMMANUEL OKPOHO" as a person would write it. Banks return names in capitals. */
 function titleCase(name: string): string {
@@ -131,7 +131,7 @@ function PayoutProgress({
           {status === 'expired' ? 'Expired' : 'Failed'}
         </p>
       )}
-      <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums dark:bg-[#191a33]">
+      <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums dark:bg-[#121212]">
         {summary}
       </p>
     </div>
@@ -281,7 +281,7 @@ export function NairaPayoutCard({
       <div className={cn(SHELL, 'gap-5')}>
         <CardHeader title="Review payout" subtitle="The rate is locked for this order." />
 
-        <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums dark:bg-[#191a33]">
+        <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums dark:bg-[#121212]">
           <span className="text-muted-foreground text-xs">You send</span>
           <span className="text-lg font-semibold">
             {order.amount} {order.coin.toUpperCase()}
@@ -406,7 +406,7 @@ export function NairaPayoutCard({
           <div
             role="radiogroup"
             aria-label="How to pay"
-            className="bg-muted/70 grid grid-cols-2 rounded-full p-1 dark:bg-[#191a33]"
+            className="bg-muted/70 grid grid-cols-2 rounded-full p-1 dark:bg-[#121212]"
           >
             {(
               [
