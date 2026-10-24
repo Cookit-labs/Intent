@@ -2,6 +2,7 @@
 
 import { activeNetwork, isMainnet, isMultiNetwork, stellarNetwork } from '@intent/config'
 import { Badge, Button } from '@intent/ui'
+import { ShieldCheck } from 'lucide-react'
 
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
 import { mismatchLabel } from '../../lib/wallet-network'
@@ -28,7 +29,7 @@ export function NetworkStatus({
   /** The per-trade cap on mainnet, when there is one. Decided on the server. */
   tradeCapUsd?: number | undefined
 }): JSX.Element {
-  const { slug, descriptor, adapter } = useChain()
+  const { slug, descriptor } = useChain()
   const {
     isConnected,
     isWrongNetwork,
@@ -81,17 +82,10 @@ export function NetworkStatus({
     )
   }
 
+  // The network itself is shown by the chain switcher beside this, so what is
+  // left here is what the network means for the user right now.
   return (
     <div className="flex items-center gap-2">
-      <Badge variant="outline">
-        <span
-          className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${
-            isConnected ? 'bg-success' : 'bg-muted-foreground'
-          }`}
-        />
-        {descriptor.networkLabel}
-      </Badge>
-
       {needsFunding ? (
         slug === 'stellar' ? (
           // No faucet on mainnet: the account exists once someone pays its
@@ -113,7 +107,8 @@ export function NetworkStatus({
         )
       ) : isMainnet() ? (
         tradeCapUsd !== undefined && slug === 'stellar' ? (
-          <span className="text-muted-foreground hidden text-xs sm:inline">
+          <span className="text-muted-foreground hidden items-center gap-1.5 text-xs sm:inline-flex">
+            <ShieldCheck className="h-3.5 w-3.5" />
             Trades up to ${tradeCapUsd}
           </span>
         ) : null
@@ -122,17 +117,6 @@ export function NetworkStatus({
           pre-mainnet · rails may change
         </span>
       )}
-
-      {isConnected && address !== undefined ? (
-        <a
-          href={adapter.accountUrl(address)}
-          target="_blank"
-          rel="noreferrer"
-          className="text-muted-foreground hover:text-foreground hidden text-xs underline underline-offset-2 sm:inline"
-        >
-          Explorer
-        </a>
-      ) : null}
     </div>
   )
 }
