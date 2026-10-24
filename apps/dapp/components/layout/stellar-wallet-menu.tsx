@@ -12,6 +12,7 @@ import {
   Copy,
   ExternalLink,
   LogOut,
+  Wallet,
 } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
@@ -22,7 +23,6 @@ import {
   type Activity,
   type Holding,
 } from '../../lib/wallet/account-activity'
-import { agentAvatarUri } from '../../lib/agents/persona'
 import { timeAgo } from '../../lib/wallet/time-ago'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
@@ -31,6 +31,39 @@ type Tab = 'holdings' | 'activity'
 
 function short(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`
+}
+
+/** The connected wallet's own mark (Freighter, Lobstr…) in a light purple circle. */
+function WalletBadge({
+  icon,
+  className,
+  iconClassName,
+}: {
+  icon: string | undefined
+  className: string
+  iconClassName: string
+}): JSX.Element {
+  return (
+    <span
+      className={cn(
+        'bg-bubble-me text-bubble-me-foreground flex shrink-0 items-center justify-center overflow-hidden rounded-full',
+        className
+      )}
+    >
+      {icon !== undefined ? (
+        <Image
+          src={icon}
+          alt=""
+          width={20}
+          height={20}
+          unoptimized
+          className={cn('rounded-full object-contain', iconClassName)}
+        />
+      ) : (
+        <Wallet className={iconClassName} strokeWidth={1.75} aria-hidden="true" />
+      )}
+    </span>
+  )
 }
 
 function amount(value: string): string {
@@ -115,25 +148,7 @@ export function StellarWalletMenu({
         className="border-border bg-card hover:bg-muted/60 focus-visible:ring-ring inline-flex h-9 items-center gap-2 rounded-md border pl-1.5 pr-2 transition-colors focus-visible:outline-none focus-visible:ring-2"
       >
         <span className="relative shrink-0">
-          {walletIcon !== undefined ? (
-            <span className="bg-bubble-me flex h-6 w-6 items-center justify-center rounded-full">
-              <Image
-                src={walletIcon}
-                alt=""
-                width={16}
-                height={16}
-                unoptimized
-                className="h-4 w-4"
-              />
-            </span>
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={agentAvatarUri(address)}
-              alt=""
-              className="h-6 w-6 rounded-full [image-rendering:pixelated]"
-            />
-          )}
+          <WalletBadge icon={walletIcon} className="h-6 w-6" iconClassName="h-3.5 w-3.5" />
           <span
             className="bg-success ring-card absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2"
             aria-hidden="true"
@@ -153,12 +168,7 @@ export function StellarWalletMenu({
           className="border-border bg-background absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border shadow-lg"
         >
           <div className="flex items-center gap-3 px-4 pt-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={agentAvatarUri(address)}
-              alt=""
-              className="h-8 w-8 shrink-0 rounded-full [image-rendering:pixelated]"
-            />
+            <WalletBadge icon={walletIcon} className="h-9 w-9" iconClassName="h-5 w-5" />
             <div className="min-w-0 flex-1">
               <p className="font-mono text-sm">{short(address)}</p>
               <p className="text-muted-foreground text-xs">{descriptor.networkLabel}</p>
