@@ -2313,8 +2313,13 @@ export function IntentChat(): JSX.Element {
         </div>
       </div>
 
-      {/* Composer */}
-      <div className="border-border bg-card/80 shrink-0 border-t p-3 backdrop-blur">
+      {/* Composer. Hidden, not unmounted, behind the history list so a draft survives it. */}
+      <div
+        className={cn(
+          'border-border bg-card/80 shrink-0 border-t p-3 backdrop-blur',
+          historyOpen && isConnected && 'hidden'
+        )}
+      >
         <ComposerInput
           onSubmit={handleSubmit}
           showExamples={!parsed && thread.length === 0}
