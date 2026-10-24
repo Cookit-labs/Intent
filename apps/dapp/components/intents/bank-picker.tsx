@@ -10,10 +10,31 @@ import { keyHash } from '../../lib/agents/persona'
 export interface Bank {
   code: string
   name: string
+  logo?: string
 }
 
-/** Two letters and a colour that stay the same for a bank, in place of a logo we do not have. */
+/**
+ * The bank's logo, or two letters and a colour that stay the same for a bank
+ * when there is no logo or it fails to load.
+ */
 export function BankMark({ bank, className }: { bank: Bank; className?: string }): JSX.Element {
+  const [broken, setBroken] = useState(false)
+  if (bank.logo !== undefined && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={bank.logo}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        onError={() => setBroken(true)}
+        className={cn(
+          'ring-border h-7 w-7 shrink-0 rounded-full bg-white object-contain ring-1',
+          className
+        )}
+      />
+    )
+  }
   const hue = keyHash(bank.code) % 360
   const initials = bank.name
     .replace(/[^A-Za-z ]/g, '')
