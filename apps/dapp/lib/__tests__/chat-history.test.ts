@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { clearTurnsRemote, saveTurnRemote } from '../api/conversation-client'
+import { clearTurnsRemote, listTurns, saveTurnRemote } from '../api/conversation-client'
 import { setHistoryOwner } from '../history-owner'
 import {
   clearTurns,
   flushPendingTurns,
   loadTurns,
   saveTurn,
+  syncTurns,
   updateTurn,
   type ChatTurn,
 } from '../chat-history'
@@ -288,5 +289,26 @@ describe('conversations accumulate rather than replace', () => {
     expect(all.find((t) => t.id === 'older')?.txHash).toBeUndefined()
     expect(all.find((t) => t.id === 'older')?.winner).toBe('twap')
     expect(all.find((t) => t.id === 'newer')?.txHash).toBe('f'.repeat(64))
+  })
+})
+
+/**
+ * The server does not store what the assistant said: a cash-out's exchange, or
+ * a reply to a question that ran nothing. Its copy of a turn used to replace the
+ * local one on every sync, so a reopened chat showed the user's line alone.
+ */
+describe('a sync keeps what the assistant said', () => {
+  it('carries the local outcome and exchange onto the server copy', async () => {
+    saveTurn(turn({ id: 'cash', winner: null }))
+    updateTurn('cash', {
+      outcome: 'Opened the cash-out form for 40 USDC.',
+      conversation: [{ role: 'assistant', content: 'Which bank?' }],
+    })
+    vi.mocked(listTurns).mockResolvedValueOnce([turn({ id: 'cash', winner: null })])
+
+    const [found] = await syncTurns('stellar')
+
+    expect(found?.outcome).toBe('Opened the cash-out form for 40 USDC.')
+    expect(found?.conversation).toEqual([{ role: 'assistant', content: 'Which bank?' }])
   })
 })

@@ -314,7 +314,22 @@ export async function syncTurns(chain: string): Promise<ChatTurn[]> {
   const pending = new Set(readPending())
   for (const local of read()) {
     // A turn still queued is newer than the server's copy of it.
-    if (!byId.has(local.id) || pending.has(local.id)) byId.set(local.id, local)
+    const server = byId.get(local.id)
+    if (server === undefined || pending.has(local.id)) {
+      byId.set(local.id, local)
+      continue
+    }
+    // The server does not store what the assistant said, so its copy would
+    // erase the reply and leave a reopened chat with the user's line alone.
+    byId.set(local.id, {
+      ...server,
+      ...(server.outcome === undefined && local.outcome !== undefined
+        ? { outcome: local.outcome }
+        : {}),
+      ...(server.conversation === undefined && local.conversation !== undefined
+        ? { conversation: local.conversation }
+        : {}),
+    })
   }
 
   const merged = [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))

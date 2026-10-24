@@ -3,7 +3,7 @@
 import { cn } from '@intent/ui'
 import { activeNetwork, isMainnet, stellarNetwork } from '@intent/config'
 import { motion } from 'framer-motion'
-import { Bell, CheckCheck, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
+import { CheckCheck, Clock, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
@@ -52,7 +52,12 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
-import { cashoutOutcome, cashoutTurns, fetchCashouts } from '../../lib/naira/history'
+import {
+  cashoutFormOutcome,
+  cashoutOutcome,
+  cashoutTurns,
+  fetchCashouts,
+} from '../../lib/naira/history'
 import { fetchSwapHistory } from '../../lib/swap/history'
 import { ledgerTurns } from '../../lib/chat/ledger-turns'
 import type { StandingRuleRecord } from '../../lib/api/standing-client'
@@ -107,6 +112,7 @@ import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
 import { agentBubble, systemPill, userBubble } from './bubble'
+import { AgentAvatar } from '../agents/agent-avatar'
 
 /**
  * The price of the only asset an anchor withdraws.
@@ -118,6 +124,11 @@ import { agentBubble, systemPill, userBubble } from './bubble'
  * other price cannot quietly reuse that path.
  */
 const USDC_PRICE_USD = 1
+
+/** The asset a cash-out form pays out, as the form names it. */
+function nairaSymbol(form: { asset: 'xlm' | 'usdc'; symbol?: string }): string {
+  return form.symbol ?? (form.asset === 'usdc' ? 'USDC' : 'XLM')
+}
 
 /** Who the user is talking to, the way a chat app heads a conversation. */
 function ChatIdentity(): JSX.Element {
@@ -559,6 +570,31 @@ export function IntentChat(): JSX.Element {
     setTurns(loadTurns(slug))
   }, [slug, address])
 
+  // What the assistant says outside a race — an answer, a refusal, an error —
+  // is the reply to the turn, and is kept with it. Only the race and a placed
+  // cash-out used to be written, so reopening anything else showed the user's
+  // line with nothing under it.
+  useEffect(() => {
+    if (affordError === null || turnId === null || message === null || restored !== null) return
+    updateTurn(turnId, { outcome: affordError }, { chain: slug, text: message })
+    setTurns(loadTurns(slug))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [affordError])
+
+  // An opened cash-out form is a reply too. An order placed from it replaces
+  // this with how the payout went.
+  const nairaFormKey = nairaForm?.key
+  useEffect(() => {
+    if (nairaForm === null || turnId === null || message === null || restored !== null) return
+    updateTurn(
+      turnId,
+      { outcome: cashoutFormOutcome(nairaSymbol(nairaForm), nairaForm.amountXlm) },
+      { chain: slug, text: message }
+    )
+    setTurns(loadTurns(slug))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nairaFormKey])
+
   // Record the conversation once the competition settles on a winner, so the
   // agents' reasoning survives a reload even if nothing is ever signed.
   // Only a live competition writes a turn. A restored one is already decided,
@@ -591,13 +627,35 @@ export function IntentChat(): JSX.Element {
   /** Something came of the open intent: a trade settled, or an order was placed. */
   const turnExecuted = swap.phase === 'settled' || sequence.phase === 'settled' || placedId !== null
 
+  /** What was said back to the open turn, in the words it was shown. */
+  function openTurnReply(): ThreadTurn['reply'] {
+    if (affordError !== null) return { text: affordError }
+    if (nairaForm !== null) {
+      return { text: cashoutFormOutcome(nairaSymbol(nairaForm), nairaForm.amountXlm) }
+    }
+    const chosen = executingKey ?? competition.winner
+    const proposal = chosen !== null ? competition.proposals[chosen] : undefined
+    if (proposal?.reasoning !== undefined && proposal.reasoning !== '') {
+      return { text: proposal.reasoning, agentKey: proposal.key, agentName: proposal.name }
+    }
+    if (restored?.outcome !== undefined) return { text: restored.outcome }
+    return undefined
+  }
+
   /** Puts the open turn behind the user, so the next one reads as the chat's next line. */
   function archiveOpenTurn(): void {
     if (message === null) return
     const previous = message
+    const reply = openTurnReply()
     setThread((t) => [
       ...t,
-      { id: turnId ?? crypto.randomUUID(), text: previous, executed: turnExecuted },
+      {
+        id: turnId ?? crypto.randomUUID(),
+        text: previous,
+        executed: turnExecuted,
+        attempted: parsed !== null || nairaForm !== null || sequence.phase !== 'idle',
+        ...(reply !== undefined ? { reply } : {}),
+      },
     ])
     setNotes([])
   }
@@ -1713,52 +1771,6 @@ export function IntentChat(): JSX.Element {
             <Clock className="h-4 w-4" />
           </button>
         ) : null}
-
-        {/* Standing rules. Badged when one has come due, because a rule that
-            is ready and unnoticed is the same as a rule that never fired. */}
-        <button
-          type="button"
-          onClick={() => {
-            setInboxOpen(false)
-            setRulesOpen((v) => !v)
-          }}
-          aria-label="Standing rules"
-          aria-expanded={rulesOpen}
-          className={cn(
-            'relative rounded-full p-1.5 transition-colors',
-            rulesOpen
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-          )}
-        >
-          <Bell className="h-4 w-4" />
-          {standing.due.length > 0 ? (
-            <span className="bg-brand absolute right-1 top-1 h-1.5 w-1.5 rounded-full" />
-          ) : null}
-        </button>
-
-        {/* The inbox: rules the server fired while nobody was looking. Badged
-            with the count, because a firing that goes unnoticed is the same
-            as one that never happened. */}
-        <button
-          type="button"
-          onClick={() => (inboxOpen ? setInboxOpen(false) : openInbox())}
-          aria-label="Fired rules"
-          aria-expanded={inboxOpen}
-          className={cn(
-            'relative rounded-full p-1.5 transition-colors',
-            inboxOpen
-              ? 'bg-muted text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-          )}
-        >
-          <Inbox className="h-4 w-4" />
-          {inbox.items.length > 0 ? (
-            <span className="bg-brand text-brand-foreground absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none">
-              {inbox.items.length}
-            </span>
-          ) : null}
-        </button>
       </div>
 
       {/* Body.
@@ -1841,7 +1853,7 @@ export function IntentChat(): JSX.Element {
         {/* The scrolling thread. Separate from the wrapper above so the
             overlays position against the panel rather than against content
             that moves under them. */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-5">
+        <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-5">
           {/* Gated on the message, not on a parsed *trade*.
               `parsed` answers "was a trade read", and three submit paths
               deliberately leave it null: a standing rule, and a supply of
@@ -1888,12 +1900,37 @@ export function IntentChat(): JSX.Element {
 
               {/* The turns before this one, quieter than the open intent. */}
               {thread.map((turn) => (
-                <div key={turn.id} className="flex flex-col items-end gap-1">
-                  <div className={cn(userBubble, 'opacity-70')}>{turn.text}</div>
-                  <span className="text-muted-foreground mr-2 flex items-center gap-1 text-[11px]">
-                    {turn.executed ? <CheckCheck className="text-brand h-3 w-3" /> : null}
-                    {turn.executed ? 'Done' : 'Not executed'}
-                  </span>
+                <div key={turn.id} className="flex flex-col gap-3">
+                  <div className="flex flex-col items-end gap-1">
+                    <div className={userBubble}>{turn.text}</div>
+                    {turn.executed || turn.attempted === true ? (
+                      <span className="text-muted-foreground mr-2 flex items-center gap-1 text-[11px]">
+                        {turn.executed ? <CheckCheck className="text-brand h-3 w-3" /> : null}
+                        {turn.executed ? 'Done' : 'Not executed'}
+                      </span>
+                    ) : null}
+                  </div>
+                  {turn.reply !== undefined ? (
+                    <div className="flex flex-col gap-1">
+                      {turn.reply.agentName !== undefined ? (
+                        <span className="text-foreground ml-11 text-xs font-semibold">
+                          {turn.reply.agentName}
+                        </span>
+                      ) : null}
+                      <div className="flex items-end gap-2.5">
+                        {turn.reply.agentKey !== undefined ? (
+                          <AgentAvatar
+                            seed={turn.reply.agentKey}
+                            name={turn.reply.agentName ?? ''}
+                            className="h-8 w-8"
+                          />
+                        ) : null}
+                        <div className={cn(agentBubble, 'whitespace-pre-line')}>
+                          {turn.reply.text}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
 

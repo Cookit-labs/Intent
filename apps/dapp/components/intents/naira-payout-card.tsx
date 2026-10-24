@@ -2,12 +2,12 @@
 
 import { cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   ArrowDown,
+  BadgeCheck,
   Banknote,
   Check,
-  CircleCheck,
   Loader2,
   ShieldCheck,
   TriangleAlert,
@@ -46,6 +46,11 @@ const SHELL =
 
 const FIELD =
   'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4'
+
+/** "DANIEL EMMANUEL OKPOHO" as a person would write it. Banks return names in capitals. */
+function titleCase(name: string): string {
+  return name.toLowerCase().replace(/(^|[\s'-])\p{L}/gu, (m) => m.toUpperCase())
+}
 
 function naira(n: number): string {
   return `₦${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -332,7 +337,7 @@ export function NairaPayoutCard({
             type="button"
             disabled={busy}
             onClick={pay}
-            className="bg-brand text-brand-foreground flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
+            className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors disabled:opacity-60"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}
             {phase === 'signing'
@@ -530,60 +535,29 @@ export function NairaPayoutCard({
               className="placeholder:text-muted-foreground/50 min-w-0 flex-1 bg-transparent text-sm tabular-nums tracking-[0.15em] outline-none"
             />
           </div>
+          {/* The name the bank gave for the account, said the way a banking
+              app says it: under the number, in the holder's own name. */}
+          <div className="flex min-h-[24px] items-center px-1 text-xs" aria-live="polite">
+            {holder.isFetching ? (
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+                Checking with the bank…
+              </span>
+            ) : holder.data !== undefined ? (
+              <motion.span
+                initial={{ opacity: 0, y: -2 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-1.5"
+              >
+                <span className="font-medium">{titleCase(holder.data)}</span>
+                <BadgeCheck className="text-brand h-3.5 w-3.5" aria-label="Verified by the bank" />
+              </motion.span>
+            ) : holder.isError ? (
+              <span className="text-destructive">{(holder.error as Error).message}</span>
+            ) : null}
+          </div>
         </div>
       </div>
-
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={
-            holder.isFetching
-              ? 'checking'
-              : holder.data !== undefined
-                ? 'ok'
-                : holder.isError
-                  ? 'error'
-                  : 'idle'
-          }
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.15 }}
-          className={cn(
-            'flex min-h-[52px] items-center gap-3 rounded-2xl px-4 py-2.5 text-sm',
-            holder.data !== undefined && !holder.isFetching
-              ? 'bg-success/10'
-              : holder.isError && !holder.isFetching
-                ? 'bg-destructive/10'
-                : 'bg-background/60'
-          )}
-        >
-          {holder.isFetching ? (
-            <>
-              <Loader2 className="text-muted-foreground h-4 w-4 animate-spin motion-reduce:animate-none" />
-              <span className="text-muted-foreground">Checking with the bank…</span>
-            </>
-          ) : holder.data !== undefined ? (
-            <>
-              <CircleCheck className="text-success h-5 w-5 shrink-0" />
-              <span className="flex flex-col leading-tight">
-                <span className="font-semibold">{holder.data}</span>
-                <span className="text-muted-foreground text-[11px]">
-                  Account holder, verified by the bank
-                </span>
-              </span>
-            </>
-          ) : holder.isError ? (
-            <>
-              <TriangleAlert className="text-destructive h-4 w-4 shrink-0" />
-              <span>{(holder.error as Error).message}</span>
-            </>
-          ) : (
-            <span className="text-muted-foreground text-xs">
-              The account holder&apos;s name appears here once the bank confirms it.
-            </span>
-          )}
-        </motion.div>
-      </AnimatePresence>
 
       <button
         type="button"
@@ -602,7 +576,7 @@ export function NairaPayoutCard({
             ...(asset === 'usdc' ? { usdc: xlm } : {}),
           })
         }}
-        className="bg-brand text-brand-foreground flex h-12 items-center justify-center gap-2 rounded-full text-sm font-medium transition-all hover:opacity-90 disabled:opacity-35"
+        className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground disabled:hover:bg-bubble-me disabled:hover:text-bubble-me-foreground flex h-12 items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors disabled:opacity-50"
       >
         {phase === 'creating' ? (
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />

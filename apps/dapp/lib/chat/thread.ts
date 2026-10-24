@@ -13,6 +13,10 @@ export interface ThreadTurn {
   text: string
   /** Whether a transaction came out of it, or the intent was only placed. */
   executed: boolean
+  /** Whether it asked for something to happen, as opposed to a question. */
+  attempted?: boolean
+  /** What was said back, kept so the chat shows both sides once the turn is behind it. */
+  reply?: { text: string; agentKey?: string; agentName?: string }
 }
 
 export type FollowUpKind = 'note' | 'new'
