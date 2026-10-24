@@ -40,12 +40,17 @@ const STATUS_COPY: Record<NairaStatus, string> = {
   failed: 'The bank transfer failed. Your XLM is returned to your account.',
 }
 
-/** The card sits in the thread as the agents' side of it. */
+/**
+ * The card sits in the thread as the agents' side of it. In dark mode it steps
+ * out of the purple bubbles into its own surface: a purple so deep it is nearly
+ * black, fading into near-black grey, so the form reads as a tool rather than
+ * another message.
+ */
 const SHELL =
-  'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)]'
+  'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)] dark:border-white/[0.06] dark:bg-[linear-gradient(155deg,hsl(245_28%_10%)_0%,hsl(240_12%_8%)_55%,hsl(0_0%_8%)_100%)] dark:text-foreground dark:shadow-[0_12px_40px_-16px_rgb(0_0_0/0.7)]'
 
 const FIELD =
-  'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4'
+  'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[hsl(240_4%_13%)]'
 
 /** "DANIEL EMMANUEL OKPOHO" as a person would write it. Banks return names in capitals. */
 function titleCase(name: string): string {
@@ -126,7 +131,9 @@ function PayoutProgress({
           {status === 'expired' ? 'Expired' : 'Failed'}
         </p>
       )}
-      <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums">{summary}</p>
+      <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums dark:bg-[hsl(240_4%_12%)]">
+        {summary}
+      </p>
     </div>
   )
 }
@@ -274,7 +281,7 @@ export function NairaPayoutCard({
       <div className={cn(SHELL, 'gap-5')}>
         <CardHeader title="Review payout" subtitle="The rate is locked for this order." />
 
-        <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums">
+        <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums dark:bg-[hsl(240_4%_12%)]">
           <span className="text-muted-foreground text-xs">You send</span>
           <span className="text-lg font-semibold">
             {order.amount} {order.coin.toUpperCase()}
@@ -288,7 +295,7 @@ export function NairaPayoutCard({
           </span>
         </div>
 
-        <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm tabular-nums">
+        <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm tabular-nums dark:divide-white/[0.07]">
           {(
             [
               [
@@ -399,7 +406,7 @@ export function NairaPayoutCard({
           <div
             role="radiogroup"
             aria-label="How to pay"
-            className="bg-muted/70 grid grid-cols-2 rounded-full p-1"
+            className="bg-muted/70 grid grid-cols-2 rounded-full p-1 dark:bg-[hsl(240_4%_12%)]"
           >
             {(
               [
@@ -467,7 +474,7 @@ export function NairaPayoutCard({
             />
             <span className="bg-muted rounded-full px-3 py-1 text-sm font-medium">{symbol}</span>
           </div>
-          <div className="border-bubble-agent-border mt-2 border-t pt-2 text-xs">
+          <div className="border-bubble-agent-border mt-2 border-t pt-2 text-xs dark:border-white/[0.07]">
             {other ? (
               <span className="text-muted-foreground">
                 Agents compete on the swap into USDC, then the USDC is paid out. The final figure is
