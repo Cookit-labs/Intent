@@ -163,7 +163,7 @@ export function ChainSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Chain: ${descriptor.name}. Switch chain`}
+        aria-label={`Chain: ${descriptor.networkLabel}. Switch chain`}
         className={cn(
           'hover:bg-muted/60 inline-flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-2.5 text-sm font-semibold transition-colors',
           open && 'bg-muted/60'
@@ -206,6 +206,7 @@ export function ChainSwitcher({
                   type="button"
                   role="menuitem"
                   onClick={() => switchTo(entry)}
+                  aria-label={entry.label}
                   className={rowClass(entry.slug === slug && entry.network === network)}
                 >
                   <ChainMark chain={entry.slug} className="h-7 w-7 shrink-0" />
@@ -226,6 +227,7 @@ export function ChainSwitcher({
                     type="button"
                     role="menuitem"
                     onClick={() => switchChain(option)}
+                    aria-label={d.networkLabel}
                     className={rowClass(option === slug)}
                   >
                     <ChainMark chain={option} className="h-7 w-7 shrink-0" />
@@ -242,6 +244,7 @@ export function ChainSwitcher({
             <a
               href={other.href}
               role="menuitem"
+              aria-label={`Stellar ${other.label.replace(/^stellar\s+/i, '')}`}
               className="hover:bg-muted/60 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
             >
               <ChainMark chain="stellar" className="h-7 w-7 shrink-0" />
@@ -256,6 +259,7 @@ export function ChainSwitcher({
             <div
               role="menuitem"
               aria-disabled="true"
+              aria-label={`Stellar ${other.label.replace(/^stellar\s+/i, '')}, not set up here`}
               className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm"
             >
               <ChainMark chain="stellar" className="h-7 w-7 shrink-0 opacity-60" />
@@ -274,6 +278,7 @@ export function ChainSwitcher({
               key={c.id}
               role="menuitem"
               aria-disabled="true"
+              aria-label={`${c.name}, coming soon`}
               className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm"
             >
               <ChainMark chain={c.id} className="h-7 w-7 shrink-0 opacity-60 grayscale" />

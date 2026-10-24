@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-/** Each venue card is one link; the badges inside it say what the app can do there. */
+/** Each venue card is one link; a verified tick marks a venue the app can execute on. */
 test('the stellar apps page shows soroswap as integrated and soroban domains under names', async ({
   page,
 }) => {
@@ -11,7 +11,7 @@ test('the stellar apps page shows soroswap as integrated and soroban domains und
   // Exact, so "Soroswap Aggregator" is a different card.
   const soroswap = page.locator('a').filter({ has: page.getByText('Soroswap', { exact: true }) })
   await expect(soroswap).toHaveCount(1)
-  await expect(soroswap.getByText('Integrated', { exact: true })).toBeVisible()
+  await expect(soroswap.getByRole('img', { name: /^Integrated/ })).toBeVisible()
 
   const domains = page
     .locator('a')
