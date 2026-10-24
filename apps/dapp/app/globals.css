@@ -96,9 +96,9 @@
        brand's side of the thread. */
     --bubble-me: 237 45% 82%;
     --bubble-me-foreground: 237 45% 22%;
-    --bubble-agent: 237 30% 15%;
+    --bubble-agent: 238 35% 29%; /* #303263 */
     --bubble-agent-foreground: 237 45% 96%;
-    --bubble-agent-border: 237 28% 23%;
+    --bubble-agent-border: 238 30% 37%;
   }
 }
 

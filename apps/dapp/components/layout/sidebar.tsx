@@ -1,7 +1,7 @@
 'use client'
 
 import { ChainMark, cn } from '@intent/ui'
-import { BarChart3, Boxes, History, Settings, Sparkles, Vault, Wallet } from 'lucide-react'
+import { BarChart3, Boxes, History, Sparkles, Vault, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -16,7 +16,6 @@ const nav = [
   { href: '/analytics', label: 'Analytics', icon: BarChart3, soon: true },
   { href: '/history', label: 'History', icon: History },
   { href: '/vault', label: 'Vault', icon: Vault, soon: true },
-  { href: '/settings', label: 'Settings', icon: Settings, soon: true },
 ] as const
 
 export function Sidebar({

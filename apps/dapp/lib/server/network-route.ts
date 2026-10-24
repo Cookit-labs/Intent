@@ -36,7 +36,6 @@ const BARE_SCREENS = [
   'analytics',
   'history',
   'vault',
-  'settings',
   'competitions',
   'leaderboard',
 ]
