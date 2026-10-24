@@ -309,8 +309,8 @@ export function CompetitionPanel({
               is none — the route's real output decides, and a tie is broken
               by a draw the agents cannot influence. */}
           {unanimous
-            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree — ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
-            : `Recommended: ${proposals[winner]?.name} — best measured fill. You pick who executes.`}
+            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+            : `Recommended: ${proposals[winner]?.name}, best measured fill. You pick who executes.`}
         </motion.div>
       ) : null}
     </div>
