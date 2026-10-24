@@ -174,7 +174,7 @@ export function BankPicker({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'border-bubble-agent-border bg-background/70 hover:border-brand/40 flex h-12 w-full items-center gap-2.5 rounded-2xl border px-3 text-left text-sm transition-colors dark:border-white/[0.07] dark:bg-[hsl(240_4%_13%)]',
+          'border-bubble-agent-border bg-background/70 hover:border-brand/40 flex h-12 w-full items-center gap-2.5 rounded-2xl border px-3 text-left text-sm transition-colors dark:border-white/[0.07] dark:bg-[#191a33]',
           open && 'border-brand/60 ring-brand/15 ring-4'
         )}
       >
