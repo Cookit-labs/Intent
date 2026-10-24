@@ -15,7 +15,7 @@ import { ChainMark, type ChainLogoId } from '@intent/ui'
 import { cn } from '@intent/ui'
 import { ArrowUpRight, Check, ChevronDown } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
 import { useWallet } from '../../hooks/use-wallet'
@@ -93,7 +93,12 @@ function entriesFor(): Entry[] {
   return out
 }
 
-export function ChainSwitcher(): JSX.Element {
+export function ChainSwitcher({
+  caption,
+}: {
+  /** A line under the pill, such as the trade cap. The menu opens below it. */
+  caption?: ReactNode
+} = {}): JSX.Element {
   const { slug, network, descriptor } = useChain()
   const router = useRouter()
   const pathname = usePathname()
@@ -152,7 +157,7 @@ export function ChainSwitcher(): JSX.Element {
     }`
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative flex flex-col items-start gap-0.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -183,12 +188,13 @@ export function ChainSwitcher(): JSX.Element {
           )}
         />
       </button>
+      {caption}
 
       {open ? (
         <div
           role="menu"
           aria-label="Choose a chain"
-          className="border-border bg-card absolute left-0 z-50 mt-2 w-64 rounded-2xl border p-1.5 shadow-xl"
+          className="border-border bg-card absolute left-0 top-full z-50 mt-2 w-64 rounded-2xl border p-1.5 shadow-xl"
         >
           <p className="text-muted-foreground px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider">
             Network

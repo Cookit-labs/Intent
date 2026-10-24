@@ -37,12 +37,13 @@ export function Header({
         {/* The network's status sits under the switcher as its caption, so the
             two read as one control. Hidden below `md`: it is the only part
             here that is purely informational. */}
-        <div className="flex flex-col items-start gap-0.5">
-          <ChainSwitcher />
-          <div className="hidden pl-2 md:block">
-            <NetworkStatus tradeCapUsd={tradeCapUsd} />
-          </div>
-        </div>
+        <ChainSwitcher
+          caption={
+            <div className="hidden pl-2 md:block">
+              <NetworkStatus tradeCapUsd={tradeCapUsd} />
+            </div>
+          }
+        />
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
