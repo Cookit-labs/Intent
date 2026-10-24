@@ -88,6 +88,30 @@ export function VenueLogo({
   )
 }
 
+/**
+ * The venue's own colour, as light behind its tile: its logo, blown up and
+ * blurred. Gives each tile depth without adding words. A venue with no logo
+ * glows in the brand purple.
+ */
+function VenueGlow({ venue }: { venue: Venue }): JSX.Element {
+  const [failed, setFailed] = useState(false)
+  const base =
+    'pointer-events-none absolute -left-10 -top-10 h-48 w-48 rounded-full opacity-25 blur-3xl transition-opacity duration-300 group-hover:opacity-45'
+  if (failed || venue.category === 'infrastructure') {
+    return <span aria-hidden className={cn(base, 'bg-brand')} />
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/images/venues/${venue.id}.webp`}
+      alt=""
+      aria-hidden
+      onError={() => setFailed(true)}
+      className={cn(base, 'object-cover')}
+    />
+  )
+}
+
 export function VenueCard({
   venue,
   live,
@@ -113,14 +137,18 @@ export function VenueCard({
       // What the app can actually do here, for anyone who wants the detail.
       title={venue.capability ?? venue.bestFor}
       className={cn(
-        'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border group relative flex flex-col justify-between gap-4 rounded-3xl border p-4 transition-all duration-200 sm:aspect-square',
+        'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border group relative isolate flex flex-col justify-between gap-4 overflow-hidden rounded-3xl border p-4 transition-all duration-200 sm:aspect-square',
         live
           ? 'hover:border-brand/30 hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-12px_hsl(var(--brand)/0.35)]'
           : 'hover:border-brand/20 opacity-80 hover:opacity-100'
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <VenueLogo venue={venue} className={cn('h-14 w-14', !live && 'grayscale-[40%]')} />
+      <VenueGlow venue={venue} />
+      <div className="relative flex items-start justify-between gap-2">
+        <VenueLogo
+          venue={venue}
+          className={cn('h-12 w-12 shadow-lg shadow-black/20', !live && 'grayscale-[40%]')}
+        />
         <div className="flex items-center gap-1.5">
           {showChains ? (
             <div className="flex -space-x-1.5">
@@ -153,7 +181,7 @@ export function VenueCard({
         </div>
       </div>
 
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="relative flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-[15px] font-semibold">{venue.name}</span>
           {live && integration === 'executes' ? <VerifiedTick /> : null}
@@ -173,6 +201,24 @@ export function VenueCard({
             .join(' · ')}
         </div>
         <p className="mt-1.5 line-clamp-2 text-sm leading-snug">{venue.bestFor}</p>
+        <div className="border-bubble-agent-foreground/10 mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-medium">
+          {live ? (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="bg-success absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:animate-none" />
+                <span className="bg-success relative inline-flex h-2 w-2 rounded-full" />
+              </span>
+              <span>{integration === 'quotes' ? 'Prices live' : 'Agents trade here'}</span>
+            </>
+          ) : (
+            <>
+              <span className="bg-muted-foreground/50 h-2 w-2 rounded-full" />
+              <span className="text-muted-foreground">
+                {notHere !== undefined ? 'Coming soon' : 'Listed'}
+              </span>
+            </>
+          )}
+        </div>
       </div>
     </a>
   )
