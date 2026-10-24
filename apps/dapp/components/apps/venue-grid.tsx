@@ -174,7 +174,7 @@ export function VenueGrid({
             <span className="bg-success h-1.5 w-1.5 rounded-full" /> Live now
             <span className="tabular-nums opacity-60">{liveShown.length}</span>
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-4">
             {liveShown.map((r) => (
               <VenueCard key={r.venue.id} venue={r.venue} live notHere={r.notHere} />
             ))}
@@ -188,7 +188,7 @@ export function VenueGrid({
             {restTitle}
             <span className="tabular-nums opacity-60">{restShown.length}</span>
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-4">
             {restShown.map((r) => (
               <VenueCard key={r.venue.id} venue={r.venue} live={false} notHere={r.notHere} />
             ))}
