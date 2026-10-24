@@ -34,11 +34,14 @@ export function Header({
     <header className="flex h-16 shrink-0 items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         {menuButton}
-        <ChainSwitcher />
-        {/* Hidden below `md`: it is the only element here that is purely
-            informational, so it is the right one to drop when space runs out. */}
-        <div className="hidden md:block">
-          <NetworkStatus tradeCapUsd={tradeCapUsd} />
+        {/* The network's status sits under the switcher as its caption, so the
+            two read as one control. Hidden below `md`: it is the only part
+            here that is purely informational. */}
+        <div className="flex flex-col items-start gap-0.5">
+          <ChainSwitcher />
+          <div className="hidden pl-2 md:block">
+            <NetworkStatus tradeCapUsd={tradeCapUsd} />
+          </div>
         </div>
       </div>
 

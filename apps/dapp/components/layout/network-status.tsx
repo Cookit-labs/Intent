@@ -2,7 +2,6 @@
 
 import { activeNetwork, isMainnet, isMultiNetwork, stellarNetwork } from '@intent/config'
 import { Badge, Button } from '@intent/ui'
-import { ShieldCheck } from 'lucide-react'
 
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
 import { mismatchLabel } from '../../lib/wallet-network'
@@ -107,8 +106,7 @@ export function NetworkStatus({
         )
       ) : isMainnet() ? (
         tradeCapUsd !== undefined && slug === 'stellar' ? (
-          <span className="text-muted-foreground hidden items-center gap-1.5 text-xs sm:inline-flex">
-            <ShieldCheck className="h-3.5 w-3.5" />
+          <span className="text-muted-foreground text-[11px] leading-none">
             Trades up to ${tradeCapUsd}
           </span>
         ) : null
