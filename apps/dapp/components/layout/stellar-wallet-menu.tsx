@@ -1,17 +1,17 @@
 'use client'
 
 import { stellarNetwork } from '@intent/config'
-import { Button, Skeleton } from '@intent/ui'
+import { Button, Skeleton, cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUpRight,
   Check,
+  ChevronDown,
   Copy,
   ExternalLink,
   LogOut,
-  Wallet,
 } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
@@ -22,6 +22,7 @@ import {
   type Activity,
   type Holding,
 } from '../../lib/wallet/account-activity'
+import { agentAvatarUri } from '../../lib/agents/persona'
 import { timeAgo } from '../../lib/wallet/time-ago'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
@@ -34,15 +35,6 @@ function short(address: string): string {
 
 function amount(value: string): string {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 7 })
-}
-
-/** Two hues taken from the address, so the same account always looks the same. */
-function avatarStyle(address: string): { background: string } {
-  let h = 0
-  for (const ch of address) h = (h * 31 + ch.charCodeAt(0)) % 360
-  return {
-    background: `linear-gradient(135deg, hsl(${h} 62% 58%), hsl(${(h + 48) % 360} 62% 46%))`,
-  }
 }
 
 /**
@@ -120,15 +112,36 @@ export function StellarWalletMenu({
         aria-expanded={open}
         aria-label={`Wallet ${short(address)}`}
         title={short(address)}
-        className="border-border bg-card hover:bg-muted/60 focus-visible:ring-ring relative inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2"
+        className="border-border bg-card hover:bg-muted/60 focus-visible:ring-ring inline-flex h-9 items-center gap-2 rounded-md border pl-1.5 pr-2 transition-colors focus-visible:outline-none focus-visible:ring-2"
       >
-        {walletIcon !== undefined ? (
-          <Image src={walletIcon} alt="" width={20} height={20} unoptimized className="h-5 w-5" />
-        ) : (
-          <Wallet className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-        )}
-        <span
-          className="bg-success ring-background absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2"
+        <span className="relative shrink-0">
+          {walletIcon !== undefined ? (
+            <span className="bg-bubble-me flex h-6 w-6 items-center justify-center rounded-full">
+              <Image
+                src={walletIcon}
+                alt=""
+                width={16}
+                height={16}
+                unoptimized
+                className="h-4 w-4"
+              />
+            </span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={agentAvatarUri(address)}
+              alt=""
+              className="h-6 w-6 rounded-full [image-rendering:pixelated]"
+            />
+          )}
+          <span
+            className="bg-success ring-card absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2"
+            aria-hidden="true"
+          />
+        </span>
+        <span className="text-sm font-medium tabular-nums">{short(address)}</span>
+        <ChevronDown
+          className={cn('text-muted-foreground h-4 w-4 transition-transform', open && 'rotate-180')}
           aria-hidden="true"
         />
       </button>
@@ -140,7 +153,12 @@ export function StellarWalletMenu({
           className="border-border bg-background absolute right-0 z-50 mt-2 w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border shadow-lg"
         >
           <div className="flex items-center gap-3 px-4 pt-4">
-            <span className="h-8 w-8 shrink-0 rounded-full" style={avatarStyle(address)} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={agentAvatarUri(address)}
+              alt=""
+              className="h-8 w-8 shrink-0 rounded-full [image-rendering:pixelated]"
+            />
             <div className="min-w-0 flex-1">
               <p className="font-mono text-sm">{short(address)}</p>
               <p className="text-muted-foreground text-xs">{descriptor.networkLabel}</p>
