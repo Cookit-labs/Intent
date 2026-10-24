@@ -2321,7 +2321,7 @@ export function IntentChat(): JSX.Element {
       >
         <ComposerInput
           onSubmit={handleSubmit}
-          showExamples={!parsed && thread.length === 0}
+          showExamples={message === null && thread.length === 0}
           {...(clarifying !== null
             ? { placeholder: 'Type your answer…' }
             : message !== null
