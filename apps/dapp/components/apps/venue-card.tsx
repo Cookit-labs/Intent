@@ -48,7 +48,7 @@ export function VerifiedTick({ className }: { className?: string }): JSX.Element
  * before hydration. A server-rendered `<img>` can error before React attaches
  * `onError`, which left a blank frame where the fallback belonged.
  */
-function useImageFailure(): [React.RefObject<HTMLImageElement>, boolean, () => void] {
+function useImageFailure(): [React.RefObject<HTMLImageElement | null>, boolean, () => void] {
   const ref = useRef<HTMLImageElement>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
