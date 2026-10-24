@@ -122,8 +122,30 @@ export const SUBMIT_PROPOSAL_TOOL = {
   },
 }
 
-/** Reasoning is rendered in a chat bubble, so an essay is a defect. */
-export const MAX_REASONING_CHARS = 240
+/**
+ * Reasoning is rendered in a chat bubble, so an essay is a defect. Two
+ * sentences with real figures run past 240 characters, which is where the cap
+ * used to sit and why replies were cut off mid-word.
+ */
+export const MAX_REASONING_CHARS = 360
+
+/**
+ * Reasoning shortened to fit, at a sentence end where one fits and at a word
+ * boundary otherwise, so a reply is never cut off mid-word.
+ */
+export function clipReasoning(text: string, max: number = MAX_REASONING_CHARS): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= max) return trimmed
+  const head = trimmed.slice(0, max)
+  const sentenceEnd = Math.max(
+    head.lastIndexOf('. '),
+    head.lastIndexOf('! '),
+    head.lastIndexOf('? ')
+  )
+  if (sentenceEnd > 0) return head.slice(0, sentenceEnd + 1)
+  const word = head.slice(0, max - 1).lastIndexOf(' ')
+  return `${head.slice(0, word > 0 ? word : max - 1).replace(/[,;:]$/, '')}…`
+}
 
 /** Above this, a projection is not a plan — it is a hallucination. */
 export const MAX_SLIPPAGE_PCT = 5
@@ -347,7 +369,7 @@ export function validateProposal(
     ok: true,
     value: {
       ...value,
-      reasoning: value.reasoning.slice(0, MAX_REASONING_CHARS),
+      reasoning: clipReasoning(value.reasoning),
       venues: venues.length > 0 ? venues : ctx.allowedVenueIds.slice(0, 1),
       thenAction,
       thenVenue,

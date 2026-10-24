@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_SLIPPAGE_PCT,
   SUBMIT_PROPOSAL_TOOL,
+  clipReasoning,
   proposalToolSchema,
   validateProposal,
 } from '../agents/tool-schema'
@@ -269,5 +270,22 @@ describe('the route rate is the route rate', () => {
 
   it('still rejects a fabricated figure', () => {
     expect(validateProposal(proposal(880), ctx).ok).toBe(false)
+  })
+})
+
+describe('clipReasoning', () => {
+  it('leaves reasoning under the cap alone', () => {
+    expect(clipReasoning('Fill now on horizon-1.', 360)).toBe('Fill now on horizon-1.')
+  })
+
+  it('cuts at the last whole sentence, never mid-word', () => {
+    const text = 'First sentence is here. Second one is also here. Third runs far past the cap.'
+    expect(clipReasoning(text, 50)).toBe('First sentence is here. Second one is also here.')
+  })
+
+  it('cuts one overlong sentence at a word and marks it', () => {
+    const out = clipReasoning('a single immediate fill is right at this size of order', 30)
+    expect(out).toBe('a single immediate fill is…')
+    expect(out.length).toBeLessThanOrEqual(30)
   })
 })
