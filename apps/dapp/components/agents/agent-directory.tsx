@@ -24,7 +24,7 @@ function AgentRow({ agent }: { agent: PublicAgent }): JSX.Element {
       className="border-border hover:border-foreground/40 flex flex-col gap-4 rounded-xl border p-5 transition-colors"
     >
       <div className="flex items-center gap-3">
-        <AgentAvatar gradient={agent.gradient} name={agent.name} className="h-10 w-10" />
+        <AgentAvatar seed={agent.key} name={agent.name} className="h-10 w-10" />
         <div className="flex flex-1 flex-col">
           <span className="text-foreground text-sm font-semibold">{agent.name}</span>
           <span className="text-muted-foreground text-xs">via {agent.providerName}</span>

@@ -30,6 +30,12 @@
     --surface-elevated: 60 20% 95.7%;
     --surface-card: 60 20% 95.7%;
     --radius: 0.4rem;
+    /* Chat bubbles: the user's in a light brand purple, the agents' in white. */
+    --bubble-me: 236 79% 92%;
+    --bubble-me-foreground: 237 51% 28%;
+    --bubble-agent: 0 0% 100%;
+    --bubble-agent-foreground: 60 5% 10%;
+    --bubble-agent-border: 240 37% 93%;
   }
 
   /*
@@ -85,6 +91,14 @@
     --surface-base: 0 0% 6%;
     --surface-elevated: 0 0% 11%;
     --surface-card: 0 0% 9%;
+
+    /* Agents go purple-black rather than grey, so a reply still reads as the
+       brand's side of the thread. */
+    --bubble-me: 237 72% 87%;
+    --bubble-me-foreground: 238 51% 23%;
+    --bubble-agent: 244 36% 17%;
+    --bubble-agent-foreground: 240 100% 97%;
+    --bubble-agent-border: 244 30% 24%;
   }
 }
 

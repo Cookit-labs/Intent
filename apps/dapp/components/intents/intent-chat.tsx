@@ -2,7 +2,8 @@
 
 import { cn } from '@intent/ui'
 import { activeNetwork, isMainnet, stellarNetwork } from '@intent/config'
-import { Bell, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Bell, CheckCheck, Clock, Inbox, Plus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
@@ -105,6 +106,7 @@ import { OpenOrders } from './open-orders'
 import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
+import { agentBubble, systemPill, userBubble } from './bubble'
 
 /**
  * The price of the only asset an anchor withdraws.
@@ -117,12 +119,18 @@ import { PriceTicker } from './price-ticker'
  */
 const USDC_PRICE_USD = 1
 
-function TrafficLights(): JSX.Element {
+/** Who the user is talking to, the way a chat app heads a conversation. */
+function ChatIdentity(): JSX.Element {
   return (
-    <div className="flex items-center gap-1.5" aria-hidden>
-      <span className="h-3 w-3 rounded-full" style={{ background: '#ff5f57' }} />
-      <span className="h-3 w-3 rounded-full" style={{ background: '#febc2e' }} />
-      <span className="h-3 w-3 rounded-full" style={{ background: '#28c840' }} />
+    <div className="flex items-center gap-2.5">
+      <span className="bg-brand text-brand-foreground relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
+        <Sparkles className="h-4 w-4" />
+        <span className="border-card bg-success absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2" />
+      </span>
+      <div className="flex flex-col leading-tight">
+        <span className="text-foreground text-sm font-semibold">Agent network</span>
+        <span className="text-muted-foreground text-[11px]">Live settlement</span>
+      </div>
     </div>
   )
 }
@@ -1664,18 +1672,15 @@ export function IntentChat(): JSX.Element {
   return (
     <div className="border-border bg-card flex h-[75vh] max-h-[720px] min-h-[420px] flex-col overflow-hidden rounded-xl border sm:min-h-[520px] sm:rounded-2xl">
       {/* Window chrome */}
-      <div className="border-border relative flex shrink-0 items-center border-b px-4 py-3">
-        <TrafficLights />
+      <div className="border-border bg-card/80 relative flex shrink-0 items-center gap-1 border-b px-4 py-2.5 backdrop-blur">
+        <ChatIdentity />
         {/* The rate every dollar amount on this page is sized against.
             "$20 worth of XLM" becomes a token count using this number, so
             showing it lets the user see the conversion before writing the
             sentence rather than after signing it. Hidden on narrow screens,
             where the centred label and the actions already compete. */}
-        <span className="ml-3 hidden sm:inline-flex">
+        <span className="bg-muted/60 ml-4 hidden rounded-full px-3 py-1 md:inline-flex">
           <PriceTicker prices={swap.priceDetail} />
-        </span>
-        <span className="text-muted-foreground absolute left-1/2 -translate-x-1/2 text-xs">
-          Live settlement
         </span>
         {/* Past conversations. The chat keeps nothing across a reload on its
             own, so without this the agents' reasoning is lost the moment the
@@ -1728,7 +1733,7 @@ export function IntentChat(): JSX.Element {
         >
           <Bell className="h-4 w-4" />
           {standing.due.length > 0 ? (
-            <span className="bg-foreground absolute right-1 top-1 h-1.5 w-1.5 rounded-full" />
+            <span className="bg-brand absolute right-1 top-1 h-1.5 w-1.5 rounded-full" />
           ) : null}
         </button>
 
@@ -1749,7 +1754,7 @@ export function IntentChat(): JSX.Element {
         >
           <Inbox className="h-4 w-4" />
           {inbox.items.length > 0 ? (
-            <span className="bg-foreground text-background absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none">
+            <span className="bg-brand text-brand-foreground absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none">
               {inbox.items.length}
             </span>
           ) : null}
@@ -1836,7 +1841,7 @@ export function IntentChat(): JSX.Element {
         {/* The scrolling thread. Separate from the wrapper above so the
             overlays position against the panel rather than against content
             that moves under them. */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-5">
           {/* Gated on the message, not on a parsed *trade*.
               `parsed` answers "was a trade read", and three submit paths
               deliberately leave it null: a standing rule, and a supply of
@@ -1848,8 +1853,8 @@ export function IntentChat(): JSX.Element {
               was as invisible as a success. */}
           {!message ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-              <span className="border-border text-foreground flex h-11 w-11 items-center justify-center rounded-full border">
-                <Sparkles className="h-5 w-5" />
+              <span className="bg-bubble-me text-bubble-me-foreground flex h-14 w-14 items-center justify-center rounded-full">
+                <Sparkles className="h-6 w-6" />
               </span>
               <p className="text-muted-foreground max-w-sm text-sm">
                 Say what you want to happen. Autonomous agents compete to find the best execution —
@@ -1862,7 +1867,7 @@ export function IntentChat(): JSX.Element {
                 it ran. Saying so matters: signing against a rate from an hour
                 ago is a different decision from signing a fresh one. */}
               {restored !== null ? (
-                <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs">
+                <div className={systemPill}>
                   <Clock className="h-3.5 w-3.5" />
                   Reopened from{' '}
                   {new Date(restored.createdAt).toLocaleString(undefined, {
@@ -1884,47 +1889,43 @@ export function IntentChat(): JSX.Element {
               {/* The turns before this one, quieter than the open intent. */}
               {thread.map((turn) => (
                 <div key={turn.id} className="flex flex-col items-end gap-1">
-                  <div className="bg-muted text-muted-foreground max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-sm">
-                    {turn.text}
-                  </div>
-                  <span className="text-muted-foreground text-xs">
+                  <div className={cn(userBubble, 'opacity-70')}>{turn.text}</div>
+                  <span className="text-muted-foreground mr-2 flex items-center gap-1 text-[11px]">
+                    {turn.executed ? <CheckCheck className="text-brand h-3 w-3" /> : null}
                     {turn.executed ? 'Done' : 'Not executed'}
                   </span>
                 </div>
               ))}
 
-              <div className="flex justify-end">
-                <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
-                  {message}
-                </div>
-              </div>
+              <motion.div
+                key={message}
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="flex justify-end"
+              >
+                <div className={userBubble}>{message}</div>
+              </motion.div>
               {restored?.conversation?.map((line, i) => (
                 <div
                   key={`c-${i}`}
                   className={cn('flex', line.role === 'user' ? 'justify-end' : 'justify-start')}
                 >
-                  <div
-                    className={cn(
-                      'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm',
-                      line.role === 'user'
-                        ? 'bg-foreground text-background rounded-br-sm'
-                        : 'bg-muted text-foreground rounded-bl-sm'
-                    )}
-                  >
+                  <div className={line.role === 'user' ? userBubble : agentBubble}>
                     {line.content}
                   </div>
                 </div>
               ))}
               {restored?.outcome !== undefined ? (
                 <div className="flex justify-start">
-                  <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
+                  <div className={agentBubble}>
                     {restored.outcome}
                     {restored.txHash !== undefined ? (
                       <a
                         href={`${stellarNetwork.blockExplorerUrl}/tx/${restored.txHash}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-muted-foreground mt-1 block text-xs underline underline-offset-2"
+                        className="mt-1 block text-xs underline underline-offset-2 opacity-70"
                       >
                         View transaction
                       </a>
@@ -1935,17 +1936,13 @@ export function IntentChat(): JSX.Element {
               {restored !== null &&
               restored.outcome === undefined &&
               Object.keys(restored.proposals).length === 0 ? (
-                <p className="text-muted-foreground text-center text-xs">
-                  No agent discussion was recorded for this intent.
-                </p>
+                <p className={systemPill}>No agent discussion was recorded for this intent.</p>
               ) : null}
 
               {/* What was added to the open intent while it was being decided. */}
               {notes.map((note, i) => (
                 <div key={`${i}-${note}`} className="flex justify-end">
-                  <div className="border-border text-foreground max-w-[85%] rounded-2xl rounded-br-sm border px-4 py-2 text-sm">
-                    {note}
-                  </div>
+                  <div className={userBubble}>{note}</div>
                 </div>
               ))}
               {/* The questions asked before the agents ran, and the answers. */}
@@ -1956,26 +1953,20 @@ export function IntentChat(): JSX.Element {
                     .map((turn, i) =>
                       turn.role === 'assistant' ? (
                         <div key={`q-${i}`} className="flex justify-start">
-                          <div className="bg-muted text-foreground max-w-[85%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm">
-                            {turn.content}
-                          </div>
+                          <div className={agentBubble}>{turn.content}</div>
                         </div>
                       ) : (
                         <div key={`a-${i}`} className="flex justify-end">
-                          <div className="bg-foreground text-background max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm">
-                            {turn.content}
-                          </div>
+                          <div className={userBubble}>{turn.content}</div>
                         </div>
                       )
                     )
                 : null}
               {clarifyBusy ? (
-                <p className="text-muted-foreground text-center text-xs">Thinking…</p>
+                <div className={cn(agentBubble, 'text-muted-foreground w-fit')}>Thinking…</div>
               ) : null}
               {notes.length > 0 && competition.phase === 'competing' ? (
-                <p className="text-muted-foreground text-center text-xs">
-                  Agents are working again with your note.
-                </p>
+                <p className={systemPill}>Agents are working again with your note.</p>
               ) : null}
               {/* Changes to how the recommendation is carried out, offered once
                   the agents have answered and before anything is signed. */}
@@ -2026,8 +2017,8 @@ export function IntentChat(): JSX.Element {
                 fund is refused here rather than allowed to rest for hours and
                 then fail. */}
               {affordError !== null ? (
-                <div className="border-border rounded-2xl border border-dashed p-4">
-                  <p className="text-foreground whitespace-pre-line text-sm">{affordError}</p>
+                <div className={cn(agentBubble, 'border-dashed')}>
+                  <p className="whitespace-pre-line">{affordError}</p>
                 </div>
               ) : null}
 
@@ -2148,8 +2139,8 @@ export function IntentChat(): JSX.Element {
                 reads as a dropped intent, which is the complaint that started
                 this work. */}
               {parsing && pending === null ? (
-                <div className="text-muted-foreground flex items-center gap-2 p-1 text-xs">
-                  <Sparkles className="h-3.5 w-3.5" />
+                <div className={systemPill}>
+                  <Sparkles className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
                   Reading your intent…
                 </div>
               ) : null}
@@ -2273,7 +2264,7 @@ export function IntentChat(): JSX.Element {
       </div>
 
       {/* Composer */}
-      <div className="border-border shrink-0 border-t p-3">
+      <div className="border-border bg-card/80 shrink-0 border-t p-3 backdrop-blur">
         <ComposerInput
           onSubmit={handleSubmit}
           showExamples={!parsed && thread.length === 0}

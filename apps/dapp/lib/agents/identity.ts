@@ -1,5 +1,6 @@
 import type { AgentKey, BrainProvider } from './brain'
 import { PROVIDERS } from './brains/providers'
+import { keyHash } from './persona'
 
 /**
  * An agent is a model. Everything that identifies one on a card, in history
@@ -45,11 +46,6 @@ export function agentName(provider: BrainProvider, model: string): string {
  * deploys and old history rows without anyone maintaining a palette.
  */
 export function agentGradient(key: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < key.length; i += 1) {
-    hash ^= key.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  const hue = hash % 360
+  const hue = keyHash(key) % 360
   return `linear-gradient(135deg, hsl(${hue} 35% 55%), hsl(${(hue + 40) % 360} 30% 70%))`
 }

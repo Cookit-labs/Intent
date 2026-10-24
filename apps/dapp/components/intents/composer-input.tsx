@@ -23,7 +23,7 @@ function MenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="text-foreground hover:bg-muted flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors"
+      className="text-foreground hover:bg-muted flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors"
     >
       <Icon className="text-muted-foreground h-4 w-4" />
       {label}
@@ -71,7 +71,7 @@ export function ComposerInput({
               type="button"
               disabled={disabled}
               onClick={() => onSubmit(ex)}
-              className="border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground rounded-full border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
+              className="bg-bubble-me/60 text-bubble-me-foreground hover:bg-bubble-me rounded-full px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
             >
               {ex}
             </button>
@@ -81,7 +81,7 @@ export function ComposerInput({
 
       <div
         className={cn(
-          'border-border focus-within:border-foreground/40 flex items-end gap-2 rounded-full border py-2 pl-2 pr-2 transition-colors',
+          'bg-muted/60 focus-within:border-brand/40 focus-within:bg-background flex items-end gap-2 rounded-[26px] border border-transparent p-1.5 transition-colors',
           disabled && 'opacity-60'
         )}
       >
@@ -91,14 +91,17 @@ export function ComposerInput({
             onClick={() => setMenuOpen((o) => !o)}
             aria-label="Add to intent"
             aria-expanded={menuOpen}
-            className="border-border text-muted-foreground hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors"
+            className={cn(
+              'bg-background text-muted-foreground hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm transition-all',
+              menuOpen && 'text-foreground rotate-45'
+            )}
           >
             <Plus className="h-4 w-4" />
           </button>
           {menuOpen ? (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="border-border bg-card absolute bottom-full left-0 z-20 mb-2 w-48 overflow-hidden rounded-xl border shadow-lg">
+              <div className="border-border bg-card absolute bottom-full left-0 z-20 mb-2 w-52 overflow-hidden rounded-2xl border p-1 shadow-xl">
                 {onReset ? (
                   <MenuItem
                     icon={Sparkles}
@@ -132,7 +135,7 @@ export function ComposerInput({
           onClick={submit}
           disabled={disabled || !text.trim()}
           aria-label="Send intent"
-          className="bg-foreground text-background flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="bg-brand text-brand-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all hover:opacity-90 disabled:scale-90 disabled:opacity-30"
         >
           <ArrowUp className="h-4 w-4" />
         </button>

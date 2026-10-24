@@ -4,7 +4,6 @@ import { cn } from '@intent/ui'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
-import { agentGradient } from '../../lib/agents/identity'
 import type { Confidence, RankedAgent } from '../../lib/agents/ranking'
 import {
   countRankableRaces,
@@ -123,11 +122,7 @@ export function AgentLeaderboard(): JSX.Element {
                 {meaningful ? positions[i] : '–'}
               </span>
               <div className="flex min-w-0 items-center gap-3">
-                <AgentAvatar
-                  gradient={agentGradient(row.key)}
-                  name={row.name}
-                  className="h-8 w-8"
-                />
+                <AgentAvatar seed={row.key} name={row.name} className="h-8 w-8" />
                 <div className="flex min-w-0 flex-col">
                   <span className="text-foreground truncate text-sm font-medium">{row.name}</span>
                   {sharesRank ? (
