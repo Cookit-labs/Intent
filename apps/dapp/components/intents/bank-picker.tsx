@@ -3,7 +3,8 @@
 import { cn } from '@intent/ui'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, ChevronDown, Loader2, Search } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 import { keyHash } from '../../lib/agents/persona'
 
@@ -85,6 +86,44 @@ export function BankPicker({
   const [active, setActive] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  // Where the list sits on screen. It is drawn over the whole page rather than
+  // inside the chat, whose scrolling box clipped it, so it is placed against
+  // the trigger and kept there while anything scrolls.
+  const [place, setPlace] = useState<{
+    left: number
+    width: number
+    edge: number
+    up: boolean
+    listMax: number
+  } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) return
+    function measure(): void {
+      const r = triggerRef.current?.getBoundingClientRect()
+      if (r === undefined) return
+      const below = window.innerHeight - r.bottom - 12
+      const above = r.top - 12
+      const up = below < 320 && above > below
+      const room = up ? above : below
+      setPlace({
+        left: r.left,
+        width: Math.max(r.width, 300),
+        edge: up ? window.innerHeight - r.top + 8 : r.bottom + 8,
+        up,
+        // The search row takes about 45px of the room.
+        listMax: Math.max(160, Math.min(320, room - 56)),
+      })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open])
 
   const selected = banks?.find((b) => b.code === value)
   const matches = useMemo(() => {
@@ -128,6 +167,7 @@ export function BankPicker({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         id={id}
         type="button"
         aria-haspopup="listbox"
@@ -151,62 +191,84 @@ export function BankPicker({
         />
       </button>
 
-      <AnimatePresence>
-        {open ? (
-          <>
-            <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-            <motion.div
-              initial={{ opacity: 0, y: -4, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -4, scale: 0.98 }}
-              transition={{ duration: 0.15 }}
-              className="border-border bg-card absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-2xl border shadow-xl sm:min-w-[300px]"
-            >
-              <div className="border-border flex items-center gap-2 border-b px-3">
-                <Search className="text-muted-foreground h-4 w-4" />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e) => {
-                    setQuery(e.target.value)
-                    setActive(0)
-                  }}
-                  onKeyDown={onKeyDown}
-                  placeholder="Search banks"
-                  aria-label="Search banks"
-                  className="placeholder:text-muted-foreground h-11 flex-1 bg-transparent text-sm outline-none"
-                />
-              </div>
-              <ul ref={listRef} role="listbox" className="max-h-64 overflow-y-auto p-1">
-                {matches.length === 0 ? (
-                  <li className="text-muted-foreground px-3 py-6 text-center text-sm">
-                    No bank matches “{query}”
-                  </li>
-                ) : (
-                  matches.map((b, i) => (
-                    <li
-                      key={b.code}
-                      data-index={i}
-                      role="option"
-                      aria-selected={b.code === value}
-                      onMouseEnter={() => setActive(i)}
-                      onClick={() => choose(b)}
-                      className={cn(
-                        'flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm',
-                        i === active && 'bg-muted'
-                      )}
+      {typeof document === 'undefined'
+        ? null
+        : createPortal(
+            <AnimatePresence>
+              {open && place !== null ? (
+                <>
+                  <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, y: place.up ? 4 : -4, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: place.up ? 4 : -4, scale: 0.98 }}
+                    transition={{ duration: 0.15 }}
+                    style={{
+                      left: place.left,
+                      width: place.width,
+                      ...(place.up ? { bottom: place.edge } : { top: place.edge }),
+                    }}
+                    className="border-border bg-card fixed z-[61] overflow-hidden rounded-2xl border shadow-xl"
+                  >
+                    <div className="border-border flex items-center gap-2 border-b px-3">
+                      <Search className="text-muted-foreground h-4 w-4" />
+                      <input
+                        ref={searchRef}
+                        value={query}
+                        onChange={(e) => {
+                          setQuery(e.target.value)
+                          setActive(0)
+                        }}
+                        onKeyDown={onKeyDown}
+                        placeholder="Search banks"
+                        aria-label="Search banks"
+                        className="placeholder:text-muted-foreground h-11 flex-1 bg-transparent text-sm outline-none"
+                      />
+                    </div>
+                    <ul
+                      ref={listRef}
+                      role="listbox"
+                      style={{ maxHeight: place.listMax }}
+                      className="scrollbar-none overflow-y-auto p-1"
                     >
-                      <BankMark bank={b} />
-                      <span className="flex-1 truncate">{b.name}</span>
-                      {b.code === value ? <Check className="text-brand h-4 w-4" /> : null}
-                    </li>
-                  ))
-                )}
-              </ul>
-            </motion.div>
-          </>
-        ) : null}
-      </AnimatePresence>
+                      {matches.length === 0 ? (
+                        <li className="text-muted-foreground flex items-center justify-center gap-2 px-3 py-6 text-center text-sm">
+                          {loading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+                              Loading banks…
+                            </>
+                          ) : (
+                            <>No bank matches “{query}”</>
+                          )}
+                        </li>
+                      ) : (
+                        matches.map((b, i) => (
+                          <li
+                            key={b.code}
+                            data-index={i}
+                            role="option"
+                            aria-selected={b.code === value}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(b)}
+                            className={cn(
+                              'flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm',
+                              i === active && 'bg-muted'
+                            )}
+                          >
+                            <BankMark bank={b} />
+                            <span className="flex-1 truncate">{b.name}</span>
+                            {b.code === value ? <Check className="text-brand h-4 w-4" /> : null}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  </motion.div>
+                </>
+              ) : null}
+            </AnimatePresence>,
+            document.body
+          )}
     </div>
   )
 }
