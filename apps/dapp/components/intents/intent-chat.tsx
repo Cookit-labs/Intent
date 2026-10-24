@@ -43,7 +43,6 @@ import { NairaOrderTracker, NairaPayoutCard } from './naira-payout-card'
 import {
   detectPayout,
   namedPayoutAsset,
-  preselectPayoutPath,
   readPayoutSource,
   unsupportedCurrencyMessage,
 } from '../../lib/naira/currency'
@@ -868,7 +867,8 @@ export function IntentChat(): JSX.Element {
       setNairaForm({
         key: Date.now(),
         asset: 'xlm',
-        path: preselectPayoutPath(text),
+        // Linq takes USDC only, so a cash-out of XLM is always a swap first.
+        path: 'usdc',
         ...(source.amountXlm !== undefined ? { amountXlm: source.amountXlm } : {}),
       })
       return
@@ -2091,7 +2091,6 @@ export function IntentChat(): JSX.Element {
                   {...(balances?.trustlines?.['USDC']?.balance !== undefined
                     ? { balanceUsdc: balances.trustlines['USDC'].balance }
                     : {})}
-                  initialPath={nairaForm.path}
                   onOrder={(order) => {
                     if (turnId === null) return
                     updateTurn(

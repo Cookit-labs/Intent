@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNairaPayout } from '../../hooks/use-naira-payout'
 import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
+import { TokenIcon } from '../ui/token-icon'
 import { BankPicker, type Bank } from './bank-picker'
 
 /**
@@ -47,7 +48,7 @@ const STATUS_COPY: Record<NairaStatus, string> = {
  * rather than another message.
  */
 const SHELL =
-  'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)] dark:border-white/[0.06] dark:bg-[#1a1a1a] dark:text-foreground dark:shadow-[0_12px_40px_-16px_rgb(0_0_0/0.7)]'
+  'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)] dark:border-white/[0.06] dark:bg-[#0F0F0F] dark:text-foreground dark:shadow-[0_12px_40px_-16px_rgb(0_0_0/0.7)]'
 
 const FIELD =
   'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[#121212]'
@@ -144,7 +145,6 @@ export function NairaPayoutCard({
   balanceXlm,
   asset = 'xlm',
   balanceUsdc,
-  initialPath = 'xlm',
   onConvertFirst,
   onOrder,
   sourceSymbol,
@@ -163,8 +163,6 @@ export function NairaPayoutCard({
    */
   sourceSymbol?: string
   balanceOther?: string
-  /** Which route the form opens on; the user can change it. */
-  initialPath?: 'xlm' | 'usdc'
   /**
    * Hands the filled form to the swap flow. Absent means the convert-first
    * route is not offered and the form only pays XLM directly.
@@ -185,9 +183,10 @@ export function NairaPayoutCard({
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const other = sourceSymbol !== undefined
-  const [path, setPath] = useState<'xlm' | 'usdc'>(
-    other ? 'usdc' : onConvertFirst !== undefined ? initialPath : 'xlm'
-  )
+  // Linq pays out from USDC only, so XLM always goes through a swap into USDC
+  // first. "xlm" survives only as the direct route for USDC already held.
+  const path: 'xlm' | 'usdc' =
+    other || (asset === 'xlm' && onConvertFirst !== undefined) ? 'usdc' : 'xlm'
 
   const banks = useQuery({
     queryKey: ['naira-banks'],
@@ -401,47 +400,11 @@ export function NairaPayoutCard({
         subtitle="Paid straight to a Nigerian bank account"
       />
 
-      {onConvertFirst !== undefined && !other ? (
-        <div className="flex flex-col gap-2">
-          <div
-            role="radiogroup"
-            aria-label="How to pay"
-            className="bg-muted/70 grid grid-cols-2 rounded-full p-1 dark:bg-[#121212]"
-          >
-            {(
-              [
-                ['xlm', 'Send XLM directly'],
-                ['usdc', 'Convert to USDC first'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={path === value}
-                onClick={() => setPath(value)}
-                className={cn(
-                  'relative rounded-full px-3 py-2 text-xs font-medium transition-colors',
-                  path === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {path === value ? (
-                  <motion.span
-                    layoutId="naira-path-thumb"
-                    className="bg-background absolute inset-0 rounded-full shadow-sm"
-                    transition={{ type: 'spring', stiffness: 500, damping: 38 }}
-                  />
-                ) : null}
-                <span className="relative">{label}</span>
-              </button>
-            ))}
-          </div>
-          <p className="text-muted-foreground px-1 text-xs">
-            {path === 'xlm'
-              ? `One signature. Your ${symbol} goes straight to the payout.`
-              : 'Two signatures. Agents compete on the swap, then the USDC is paid out. Swap fees and slippage apply.'}
-          </p>
-        </div>
+      {path === 'usdc' && !other ? (
+        <p className="text-muted-foreground px-1 text-xs">
+          Linq pays out from USDC, so agents first compete to swap your {symbol} into USDC. Two
+          signatures; swap fees and slippage apply.
+        </p>
       ) : null}
 
       <div className="flex flex-col gap-1.5">
@@ -472,7 +435,10 @@ export function NairaPayoutCard({
               placeholder="0.00"
               className="placeholder:text-muted-foreground/50 min-w-0 flex-1 bg-transparent text-2xl font-semibold tabular-nums outline-none"
             />
-            <span className="bg-muted rounded-full px-3 py-1 text-sm font-medium">{symbol}</span>
+            <span className="bg-muted flex items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-sm font-medium">
+              <TokenIcon symbol={symbol} size={20} />
+              {symbol}
+            </span>
           </div>
           <div className="border-bubble-agent-border mt-2 border-t pt-2 text-xs dark:border-white/[0.07]">
             {other ? (
