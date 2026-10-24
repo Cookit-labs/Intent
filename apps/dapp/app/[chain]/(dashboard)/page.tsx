@@ -1,5 +1,9 @@
 import { redirect } from 'next/navigation'
 
-export default function DashboardPage({ params }: { params: { chain: string } }): never {
-  redirect(`/${params.chain}/intents`)
+export default async function DashboardPage({
+  params,
+}: {
+  params: Promise<{ chain: string }>
+}): Promise<never> {
+  redirect(`/${(await params).chain}/intents`)
 }

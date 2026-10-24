@@ -1,6 +1,11 @@
+const path = require('node:path')
+
 /** @type {import('next').NextConfig} */
 const config = {
   transpilePackages: ['@intent/ui', '@intent/types', '@intent/config'],
+  // The monorepo root, stated rather than inferred: a stray lockfile higher up
+  // the disk was otherwise taken for it.
+  outputFileTracingRoot: path.join(__dirname, '../..'),
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion'],
   },

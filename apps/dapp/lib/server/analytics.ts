@@ -420,7 +420,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 async function raceFromRequest(): Promise<string | undefined> {
   try {
     const { headers } = await import('next/headers')
-    const value = headers().get(RACE_HEADER)
+    const value = (await headers()).get(RACE_HEADER)
     return value !== null && UUID.test(value) ? value.toLowerCase() : undefined
   } catch {
     return undefined

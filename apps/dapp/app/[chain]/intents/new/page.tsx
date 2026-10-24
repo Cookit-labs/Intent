@@ -7,8 +7,12 @@ import { intentIntro } from '../../../../lib/intent-intro-copy'
 
 export const metadata: Metadata = { title: 'New intent' }
 
-export default function NewIntentPage({ params }: { params: { chain: string } }): JSX.Element {
-  const route = parseChainSegment(params.chain)
+export default async function NewIntentPage({
+  params,
+}: {
+  params: Promise<{ chain: string }>
+}): Promise<JSX.Element> {
+  const route = parseChainSegment((await params).chain)
   if (route === undefined) notFound()
 
   return (

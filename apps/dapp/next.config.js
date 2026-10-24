@@ -1,9 +1,13 @@
+const path = require('node:path')
 const { withSentryConfig } = require('@sentry/nextjs/config')
 
 /** @type {import('next').NextConfig} */
 const config = {
   distDir: process.env.NEXT_DIST_DIR ?? '.next',
   transpilePackages: ['@intent/ui', '@intent/types', '@intent/config', '@intent/sdk'],
+  // The monorepo root, stated rather than inferred: a stray lockfile higher up
+  // the disk was otherwise taken for it.
+  outputFileTracingRoot: path.join(__dirname, '../..'),
   // The bare root and the old unprefixed screens are redirected in middleware.ts,
   // where the deployment's networks are known: a static redirect here cannot know
   // whether mainnet is served.

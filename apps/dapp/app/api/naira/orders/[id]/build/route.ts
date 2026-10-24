@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(
   request: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const guard = guardNaira(request)
   if (!guard.ok) return guard.response
@@ -25,7 +25,7 @@ export async function POST(
   if (limited !== undefined) return limited
 
   const repo = await getNairaOrderRepo()
-  const row = await repo.getForEmail(context.params.id, guard.email)
+  const row = await repo.getForEmail((await context.params).id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   // Asked of the provider now, not read from a copy that a webhook may have

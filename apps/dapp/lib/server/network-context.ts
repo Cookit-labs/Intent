@@ -8,7 +8,7 @@ import {
   setNetworkResolver,
   type StellarNetworkName,
 } from '@intent/config'
-import { headers } from 'next/headers'
+import { headers, type UnsafeUnwrappedHeaders } from 'next/headers'
 
 /**
  * The Stellar network of the work in progress, on the server.
@@ -34,7 +34,10 @@ function networkOfCurrentWork(): StellarNetworkName | undefined {
 
   let value: string | null
   try {
-    value = headers().get(NETWORK_HEADER)
+    // Next 15 made headers() async. activeNetwork() is synchronous and read all
+    // over the server, so this uses Next's documented synchronous access to the
+    // same headers rather than making every caller async.
+    value = (headers() as unknown as UnsafeUnwrappedHeaders).get(NETWORK_HEADER)
   } catch {
     // Outside a request: a job, a script, or module load.
     return undefined
