@@ -4,7 +4,7 @@ import type { Venue, VenueCategory } from '@intent/types'
 import { ChainMark, cn } from '@intent/ui'
 import { ArrowUpRight, BadgeCheck } from 'lucide-react'
 import Image from 'next/image'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export const categoryLabel: Record<VenueCategory, string> = {
   swap: 'Swap',
@@ -44,12 +44,28 @@ export function VerifiedTick({ className }: { className?: string }): JSX.Element
 }
 
 /**
+ * An image that may 404, with a fallback that still shows when it fails
+ * before hydration. A server-rendered `<img>` can error before React attaches
+ * `onError`, which left a blank frame where the fallback belonged.
+ */
+function useImageFailure(): [React.RefObject<HTMLImageElement>, boolean, () => void] {
+  const ref = useRef<HTMLImageElement>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (el !== null && el.complete && el.naturalWidth === 0) setFailed(true)
+  }, [])
+  return [ref, failed, () => setFailed(true)]
+}
+
+/**
  * Venue logo, falling back to a lettermark.
  *
  * Logos live at /images/venues/<id>.webp. The network itself draws the Stellar
  * mark; anything else without a logo degrades to its initial rather than a
  * broken frame.
  */
+
 export function VenueLogo({
   venue,
   className = 'h-12 w-12',
@@ -57,7 +73,7 @@ export function VenueLogo({
   venue: Venue
   className?: string
 }): JSX.Element {
-  const [failed, setFailed] = useState(false)
+  const [ref, failed, fail] = useImageFailure()
 
   if (venue.category === 'infrastructure' && venue.family === 'stellar') {
     return <ChainMark chain="stellar" className={cn('shrink-0 rounded-2xl', className)} />
@@ -82,7 +98,8 @@ export function VenueLogo({
       alt=""
       width={48}
       height={48}
-      onError={() => setFailed(true)}
+      ref={ref}
+      onError={fail}
       className={cn('ring-border/60 shrink-0 rounded-2xl object-cover ring-1', className)}
     />
   )
@@ -94,7 +111,7 @@ export function VenueLogo({
  * glows in the brand purple.
  */
 function VenueGlow({ venue }: { venue: Venue }): JSX.Element {
-  const [failed, setFailed] = useState(false)
+  const [ref, failed, fail] = useImageFailure()
   const base =
     'pointer-events-none absolute -left-10 -top-10 h-48 w-48 rounded-full opacity-25 blur-3xl transition-opacity duration-300 group-hover:opacity-45'
   if (failed || venue.category === 'infrastructure') {
@@ -106,7 +123,8 @@ function VenueGlow({ venue }: { venue: Venue }): JSX.Element {
       src={`/images/venues/${venue.id}.webp`}
       alt=""
       aria-hidden
-      onError={() => setFailed(true)}
+      ref={ref}
+      onError={fail}
       className={cn(base, 'object-cover')}
     />
   )
