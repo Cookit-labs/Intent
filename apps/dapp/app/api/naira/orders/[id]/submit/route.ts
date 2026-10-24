@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(
   request: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const guard = guardNaira(request)
   if (!guard.ok) return guard.response
@@ -36,7 +36,7 @@ export async function POST(
   const signedXdr = parsed.signedXdr
 
   const repo = await getNairaOrderRepo()
-  const row = await repo.getForEmail(context.params.id, guard.email)
+  const row = await repo.getForEmail((await context.params).id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
   // The same question as at build, asked again at the last moment: the
   // signature took a while, and the order may have ended or been paid since.

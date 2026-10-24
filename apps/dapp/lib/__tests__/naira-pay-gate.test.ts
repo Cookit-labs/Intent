@@ -112,7 +112,9 @@ describe('reconcileBeforePay', () => {
 describe('POST /api/naira/orders/[id]/build', () => {
   async function build() {
     const { POST } = await import('../../app/api/naira/orders/[id]/build/route')
-    return POST(new Request('http://localhost/x', { method: 'POST' }), { params: { id: 'ord-1' } })
+    return POST(new Request('http://localhost/x', { method: 'POST' }), {
+      params: Promise.resolve({ id: 'ord-1' }),
+    })
   }
 
   it('builds the payment for an order the webhook had wrongly moved to processing', async () => {

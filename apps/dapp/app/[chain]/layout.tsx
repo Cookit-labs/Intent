@@ -14,16 +14,17 @@ import { ChainProvider } from '../../providers/chain-provider'
  * shows depends on the network of the request, which no static render has.
  */
 export const dynamic = 'force-dynamic'
-export default function ChainLayout({
+export default async function ChainLayout({
   children,
   params,
 }: {
   children: React.ReactNode
-  params: { chain: string }
-}): JSX.Element {
+  params: Promise<{ chain: string }>
+}): Promise<JSX.Element> {
+  const { chain } = await params
   // An unknown slug is a 404 rather than a silent fallback to Arc: quietly
   // showing a different chain than the URL names would be worse than an error.
-  if (parseChainSegment(params.chain) === undefined) notFound()
+  if (parseChainSegment(chain) === undefined) notFound()
 
   // A misconfigured cap must not take the whole frame down with it; the
   // routes that enforce it report the problem where it matters.
@@ -35,7 +36,7 @@ export default function ChainLayout({
   }
 
   return (
-    <ChainProvider segment={params.chain}>
+    <ChainProvider segment={chain}>
       <AppShell tradeCapUsd={cap}>{children}</AppShell>
     </ChainProvider>
   )

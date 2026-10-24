@@ -15,14 +15,14 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(
   request: Request,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const guard = guardNaira(request)
   if (!guard.ok) return guard.response
 
   const repo = await getNairaOrderRepo()
   // A wrong id and somebody else's id are the same answer.
-  let row = await repo.getForEmail(context.params.id, guard.email)
+  let row = await repo.getForEmail((await context.params).id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   if (!isTerminal(row.status)) {
