@@ -37,7 +37,7 @@ import { useWallet } from '../../hooks/use-wallet'
 import { checkAffordability } from '../../lib/affordability'
 import { isLimitType } from '../../lib/intent-kind'
 import { fetchStellarBalances } from '../../lib/stellar-account'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { OpenIntentCard } from './open-intent-card'
 import { NairaOrderTracker, NairaPayoutCard } from './naira-payout-card'
 import {
@@ -177,6 +177,10 @@ export function IntentChat(): JSX.Element {
   } | null>(null)
   // The bank details of a convert-first payout, held only until the swap is
   // chosen and signed. In memory: never in history, storage or the URL.
+  // A cash-out of anything but USDC: the agents race on the swap into USDC
+  // first, and the payout form opens only once that swap has settled.
+  const [cashOutAfterSwap, setCashOutAfterSwap] = useState(false)
+  const queryClient = useQueryClient()
   const [nairaConvert, setNairaConvert] = useState<{
     bankCode: string
     accountNumber: string
@@ -624,6 +628,27 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decided, turnId, message, slug])
 
+  // The USDC the swap delivered is read from the account, so the balance is
+  // refreshed the moment the swap settles.
+  const swapSettled = swap.phase === 'settled'
+  useEffect(() => {
+    if (!swapSettled || !cashOutAfterSwap || address === undefined) return
+    void queryClient.invalidateQueries({ queryKey: ['stellar-balances', address] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swapSettled, cashOutAfterSwap])
+  const usdcHeld = balances?.trustlines?.['USDC']?.balance
+  // What the payout opens on: what the swap said it would deliver, never more
+  // than the account now holds.
+  const cashOutUsdc =
+    swap.receiveDisplay === undefined
+      ? undefined
+      : Math.floor(
+          Math.min(
+            Number(swap.receiveDisplay),
+            usdcHeld !== undefined ? Number(usdcHeld) : Number.POSITIVE_INFINITY
+          ) * 100
+        ) / 100
+
   /** A signature is with the wallet or the network, so nothing may change under it. */
   const executionInFlight =
     swap.phase === 'signing' ||
@@ -677,6 +702,7 @@ export function IntentChat(): JSX.Element {
     setAffordError(null)
     setNairaForm(null)
     setNairaConvert(null)
+    setCashOutAfterSwap(false)
     setPendingInput(null)
     setFollowOn(null)
     setHistoryOpen(false)
@@ -695,6 +721,27 @@ export function IntentChat(): JSX.Element {
    * chat. `shown` is what the user typed, which stays in the bubble even when
    * the instruction that runs is the clarifier's rewrite of it.
    */
+  /**
+   * Cashes out an asset that Linq cannot take: race the swap into USDC now,
+   * and open the payout form once it settles, sized to what arrived. Bank
+   * details are asked for after the swap, never held through it.
+   */
+  function startSwapThenCashOut(symbol: string, amount: number | undefined): void {
+    if (amount === undefined || !(amount > 0)) {
+      setAffordError(
+        `How much ${symbol} do you want to cash out? For example: cash out 20 ${symbol} to naira.`
+      )
+      return
+    }
+    setCashOutAfterSwap(true)
+    // Replaces the reader's notes about the bank: given those, agents judged
+    // the swap against a payout they cannot see and called it impossible.
+    setBrief([
+      `This swap is step one of a naira cash-out. The USDC it delivers is paid to a Nigerian bank by Linq in a separate step after it settles. Your job is only the best ${symbol} to USDC swap.`,
+    ])
+    setParsed(parseIntent(`Swap ${amount} ${symbol} to USDC`, swap.usdPrices))
+  }
+
   function startIntent(
     text: string,
     options: {
@@ -768,6 +815,7 @@ export function IntentChat(): JSX.Element {
     setAffordError(null)
     setNairaForm(null)
     setNairaConvert(null)
+    setCashOutAfterSwap(false)
     setPendingInput(null)
     const newTurnId = crypto.randomUUID()
     setTurnId(newTurnId)
@@ -843,13 +891,7 @@ export function IntentChat(): JSX.Element {
             return
           }
           registerLiveAsset(activeNetwork(), found)
-          setNairaForm({
-            key: Date.now(),
-            path: 'usdc',
-            asset: 'xlm',
-            symbol: wanted,
-            ...(other.amount !== undefined ? { amountXlm: other.amount } : {}),
-          })
+          startSwapThenCashOut(wanted, other.amount)
         })()
         return
       }
@@ -864,13 +906,8 @@ export function IntentChat(): JSX.Element {
         })
         return
       }
-      setNairaForm({
-        key: Date.now(),
-        asset: 'xlm',
-        // Linq takes USDC only, so a cash-out of XLM is always a swap first.
-        path: 'usdc',
-        ...(source.amountXlm !== undefined ? { amountXlm: source.amountXlm } : {}),
-      })
+      // Linq takes USDC only, so a cash-out of XLM is a swap first.
+      startSwapThenCashOut('XLM', source.amountXlm)
       return
     }
 
@@ -1393,6 +1430,7 @@ export function IntentChat(): JSX.Element {
     setAffordError(null)
     setNairaForm(null)
     setNairaConvert(null)
+    setCashOutAfterSwap(false)
     setPendingInput(null)
     setRestored(null)
     setTurnId(null)
@@ -2307,6 +2345,34 @@ export function IntentChat(): JSX.Element {
                   onReset={swap.reset}
                 />
               </div>
+
+              {/* The cash-out's second half: the swap has settled and the USDC
+                  is in the account, so now the bank details are asked for. */}
+              {cashOutAfterSwap && swapSettled ? (
+                <>
+                  <p className={systemPill}>Swap settled. Now cash out your USDC to naira.</p>
+                  <NairaPayoutCard
+                    key={`after-swap-${swap.hash ?? ''}-${usdcHeld ?? 'pending'}`}
+                    asset="usdc"
+                    {...(cashOutUsdc !== undefined && cashOutUsdc > 0
+                      ? { initialXlm: cashOutUsdc }
+                      : {})}
+                    {...(usdcHeld !== undefined ? { balanceUsdc: usdcHeld } : {})}
+                    onOrder={(order) => {
+                      if (turnId === null) return
+                      updateTurn(
+                        turnId,
+                        {
+                          ...(order.paymentHash !== undefined ? { txHash: order.paymentHash } : {}),
+                          outcome: cashoutOutcome(order),
+                        },
+                        { chain: slug, text: message ?? '' }
+                      )
+                      setTurns(loadTurns(slug))
+                    }}
+                  />
+                </>
+              ) : null}
             </div>
           )}
         </div>
