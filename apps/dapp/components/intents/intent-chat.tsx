@@ -180,6 +180,9 @@ export function IntentChat(): JSX.Element {
   // A cash-out of anything but USDC: the agents race on the swap into USDC
   // first, and the payout form opens only once that swap has settled.
   const [cashOutAfterSwap, setCashOutAfterSwap] = useState(false)
+  // The settled swap a cash-out continues from, kept apart from the swap card
+  // so its Done button, or any reset of the card, cannot take the form away.
+  const [cashOutFrom, setCashOutFrom] = useState<{ hash: string; receive: string } | null>(null)
   const queryClient = useQueryClient()
   const [nairaConvert, setNairaConvert] = useState<{
     bankCode: string
@@ -567,14 +570,15 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sequenceHash, sequenceSteps])
 
-  // Declining in the wallet returns the swap to `review`, but the clicked
-  // agent stayed marked as executing — its button spun forever and the others
-  // could not be chosen. Releasing it lets the user pick again, including a
-  // different agent.
-  const swapFailed = swap.phase === 'failed'
-  useEffect(() => {
-    if (swapFailed) setExecutingKey(null)
-  }, [swapFailed])
+  // A failed swap keeps its agent selected so the failure stays on screen.
+  // Clearing the selection here used to empty the route, which reset the swap
+  // and wiped the error within a frame. The cards only lock while a signature
+  // is in flight, so every agent is pickable again after a failure anyway;
+  // Try again and Cancel release the selection (`releaseSwap`).
+  function releaseSwap(): void {
+    swap.reset()
+    setExecutingKey(null)
+  }
 
   useEffect(() => {
     setTurns(loadTurns(slug))
@@ -633,6 +637,7 @@ export function IntentChat(): JSX.Element {
   const swapSettled = swap.phase === 'settled'
   useEffect(() => {
     if (!swapSettled || !cashOutAfterSwap || address === undefined) return
+    setCashOutFrom({ hash: swap.hash ?? '', receive: swap.receiveDisplay ?? '' })
     void queryClient.invalidateQueries({ queryKey: ['stellar-balances', address] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swapSettled, cashOutAfterSwap])
@@ -640,11 +645,11 @@ export function IntentChat(): JSX.Element {
   // What the payout opens on: what the swap said it would deliver, never more
   // than the account now holds.
   const cashOutUsdc =
-    swap.receiveDisplay === undefined
+    cashOutFrom === null || cashOutFrom.receive === ''
       ? undefined
       : Math.floor(
           Math.min(
-            Number(swap.receiveDisplay),
+            Number(cashOutFrom.receive),
             usdcHeld !== undefined ? Number(usdcHeld) : Number.POSITIVE_INFINITY
           ) * 100
         ) / 100
@@ -703,6 +708,7 @@ export function IntentChat(): JSX.Element {
     setNairaForm(null)
     setNairaConvert(null)
     setCashOutAfterSwap(false)
+    setCashOutFrom(null)
     setPendingInput(null)
     setFollowOn(null)
     setHistoryOpen(false)
@@ -816,6 +822,7 @@ export function IntentChat(): JSX.Element {
     setNairaForm(null)
     setNairaConvert(null)
     setCashOutAfterSwap(false)
+    setCashOutFrom(null)
     setPendingInput(null)
     const newTurnId = crypto.randomUUID()
     setTurnId(newTurnId)
@@ -1431,6 +1438,7 @@ export function IntentChat(): JSX.Element {
     setNairaForm(null)
     setNairaConvert(null)
     setCashOutAfterSwap(false)
+    setCashOutFrom(null)
     setPendingInput(null)
     setRestored(null)
     setTurnId(null)
@@ -2342,17 +2350,17 @@ export function IntentChat(): JSX.Element {
                       : undefined
                   }
                   onConfirm={swap.confirm}
-                  onReset={swap.reset}
+                  onReset={releaseSwap}
                 />
               </div>
 
               {/* The cash-out's second half: the swap has settled and the USDC
                   is in the account, so now the bank details are asked for. */}
-              {cashOutAfterSwap && swapSettled ? (
+              {cashOutFrom !== null ? (
                 <>
                   <p className={systemPill}>Swap settled. Now cash out your USDC to naira.</p>
                   <NairaPayoutCard
-                    key={`after-swap-${swap.hash ?? ''}-${usdcHeld ?? 'pending'}`}
+                    key={`after-swap-${cashOutFrom.hash}-${usdcHeld ?? 'pending'}`}
                     asset="usdc"
                     {...(cashOutUsdc !== undefined && cashOutUsdc > 0
                       ? { initialXlm: cashOutUsdc }
