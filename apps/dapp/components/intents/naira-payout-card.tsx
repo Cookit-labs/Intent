@@ -10,6 +10,7 @@ import {
   Check,
   Loader2,
   ShieldCheck,
+  Timer,
   TriangleAlert,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -18,7 +19,7 @@ import { useNairaPayout } from '../../hooks/use-naira-payout'
 import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
 import { TokenIcon } from '../ui/token-icon'
-import { BankPicker, type Bank } from './bank-picker'
+import { BankMark, BankPicker, type Bank } from './bank-picker'
 
 /**
  * The form an agent drops into the thread when an instruction is read as a
@@ -135,6 +136,86 @@ function PayoutProgress({
       <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums dark:bg-[#121212]">
         {summary}
       </p>
+    </div>
+  )
+}
+
+/** How long a payout order waits for its deposit before the provider cancels it. */
+const PAY_WINDOW_MS = 10 * 60 * 1000
+
+/**
+ * The two things to do before signing, as UI rather than a paragraph: pay in
+ * time, and check the address the wallet shows against this one.
+ *
+ * The countdown starts when the review appears, which is when the order is
+ * made, so it can only run slightly ahead of the provider's own clock.
+ */
+function BeforeYouSign({ address }: { address: string }): JSX.Element {
+  const [deadline] = useState(() => Date.now() + PAY_WINDOW_MS)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const left = Math.max(0, deadline - now)
+  const expired = left === 0
+  const mm = Math.floor(left / 60_000)
+  const ss = String(Math.floor((left % 60_000) / 1000)).padStart(2, '0')
+
+  return (
+    <div className="bg-background/60 divide-bubble-agent-border flex flex-col divide-y rounded-2xl text-sm dark:divide-white/[0.07] dark:bg-[#121212]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+            expired
+              ? 'bg-destructive/15 text-destructive'
+              : 'bg-bubble-me text-bubble-me-foreground'
+          )}
+        >
+          <Timer className="h-4 w-4" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
+          <span className="font-medium">{expired ? 'Time is up' : 'Pay within'}</span>
+          <span className="text-muted-foreground text-xs">
+            {expired
+              ? 'This payout will be cancelled. Use Edit to start a new one.'
+              : 'Unpaid orders are cancelled. Nothing is taken.'}
+          </span>
+        </div>
+        <span
+          className={cn(
+            'font-mono text-lg font-semibold tabular-nums',
+            expired ? 'text-destructive' : left < 120_000 ? 'text-warning' : undefined
+          )}
+          aria-live="off"
+        >
+          {mm}:{ss}
+        </span>
+      </div>
+
+      <div className="flex items-start gap-3 px-4 py-3">
+        <span className="bg-bubble-me text-bubble-me-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+          <ShieldCheck className="h-4 w-4" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="font-medium leading-tight">Match the address in your wallet</span>
+          <span className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
+            <span className="bg-brand/15 text-brand dark:bg-brand/30 dark:text-bubble-me rounded-md px-1.5 py-0.5 font-semibold">
+              {address.slice(0, 6)}
+            </span>
+            <span className="text-muted-foreground tracking-widest">···</span>
+            <span className="bg-brand/15 text-brand dark:bg-brand/30 dark:text-bubble-me rounded-md px-1.5 py-0.5 font-semibold">
+              {address.slice(-6)}
+            </span>
+          </span>
+          <span className="text-muted-foreground text-xs leading-relaxed">
+            A one-time deposit address made for this payout, so a wallet security scan may flag it
+            as new.
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -256,6 +337,11 @@ export function NairaPayoutCard({
   )
 
   const { phase, order } = state
+  // The bank the order pays, for its logo: by the code picked here, or by the
+  // name the order was made with when the form has been reset since.
+  const reviewBank =
+    banks.data?.find((b) => b.code === bankCode) ??
+    banks.data?.find((b) => b.name === order?.bankName)
 
   if (phase === 'tracking' && order !== undefined) {
     return (
@@ -285,9 +371,13 @@ export function NairaPayoutCard({
           <span className="text-lg font-semibold">
             {order.amount} {order.coin.toUpperCase()}
           </span>
-          <span className="bg-bubble-me text-bubble-me-foreground my-1 flex h-7 w-7 items-center justify-center rounded-full">
-            <ArrowDown className="h-3.5 w-3.5" />
-          </span>
+          {reviewBank !== undefined ? (
+            <BankMark bank={reviewBank} className="my-1.5 h-9 w-9" />
+          ) : (
+            <span className="bg-bubble-me text-bubble-me-foreground my-1 flex h-7 w-7 items-center justify-center rounded-full">
+              <ArrowDown className="h-3.5 w-3.5" />
+            </span>
+          )}
           <span className="text-muted-foreground text-xs">{order.accountName} receives</span>
           <span className="text-3xl font-semibold tracking-tight">
             {naira(Number(order.amountNgn))}
@@ -326,17 +416,7 @@ export function NairaPayoutCard({
           </div>
         </dl>
 
-        <div className="bg-bubble-me/40 flex gap-2.5 rounded-2xl px-4 py-3 text-xs">
-          <ShieldCheck className="text-brand mt-0.5 h-4 w-4 shrink-0" />
-          <p className="leading-relaxed">
-            Send the payment within 10 minutes or it is cancelled. This is a one-time deposit
-            address made for this payout, so a wallet security scan can flag it. Before you sign,
-            check that the address your wallet shows starts with{' '}
-            <span className="font-mono font-semibold">{order.depositAddress.slice(0, 6)}</span> and
-            ends with{' '}
-            <span className="font-mono font-semibold">{order.depositAddress.slice(-6)}</span>.
-          </p>
-        </div>
+        <BeforeYouSign key={order.id} address={order.depositAddress} />
 
         <div className="flex gap-2">
           <button
@@ -356,7 +436,7 @@ export function NairaPayoutCard({
             type="button"
             disabled={busy}
             onClick={edit}
-            className="border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 h-11 rounded-full border px-5 text-sm transition-colors disabled:opacity-50"
+            className="border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 h-11 shrink-0 rounded-full border px-5 text-sm transition-colors disabled:opacity-50"
           >
             Edit
           </button>
