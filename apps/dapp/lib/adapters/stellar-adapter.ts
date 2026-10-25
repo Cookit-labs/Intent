@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
+import { walletErrorMessage } from '../wallet/error-message'
 import { Networks } from '@creit.tech/stellar-wallets-kit/types'
 
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
@@ -418,7 +419,7 @@ async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
     }
     return { ok: true, signedXdr: signedTxXdr }
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'could not sign'
+    const message = walletErrorMessage(e)
     // Wallets word a decline differently; treating it as an error would show a
     // failure message for something the user chose to do.
     if (/reject|denied|declin|cancel|close/i.test(message)) {
