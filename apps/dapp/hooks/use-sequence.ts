@@ -633,7 +633,18 @@ export function useSequence(): Sequence {
               ...(req.slippageBps !== undefined ? { slippageBps: req.slippageBps } : {}),
             }),
           })
-          const built = (await res.json()) as { xdr?: string; error?: string }
+          // Read as text first: a platform error page (a timeout, a deploy in
+          // progress) is not JSON, and parsing it used to throw into the catch
+          // below, which then blamed the network for whatever had happened.
+          const raw = await res.text()
+          let built: { xdr?: string; error?: string }
+          try {
+            built = JSON.parse(raw) as typeof built
+          } catch {
+            built = {
+              error: `The swap could not be built: the server answered ${res.status} without a usable reply. Nothing was signed.`,
+            }
+          }
 
           if (built.xdr === undefined) {
             setState({
@@ -683,8 +694,17 @@ export function useSequence(): Sequence {
             const warning = offrampSizeWarning(req.estimatedReceive, req.limits)
             if (warning !== undefined) setState((s) => ({ ...s, warning }))
           }
-        } catch {
-          setState({ ...EMPTY, phase: 'failed', error: 'Could not reach the network.' })
+        } catch (e) {
+          // Said as what happened. A blanket "could not reach the network"
+          // hid every other failure here behind one message.
+          setState({
+            ...EMPTY,
+            phase: 'failed',
+            error:
+              e instanceof TypeError
+                ? 'Could not reach the server. Check your connection and try again. Nothing was signed.'
+                : `${e instanceof Error ? e.message : 'The sequence could not be prepared'}. Nothing was signed.`,
+          })
         }
       }
 
