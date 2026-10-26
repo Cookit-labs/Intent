@@ -187,9 +187,9 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
    *
    * **Limits are per key, across every free model together.** 20 requests a
    * minute; 50 a day until 10 credits have ever been bought, 1,000 a day
-   * after. The default roster puts five agents here, so a race is five
-   * requests: ten races a day on an untopped key, then every OpenRouter agent
-   * reports `rate_limited` until midnight UTC.
+   * after. The default roster puts five agents here and `lineUp` seats two of
+   * them per race, so an untopped key lasts twenty-five races a day; after
+   * that a 429 benches the provider until its reset.
    *
    * `strict` is not sent: OpenRouter passes the request through to whichever
    * lab serves the model, and it is not in the shape they all accept.

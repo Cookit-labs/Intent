@@ -286,7 +286,13 @@ export interface BrainMeta {
  */
 export type ProposalOutcome =
   | { ok: true; proposal: AgentProposalResult; meta: BrainMeta }
-  | { ok: false; error: BrainErrorCode; meta: BrainMeta }
+  | {
+      ok: false
+      error: BrainErrorCode
+      meta: BrainMeta
+      /** On a 429: how long until the provider said it would accept requests again. */
+      retryAfterMs?: number
+    }
 
 export interface AgentBrain {
   id: BrainProvider

@@ -388,6 +388,18 @@ function classifyStatus(status: number): BrainErrorCode {
   return 'upstream_error'
 }
 
+/**
+ * When a 429 says to come back. `Retry-After` is seconds; OpenRouter's
+ * `X-RateLimit-Reset` is the epoch millisecond its window reopens.
+ */
+function retryAfter(headers: Headers): number | undefined {
+  const seconds = Number(headers.get('retry-after'))
+  if (headers.get('retry-after') !== null && Number.isFinite(seconds)) return seconds * 1000
+  const reset = Number(headers.get('x-ratelimit-reset'))
+  if (headers.get('x-ratelimit-reset') !== null && Number.isFinite(reset)) return reset - Date.now()
+  return undefined
+}
+
 export function createBrain(options: BrainOptions = {}): AgentBrain {
   const config = PROVIDERS[options.provider ?? 'deepseek']
 
@@ -462,10 +474,12 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
 
       if (!res.ok) {
+        const retryAfterMs = res.status === 429 ? retryAfter(res.headers) : undefined
         return {
           ok: false,
           error: classifyStatus(res.status),
           meta: meta(config, model, Date.now() - startedAt, undefined),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         }
       }
 

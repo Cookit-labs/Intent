@@ -150,6 +150,15 @@ describe('deepseek brain', () => {
     }
   })
 
+  it('reads when a 429 says to come back', async () => {
+    const brain = createBrain({
+      apiKey: SECRET,
+      fetchImpl: async () => new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }),
+    })
+    const outcome = await brain.propose(request)
+    expect(outcome).toMatchObject({ ok: false, error: 'rate_limited', retryAfterMs: 30_000 })
+  })
+
   it('reports an aborted request as a timeout', async () => {
     const brain = createBrain({
       apiKey: SECRET,
