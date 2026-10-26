@@ -1,6 +1,6 @@
 'use client'
 
-import { cn } from '@intent/ui'
+import { ChainMark, cn } from '@intent/ui'
 import {
   ArrowDown,
   ArrowLeftRight,
@@ -151,6 +151,29 @@ function HashChip({ hash }: { hash: string }): JSX.Element {
       {hash.slice(0, 6)}…{hash.slice(-6)}
       {copied ? <Check className="text-success h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
+  )
+}
+
+/**
+ * The venue's mark beside its name. Stellar DEX is the network's own order
+ * book, so it draws the Stellar mark; the others use their logos.
+ */
+function SourceLogo({ source }: { source: string | undefined }): JSX.Element | null {
+  if (source === undefined) return null
+  if (source === 'horizon') {
+    return <ChainMark chain="stellar" className="h-4 w-4 shrink-0 rounded-full" />
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/images/venues/${source}.webp`}
+      alt=""
+      aria-hidden
+      className="ring-border/60 h-4 w-4 shrink-0 rounded-full object-cover ring-1"
+      onError={(e) => {
+        e.currentTarget.style.display = 'none'
+      }}
+    />
   )
 }
 
@@ -348,9 +371,12 @@ export function SwapConfirm({
             Aggregator" are different claims about where a fill came from. */}
         <div className="flex items-center justify-between gap-4 py-2">
           <dt className="text-muted-foreground">Route</dt>
-          <dd className="text-right font-medium">
-            {route ?? '—'} · {hops}
-            {sliceCount === 1 ? ' · single fill' : ''}
+          <dd className="flex items-center justify-end gap-1.5 text-right font-medium">
+            <SourceLogo source={quote?.source} />
+            <span>
+              {route ?? '—'} · {hops}
+              {sliceCount === 1 ? ' · single fill' : ''}
+            </span>
           </dd>
         </div>
         <div className="flex items-center justify-between gap-4 py-2">
