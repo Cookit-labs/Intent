@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
 import { walletErrorMessage } from '../wallet/error-message'
+import { lobstrNeedsConnection } from '../wallet/lobstr'
 import { Networks } from '@creit.tech/stellar-wallets-kit/types'
 
 import { StellarWalletsKit, ensureKit } from '../stellar-kit'
@@ -405,6 +406,42 @@ async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
       ok: false,
       reason: 'wrong_network',
       detail: switchNetworkMessage(),
+    }
+  }
+
+  // LOBSTR signs only with a per-tab connection key, written when access is
+  // granted. A wallet restored in a new tab has none, so access is asked for
+  // here first: the kit's own getAddress returns the remembered address
+  // without asking the wallet, which is why the key was never written.
+  let walletId: string | undefined
+  try {
+    walletId = StellarWalletsKit.selectedModule.productId
+  } catch {
+    walletId = undefined
+  }
+  let session: Storage | undefined
+  try {
+    session = window.sessionStorage
+  } catch {
+    session = undefined
+  }
+  if (lobstrNeedsConnection(walletId, session)) {
+    try {
+      const { address } = await StellarWalletsKit.selectedModule.getAddress()
+      // LOBSTR ignores the address it is asked to sign with, so a different
+      // account selected in LOBSTR would sign for itself and fail later.
+      if (address !== req.address) {
+        return {
+          ok: false,
+          reason: 'wallet_error',
+          detail: `LOBSTR is on a different account (${address.slice(0, 4)}…${address.slice(-4)}). Switch to ${req.address.slice(0, 4)}…${req.address.slice(-4)} in LOBSTR and try again.`,
+        }
+      }
+    } catch (e) {
+      const message = walletErrorMessage(e)
+      if (/reject|denied|declin|cancel|close/i.test(message))
+        return { ok: false, reason: 'rejected' }
+      return { ok: false, reason: 'wallet_error', detail: message }
     }
   }
 
