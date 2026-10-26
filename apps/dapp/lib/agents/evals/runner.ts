@@ -24,7 +24,7 @@ import { parseIntent } from '../../parse-intent'
  *
  *   pnpm agents:eval                              # deepseek-v4-flash
  *   pnpm agents:eval deepseek-v4-pro              # compare
- *   pnpm agents:eval openrouter nemotron-super    # another provider, by alias or raw id
+ *   pnpm agents:eval openrouter north-mini    # another provider, by alias or raw id
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))

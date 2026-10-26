@@ -80,8 +80,9 @@ export interface ProviderConfig {
  * is disagreement, and two sizes of the same family agree by construction.
  *
  * Revised 2026-10-26: Ling 3.0 Flash Fin left the catalogue, and Laguna S 2.1
- * is listed to expire on 2026-10-31. Inkling (whose tool support has since
- * appeared in `supported_parameters`) and Laguna XS 2.1 take their places.
+ * is listed to expire on 2026-10-31; Laguna XS 2.1 replaces it. Inkling was
+ * tried and refused (403: "only available on agentic harnesses"), and
+ * Nemotron 3 Super was dropped when Nvidia's endpoint began answering 404.
  *
  * Not here on purpose: `qwen/qwen3.8-27b:free` is the model the Groq slot
  * already runs, and Nemotron 3 Ultra (550B) was degraded and is slow enough
@@ -89,10 +90,6 @@ export interface ProviderConfig {
  * in `AGENT_BRAINS` when that changes.
  */
 export const OPENROUTER_MODELS: Record<string, string> = {
-  /** Thinking Machines' model; now lists tool calling on the free tier. */
-  inkling: 'thinkingmachines/inkling:free',
-  /** 120B mixture-of-experts. 40 req/min on its own, on top of OpenRouter's. */
-  'nemotron-super': 'nvidia/nemotron-3-super-120b-a12b:free',
   /** 26B with 4B active, so fast for its size. */
   'gemma-4': 'google/gemma-4-26b-a4b-it:free',
   /** Code-trained; disciplined about structured output. */
@@ -233,8 +230,6 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     defaultPricing: { input: 0, output: 0 },
     aliases: OPENROUTER_MODELS,
     displayNames: {
-      'thinkingmachines/inkling:free': 'Inkling',
-      'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super',
       'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B',
       'poolside/laguna-xs-2.1:free': 'Laguna XS 2.1',
       'cohere/north-mini-code:free': 'North Mini Code',

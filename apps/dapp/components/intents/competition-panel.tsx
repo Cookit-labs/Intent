@@ -125,8 +125,12 @@ export function CompetitionPanel({
   }
 
   const decided = phase === 'decided'
-  const revealedAgents = agents.filter((a) => revealed[a.key])
-  const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key])
+  // An agent that did not answer — rate-limited, unreachable, timed out — is
+  // left out rather than shown as a card saying so. The race is the agents
+  // that answered; a row of failures says nothing the user can act on.
+  const answered = (key: string): boolean => proposals[key]?.failed === undefined
+  const revealedAgents = agents.filter((a) => revealed[a.key] && answered(a.key))
+  const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key] && answered(a.key))
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
   return (

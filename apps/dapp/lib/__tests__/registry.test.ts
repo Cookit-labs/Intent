@@ -61,17 +61,17 @@ describe('getRoster', () => {
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
     const roster = getRoster() ?? []
-    expect(roster).toHaveLength(5)
-    expect(new Set(roster.map((a) => a.model)).size).toBe(5)
+    expect(roster).toHaveLength(3)
+    expect(new Set(roster.map((a) => a.model)).size).toBe(3)
     expect(roster.every((a) => a.provider === 'openrouter')).toBe(true)
   })
 
-  it('is seven agents with the three hosted keys', async () => {
+  it('is five agents with the three hosted keys', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['GROQ_API_KEY'] = 'test-key'
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
-    expect(getRoster()).toHaveLength(7)
+    expect(getRoster()).toHaveLength(5)
   })
 
   it('never fields a local daemon unless named', async () => {
