@@ -336,7 +336,7 @@ export async function POST(request: Request): Promise<Response> {
 
             if (!outcome.ok) {
               if (outcome.error === 'rate_limited') {
-                noteRateLimited(agent.provider, outcome.retryAfterMs)
+                noteRateLimited(agent.key, outcome.retryAfterMs)
               }
               attempts.push({
                 agent: agent.key,

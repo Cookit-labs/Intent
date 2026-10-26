@@ -1,4 +1,3 @@
-import type { BrainProvider } from './brain'
 import type { RosterAgent } from './registry'
 
 /**
@@ -10,9 +9,11 @@ import type { RosterAgent } from './registry'
  * per race, taken in turn, is twenty-five races, and every model still gets
  * its turn.
  *
- * A provider that answered 429 sits out until the reset it named. Sending it
- * more requests only buys more failed cards, and on OpenRouter each of those
- * still counts against the day.
+ * An agent that answered 429 sits out until the reset it named. Benched per
+ * model, not per provider: a free OpenRouter model is often rate-limited
+ * upstream on its own while the others answer, and benching the whole
+ * provider for one of them emptied the race of every OpenRouter agent. When
+ * the key itself is spent, each model learns it from its own 429.
  *
  * Kept in memory, so per server instance: a cold instance learns of a limit
  * from its own first 429. That costs one wasted request, not a wrong answer.
@@ -26,29 +27,29 @@ const DEFAULT_COOLDOWN_MS = 60_000
 /** A reset further out than this is treated as this: a bad header should not bench a provider for a week. */
 const MAX_COOLDOWN_MS = 24 * 60 * 60 * 1000
 
-const benchedUntil = new Map<BrainProvider, number>()
+const benchedUntil = new Map<string, number>()
 let turn = 0
 
 export function noteRateLimited(
-  provider: BrainProvider,
+  agentKey: string,
   retryAfterMs: number | undefined,
   now: number = Date.now()
 ): void {
   const wait = Math.min(Math.max(retryAfterMs ?? DEFAULT_COOLDOWN_MS, 0), MAX_COOLDOWN_MS)
-  benchedUntil.set(provider, Math.max(benchedUntil.get(provider) ?? 0, now + wait))
+  benchedUntil.set(agentKey, Math.max(benchedUntil.get(agentKey) ?? 0, now + wait))
 }
 
-/** When the earliest benched provider comes back, if every one is benched. */
+/** When the earliest benched agent comes back, if every one is benched. */
 export function benchedUntilFor(
   roster: RosterAgent[],
   now: number = Date.now()
 ): number | undefined {
-  const until = roster.map((a) => benchedUntil.get(a.provider) ?? 0)
+  const until = roster.map((a) => benchedUntil.get(a.key) ?? 0)
   return until.every((t) => t > now) ? Math.min(...until) : undefined
 }
 
 export function lineUp(roster: RosterAgent[], now: number = Date.now()): RosterAgent[] {
-  const available = roster.filter((a) => (benchedUntil.get(a.provider) ?? 0) <= now)
+  const available = roster.filter((a) => (benchedUntil.get(a.key) ?? 0) <= now)
   const openrouter = available.filter((a) => a.provider === 'openrouter')
   if (openrouter.length <= OPENROUTER_SEATS) return available
 

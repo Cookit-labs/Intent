@@ -42,18 +42,20 @@ describe('lineUp', () => {
     expect([...seen].sort()).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
-  it('benches a rate-limited provider until its reset', () => {
+  it('benches only the model that was rate-limited, until its reset', () => {
     const now = 1_000_000
-    noteRateLimited('openrouter', 30_000, now)
-    expect(lineUp(roster, now + 1).some((a) => a.provider === 'openrouter')).toBe(false)
-    expect(lineUp(roster, now + 30_001).some((a) => a.provider === 'openrouter')).toBe(true)
+    noteRateLimited('openrouter-a', 30_000, now)
+    const during = keys(lineUp(roster, now + 1))
+    expect(during).not.toContain('openrouter-a')
+    expect(during.filter((k) => k.startsWith('openrouter-'))).toHaveLength(2)
+    resetLineUp()
+    noteRateLimited('openrouter-a', 30_000, now)
+    expect(keys(lineUp(roster, now + 30_001))).toContain('openrouter-a')
   })
 
   it('names when the first provider is back once all are benched', () => {
     const now = 1_000_000
-    noteRateLimited('groq', 10_000, now)
-    noteRateLimited('openrouter', 60_000, now)
-    noteRateLimited('deepseek', 120_000, now)
+    for (const a of roster) noteRateLimited(a.key, a.provider === 'groq' ? 10_000 : 60_000, now)
     expect(lineUp(roster, now)).toEqual([])
     expect(benchedUntilFor(roster, now)).toBe(now + 10_000)
   })
