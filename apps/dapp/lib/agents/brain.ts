@@ -25,7 +25,7 @@ import type { PerpFacts } from '../perps/market-facts'
  *
  * See `brains/providers.ts` for each one's endpoint, limits and cost.
  */
-export type BrainProvider = 'deepseek' | 'groq' | 'ollama' | 'openrouter'
+export type BrainProvider = 'anthropic' | 'deepseek' | 'groq' | 'ollama' | 'openrouter'
 
 /**
  * Which agent. `provider:model`, built by `identity.ts` — an agent is a

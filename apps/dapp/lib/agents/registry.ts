@@ -1,5 +1,5 @@
 import type { AgentBrain, AgentKey, BrainProvider } from './brain'
-import { BRAINS, createBrain } from './brains/openai-compatible'
+import { BRAINS, brainFor } from './brains'
 import {
   ALL_PROVIDERS,
   OPENROUTER_MODELS,
@@ -107,7 +107,7 @@ function requestedRoster(raw: string): RosterAgent[] {
       continue
     }
     const model = ask.model ?? shared.model
-    const brain = ask.model !== undefined ? createBrain({ provider: ask.provider, model }) : shared
+    const brain = ask.model !== undefined ? brainFor(ask.provider, model) : shared
     const next = agent(ask.provider, model, brain)
     if (roster.some((a) => a.key === next.key)) {
       // eslint-disable-next-line no-console
@@ -130,7 +130,7 @@ function defaultRoster(): RosterAgent[] {
     if (!PROVIDERS[provider].autoSelect || !BRAINS[provider].isConfigured()) continue
     if (provider === 'openrouter') {
       for (const model of Object.values(OPENROUTER_MODELS)) {
-        roster.push(agent(provider, model, createBrain({ provider, model })))
+        roster.push(agent(provider, model, brainFor(provider, model)))
       }
       continue
     }

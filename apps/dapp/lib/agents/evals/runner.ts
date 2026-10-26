@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import type { AgentProposalResult, ProposalOutcome } from '../brain'
+import { createClaudeBrain } from '../brains/anthropic'
 import { createBrain } from '../brains/openai-compatible'
 import { PROVIDERS, isBrainProvider, modelFor, resolveModel } from '../brains/providers'
 import { agentKey } from '../identity'
@@ -130,7 +131,10 @@ async function main(): Promise<void> {
     cases: GoldenCase[]
   }
 
-  const brain = createBrain({ provider, apiKey, model })
+  const brain =
+    provider === 'anthropic'
+      ? createClaudeBrain({ apiKey, model })
+      : createBrain({ provider, apiKey, model })
   const agent = agentKey(provider, model)
   const market = buildMarketContext('arc')
   const allowedVenues = new Set(market.venues.map((v) => v.id))

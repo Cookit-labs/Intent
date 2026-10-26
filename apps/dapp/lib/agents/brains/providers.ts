@@ -102,6 +102,28 @@ export const OPENROUTER_MODELS: Record<string, string> = {
 }
 
 export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
+  /**
+   * Claude, through Anthropic's own SDK rather than the chat-completions
+   * client — see `anthropic.ts`. `baseUrl`, `strictTools` and `toolChoice`
+   * are recorded for completeness; that client sets them itself.
+   *
+   * Paid, unlike most of the line-up: about 2,300 input tokens a race plus
+   * the thinking and the tool call, so roughly two to five cents per race.
+   */
+  anthropic: {
+    id: 'anthropic',
+    displayName: 'Claude',
+    baseUrl: 'https://api.anthropic.com',
+    defaultModel: 'claude-opus-5-5',
+    apiKeyEnv: 'ANTHROPIC_API_KEY',
+    strictTools: true,
+    autoSelect: true,
+    toolChoice: 'auto',
+    pricing: { 'claude-opus-5-5': { input: 4, output: 20 } },
+    defaultPricing: { input: 4, output: 20 },
+    displayNames: { 'claude-opus-5-5': 'Claude Opus 5.5' },
+  },
+
   deepseek: {
     id: 'deepseek',
     displayName: 'DeepSeek',
