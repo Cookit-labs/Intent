@@ -212,6 +212,14 @@ export function useSwapExecution(
               result.reason !== undefined
                 ? FAILURE_MESSAGES[result.reason]
                 : 'The swap did not go through.',
+            // A transaction that reached the network, or may yet, is linked so
+            // the user can see what happened to it rather than guess.
+            ...(result.hash !== undefined
+              ? {
+                  hash: result.hash,
+                  explorerUrl: `${adapter.descriptor.blockExplorerUrl}/tx/${result.hash}`,
+                }
+              : {}),
           }))
           return
         }

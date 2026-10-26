@@ -297,13 +297,32 @@ export function SwapConfirm({
           tone="warning"
           icon={<TriangleAlert className="h-5 w-5" />}
           title="Swap not completed"
-          subtitle="Nothing was spent"
+          subtitle={
+            // A hash means it reached the network, so it may have spent a fee
+            // or even settled: said as something to check, never as "nothing".
+            explorerUrl !== undefined
+              ? 'Check the transaction before trying again'
+              : 'Nothing was spent'
+          }
         />
         {/* The message is already user-facing prose from FAILURE_MESSAGES. */}
         <p className={cn(toolPanel, 'px-4 py-3 text-sm')}>{error ?? 'Something went wrong.'}</p>
-        <button type="button" onClick={onReset} className={cn(SECONDARY, 'w-fit')}>
-          Try again
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={onReset} className={SECONDARY}>
+            Try again
+          </button>
+          {explorerUrl !== undefined ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+            >
+              View on Stellar Expert
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
+        </div>
       </div>
     )
   }
