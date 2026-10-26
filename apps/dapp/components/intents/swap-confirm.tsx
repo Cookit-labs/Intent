@@ -1,13 +1,23 @@
 'use client'
 
-import { Button, Card } from '@intent/ui'
-import { ArrowRight, CheckCircle2, ExternalLink, Loader2, TriangleAlert } from 'lucide-react'
+import { cn } from '@intent/ui'
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  Check,
+  Copy,
+  ExternalLink,
+  Loader2,
+  TriangleAlert,
+} from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
 import type { SwapPhase } from '../../hooks/use-swap'
 import type { LedgerPreview as LedgerPreviewData } from '../../lib/swap/preview'
 import { sourceDisplayName, type SwapQuote } from '../../lib/swap/quote'
 import { needsTrustCaution, trustSummary, verificationOf } from '../../lib/swap/asset-registry'
 import { TokenIcon } from '../ui/token-icon'
+import { toolCard, toolPanel } from './bubble'
 import { LedgerPreview } from './ledger-preview'
 
 /**
@@ -50,6 +60,97 @@ function amount(value: string | undefined): string {
   // Seven decimals is exact but unreadable; four is enough to check a price.
   return n.toLocaleString('en-US', { maximumFractionDigits: 4 })
 }
+
+/** An icon in a round tint beside a title, as every tool card in the thread opens. */
+function CardHeader({
+  icon,
+  tone = 'brand',
+  title,
+  subtitle,
+}: {
+  icon: ReactNode
+  tone?: 'brand' | 'success' | 'warning'
+  title: string
+  subtitle?: string | undefined
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className={cn(
+          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+          tone === 'success'
+            ? 'bg-success/15 text-success'
+            : tone === 'warning'
+              ? 'bg-warning/15 text-warning'
+              : 'bg-bubble-me text-bubble-me-foreground'
+        )}
+      >
+        {icon}
+      </span>
+      <div className="flex min-w-0 flex-col leading-tight">
+        <span className="text-sm font-semibold">{title}</span>
+        {subtitle !== undefined && subtitle !== '' ? (
+          <span className="text-muted-foreground truncate text-xs">{subtitle}</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** One side of the trade: label, amount large, token pill, dollar value small. */
+function AmountRow({
+  label,
+  symbol,
+  value,
+  usd,
+}: {
+  label: string
+  symbol: string | undefined
+  value: string | undefined
+  usd: string | undefined
+}): JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-col">
+        <span className="text-muted-foreground text-xs">{label}</span>
+        <span className="truncate text-2xl font-semibold tabular-nums">{amount(value)}</span>
+        {usd !== undefined ? (
+          <span className="text-muted-foreground text-xs tabular-nums">{usd}</span>
+        ) : null}
+      </div>
+      <span className="bg-muted flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-sm font-medium">
+        <TokenIcon symbol={symbol} size={22} />
+        {symbol}
+      </span>
+    </div>
+  )
+}
+
+/** The transaction hash, short, with a copy button: 64 characters say nothing at a glance. */
+function HashChip({ hash }: { hash: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      title={hash}
+      onClick={() => {
+        void navigator.clipboard.writeText(hash).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+      className="bg-muted text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-xs transition-colors"
+    >
+      {hash.slice(0, 6)}…{hash.slice(-6)}
+      {copied ? <Check className="text-success h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  )
+}
+
+const PRIMARY =
+  'bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-60'
+const SECONDARY =
+  'border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 h-11 shrink-0 rounded-full border px-5 text-sm transition-colors dark:border-white/15 dark:hover:bg-white/5'
 
 export function SwapConfirm({
   phase,
@@ -103,62 +204,77 @@ export function SwapConfirm({
 
   if (phase === 'quoting') {
     return (
-      <Card className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div className={cn(toolCard, 'text-muted-foreground flex-row items-center gap-2 text-sm')}>
+        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
         Finding the best route…
-      </Card>
+      </div>
     )
   }
 
   if (phase === 'settled') {
     return (
-      <Card className="flex flex-col gap-3 p-5">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="text-success h-5 w-5" />
-          <span className="font-medium">Swap complete</span>
+      <div className={cn(toolCard, 'gap-4')}>
+        <CardHeader
+          tone="success"
+          icon={<Check className="h-5 w-5" strokeWidth={2.5} />}
+          title="Swap complete"
+          subtitle="Settled on Stellar"
+        />
+        <div
+          className={cn(toolPanel, 'flex flex-wrap items-center justify-center gap-3 px-4 py-5')}
+        >
+          <span className="flex items-center gap-2 text-lg font-semibold tabular-nums">
+            <TokenIcon symbol={quote?.from.code} size={24} />
+            {amount(sendDisplay)} {quote?.from.code}
+          </span>
+          <ArrowLeftRight className="text-muted-foreground h-4 w-4" />
+          <span className="flex items-center gap-2 text-lg font-semibold tabular-nums">
+            <TokenIcon symbol={quote?.to.code} size={24} />
+            {amount(receiveDisplay)} {quote?.to.code}
+          </span>
         </div>
-        <p className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm">
-          <TokenIcon symbol={quote?.from.code} size={16} />
-          {amount(sendDisplay)} {quote?.from.code} became
-          <TokenIcon symbol={quote?.to.code} size={16} />
-          {amount(receiveDisplay)} {quote?.to.code}.
-        </p>
         {/* The explorer is the only independent proof the swap happened, so it
             is a button rather than a dim hash the eye slides past. */}
-        {explorerUrl !== undefined ? (
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors"
+        <div className="flex flex-wrap items-center gap-2">
+          {explorerUrl !== undefined ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+            >
+              View on Stellar Expert
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
+          {hash !== undefined ? <HashChip hash={hash} /> : null}
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-muted-foreground hover:text-foreground ml-auto rounded-full px-3 py-1.5 text-xs transition-colors"
           >
-            View on Stellar Expert
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-        ) : null}
-        {hash !== undefined ? (
-          <span className="text-muted-foreground break-all font-mono text-xs">{hash}</span>
-        ) : null}
-        <Button variant="outline" size="sm" onClick={onReset} className="self-start">
-          Done
-        </Button>
-      </Card>
+            Done
+          </button>
+        </div>
+      </div>
     )
   }
 
   if (phase === 'failed') {
     return (
-      <Card className="flex flex-col gap-3 p-5">
-        <div className="flex items-center gap-2">
-          <TriangleAlert className="text-warning h-5 w-5" />
-          <span className="font-medium">Swap not completed</span>
-        </div>
+      <div className={cn(toolCard, 'gap-4')}>
+        <CardHeader
+          tone="warning"
+          icon={<TriangleAlert className="h-5 w-5" />}
+          title="Swap not completed"
+          subtitle="Nothing was spent"
+        />
         {/* The message is already user-facing prose from FAILURE_MESSAGES. */}
-        <p className="text-muted-foreground text-sm">{error ?? 'Something went wrong.'}</p>
-        <Button variant="outline" size="sm" onClick={onReset} className="self-start">
+        <p className={cn(toolPanel, 'px-4 py-3 text-sm')}>{error ?? 'Something went wrong.'}</p>
+        <button type="button" onClick={onReset} className={cn(SECONDARY, 'w-fit')}>
           Try again
-        </Button>
-      </Card>
+        </button>
+      </div>
     )
   }
 
@@ -187,47 +303,54 @@ export function SwapConfirm({
   const trustCaution =
     receiving !== undefined && needsTrustCaution(receiving) ? trustSummary(receiving) : undefined
 
+  const route = quote !== undefined ? sourceDisplayName(quote.source) : undefined
+  const hops =
+    quote?.path.length === 0
+      ? 'direct'
+      : `${quote?.path.length ?? 0} hop${quote?.path.length === 1 ? '' : 's'}`
+
   return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col">
-          <span className="text-muted-foreground text-xs">You pay</span>
-          <span className="flex items-center gap-2 font-mono text-lg tabular-nums">
-            <TokenIcon symbol={quote?.from.code} size={22} />
-            {amount(sendDisplay)} {quote?.from.code}
+    <div className={cn(toolCard, 'gap-4')}>
+      <CardHeader
+        icon={<ArrowLeftRight className="h-5 w-5" />}
+        title="Review swap"
+        subtitle={[agentName, route !== undefined ? `via ${route}` : undefined]
+          .filter((v) => v !== undefined)
+          .join(' · ')}
+      />
+
+      <div className={cn(toolPanel, 'flex flex-col gap-3 px-4 py-4')}>
+        <AmountRow label="You pay" symbol={quote?.from.code} value={sendDisplay} usd={sendUsd} />
+        <div className="relative flex items-center">
+          <span className="border-bubble-agent-border w-full border-t dark:border-white/[0.07]" />
+          <span className="bg-bubble-me text-bubble-me-foreground absolute left-1/2 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full">
+            <ArrowDown className="h-3.5 w-3.5" />
           </span>
-          {sendUsd !== undefined ? (
-            <span className="text-muted-foreground text-xs tabular-nums">{sendUsd}</span>
-          ) : null}
         </div>
-        <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0" />
-        <div className="flex flex-col items-end">
-          <span className="text-muted-foreground text-xs">You receive, about</span>
-          <span className="flex items-center gap-2 font-mono text-lg tabular-nums">
-            <TokenIcon symbol={quote?.to.code} size={22} />
-            {amount(receiveDisplay)} {quote?.to.code}
-          </span>
-          {receiveUsd !== undefined ? (
-            <span className="text-muted-foreground text-xs tabular-nums">{receiveUsd}</span>
-          ) : null}
-        </div>
+        <AmountRow
+          label="You receive, about"
+          symbol={quote?.to.code}
+          value={receiveDisplay}
+          usd={receiveUsd}
+        />
       </div>
 
-      <div className="text-muted-foreground border-border flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs">
-        {agentName !== undefined ? <span className="text-foreground">{agentName}</span> : null}
+      <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm dark:divide-white/[0.07]">
         {/* The agents differ in how they execute, not in which route they can
-            reach — one executable quote exists, so they all take it. */}
-        {sliceCount === 1 ? <span>single fill</span> : null}
-        {/* Named per source, because "Soroswap" and "Soroswap Aggregator"
-            are different claims about where a fill came from. */}
-        <span>via {quote !== undefined ? sourceDisplayName(quote.source) : undefined}</span>
-        <span>
-          {quote?.path.length === 0
-            ? 'direct'
-            : `${quote?.path.length ?? 0} hop${quote?.path.length === 1 ? '' : 's'}`}
-        </span>
-        <span>0.5% max slippage</span>
-      </div>
+            reach. Named per source, because "Soroswap" and "Soroswap
+            Aggregator" are different claims about where a fill came from. */}
+        <div className="flex items-center justify-between gap-4 py-2">
+          <dt className="text-muted-foreground">Route</dt>
+          <dd className="text-right font-medium">
+            {route ?? '—'} · {hops}
+            {sliceCount === 1 ? ' · single fill' : ''}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-4 py-2">
+          <dt className="text-muted-foreground">Max slippage</dt>
+          <dd className="text-right font-medium">0.5%</dd>
+        </div>
+      </dl>
 
       <LedgerPreview preview={preview} />
 
@@ -243,32 +366,25 @@ export function SwapConfirm({
           reads as "possibly a scam", and the canonical testnet USDC is not
           one — its issuer simply names a site that lists only mainnet. */}
       {trustCaution !== undefined ? (
-        <div className="border-border text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed p-2.5 text-xs">
+        <div className="border-bubble-agent-border text-muted-foreground flex items-start gap-2 rounded-2xl border border-dashed p-3 text-xs dark:border-white/10">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{trustCaution}</span>
         </div>
       ) : null}
 
       <div className="flex items-center gap-2">
-        <Button onClick={onConfirm} disabled={busy}>
-          {phase === 'signing' ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              Confirm in your wallet
-            </>
-          ) : phase === 'submitting' ? (
-            <>
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              Submitting…
-            </>
-          ) : (
-            'Sign & swap'
-          )}
-        </Button>
+        <button type="button" onClick={onConfirm} disabled={busy} className={cn(PRIMARY, 'flex-1')}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}
+          {phase === 'signing'
+            ? 'Confirm in your wallet'
+            : phase === 'submitting'
+              ? 'Submitting…'
+              : 'Sign & swap'}
+        </button>
         {!busy ? (
-          <Button variant="outline" onClick={onReset}>
+          <button type="button" onClick={onReset} className={SECONDARY}>
             Cancel
-          </Button>
+          </button>
         ) : null}
       </div>
 
@@ -299,6 +415,6 @@ export function SwapConfirm({
         The received amount is an estimate. If the price moves more than 0.5%, the swap is cancelled
         and nothing is spent.
       </p>
-    </Card>
+    </div>
   )
 }

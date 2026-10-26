@@ -642,6 +642,18 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swapSettled, cashOutAfterSwap])
   const usdcHeld = balances?.trustlines?.['USDC']?.balance
+  // The form appears below a long thread, so it is brought into view rather
+  // than left for the user to find by scrolling.
+  const cashOutRef = useRef<HTMLDivElement>(null)
+  const cashOutShown = cashOutFrom !== null
+  useEffect(() => {
+    if (!cashOutShown) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const id = window.setTimeout(() => {
+      cashOutRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+    }, 150)
+    return () => window.clearTimeout(id)
+  }, [cashOutShown])
   // What the payout opens on: what the swap said it would deliver, never more
   // than the account now holds.
   const cashOutUsdc =
@@ -2357,7 +2369,7 @@ export function IntentChat(): JSX.Element {
               {/* The cash-out's second half: the swap has settled and the USDC
                   is in the account, so now the bank details are asked for. */}
               {cashOutFrom !== null ? (
-                <>
+                <div ref={cashOutRef} className="flex scroll-mt-4 flex-col gap-4">
                   <p className={systemPill}>Swap settled. Now cash out your USDC to naira.</p>
                   <NairaPayoutCard
                     key={`after-swap-${cashOutFrom.hash}-${usdcHeld ?? 'pending'}`}
@@ -2379,7 +2391,7 @@ export function IntentChat(): JSX.Element {
                       setTurns(loadTurns(slug))
                     }}
                   />
-                </>
+                </div>
               ) : null}
             </div>
           )}

@@ -1,10 +1,11 @@
 'use client'
 
-import { Card } from '@intent/ui'
-import { Clock, Loader2 } from 'lucide-react'
+import { cn } from '@intent/ui'
+import { Check, Clock, Loader2, TriangleAlert, X } from 'lucide-react'
 
 import { useIntent } from '../../hooks/use-intent'
 import { TokenIcon } from '../ui/token-icon'
+import { toolCard } from './bubble'
 
 /**
  * A resting order, shown inside the conversation that placed it.
@@ -35,27 +36,51 @@ export function OpenIntentCard({
   const finished =
     intent.status === 'settled' || intent.status === 'cancelled' || intent.status === 'failed'
 
-  // A market order's progress is already narrated by the swap card above; only
-  // a resting order needs its own place in the thread.
+  // A market order's progress is already narrated by the swap card above,
+  // settlement included; only a resting order needs its own place in the
+  // thread. A filled market order used to add a second "Order filled." here.
+  if (intent.limitPriceUsd === undefined) return null
   if (!waiting && !finished) return null
 
   if (finished) {
     return (
-      <Card className="text-muted-foreground p-4 text-sm">
-        {intent.status === 'settled'
-          ? 'Order filled.'
-          : intent.status === 'cancelled'
-            ? 'Order cancelled. Nothing was spent.'
-            : 'Order failed. Nothing was spent.'}
-      </Card>
+      <div className={cn(toolCard, 'flex-row items-center gap-3 py-4 text-sm')}>
+        <span
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+            intent.status === 'settled'
+              ? 'bg-success/15 text-success'
+              : intent.status === 'cancelled'
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-warning/15 text-warning'
+          )}
+        >
+          {intent.status === 'settled' ? (
+            <Check className="h-4 w-4" strokeWidth={2.5} />
+          ) : intent.status === 'cancelled' ? (
+            <X className="h-4 w-4" />
+          ) : (
+            <TriangleAlert className="h-4 w-4" />
+          )}
+        </span>
+        <span className="font-medium">
+          {intent.status === 'settled'
+            ? 'Order filled'
+            : intent.status === 'cancelled'
+              ? 'Order cancelled. Nothing was spent.'
+              : 'Order failed. Nothing was spent.'}
+        </span>
+      </div>
     )
   }
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="flex items-center gap-2 text-sm">
-        <Clock className="text-muted-foreground h-4 w-4 shrink-0" />
-        <span className="font-medium">Order open</span>
+    <div className={cn(toolCard, 'gap-3')}>
+      <div className="flex items-center gap-3 text-sm">
+        <span className="bg-bubble-me text-bubble-me-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+          <Clock className="h-4 w-4" />
+        </span>
+        <span className="font-semibold">Order open</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-sm tabular-nums">
@@ -79,14 +104,14 @@ export function OpenIntentCard({
           type="button"
           disabled={cancelling}
           onClick={() => onCancel(intent.id)}
-          className="border-border text-foreground hover:border-foreground/40 inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
+          className="border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm transition-colors disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/5"
         >
           {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           Cancel order
         </button>
       </div>
 
-      {cancelError !== undefined ? <p className="text-foreground text-xs">{cancelError}</p> : null}
-    </Card>
+      {cancelError !== undefined ? <p className="text-destructive text-xs">{cancelError}</p> : null}
+    </div>
   )
 }
