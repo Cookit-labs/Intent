@@ -1,9 +1,10 @@
 'use client'
 
-import { cn } from '@intent/ui'
+import { ChainMark, cn } from '@intent/ui'
 import {
   ArrowDown,
   ArrowLeftRight,
+  BadgeCheck,
   Check,
   Copy,
   ExternalLink,
@@ -69,24 +70,30 @@ function CardHeader({
   subtitle,
 }: {
   icon: ReactNode
-  tone?: 'brand' | 'success' | 'warning'
+  tone?: 'brand' | 'verified' | 'warning'
   title: string
   subtitle?: string | undefined
 }): JSX.Element {
   return (
     <div className="flex items-center gap-3">
-      <span
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-          tone === 'success'
-            ? 'bg-success/15 text-success'
-            : tone === 'warning'
+      {tone === 'verified' ? (
+        <BadgeCheck
+          className="fill-brand text-brand-foreground h-10 w-10 shrink-0"
+          aria-label="Complete"
+          role="img"
+        />
+      ) : (
+        <span
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+            tone === 'warning'
               ? 'bg-warning/15 text-warning'
               : 'bg-bubble-me text-bubble-me-foreground'
-        )}
-      >
-        {icon}
-      </span>
+          )}
+        >
+          {icon}
+        </span>
+      )}
       <div className="flex min-w-0 flex-col leading-tight">
         <span className="text-sm font-semibold">{title}</span>
         {subtitle !== undefined && subtitle !== '' ? (
@@ -144,6 +151,29 @@ function HashChip({ hash }: { hash: string }): JSX.Element {
       {hash.slice(0, 6)}…{hash.slice(-6)}
       {copied ? <Check className="text-success h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
+  )
+}
+
+/**
+ * The venue's mark beside its name. Stellar DEX is the network's own order
+ * book, so it draws the Stellar mark; the others use their logos.
+ */
+function SourceLogo({ source }: { source: string | undefined }): JSX.Element | null {
+  if (source === undefined) return null
+  if (source === 'horizon') {
+    return <ChainMark chain="stellar" className="h-4 w-4 shrink-0 rounded-full" />
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={`/images/venues/${source}.webp`}
+      alt=""
+      aria-hidden
+      className="ring-border/60 h-4 w-4 shrink-0 rounded-full object-cover ring-1"
+      onError={(e) => {
+        e.currentTarget.style.display = 'none'
+      }}
+    />
   )
 }
 
@@ -215,8 +245,8 @@ export function SwapConfirm({
     return (
       <div className={cn(toolCard, 'gap-4')}>
         <CardHeader
-          tone="success"
-          icon={<Check className="h-5 w-5" strokeWidth={2.5} />}
+          tone="verified"
+          icon={null}
           title="Swap complete"
           subtitle="Settled on Stellar"
         />
@@ -267,13 +297,32 @@ export function SwapConfirm({
           tone="warning"
           icon={<TriangleAlert className="h-5 w-5" />}
           title="Swap not completed"
-          subtitle="Nothing was spent"
+          subtitle={
+            // A hash means it reached the network, so it may have spent a fee
+            // or even settled: said as something to check, never as "nothing".
+            explorerUrl !== undefined
+              ? 'Check the transaction before trying again'
+              : 'Nothing was spent'
+          }
         />
         {/* The message is already user-facing prose from FAILURE_MESSAGES. */}
         <p className={cn(toolPanel, 'px-4 py-3 text-sm')}>{error ?? 'Something went wrong.'}</p>
-        <button type="button" onClick={onReset} className={cn(SECONDARY, 'w-fit')}>
-          Try again
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={onReset} className={SECONDARY}>
+            Try again
+          </button>
+          {explorerUrl !== undefined ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+            >
+              View on Stellar Expert
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
+        </div>
       </div>
     )
   }
@@ -341,9 +390,12 @@ export function SwapConfirm({
             Aggregator" are different claims about where a fill came from. */}
         <div className="flex items-center justify-between gap-4 py-2">
           <dt className="text-muted-foreground">Route</dt>
-          <dd className="text-right font-medium">
-            {route ?? '—'} · {hops}
-            {sliceCount === 1 ? ' · single fill' : ''}
+          <dd className="flex items-center justify-end gap-1.5 text-right font-medium">
+            <SourceLogo source={quote?.source} />
+            <span>
+              {route ?? '—'} · {hops}
+              {sliceCount === 1 ? ' · single fill' : ''}
+            </span>
           </dd>
         </div>
         <div className="flex items-center justify-between gap-4 py-2">

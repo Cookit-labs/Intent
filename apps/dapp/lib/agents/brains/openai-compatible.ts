@@ -56,7 +56,7 @@ import { PROVIDERS, modelFor } from './providers'
 // by a canned proposal. Unused tokens are not billed, so the headroom costs
 // nothing and the failure it prevents is the one that makes the whole
 // competition look fabricated.
-const MAX_OUTPUT_TOKENS = 16_000
+export const MAX_OUTPUT_TOKENS = 16_000
 
 /**
  * One value for every agent. The old per-seat spread (0.2–0.7) was never
@@ -102,7 +102,7 @@ function estimateCost(
   return (inTokens / 1_000_000) * rate.input + (outTokens / 1_000_000) * rate.output
 }
 
-function meta(
+export function meta(
   config: ProviderConfig,
   model: string,
   latencyMs: number,
@@ -132,7 +132,7 @@ function meta(
  * intent — the only genuinely unique part — last. Reversing this still works
  * and still returns the right answer; it just quietly costs ~50x more.
  */
-function buildMessages(req: ProposalRequest): { role: string; content: string }[] {
+export function buildMessages(req: ProposalRequest): { role: string; content: string }[] {
   const venueList = req.market.venues.map((v) => `${v.id} (${v.name}, ${v.category})`).join(', ')
   const priceList = Object.entries(req.market.prices)
     .map(([sym, px]) => `${sym}=$${px}`)
@@ -388,6 +388,18 @@ function classifyStatus(status: number): BrainErrorCode {
   return 'upstream_error'
 }
 
+/**
+ * When a 429 says to come back. `Retry-After` is seconds; OpenRouter's
+ * `X-RateLimit-Reset` is the epoch millisecond its window reopens.
+ */
+function retryAfter(headers: Headers): number | undefined {
+  const seconds = Number(headers.get('retry-after'))
+  if (headers.get('retry-after') !== null && Number.isFinite(seconds)) return seconds * 1000
+  const reset = Number(headers.get('x-ratelimit-reset'))
+  if (headers.get('x-ratelimit-reset') !== null && Number.isFinite(reset)) return reset - Date.now()
+  return undefined
+}
+
 export function createBrain(options: BrainOptions = {}): AgentBrain {
   const config = PROVIDERS[options.provider ?? 'deepseek']
 
@@ -462,10 +474,19 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
 
       if (!res.ok) {
+        // The provider's own words, so a model that left the catalogue or a
+        // spent key is told apart from a busy one in the logs. Never the key.
+        const reason = await res.text().catch(() => '')
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[agents] ${req.agent}: HTTP ${res.status} from ${config.id} for ${model}: ${reason.slice(0, 300)}`
+        )
+        const retryAfterMs = res.status === 429 ? retryAfter(res.headers) : undefined
         return {
           ok: false,
           error: classifyStatus(res.status),
           meta: meta(config, model, Date.now() - startedAt, undefined),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         }
       }
 
@@ -510,109 +531,102 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
         }
       }
 
-      const validated = validateProposal(raw, {
-        // When a route was quoted, its implied rate is the reference: it came
-        // from live liquidity, while the price table is indicative and can be
-        // stale by a wide margin. Rejecting an agent for agreeing with the
-        // market would be exactly backwards.
-        // Both bases are offered because both are shown to the agent: the
-        // route rate it is told to quote, and the market price it is told to
-        // sanity-check against.
-        referencePriceUsd: req.intent.referencePriceUsd,
-        // Every route's rate is a legitimate answer, because an agent may
-        // pick any of them. Passing only one made choosing the better venue
-        // look like a fabrication.
-        routeRates: impliedRates(req),
-        // Venues on this chain, plus the venue of every route the agent was
-        // shown and the route ids themselves. A route's source is on this
-        // chain by construction, but "horizon" is not in the venue list — so
-        // an agent picking the classic route had no correct venue to name —
-        // and agents also put a route id in this field, which is a slip in a
-        // label, not reasoning about the wrong chain. Uniswap on Stellar
-        // still fails; horizon-1 on Stellar does not.
-        allowedVenueIds: [
-          ...req.market.venues.map((v) => v.id),
-          ...(req.market.routes ?? []).flatMap((r) => [r.source, r.id]),
-        ],
-        ...(req.market.routes !== undefined
-          ? {
-              // Only executable routes are selectable. The prompt says so too,
-              // but a model that ignores it must still be refused here: an
-              // unexecutable winner is a fill the user cannot sign.
-              allowedRouteIds: req.market.routes.filter((r) => r.executable).map((r) => r.id),
-            }
-          : {}),
-        // Which lending venues this chain can actually reach. An agent naming
-        // one that is absent has its follow-on downgraded rather than its
-        // whole proposal rejected: the trade is still sound, and the second
-        // step was optional.
-        lendingVenueIds: lendingVenuesFor(req),
-        // Which anchors this deployment can actually complete a withdrawal
-        // through. Same downgrade discipline as lending: naming one absent
-        // here loses only the follow-on, not the trade.
-        offrampVenueIds: offrampVenuesFor(req),
-      })
-
-      if (!validated.ok) {
-        // eslint-disable-next-line no-console
-        console.warn(`[agents] ${req.agent}: rejected — ${validated.reason}`)
-        return {
-          ok: false,
-          error: 'invalid_schema',
-          meta: meta(config, model, Date.now() - startedAt, body.usage),
-        }
-      }
-
-      return {
-        ok: true,
-        proposal: {
-          agent: req.agent,
-          // Empty means the agent had nothing to choose from; omitted rather
-          // than stored as '' so downstream code checks presence, not value.
-          ...(validated.value.routeId !== '' ? { routeId: validated.value.routeId } : {}),
-          reasoning: tidyProse(validated.value.reasoning),
-          projectedAvgPriceUsd: validated.value.projectedAvgPriceUsd,
-          projectedSlippagePct: validated.value.projectedSlippagePct,
-          venues: validated.value.venues,
-          sliceCount: validated.value.sliceCount,
-          confidence: validated.value.confidence,
-          horizonMinutes: validated.value.horizonMinutes,
-          executionMode: validated.value.executionMode,
-          // Zero is how a filling proposal expresses "no resting price", since
-          // strict mode has no optional properties. Carrying it through as a
-          // real zero would read as a price of nothing.
-          ...((validated.value.executionMode === 'rest' ||
-            validated.value.executionMode === 'split') &&
-          validated.value.restPriceUsd > 0
-            ? { restPriceUsd: validated.value.restPriceUsd }
-            : {}),
-          ...(validated.value.executionMode === 'split'
-            ? { splitPct: validated.value.splitPct }
-            : {}),
-          // Omitted rather than carried as 'none', so downstream code checks
-          // presence like it does for every other optional field here.
-          // Validation has already downgraded anything this chain cannot do.
-          ...(validated.value.thenAction !== 'none'
-            ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
-            : {}),
-        },
-        meta: meta(config, model, Date.now() - startedAt, body.usage),
-      }
+      return toOutcome(req, raw, meta(config, model, Date.now() - startedAt, body.usage))
     },
   }
 }
 
 /**
- * One brain per provider, built once.
+ * A model's tool-call arguments, checked and turned into a proposal.
  *
- * Built eagerly because construction is a few reads of `process.env` and
- * nothing more — no client, no connection. Whether a provider is usable is
- * `isConfigured()`, which the registry checks; an unconfigured brain existing
- * costs nothing and is never handed to an agent.
+ * Shared by every brain, whatever its wire format: the arguments are only
+ * ever the model's claim, and what makes one a proposal is this validation,
+ * not the client that fetched it.
  */
-export const BRAINS: Record<BrainProvider, AgentBrain> = {
-  deepseek: createBrain({ provider: 'deepseek' }),
-  groq: createBrain({ provider: 'groq' }),
-  ollama: createBrain({ provider: 'ollama' }),
-  openrouter: createBrain({ provider: 'openrouter' }),
+export function toOutcome(req: ProposalRequest, raw: unknown, done: BrainMeta): ProposalOutcome {
+  const validated = validateProposal(raw, {
+    // When a route was quoted, its implied rate is the reference: it came
+    // from live liquidity, while the price table is indicative and can be
+    // stale by a wide margin. Rejecting an agent for agreeing with the
+    // market would be exactly backwards.
+    // Both bases are offered because both are shown to the agent: the
+    // route rate it is told to quote, and the market price it is told to
+    // sanity-check against.
+    referencePriceUsd: req.intent.referencePriceUsd,
+    // Every route's rate is a legitimate answer, because an agent may
+    // pick any of them. Passing only one made choosing the better venue
+    // look like a fabrication.
+    routeRates: impliedRates(req),
+    // Venues on this chain, plus the venue of every route the agent was
+    // shown and the route ids themselves. A route's source is on this
+    // chain by construction, but "horizon" is not in the venue list — so
+    // an agent picking the classic route had no correct venue to name —
+    // and agents also put a route id in this field, which is a slip in a
+    // label, not reasoning about the wrong chain. Uniswap on Stellar
+    // still fails; horizon-1 on Stellar does not.
+    allowedVenueIds: [
+      ...req.market.venues.map((v) => v.id),
+      ...(req.market.routes ?? []).flatMap((r) => [r.source, r.id]),
+    ],
+    ...(req.market.routes !== undefined
+      ? {
+          // Only executable routes are selectable. The prompt says so too,
+          // but a model that ignores it must still be refused here: an
+          // unexecutable winner is a fill the user cannot sign.
+          allowedRouteIds: req.market.routes.filter((r) => r.executable).map((r) => r.id),
+        }
+      : {}),
+    // Which lending venues this chain can actually reach. An agent naming
+    // one that is absent has its follow-on downgraded rather than its
+    // whole proposal rejected: the trade is still sound, and the second
+    // step was optional.
+    lendingVenueIds: lendingVenuesFor(req),
+    // Which anchors this deployment can actually complete a withdrawal
+    // through. Same downgrade discipline as lending: naming one absent
+    // here loses only the follow-on, not the trade.
+    offrampVenueIds: offrampVenuesFor(req),
+  })
+
+  if (!validated.ok) {
+    // eslint-disable-next-line no-console
+    console.warn(`[agents] ${req.agent}: rejected — ${validated.reason}`)
+    return {
+      ok: false,
+      error: 'invalid_schema',
+      meta: done,
+    }
+  }
+
+  return {
+    ok: true,
+    proposal: {
+      agent: req.agent,
+      // Empty means the agent had nothing to choose from; omitted rather
+      // than stored as '' so downstream code checks presence, not value.
+      ...(validated.value.routeId !== '' ? { routeId: validated.value.routeId } : {}),
+      reasoning: tidyProse(validated.value.reasoning),
+      projectedAvgPriceUsd: validated.value.projectedAvgPriceUsd,
+      projectedSlippagePct: validated.value.projectedSlippagePct,
+      venues: validated.value.venues,
+      sliceCount: validated.value.sliceCount,
+      confidence: validated.value.confidence,
+      horizonMinutes: validated.value.horizonMinutes,
+      executionMode: validated.value.executionMode,
+      // Zero is how a filling proposal expresses "no resting price", since
+      // strict mode has no optional properties. Carrying it through as a
+      // real zero would read as a price of nothing.
+      ...((validated.value.executionMode === 'rest' || validated.value.executionMode === 'split') &&
+      validated.value.restPriceUsd > 0
+        ? { restPriceUsd: validated.value.restPriceUsd }
+        : {}),
+      ...(validated.value.executionMode === 'split' ? { splitPct: validated.value.splitPct } : {}),
+      // Omitted rather than carried as 'none', so downstream code checks
+      // presence like it does for every other optional field here.
+      // Validation has already downgraded anything this chain cannot do.
+      ...(validated.value.thenAction !== 'none'
+        ? { thenAction: validated.value.thenAction, thenVenue: validated.value.thenVenue }
+        : {}),
+    },
+    meta: done,
+  }
 }

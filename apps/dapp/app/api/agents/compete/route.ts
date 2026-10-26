@@ -7,6 +7,7 @@ import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
 import { measureRoute } from '../../../../lib/agents/measure'
+import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents/lineup'
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
@@ -197,11 +198,20 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  const roster = getRoster()
-  if (roster === undefined) {
+  const full = getRoster()
+  if (full === undefined) {
     return errorStream(
       'agents_offline',
       'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+    )
+  }
+  const roster = lineUp(full)
+  if (roster.length === 0) {
+    const back = benchedUntilFor(full)
+    const minutes = back !== undefined ? Math.max(1, Math.ceil((back - Date.now()) / 60_000)) : 1
+    return errorStream(
+      'agents_offline',
+      `Every agent has hit its provider's free-tier limit. Try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`
     )
   }
 
@@ -325,6 +335,9 @@ export async function POST(request: Request): Promise<Response> {
             })
 
             if (!outcome.ok) {
+              if (outcome.error === 'rate_limited') {
+                noteRateLimited(agent.key, outcome.retryAfterMs)
+              }
               attempts.push({
                 agent: agent.key,
                 model: agent.model,

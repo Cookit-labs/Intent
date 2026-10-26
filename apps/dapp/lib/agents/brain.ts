@@ -25,7 +25,7 @@ import type { PerpFacts } from '../perps/market-facts'
  *
  * See `brains/providers.ts` for each one's endpoint, limits and cost.
  */
-export type BrainProvider = 'deepseek' | 'groq' | 'ollama' | 'openrouter'
+export type BrainProvider = 'anthropic' | 'deepseek' | 'groq' | 'ollama' | 'openrouter'
 
 /**
  * Which agent. `provider:model`, built by `identity.ts` — an agent is a
@@ -286,7 +286,13 @@ export interface BrainMeta {
  */
 export type ProposalOutcome =
   | { ok: true; proposal: AgentProposalResult; meta: BrainMeta }
-  | { ok: false; error: BrainErrorCode; meta: BrainMeta }
+  | {
+      ok: false
+      error: BrainErrorCode
+      meta: BrainMeta
+      /** On a 429: how long until the provider said it would accept requests again. */
+      retryAfterMs?: number
+    }
 
 export interface AgentBrain {
   id: BrainProvider

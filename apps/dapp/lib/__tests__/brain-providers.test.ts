@@ -104,7 +104,7 @@ describe('each provider is called at its own endpoint', () => {
 
     expect(seen[0]?.url).toBe('https://openrouter.ai/api/v1/chat/completions')
     expect(seen[0]?.body.tools[0]?.function.strict).toBe(false)
-    expect(seen[0]?.body.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+    expect(seen[0]?.body.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
   it('needs no key for a local daemon', async () => {
@@ -164,10 +164,8 @@ describe('OpenRouter models can be named by alias', () => {
   // and AGENT_BRAINS lists one per agent. A short name per curated model keeps
   // that line readable; anything not in the table is passed through as an id.
   it('expands a curated alias to its catalogue id', () => {
-    expect(resolveModel('openrouter', 'ling-fin')).toBe('inclusionai/ling-3.0-flash-fin:free')
-    expect(resolveModel('openrouter', 'nemotron-super')).toBe(
-      'nvidia/nemotron-3-super-120b-a12b:free'
-    )
+    expect(resolveModel('openrouter', 'gemma-4')).toBe('google/gemma-4-26b-a4b-it:free')
+    expect(resolveModel('openrouter', 'north-mini')).toBe('cohere/north-mini-code:free')
   })
 
   it('passes an unknown name through as a raw model id', () => {
@@ -185,10 +183,10 @@ describe('OpenRouter models can be named by alias', () => {
     expect(modelFor('openrouter', env)).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
-  it('curates five models, each from a different lab', () => {
+  it('curates three models, each from a different lab', () => {
     const ids = Object.values(OPENROUTER_MODELS)
-    expect(ids).toHaveLength(5)
+    expect(ids).toHaveLength(3)
     const labs = new Set(ids.map((id) => id.split('/')[0]))
-    expect(labs.size).toBe(5)
+    expect(labs.size).toBe(3)
   })
 })

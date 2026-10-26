@@ -79,25 +79,48 @@ export interface ProviderConfig {
  * answering that day. And one model per lab, because the point of a line-up
  * is disagreement, and two sizes of the same family agree by construction.
  *
+ * Revised 2026-10-26: Ling 3.0 Flash Fin left the catalogue, and Laguna S 2.1
+ * is listed to expire on 2026-10-31; Laguna XS 2.1 replaces it. Inkling was
+ * tried and refused (403: "only available on agentic harnesses"), and
+ * Nemotron 3 Super was dropped when Nvidia's endpoint began answering 404.
+ *
  * Not here on purpose: `qwen/qwen3.8-27b:free` is the model the Groq slot
  * already runs, and Nemotron 3 Ultra (550B) was degraded and is slow enough
  * on the free tier to meet the agent timeout. Either can be named by raw id
  * in `AGENT_BRAINS` when that changes.
  */
 export const OPENROUTER_MODELS: Record<string, string> = {
-  /** Finance-tuned. The best-ranked healthy tool-caller on the list. */
-  'ling-fin': 'inclusionai/ling-3.0-flash-fin:free',
-  /** 120B mixture-of-experts. 40 req/min on its own, on top of OpenRouter's. */
-  'nemotron-super': 'nvidia/nemotron-3-super-120b-a12b:free',
   /** 26B with 4B active, so fast for its size. */
   'gemma-4': 'google/gemma-4-26b-a4b-it:free',
   /** Code-trained; disciplined about structured output. */
-  'laguna-s': 'poolside/laguna-s-2.1:free',
+  'laguna-xs': 'poolside/laguna-xs-2.1:free',
   /** Cohere's Command lineage, which has done tool calling longest. */
   'north-mini': 'cohere/north-mini-code:free',
 }
 
 export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
+  /**
+   * Claude, through Anthropic's own SDK rather than the chat-completions
+   * client — see `anthropic.ts`. `baseUrl`, `strictTools` and `toolChoice`
+   * are recorded for completeness; that client sets them itself.
+   *
+   * Paid, unlike most of the line-up: about 2,300 input tokens a race plus
+   * the thinking and the tool call, so roughly two to five cents per race.
+   */
+  anthropic: {
+    id: 'anthropic',
+    displayName: 'Claude',
+    baseUrl: 'https://api.anthropic.com',
+    defaultModel: 'claude-opus-5-5',
+    apiKeyEnv: 'ANTHROPIC_API_KEY',
+    strictTools: true,
+    autoSelect: true,
+    toolChoice: 'auto',
+    pricing: { 'claude-opus-5-5': { input: 4, output: 20 } },
+    defaultPricing: { input: 4, output: 20 },
+    displayNames: { 'claude-opus-5-5': 'Claude Opus 5.5' },
+  },
+
   deepseek: {
     id: 'deepseek',
     displayName: 'DeepSeek',
@@ -187,9 +210,9 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
    *
    * **Limits are per key, across every free model together.** 20 requests a
    * minute; 50 a day until 10 credits have ever been bought, 1,000 a day
-   * after. The default roster puts five agents here, so a race is five
-   * requests: ten races a day on an untopped key, then every OpenRouter agent
-   * reports `rate_limited` until midnight UTC.
+   * after. The default roster puts five agents here and `lineUp` seats two of
+   * them per race, so an untopped key lasts twenty-five races a day; after
+   * that a 429 benches the provider until its reset.
    *
    * `strict` is not sent: OpenRouter passes the request through to whichever
    * lab serves the model, and it is not in the shape they all accept.
@@ -198,7 +221,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     id: 'openrouter',
     displayName: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'inclusionai/ling-3.0-flash-fin:free',
+    defaultModel: 'google/gemma-4-26b-a4b-it:free',
     apiKeyEnv: 'OPENROUTER_API_KEY',
     strictTools: false,
     autoSelect: true,
@@ -207,10 +230,8 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     defaultPricing: { input: 0, output: 0 },
     aliases: OPENROUTER_MODELS,
     displayNames: {
-      'inclusionai/ling-3.0-flash-fin:free': 'Ling 3.0 Flash Fin',
-      'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super',
       'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B',
-      'poolside/laguna-s-2.1:free': 'Laguna S 2.1',
+      'poolside/laguna-xs-2.1:free': 'Laguna XS 2.1',
       'cohere/north-mini-code:free': 'North Mini Code',
     },
   },

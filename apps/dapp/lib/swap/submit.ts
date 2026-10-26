@@ -1,4 +1,5 @@
 import { stellarNetwork } from '@intent/config'
+import { TransactionBuilder } from '@stellar/stellar-sdk'
 
 import { deliveredFromResultXdr } from './delivered'
 
@@ -43,6 +44,7 @@ export interface SubmitFailure {
     | 'expired'
     | 'rejected'
     | 'network_error'
+    | 'unconfirmed'
     | 'offer_cross_self'
     | 'low_reserve'
     | 'offer_not_found'
@@ -96,6 +98,79 @@ function classify(codes: HorizonSubmitResponse['extras']): SubmitFailure['reason
 export interface SubmitOptions {
   horizonUrl?: string
   fetchImpl?: typeof fetch
+  networkPassphrase?: string
+  /** How often, and for how long, a timed-out submission is looked up. */
+  pollMs?: number
+  pollTimeoutMs?: number
+}
+
+/** The hash a signed transaction will have on the ledger, read from its bytes. */
+export function transactionHashOf(
+  signedXdr: string,
+  networkPassphrase: string = stellarNetwork.networkPassphrase
+): string {
+  const tx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase)
+  return Buffer.from(tx.hash()).toString('hex')
+}
+
+/**
+ * Looks a submission up by hash after Horizon gave no verdict on it.
+ *
+ * Horizon answers a slow confirmation with a 504 or an empty reply, and the
+ * transaction can land moments later. Saying "could not reach the network"
+ * then told users a swap had failed while it was settling.
+ */
+async function lookUpAfterTimeout(
+  signedXdr: string,
+  why: string,
+  options: SubmitOptions
+): Promise<SubmitResult> {
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
+  const doFetch = options.fetchImpl ?? fetch
+  let hash: string
+  try {
+    hash = transactionHashOf(signedXdr, options.networkPassphrase)
+  } catch {
+    console.warn('[submit] no verdict from Horizon and no hash to look up:', why)
+    return { ok: false, reason: 'network_error', detail: why }
+  }
+
+  const deadline = Date.now() + (options.pollTimeoutMs ?? 25_000)
+  const every = options.pollMs ?? 2_000
+  while (Date.now() < deadline) {
+    try {
+      const res = await doFetch(`${horizonUrl}/transactions/${hash}`, { method: 'GET' })
+      if (res.ok) {
+        const record = (await res.json()) as HorizonSubmitResponse
+        if (record.successful === false) {
+          return { ok: false, reason: 'rejected', detail: 'failed in the ledger', hash }
+        }
+        return settled({ ...record, hash })
+      }
+    } catch {
+      // Still unreachable: keep asking until the deadline.
+    }
+    await new Promise((r) => setTimeout(r, every))
+  }
+
+  console.warn('[submit] unconfirmed after a Horizon timeout:', why, hash)
+  return { ok: false, reason: 'unconfirmed', detail: why, hash }
+}
+
+/** A transaction Horizon reports in a ledger and successful. */
+function settled(body: HorizonSubmitResponse & { hash: string }): SubmitSuccess {
+  // Read rather than estimated. A caller sequencing a second step against this
+  // one needs what arrived, and every alternative source for that figure is a
+  // quote taken before the swap ran.
+  const delivered =
+    body.result_xdr !== undefined ? deliveredFromResultXdr(body.result_xdr) : undefined
+  return {
+    ok: true,
+    hash: body.hash,
+    ledger: body.ledger ?? 0,
+    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${body.hash}`,
+    ...(delivered !== undefined ? { delivered } : {}),
+  }
 }
 
 function detailOf(body: HorizonSubmitResponse): string | undefined {
@@ -118,18 +193,24 @@ export async function submitSignedSwap(
       body: new URLSearchParams({ tx: signedXdr }).toString(),
     })
   } catch (e) {
-    return {
-      ok: false,
-      reason: 'network_error',
-      ...(e instanceof Error ? { detail: e.message } : {}),
-    }
+    return lookUpAfterTimeout(
+      signedXdr,
+      e instanceof Error ? e.message : 'the submission did not answer',
+      options
+    )
   }
 
   let body: HorizonSubmitResponse
   try {
     body = (await res.json()) as HorizonSubmitResponse
   } catch {
-    return { ok: false, reason: 'network_error', detail: `HTTP ${res.status}` }
+    return lookUpAfterTimeout(signedXdr, `HTTP ${res.status} without a JSON reply`, options)
+  }
+
+  // A 5xx is Horizon giving up waiting, not the network refusing: the
+  // transaction may still land, so it is looked up rather than classified.
+  if (res.status >= 500) {
+    return lookUpAfterTimeout(signedXdr, `HTTP ${res.status}`, options)
   }
 
   if (!res.ok) {
@@ -153,22 +234,10 @@ export async function submitSignedSwap(
   }
 
   if (body.hash === undefined) {
-    return { ok: false, reason: 'network_error', detail: 'Horizon returned no hash' }
+    return lookUpAfterTimeout(signedXdr, 'Horizon returned no hash', options)
   }
 
-  // Read rather than estimated. A caller sequencing a second step against this
-  // one needs what arrived, and every alternative source for that figure is a
-  // quote taken before the swap ran.
-  const delivered =
-    body.result_xdr !== undefined ? deliveredFromResultXdr(body.result_xdr) : undefined
-
-  return {
-    ok: true,
-    hash: body.hash,
-    ledger: body.ledger ?? 0,
-    explorerUrl: `${stellarNetwork.blockExplorerUrl}/tx/${body.hash}`,
-    ...(delivered !== undefined ? { delivered } : {}),
-  }
+  return settled({ ...body, hash: body.hash })
 }
 
 /** Human-readable text for each failure, shown directly to the user. */
@@ -182,6 +251,8 @@ export const FAILURE_MESSAGES: Record<SubmitFailure['reason'], string> = {
   expired: 'The transaction took too long to submit and expired. Request a fresh quote.',
   rejected: 'The network rejected the transaction.',
   network_error: 'Could not reach the network.',
+  unconfirmed:
+    'The network did not confirm the transaction in time. It may still go through: check your wallet or the explorer before trying again.',
   offer_cross_self:
     'This order would trade against one of your own resting orders. Cancel the other one first.',
   low_reserve:
