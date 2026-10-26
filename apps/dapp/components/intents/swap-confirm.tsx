@@ -4,6 +4,7 @@ import { cn } from '@intent/ui'
 import {
   ArrowDown,
   ArrowLeftRight,
+  BadgeCheck,
   Check,
   Copy,
   ExternalLink,
@@ -69,24 +70,30 @@ function CardHeader({
   subtitle,
 }: {
   icon: ReactNode
-  tone?: 'brand' | 'success' | 'warning'
+  tone?: 'brand' | 'verified' | 'warning'
   title: string
   subtitle?: string | undefined
 }): JSX.Element {
   return (
     <div className="flex items-center gap-3">
-      <span
-        className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-          tone === 'success'
-            ? 'bg-success/15 text-success'
-            : tone === 'warning'
+      {tone === 'verified' ? (
+        <BadgeCheck
+          className="fill-brand text-brand-foreground h-10 w-10 shrink-0"
+          aria-label="Complete"
+          role="img"
+        />
+      ) : (
+        <span
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+            tone === 'warning'
               ? 'bg-warning/15 text-warning'
               : 'bg-bubble-me text-bubble-me-foreground'
-        )}
-      >
-        {icon}
-      </span>
+          )}
+        >
+          {icon}
+        </span>
+      )}
       <div className="flex min-w-0 flex-col leading-tight">
         <span className="text-sm font-semibold">{title}</span>
         {subtitle !== undefined && subtitle !== '' ? (
@@ -215,8 +222,8 @@ export function SwapConfirm({
     return (
       <div className={cn(toolCard, 'gap-4')}>
         <CardHeader
-          tone="success"
-          icon={<Check className="h-5 w-5" strokeWidth={2.5} />}
+          tone="verified"
+          icon={null}
           title="Swap complete"
           subtitle="Settled on Stellar"
         />

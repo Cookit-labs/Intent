@@ -637,8 +637,12 @@ export function IntentChat(): JSX.Element {
   const swapSettled = swap.phase === 'settled'
   useEffect(() => {
     if (!swapSettled || !cashOutAfterSwap || address === undefined) return
-    setCashOutFrom({ hash: swap.hash ?? '', receive: swap.receiveDisplay ?? '' })
-    void queryClient.invalidateQueries({ queryKey: ['stellar-balances', address] })
+    const settled = { hash: swap.hash ?? '', receive: swap.receiveDisplay ?? '' }
+    // The form opens once the balance has been read again, so it starts from
+    // the USDC that arrived rather than a figure from before the swap.
+    void queryClient
+      .refetchQueries({ queryKey: ['stellar-balances', address] })
+      .finally(() => setCashOutFrom(settled))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swapSettled, cashOutAfterSwap])
   const usdcHeld = balances?.trustlines?.['USDC']?.balance
@@ -2372,7 +2376,7 @@ export function IntentChat(): JSX.Element {
                 <div ref={cashOutRef} className="flex scroll-mt-4 flex-col gap-4">
                   <p className={systemPill}>Swap settled. Now cash out your USDC to naira.</p>
                   <NairaPayoutCard
-                    key={`after-swap-${cashOutFrom.hash}-${usdcHeld ?? 'pending'}`}
+                    key={`after-swap-${cashOutFrom.hash}`}
                     asset="usdc"
                     {...(cashOutUsdc !== undefined && cashOutUsdc > 0
                       ? { initialXlm: cashOutUsdc }

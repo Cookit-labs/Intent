@@ -5,9 +5,11 @@ import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   ArrowDown,
+  ArrowRight,
   BadgeCheck,
   Banknote,
   Check,
+  ExternalLink,
   Loader2,
   ShieldCheck,
   Timer,
@@ -20,7 +22,7 @@ import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
 import { TokenIcon } from '../ui/token-icon'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
-import { toolCard } from './bubble'
+import { toolCard, toolPanel } from './bubble'
 
 /**
  * The form an agent drops into the thread when an instruction is read as a
@@ -63,12 +65,39 @@ function naira(n: number): string {
   return `₦${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-function CardHeader({ title, subtitle }: { title: string; subtitle?: string }): JSX.Element {
+function CardHeader({
+  title,
+  subtitle,
+  tone = 'brand',
+}: {
+  title: string
+  subtitle?: string
+  tone?: 'brand' | 'verified' | 'warning'
+}): JSX.Element {
   return (
     <div className="flex items-center gap-3">
-      <span className="bg-bubble-me text-bubble-me-foreground flex h-10 w-10 shrink-0 items-center justify-center rounded-full">
-        <Banknote className="h-5 w-5" />
-      </span>
+      {tone === 'verified' ? (
+        <BadgeCheck
+          className="fill-brand text-brand-foreground h-10 w-10 shrink-0"
+          aria-label="Complete"
+          role="img"
+        />
+      ) : (
+        <span
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+            tone === 'warning'
+              ? 'bg-warning/15 text-warning'
+              : 'bg-bubble-me text-bubble-me-foreground'
+          )}
+        >
+          {tone === 'warning' ? (
+            <TriangleAlert className="h-5 w-5" />
+          ) : (
+            <Banknote className="h-5 w-5" />
+          )}
+        </span>
+      )}
       <div className="flex flex-col leading-tight">
         <span className="text-sm font-semibold">{title}</span>
         {subtitle !== undefined ? (
@@ -81,28 +110,47 @@ function CardHeader({ title, subtitle }: { title: string; subtitle?: string }): 
 
 const STEPS = ['Deposit', 'Bank transfer', 'Paid'] as const
 
-/** Where a payout is, as three steps, so "in progress" says which part. */
+/** What a payout shows once it exists: the order itself, not the form that made it. */
+interface PayoutSummary {
+  amount: string
+  coin: string
+  amountNgn: string
+  accountName: string
+  bankName: string
+  accountMask: string
+  paymentHash?: string | undefined
+}
+
+/**
+ * Where a payout is. While it runs, three steps say which part; once paid, it
+ * reads as a receipt in the same shape as a completed swap.
+ */
 function PayoutProgress({
   status,
-  summary,
+  order,
+  bank,
 }: {
   status: NairaStatus
-  summary: ReactNode
+  order: PayoutSummary
+  bank?: Bank | undefined
 }): JSX.Element {
   const done = status === 'paid'
   const bad = status === 'failed' || status === 'expired'
   const reached = status === 'waiting' ? 0 : status === 'processing' ? 1 : 2
+  const coin = order.coin.toUpperCase()
   return (
     <div className={cn(SHELL, 'gap-4')}>
       <CardHeader
+        tone={done ? 'verified' : bad ? 'warning' : 'brand'}
         title={done ? 'Payout complete' : bad ? 'Payout stopped' : 'Payout in progress'}
-        subtitle={STATUS_COPY[status]}
+        subtitle={done ? `Paid to ${order.bankName}` : STATUS_COPY[status]}
       />
-      {!bad ? (
+
+      {!done && !bad ? (
         <ol className="flex items-center gap-2">
           {STEPS.map((label, i) => {
-            const complete = i < reached || done
-            const current = i === reached && !done
+            const complete = i < reached
+            const current = i === reached
             return (
               <li key={label} className="flex flex-1 flex-col gap-1.5">
                 <span
@@ -127,15 +175,50 @@ function PayoutProgress({
             )
           })}
         </ol>
-      ) : (
-        <p className="text-destructive flex items-center gap-2 text-xs">
-          <TriangleAlert className="h-3.5 w-3.5" />
-          {status === 'expired' ? 'Expired' : 'Failed'}
-        </p>
-      )}
-      <p className="bg-background/60 rounded-2xl px-4 py-3 text-sm tabular-nums dark:bg-[#121212]">
-        {summary}
-      </p>
+      ) : null}
+      {bad ? <p className="text-muted-foreground text-xs">{STATUS_COPY[status]}</p> : null}
+
+      <div
+        className={cn(
+          toolPanel,
+          'flex flex-wrap items-center justify-center gap-3 px-4 py-5 tabular-nums'
+        )}
+      >
+        <span className="flex items-center gap-2 text-lg font-semibold">
+          <TokenIcon symbol={coin} size={24} />
+          {order.amount} {coin}
+        </span>
+        <ArrowRight className="text-muted-foreground h-4 w-4" />
+        <span className="flex items-center gap-2 text-lg font-semibold">
+          {bank !== undefined ? <BankMark bank={bank} className="h-6 w-6" /> : null}
+          {naira(Number(order.amountNgn))}
+        </span>
+      </div>
+
+      <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm dark:divide-white/[0.07]">
+        <div className="flex items-center justify-between gap-4 py-2">
+          <dt className="text-muted-foreground">Account holder</dt>
+          <dd className="text-right font-medium">{order.accountName}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-4 py-2">
+          <dt className="text-muted-foreground">Bank</dt>
+          <dd className="text-right font-medium">
+            {order.bankName} {order.accountMask}
+          </dd>
+        </div>
+      </dl>
+
+      {order.paymentHash !== undefined && order.paymentHash !== '' ? (
+        <a
+          href={`https://stellar.expert/explorer/public/tx/${order.paymentHash}`}
+          target="_blank"
+          rel="noreferrer"
+          className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground inline-flex w-fit items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors"
+        >
+          View payment on Stellar Expert
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      ) : null}
     </div>
   )
 }
@@ -344,17 +427,7 @@ export function NairaPayoutCard({
     banks.data?.find((b) => b.name === order?.bankName)
 
   if (phase === 'tracking' && order !== undefined) {
-    return (
-      <PayoutProgress
-        status={order.status}
-        summary={
-          <>
-            {order.amount} {order.coin.toUpperCase()} to {naira(Number(order.amountNgn))} for{' '}
-            {order.accountName}, {order.bankName} {order.accountMask}
-          </>
-        }
-      />
-    )
+    return <PayoutProgress status={order.status} order={order} bank={reviewBank} />
   }
 
   if (
@@ -653,6 +726,13 @@ export function NairaPayoutCard({
  * sequence, so this reads the same record by id until it reaches an end.
  */
 export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element {
+  // Shares the form's cache, so the logo costs no extra request.
+  const banks = useQuery({
+    queryKey: ['naira-banks'],
+    queryFn: async () =>
+      ((await (await fetch('/api/naira/banks')).json()) as { banks: Bank[] }).banks,
+    staleTime: Infinity,
+  })
   const order = useQuery({
     queryKey: ['naira-order', orderId],
     queryFn: async () => {
@@ -666,6 +746,7 @@ export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element
           accountName: string
           bankName: string
           accountMask: string
+          paymentHash?: string
         }
       }
       if (!res.ok || body.order === undefined) throw new Error('Could not read the payout.')
@@ -690,12 +771,8 @@ export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element
   return (
     <PayoutProgress
       status={data.status}
-      summary={
-        <>
-          {data.amount} {data.coin.toUpperCase()} to {naira(Number(data.amountNgn))} for{' '}
-          {data.accountName}, {data.bankName} {data.accountMask}
-        </>
-      }
+      order={data}
+      bank={banks.data?.find((b) => b.name === data.bankName)}
     />
   )
 }
