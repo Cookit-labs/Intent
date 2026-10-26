@@ -24,7 +24,7 @@ const market: MarketContext = {
 
 const request: ProposalRequest = {
   intent: parseIntent('Accumulate 2 ETH below $3,200'),
-  agent: 'anthropic:claude-opus-5-5',
+  agent: 'anthropic:claude-sonnet-5-5',
   seat: 0,
   market,
   chain: 'arc',
@@ -51,7 +51,7 @@ function message(content: unknown[], stopReason = 'tool_use'): unknown {
     id: 'msg_1',
     type: 'message',
     role: 'assistant',
-    model: 'claude-opus-5-5',
+    model: 'claude-sonnet-5-5',
     content,
     stop_reason: stopReason,
     stop_sequence: null,
@@ -79,6 +79,22 @@ function clientReturning(
 }
 
 describe('claude brain', () => {
+  it('sends a tool schema with no minimum/maximum (strict mode rejects them)', async () => {
+    const sent: Record<string, unknown>[] = []
+    const brain = createClaudeBrain({
+      client: clientReturning(
+        200,
+        message([{ type: 'tool_use', id: 't1', name: 'submit_proposal', input: proposal }]),
+        sent
+      ),
+    })
+    await brain.propose(request)
+
+    const schema = JSON.stringify((sent[0]?.tools as { input_schema: unknown }[])[0]?.input_schema)
+    expect(schema).not.toContain('"minimum"')
+    expect(schema).not.toContain('"maximum"')
+  })
+
   it('turns a submit_proposal call into a validated proposal', async () => {
     const sent: Record<string, unknown>[] = []
     const brain = createClaudeBrain({
@@ -95,7 +111,7 @@ describe('claude brain', () => {
 
     const body = sent[0]
     expect(body).toMatchObject({
-      model: 'claude-opus-5-5',
+      model: 'claude-sonnet-5-5',
       tool_choice: { type: 'auto' },
       fallbacks: 'default',
       output_config: { effort: 'medium' },

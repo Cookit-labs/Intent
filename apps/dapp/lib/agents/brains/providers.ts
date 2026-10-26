@@ -105,20 +105,22 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
    * are recorded for completeness; that client sets them itself.
    *
    * Paid, unlike most of the line-up: about 2,300 input tokens a race plus
-   * the thinking and the tool call, so roughly two to five cents per race.
+   * the thinking and the tool call. Sonnet rather than Opus — the user pays
+   * per intent and asked for the cheaper tier (half Opus's per-token rate)
+   * rather than the strongest model money can buy for one tool call.
    */
   anthropic: {
     id: 'anthropic',
     displayName: 'Claude',
     baseUrl: 'https://api.anthropic.com',
-    defaultModel: 'claude-opus-5-5',
+    defaultModel: 'claude-sonnet-5-5',
     apiKeyEnv: 'ANTHROPIC_API_KEY',
     strictTools: true,
     autoSelect: true,
     toolChoice: 'auto',
-    pricing: { 'claude-opus-5-5': { input: 4, output: 20 } },
-    defaultPricing: { input: 4, output: 20 },
-    displayNames: { 'claude-opus-5-5': 'Claude Opus 5.5' },
+    pricing: { 'claude-sonnet-5-5': { input: 2, output: 10 } },
+    defaultPricing: { input: 2, output: 10 },
+    displayNames: { 'claude-sonnet-5-5': 'Claude Sonnet 5.5' },
   },
 
   deepseek: {
