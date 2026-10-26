@@ -152,7 +152,28 @@ function errorStream(code: 'agents_offline' | 'chain_unsupported', message: stri
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const limited = await enforceRateLimit(request, 'compete')
+  // Peeked from a clone, before the real parse and before rate-limiting: a
+  // race is costed per caller, and a caller is their wallet when one is
+  // connected, not only the IP they may share with everyone else behind the
+  // same proxy or campus network. A clone because the body stream can be
+  // read only once, and the real parse below still needs it. Anything that
+  // fails to read as a string here is silently absent — the malformed body
+  // is handled once, in the ordinary parse below, not twice.
+  const account = await request
+    .clone()
+    .json()
+    .then((b: unknown) =>
+      typeof b === 'object' &&
+      b !== null &&
+      'account' in b &&
+      typeof b.account === 'string' &&
+      b.account.length <= 64
+        ? b.account
+        : undefined
+    )
+    .catch(() => undefined)
+
+  const limited = await enforceRateLimit(request, 'compete', account)
   if (limited !== undefined) return limited
 
   let text: string

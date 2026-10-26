@@ -36,10 +36,34 @@ export interface RateLimitWindow {
 export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitFamily, RateLimitWindow>> = {
   build: { limit: 30, windowSeconds: 60 },
   submit: { limit: 10, windowSeconds: 60 },
-  compete: { limit: 10, windowSeconds: 60 },
+  // Four a minute, not ten: compete is the one family where every request
+  // is several paid model calls (DeepSeek, Claude, up to two OpenRouter
+  // seats), so the per-minute window bounds burst cost. It is not the real
+  // backstop against sustained abuse — that is the daily cap below, because
+  // a caller who rotates IPs (or never connects a wallet) is still bound by
+  // it even though the per-minute window resets for them every time.
+  compete: { limit: 4, windowSeconds: 60 },
   resolve: { limit: 30, windowSeconds: 60 },
   standing: { limit: 30, windowSeconds: 60 },
   auth: { limit: 10, windowSeconds: 60 },
+}
+
+/**
+ * A second, independent cap alongside the per-minute window, for families
+ * where the per-minute number alone does not bound a day's worst case.
+ * Checked as its own key in its own (much longer) window, so a caller who
+ * never trips the per-minute limit can still be stopped from sustaining it
+ * for hours. Absent for every family but `compete` today: the others are
+ * either free (OpenRouter, Groq) or already bounded elsewhere (`submit`
+ * spends the sponsor's balance, which is its own backstop).
+ *
+ * 150/day keeps a single key's worst-case Claude spend at roughly $2 (150
+ * races * ~$0.0136/race, from providers.ts's own pricing) and keeps one
+ * caller from alone exhausting OpenRouter's shared 50-request daily free
+ * allowance or a meaningful slice of Groq's.
+ */
+export const RATE_LIMIT_DAILY: Readonly<Partial<Record<RateLimitFamily, RateLimitWindow>>> = {
+  compete: { limit: 150, windowSeconds: 24 * 60 * 60 },
 }
 
 type Env = Record<string, string | undefined>
@@ -58,6 +82,26 @@ export function limitFor(family: RateLimitFamily, env: Env = process.env): RateL
     if (limit > 0 && windowSeconds > 0) return { limit, windowSeconds }
   }
   return RATE_LIMIT_DEFAULTS[family]
+}
+
+/**
+ * The family's daily cap, or the `RATE_LIMIT_<FAMILY>_DAILY=count/seconds`
+ * override when it parses. Undefined when the family has no daily cap and
+ * none was configured — `enforceRateLimit` then checks only the per-minute
+ * window, as every family did before this existed.
+ */
+export function dailyLimitFor(
+  family: RateLimitFamily,
+  env: Env = process.env
+): RateLimitWindow | undefined {
+  const raw = env[`RATE_LIMIT_${family.toUpperCase()}_DAILY`]
+  const match = raw === undefined ? null : /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(raw)
+  if (match !== null) {
+    const limit = Number(match[1])
+    const windowSeconds = Number(match[2])
+    if (limit > 0 && windowSeconds > 0) return { limit, windowSeconds }
+  }
+  return RATE_LIMIT_DAILY[family]
 }
 
 export interface RateLimitInput {
@@ -266,10 +310,12 @@ export async function enforceRateLimit(
   deps?: RateLimitDeps
 ): Promise<NextResponse | undefined> {
   const window = limitFor(family, deps?.env)
+  const daily = dailyLimitFor(family, deps?.env)
   // With several networks served the allowance is per network, so use on one
   // cannot run down the other's. With one, the keys are what they always were.
   const scope = isMultiNetwork() ? `:${activeNetwork()}` : ''
-  const keys = [`ip:${clientIp(request, deps?.env)}:${family}${scope}`]
+  const ip = clientIp(request, deps?.env)
+  const keys = [`ip:${ip}:${family}${scope}`]
   if (account !== undefined && account !== '') keys.push(`account:${account}:${family}${scope}`)
 
   for (const key of keys) {
@@ -279,6 +325,18 @@ export async function enforceRateLimit(
         { error: 'rate_limited', retryAfter: decision.retryAfterSeconds },
         { status: 429, headers: { 'Retry-After': String(decision.retryAfterSeconds) } }
       )
+    }
+    // A distinct key, not a second check on the same one: the two windows
+    // are different sizes, and sharing a key would mean the daily cap's
+    // 24-hour window also governed the per-minute count.
+    if (daily !== undefined) {
+      const dailyDecision = await checkRateLimit({ key: `${key}:daily`, ...daily }, deps)
+      if (!dailyDecision.allowed) {
+        return NextResponse.json(
+          { error: 'rate_limited', retryAfter: dailyDecision.retryAfterSeconds },
+          { status: 429, headers: { 'Retry-After': String(dailyDecision.retryAfterSeconds) } }
+        )
+      }
     }
   }
   return undefined

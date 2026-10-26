@@ -361,10 +361,12 @@ export function IntentChat(): JSX.Element {
   // toggle used to select a mock competition here, and a stale bundle once
   // ran it silently while the server's agents worked — every check passed and
   // the screen showed canned proposals nobody could execute.
-  const live = useCompetition(restored === null ? parsed : null, slug, [
-    ...raceContext(thread, notes),
-    ...brief,
-  ])
+  const live = useCompetition(
+    restored === null ? parsed : null,
+    slug,
+    [...raceContext(thread, notes), ...brief],
+    address
+  )
   const liveCompetition = live
 
   // A restored turn is already decided: every agent revealed, a winner picked.
