@@ -20,6 +20,7 @@ import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
 import { TokenIcon } from '../ui/token-icon'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
+import { toolCard } from './bubble'
 
 /**
  * The form an agent drops into the thread when an instruction is read as a
@@ -48,8 +49,7 @@ const STATUS_COPY: Record<NairaStatus, string> = {
  * in a soft black (#121212), so the form reads as a tool
  * rather than another message.
  */
-const SHELL =
-  'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border flex flex-col rounded-3xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.05)] dark:border-white/[0.06] dark:bg-[#0F0F0F] dark:text-foreground dark:shadow-[0_12px_40px_-16px_rgb(0_0_0/0.7)]'
+const SHELL = toolCard
 
 const FIELD =
   'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[#121212]'
