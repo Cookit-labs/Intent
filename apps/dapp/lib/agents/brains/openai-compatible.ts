@@ -474,6 +474,13 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
 
       if (!res.ok) {
+        // The provider's own words, so a model that left the catalogue or a
+        // spent key is told apart from a busy one in the logs. Never the key.
+        const reason = await res.text().catch(() => '')
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[agents] ${req.agent}: HTTP ${res.status} from ${config.id} for ${model}: ${reason.slice(0, 300)}`
+        )
         const retryAfterMs = res.status === 429 ? retryAfter(res.headers) : undefined
         return {
           ok: false,

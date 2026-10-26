@@ -49,7 +49,7 @@ export interface PublicAgent {
 }
 
 /**
- * `AGENT_BRAINS` is the roster, in display order: `deepseek,openrouter/ling-fin,
+ * `AGENT_BRAINS` is the roster, in display order: `deepseek,openrouter/inkling,
  * openrouter/nemotron-super` is three agents. An entry is a provider, or a
  * provider and a model after a slash — an alias from the provider's table or
  * a raw catalogue id, which may itself contain slashes and colons; only the

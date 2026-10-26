@@ -83,15 +83,15 @@ describe('getRoster', () => {
   it('takes AGENT_BRAINS as the roster, in order, one entry per agent', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['OPENROUTER_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
+    process.env['AGENT_BRAINS'] = 'openrouter/gemma-4,deepseek'
     const { getRoster } = await registry()
     const roster = getRoster() ?? []
     expect(roster.map((a) => a.key)).toEqual([
-      'openrouter:inclusionai/ling-3.0-flash-fin:free',
+      'openrouter:google/gemma-4-26b-a4b-it:free',
       'deepseek:deepseek-v4-flash',
     ])
-    expect(roster[0]?.name).toBe('Ling 3.0 Flash Fin')
-    expect(roster[0]?.brain.model).toBe('inclusionai/ling-3.0-flash-fin:free')
+    expect(roster[0]?.name).toBe('Gemma 4 26B')
+    expect(roster[0]?.brain.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
   it('accepts a raw catalogue id after the provider', async () => {
@@ -104,16 +104,16 @@ describe('getRoster', () => {
   it('collapses an entry that resolves to an agent already listed', async () => {
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     process.env['AGENT_BRAINS'] =
-      'openrouter/ling-fin,openrouter/inclusionai/ling-3.0-flash-fin:free,openrouter'
+      'openrouter/gemma-4,openrouter/google/gemma-4-26b-a4b-it:free,openrouter'
     const { getRoster } = await registry()
-    // The bare `openrouter` entry is its default model, which is ling-fin too.
+    // The bare `openrouter` entry is its default model, which is gemma-4 too.
     expect(getRoster()).toHaveLength(1)
     expect(console.warn).toHaveBeenCalled()
   })
 
   it('drops a named agent whose provider has no key, and says so', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin,deepseek'
+    process.env['AGENT_BRAINS'] = 'openrouter/gemma-4,deepseek'
     const { getRoster } = await registry()
     expect((getRoster() ?? []).map((a) => a.provider)).toEqual(['deepseek'])
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('OPENROUTER_API_KEY'))
@@ -128,7 +128,7 @@ describe('getRoster', () => {
 
   it('returns nothing when every named agent is dropped', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
-    process.env['AGENT_BRAINS'] = 'openrouter/ling-fin'
+    process.env['AGENT_BRAINS'] = 'openrouter/gemma-4'
     const { getRoster } = await registry()
     expect(getRoster()).toBeUndefined()
   })
