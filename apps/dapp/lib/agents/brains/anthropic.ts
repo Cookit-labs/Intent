@@ -27,10 +27,26 @@ import { PROVIDERS, modelFor } from './providers'
 
 const config = PROVIDERS.anthropic
 
+/**
+ * Claude's strict tool mode rejects `minimum`/`maximum` on a number property
+ * ("properties maximum, minimum are not supported") — OpenAI's accepts them.
+ * The bound is still stated in that property's description and still
+ * enforced at runtime by `validateProposal`, so dropping it here only
+ * changes what the model is shown up front, not what is allowed through.
+ */
+function stripNumericBounds(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(stripNumericBounds)
+  if (schema === null || typeof schema !== 'object') return schema
+  const { minimum: _min, maximum: _max, ...rest } = schema as Record<string, unknown>
+  return Object.fromEntries(Object.entries(rest).map(([k, v]) => [k, stripNumericBounds(v)]))
+}
+
 const TOOL = {
   name: SUBMIT_PROPOSAL_TOOL.function.name,
   description: SUBMIT_PROPOSAL_TOOL.function.description,
-  input_schema: SUBMIT_PROPOSAL_TOOL.function.parameters as Anthropic.Beta.BetaTool['input_schema'],
+  input_schema: stripNumericBounds(
+    SUBMIT_PROPOSAL_TOOL.function.parameters
+  ) as Anthropic.Beta.BetaTool['input_schema'],
   strict: true,
 }
 

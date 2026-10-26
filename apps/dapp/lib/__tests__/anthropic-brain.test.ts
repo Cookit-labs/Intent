@@ -79,6 +79,22 @@ function clientReturning(
 }
 
 describe('claude brain', () => {
+  it('sends a tool schema with no minimum/maximum (strict mode rejects them)', async () => {
+    const sent: Record<string, unknown>[] = []
+    const brain = createClaudeBrain({
+      client: clientReturning(
+        200,
+        message([{ type: 'tool_use', id: 't1', name: 'submit_proposal', input: proposal }]),
+        sent
+      ),
+    })
+    await brain.propose(request)
+
+    const schema = JSON.stringify((sent[0]?.tools as { input_schema: unknown }[])[0]?.input_schema)
+    expect(schema).not.toContain('"minimum"')
+    expect(schema).not.toContain('"maximum"')
+  })
+
   it('turns a submit_proposal call into a validated proposal', async () => {
     const sent: Record<string, unknown>[] = []
     const brain = createClaudeBrain({
