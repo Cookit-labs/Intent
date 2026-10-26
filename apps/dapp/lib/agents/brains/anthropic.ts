@@ -15,10 +15,12 @@ import { PROVIDERS, modelFor } from './providers'
  * `buildMessages` and `toOutcome` — so Claude competes on the same brief and
  * the same rules.
  *
- * Thinking is always on for this model and cannot be turned off; effort is
- * the only control, set explicitly because the model's default (medium)
- * differs from its predecessor's. Forced tool use is rejected, so the tool is
- * offered with `auto` and `strict` keeps its arguments to the schema.
+ * Thinking is on by default and cannot be fully disabled without giving up
+ * `auto` tool choice; effort is set explicitly to `medium` rather than the
+ * model's own `high` default, trading some quality for cost on what is, per
+ * call, one bounded tool call rather than a hard reasoning task. Forced tool
+ * use is rejected, so the tool is offered with `auto` and `strict` keeps its
+ * arguments to the schema.
  *
  * Server-side refusal fallbacks are on: a request the model's safety
  * classifiers decline is re-run on a fallback model chosen by refusal
