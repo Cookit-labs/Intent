@@ -113,6 +113,12 @@ import { ComposerInput } from './composer-input'
 import { PriceTicker } from './price-ticker'
 import { agentBubble, systemPill, userBubble } from './bubble'
 import { AgentAvatar } from '../agents/agent-avatar'
+import {
+  clearPendingCashOut,
+  pendingCashOut,
+  setPendingCashOut,
+  type PendingCashOut,
+} from '../../lib/pending-cashout'
 
 /**
  * The price of the only asset an anchor withdraws.
@@ -180,6 +186,11 @@ export function IntentChat(): JSX.Element {
   // A cash-out of anything but USDC: the agents race on the swap into USDC
   // first, and the payout form opens only once that swap has settled.
   const [cashOutAfterSwap, setCashOutAfterSwap] = useState(false)
+  // A swap that settled meaning to be followed by a cash-out, where the tab
+  // closed (or the user navigated away) before that second step ever
+  // started. Read once per wallet, not kept in sync with cashOutFrom below:
+  // this exists for the gap *before* that state exists, not alongside it.
+  const [strandedCashOut, setStrandedCashOut] = useState<PendingCashOut | undefined>(undefined)
   // The settled swap a cash-out continues from, kept apart from the swap card
   // so its Done button, or any reset of the card, cannot take the form away.
   const [cashOutFrom, setCashOutFrom] = useState<{ hash: string; receive: string } | null>(null)
@@ -272,6 +283,14 @@ export function IntentChat(): JSX.Element {
 
   const { slug } = useChain()
   const { address, isConnected, balance: nativeBalance, balanceSymbol } = useWallet()
+
+  // Checked once the wallet that owns it is known — historyOwner, which
+  // pendingCashOut reads, is set from this same address elsewhere — so a
+  // reminder left by a different wallet in this browser is never shown
+  // under the wrong one.
+  useEffect(() => {
+    setStrandedCashOut(isConnected ? pendingCashOut() : undefined)
+  }, [isConnected, address])
   // Past intents belong to a wallet. With none connected there is nothing
   // to attribute them to, so the overlay closes and its button goes away.
   useEffect(() => {
@@ -640,6 +659,10 @@ export function IntentChat(): JSX.Element {
   useEffect(() => {
     if (!swapSettled || !cashOutAfterSwap || address === undefined) return
     const settled = { hash: swap.hash ?? '', receive: swap.receiveDisplay ?? '' }
+    // Marked the instant the swap is known to owe a cash-out, not after the
+    // form opens: if the tab closes during the balance refetch below, the
+    // swap already settled and the reminder must already exist to find it.
+    setPendingCashOut(settled.hash, settled.receive)
     // The form opens once the balance has been read again, so it starts from
     // the USDC that arrived rather than a figure from before the swap.
     void queryClient
@@ -764,6 +787,32 @@ export function IntentChat(): JSX.Element {
       `This swap is step one of a naira cash-out. The USDC it delivers is paid to a Nigerian bank by Linq in a separate step after it settles. Your job is only the best ${symbol} to USDC swap.`,
     ])
     setParsed(parseIntent(`Swap ${amount} ${symbol} to USDC`, swap.usdPrices))
+  }
+
+  /**
+   * Opens the cash-out form for a swap that already settled, left behind by
+   * a closed tab. The swap itself needs nothing re-run — it is already in
+   * history — so this only starts a turn to hold the payout and shows the
+   * form, the same state `cashOutAfterSwap`'s settle effect would have
+   * reached if the tab had stayed open.
+   */
+  function resumeStrandedCashOut(stranded: PendingCashOut): void {
+    const newTurnId = crypto.randomUUID()
+    const text = `Cash out ${stranded.receiveDisplay} USDC to naira`
+    setTurnId(newTurnId)
+    setMessage(text)
+    setCashOutFrom({ hash: stranded.swapHash, receive: stranded.receiveDisplay })
+    setStrandedCashOut(undefined)
+    saveTurn({
+      id: newTurnId,
+      chain: slug,
+      text,
+      createdAt: new Date().toISOString(),
+      proposals: {},
+      winner: null,
+      txHash: stranded.swapHash,
+    })
+    setTurns(loadTurns(slug))
   }
 
   function startIntent(
@@ -1936,6 +1985,36 @@ export function IntentChat(): JSX.Element {
               was as invisible as a success. */}
           {!message ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+              {/* A swap from an earlier session settled meaning to be cashed
+                  out, and the tab closed before that second step started.
+                  The swap itself is already safe in history; this is only
+                  the reminder that one more step was owed. */}
+              {strandedCashOut !== undefined ? (
+                <div className={cn(agentBubble, 'max-w-sm border-dashed text-left')}>
+                  <p>
+                    A swap settled with {strandedCashOut.receiveDisplay} USDC waiting to be cashed
+                    out to naira.
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resumeStrandedCashOut(strandedCashOut)}
+                      className="bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground rounded-full px-4 py-1.5 text-xs font-medium transition-colors"
+                    >
+                      Cash it out now
+                    </button>
+                    <a
+                      href={`${stellarNetwork.blockExplorerUrl}/tx/${strandedCashOut.swapHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
+                    >
+                      View the swap
+                    </a>
+                  </div>
+                </div>
+              ) : null}
+
               <span className="bg-brand flex h-14 w-14 items-center justify-center rounded-full">
                 <Image
                   src="/images/intent-logo.png"
@@ -2197,7 +2276,10 @@ export function IntentChat(): JSX.Element {
               {sequence.kind === 'swap-then-naira' &&
               sequence.phase === 'settled' &&
               sequence.naira !== undefined ? (
-                <NairaOrderTracker orderId={sequence.naira.orderId} />
+                <NairaOrderTracker
+                  orderId={sequence.naira.orderId}
+                  onRetry={sequence.retryPayout}
+                />
               ) : null}
 
               {sequence.kind === 'swap-then-naira' &&
@@ -2385,6 +2467,10 @@ export function IntentChat(): JSX.Element {
                       : {})}
                     {...(usdcHeld !== undefined ? { balanceUsdc: usdcHeld } : {})}
                     onOrder={(order) => {
+                      // An order now exists for this swap's USDC — the thing
+                      // the reminder below exists to chase is done, whatever
+                      // happens to the order from here.
+                      clearPendingCashOut()
                       if (turnId === null) return
                       updateTurn(
                         turnId,

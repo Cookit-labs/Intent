@@ -129,10 +129,18 @@ function PayoutProgress({
   status,
   order,
   bank,
+  onRetry,
 }: {
   status: NairaStatus
   order: PayoutSummary
   bank?: Bank | undefined
+  /**
+   * Absent for `NairaPayoutCard`'s own tracking view, which already has
+   * `edit()` to go back; present for `NairaOrderTracker`'s standalone view,
+   * which previously had none — a failed or expired payout read as a dead
+   * end with no way to try again, for the USDC that already arrived.
+   */
+  onRetry?: () => void
 }): JSX.Element {
   const done = status === 'paid'
   const bad = status === 'failed' || status === 'expired'
@@ -177,6 +185,15 @@ function PayoutProgress({
         </ol>
       ) : null}
       {bad ? <p className="text-muted-foreground text-xs">{STATUS_COPY[status]}</p> : null}
+      {bad && onRetry !== undefined ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="border-border hover:border-foreground/40 w-fit self-start rounded-full border px-4 py-2 text-sm transition-colors"
+        >
+          Try the payout again
+        </button>
+      ) : null}
 
       <div
         className={cn(
@@ -427,7 +444,7 @@ export function NairaPayoutCard({
     banks.data?.find((b) => b.name === order?.bankName)
 
   if (phase === 'tracking' && order !== undefined) {
-    return <PayoutProgress status={order.status} order={order} bank={reviewBank} />
+    return <PayoutProgress status={order.status} order={order} bank={reviewBank} onRetry={edit} />
   }
 
   if (
@@ -725,7 +742,14 @@ export function NairaPayoutCard({
  * The card above follows its own orders; a two-leg payout is made inside the
  * sequence, so this reads the same record by id until it reaches an end.
  */
-export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element {
+export function NairaOrderTracker({
+  orderId,
+  onRetry,
+}: {
+  orderId: string
+  /** Called on a failed or expired payout; absent, no retry is offered. */
+  onRetry?: () => void
+}): JSX.Element {
   // Shares the form's cache, so the logo costs no extra request.
   const banks = useQuery({
     queryKey: ['naira-banks'],
@@ -773,6 +797,7 @@ export function NairaOrderTracker({ orderId }: { orderId: string }): JSX.Element
       status={data.status}
       order={data}
       bank={banks.data?.find((b) => b.name === data.bankName)}
+      {...(onRetry !== undefined ? { onRetry } : {})}
     />
   )
 }
