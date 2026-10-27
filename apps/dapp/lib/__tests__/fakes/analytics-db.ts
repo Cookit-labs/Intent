@@ -65,6 +65,7 @@ export interface FakeProposal {
   won: boolean
   route_id: string | null
   execution_mode: string | null
+  reasoning: string | null
 }
 
 export interface FakeAnalyticsDb {
@@ -246,18 +247,20 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
       }
 
       if (sql.startsWith('INSERT INTO agent_proposals')) {
-        const [raceId, agent, model, ok, failure, latencyMs, score, won, routeId, mode] = p as [
-          string,
-          string,
-          string | null,
-          boolean,
-          string | null,
-          number,
-          number | null,
-          boolean,
-          string | null,
-          string | null,
-        ]
+        const [raceId, agent, model, ok, failure, latencyMs, score, won, routeId, mode, reasoning] =
+          p as [
+            string,
+            string,
+            string | null,
+            boolean,
+            string | null,
+            number,
+            number | null,
+            boolean,
+            string | null,
+            string | null,
+            string | null,
+          ]
         if (proposals.some((x) => x.race_id === raceId && x.agent === agent)) return { rows: [] }
         proposals.push({
           race_id: raceId,
@@ -270,8 +273,38 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           won,
           route_id: routeId,
           execution_mode: mode,
+          reasoning,
         })
         return { rows: [{ agent }] }
+      }
+
+      // historyForAccount's read: a wallet's executions, each joined to its
+      // race and the race's winning proposal (if any). Matched loosely by
+      // its opening clause rather than the full text, so a column reorder in
+      // the real query does not also require editing this fake.
+      if (sql.startsWith('SELECT r.id AS race_id')) {
+        const [network, account, limit, offset] = p as [string, string, number, number]
+        const rows = executions
+          .filter((e) => e.network === network && e.account === account && e.race_id !== null)
+          .map((e) => {
+            const race = races.find((r) => r.id === e.race_id)
+            if (race === undefined) return undefined
+            const winning = proposals.find((pr) => pr.race_id === race.id && pr.won)
+            return {
+              race_id: race.id,
+              started_at: race.started_at,
+              token_in: race.token_in,
+              token_out: race.token_out,
+              size_usd: race.size_usd,
+              winner: race.winner,
+              winning_model: winning?.model ?? null,
+              reasoning: winning?.reasoning ?? null,
+              executed_hash: e.hash,
+            }
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== undefined)
+          .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+        return { rows: rows.slice(offset, offset + limit) }
       }
 
       throw new Error(`fake db: unrecognised statement: ${sql}`)

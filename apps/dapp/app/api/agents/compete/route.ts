@@ -394,6 +394,9 @@ export async function POST(request: Request): Promise<Response> {
               latencyMs: Date.now() - began,
               routeId: proposal.routeId,
               executionMode: proposal.executionMode,
+              // Passed for every agent; raceRecordFrom is the one place that
+              // keeps it only for the row that actually won.
+              reasoning: proposal.reasoning,
             })
 
             send({

@@ -51,6 +51,7 @@ function proposal(agent: string) {
     executionMode: 'fill',
     projectedAvgPriceUsd: 0.1,
     projectedSlippagePct: 0.2,
+    reasoning: `${agent}'s reasoning`,
   }
 }
 
@@ -114,6 +115,7 @@ describe('POST /api/agents/compete', () => {
       model: 'model-a',
       routeId: 'route-halcyon',
       executionMode: 'fill',
+      reasoning: "halcyon's reasoning",
     })
     expect(attempts.find((a) => a.agent === 'orrin')).toMatchObject({
       ok: false,
