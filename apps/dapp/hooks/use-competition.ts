@@ -54,13 +54,26 @@ export function useCompetition(
    * user made while agents were working. Sent to the server for every agent
    * alike. A change restarts the race, which is what "re-run with this" means.
    */
-  context: string[] = []
+  context: string[] = [],
+  /**
+   * The connected wallet, when there is one. Lets the server rate-limit a
+   * caller by account as well as by IP — a race costs real provider money,
+   * and IP alone both over-limits a shared address (NAT, a campus network)
+   * and under-limits a rotated one. Omitted entirely when absent rather than
+   * sent as `undefined`, so a disconnected caller is counted by IP only, the
+   * same as before this existed.
+   */
+  account?: string
 ): CompetitionWithRoute {
   // The effect reads the latest context through a ref and restarts on its
   // content, not on the array's identity, which is new every render.
   const contextRef = useRef(context)
   contextRef.current = context
   const contextKey = context.join('\u0001')
+  // Read at fetch time, not a dependency: connecting or switching wallets
+  // mid-race should not restart a race that is already running.
+  const accountRef = useRef(account)
+  accountRef.current = account
   const [proposals, setProposals] = useState<Record<string, AgentProposalView>>({})
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [phase, setPhase] = useState<CompetitionPhase>('idle')
@@ -197,6 +210,9 @@ export function useCompetition(
             ...(parsed?.reading !== undefined ? { reading: parsed.reading } : {}),
             chain,
             ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
+            ...(accountRef.current !== undefined && accountRef.current !== ''
+              ? { account: accountRef.current }
+              : {}),
           }),
           signal: abort.signal,
         })

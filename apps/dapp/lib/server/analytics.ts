@@ -90,6 +90,11 @@ export const ANALYTICS_DDL: readonly string[] = [
     execution_mode TEXT,
     PRIMARY KEY (race_id, agent)
   )`,
+  // Only ever written for the winning row — see raceRecordFrom. A losing
+  // agent's prose was never acted on, and keeping it would mean storing
+  // free text from every model on every race rather than the one plan a
+  // user's funds actually moved on.
+  `ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS reasoning TEXT`,
 ]
 
 export type ExecutionKind = 'swap' | 'plan' | 'offer' | 'send' | 'lend' | 'offramp' | 'perp'
@@ -160,6 +165,13 @@ export interface RaceAttemptOk {
   latencyMs: number
   routeId?: string | undefined
   executionMode?: string | undefined
+  /**
+   * The agent's own explanation, shown live in the competition panel.
+   * Carried through to storage only for the agent that won — see
+   * `raceRecordFrom` — so a caller may pass this for every attempt without
+   * checking who won themselves.
+   */
+  reasoning?: string | undefined
 }
 
 export interface RaceAttemptFailed {
@@ -206,6 +218,8 @@ export interface RaceRecord {
     won: boolean
     routeId: string | null
     executionMode: string | null
+    /** Only ever set when `won` is true; see `raceRecordFrom`. */
+    reasoning: string | null
   }[]
 }
 
@@ -230,8 +244,9 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
     unanimous: input.unanimous,
     outcome,
     durationMs: input.durationMs,
-    proposals: input.attempts.map((a) =>
-      a.ok
+    proposals: input.attempts.map((a) => {
+      const won = a.ok && a.agent === input.winner
+      return a.ok
         ? {
             agent: a.agent,
             model: a.model ?? null,
@@ -239,9 +254,12 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
             failure: null,
             latencyMs: a.latencyMs,
             score: input.scores[a.agent] ?? null,
-            won: a.agent === input.winner,
+            won,
             routeId: a.routeId ?? null,
             executionMode: a.executionMode ?? null,
+            // The single enforcement point: a losing agent's reasoning
+            // never reaches a row, no matter what a caller passes in.
+            reasoning: won ? (a.reasoning ?? null) : null,
           }
         : {
             agent: a.agent,
@@ -253,8 +271,9 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
             won: false,
             routeId: null,
             executionMode: null,
+            reasoning: null,
           }
-    ),
+    }),
   }
 }
 
@@ -275,6 +294,35 @@ export interface AnalyticsRepo {
   recordIntentRead: (record: IntentReadRecord) => Promise<void>
   recordExecution: (record: ExecutionRecord) => Promise<void>
   recordRace: (record: RaceRecord) => Promise<void>
+  historyForAccount: (query: HistoryQuery) => Promise<HistoryPage>
+}
+
+export interface HistoryQuery {
+  network: StellarNetworkName
+  account: string
+  /** 1-based; the first page when omitted. */
+  page?: number
+  pageSize?: number
+}
+
+export interface HistoryEntry {
+  raceId: string
+  startedAt: string
+  tokenIn: string
+  tokenOut: string
+  sizeUsd: number | null
+  winner: string | null
+  winningModel: string | null
+  /** The winning agent's own words, when one won and said something. */
+  reasoning: string | null
+  /** The hash of the transaction this account actually submitted for this race, if any. */
+  executedHash: string | null
+}
+
+export interface HistoryPage {
+  entries: HistoryEntry[]
+  /** Whether a further page exists, for simple "load more" paging. */
+  hasMore: boolean
 }
 
 export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
@@ -359,8 +407,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       for (const p of r.proposals) {
         await query(
           `INSERT INTO agent_proposals
-             (race_id, agent, model, ok, failure, latency_ms, score, won, route_id, execution_mode)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             (race_id, agent, model, ok, failure, latency_ms, score, won, route_id, execution_mode, reasoning)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT DO NOTHING`,
           [
             r.id,
@@ -373,9 +421,57 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
             p.won,
             p.routeId,
             p.executionMode,
+            p.reasoning,
           ]
         )
       }
+    },
+
+    /**
+     * A wallet's own races, each with the winning agent's reasoning and the
+     * hash this account actually submitted for it, if any.
+     *
+     * Joined through `usage_executions.race_id` — the same correlation
+     * `recordExecution` already writes — rather than a new column on
+     * `agent_races`: a race has no wallet of its own (it can run before a
+     * wallet is connected, and more than one race can precede one
+     * execution), but *this account's execution* of it is exactly the fact
+     * that makes a race "this wallet's history" rather than an anonymous
+     * one. A race nobody from this account ever executed is not returned:
+     * there is nothing to explain to this wallet about a plan it never
+     * acted on, winning or not.
+     *
+     * `address` scopes by equality on an indexed column — the same trust
+     * model every other wallet-scoped read in this app uses (naira orders,
+     * swap history): whoever knows the address can read what it did. That
+     * is a deliberate, already-standing choice, not one made new here.
+     */
+    async historyForAccount({ network, account, page = 1, pageSize = 20 }) {
+      const limit = Math.max(1, Math.min(100, pageSize))
+      const offset = Math.max(0, (Math.max(1, page) - 1) * limit)
+      const { rows } = await query(
+        `SELECT r.id AS race_id, r.started_at, r.token_in, r.token_out, r.size_usd,
+                r.winner, p.model AS winning_model, p.reasoning, e.hash AS executed_hash
+           FROM usage_executions e
+           JOIN agent_races r ON r.id = e.race_id
+           LEFT JOIN agent_proposals p ON p.race_id = r.id AND p.won
+          WHERE e.network = $1 AND e.account = $2
+          ORDER BY r.started_at DESC
+          LIMIT $3 OFFSET $4`,
+        [network, account, limit + 1, offset]
+      )
+      const entries = rows.slice(0, limit).map((row) => ({
+        raceId: String(row['race_id']),
+        startedAt: new Date(row['started_at'] as string).toISOString(),
+        tokenIn: String(row['token_in']),
+        tokenOut: String(row['token_out']),
+        sizeUsd: row['size_usd'] === null ? null : Number(row['size_usd']),
+        winner: (row['winner'] as string | null) ?? null,
+        winningModel: (row['winning_model'] as string | null) ?? null,
+        reasoning: (row['reasoning'] as string | null) ?? null,
+        executedHash: (row['executed_hash'] as string | null) ?? null,
+      }))
+      return { entries, hasMore: rows.length > limit }
     },
   }
 }

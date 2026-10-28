@@ -153,6 +153,45 @@ export const noetherRouter = lazyId({
 })
 
 /**
+ * Phoenix's factory: looks pools up, holds no liquidity itself, and is not
+ * the contract a swap signs against — a pool is. Registered here only for
+ * review's sake, since the quoter calls it read-only to resolve the pool
+ * address, which the signed transaction never touches.
+ *
+ * No `lazyId` for the pool itself: Phoenix addresses pools by their own
+ * contract id, not an index into one router the way Aquarius does, and the
+ * set is runtime-discovered and already larger than any snapshot of it (13
+ * live pools on 2026-10-28, two more than Phoenix's own last-touched
+ * mainnet upgrade script names). A static allowlist entry per pool would
+ * drift the moment Phoenix adds one. The builder instead pins to the exact
+ * pool address its quote named — the same discipline `poolIndex` already
+ * enforces for Aquarius, adapted to Phoenix's addressing — so nothing here
+ * needs to enumerate pools for a swap to be checked.
+ *
+ * Mainnet address verified live on 2026-10-28 by simulating
+ * `get_config()` and cross-checking its returned `multihop_address`
+ * against github.com/Phoenix-Protocol-Group/phoenix-contracts's
+ * `scripts/upgrade_mainnet.sh`, which names both addresses — they
+ * corroborate each other independently of the script alone.
+ *
+ * No testnet id: Phoenix's deploy scripts stand up fresh contracts rather
+ * than referencing one standing testnet instance, and no testnet
+ * factory constant appears anywhere in the repository. Mainnet-only,
+ * the mirror of Noether's testnet-only case above.
+ */
+const PHOENIX_FACTORY_MAINNET = 'CB4SVAWJA6TSRNOJZ7W2AWFW46D5VR4ZMFZKDIKXEINZCZEGZCJZCKMI'
+
+/**
+ * Not `lazyId`: that helper's `testnet` id is required, which fits every
+ * other venue here but not Phoenix, which has no testnet id to give. Written
+ * directly instead of changing `lazyId`'s contract for one venue that is the
+ * exception rather than the rule.
+ */
+export function phoenixFactory(network: StellarNetworkName = activeNetwork()): string | undefined {
+  return network === 'mainnet' ? PHOENIX_FACTORY_MAINNET : undefined
+}
+
+/**
  * Where to see a Blend position, as opposed to the transaction that made it.
  *
  * A block explorer proves the supply happened; it does not show the position,

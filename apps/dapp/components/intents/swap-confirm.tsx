@@ -11,9 +11,10 @@ import {
   Loader2,
   TriangleAlert,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import type { SwapPhase } from '../../hooks/use-swap'
+import { confirmPauseUsd, needsConfirmPause } from '../../lib/swap/confirm-pause'
 import type { LedgerPreview as LedgerPreviewData } from '../../lib/swap/preview'
 import { sourceDisplayName, type SwapQuote } from '../../lib/swap/quote'
 import { needsTrustCaution, trustSummary, verificationOf } from '../../lib/swap/asset-registry'
@@ -30,7 +31,59 @@ import { LedgerPreview } from './ledger-preview'
  *
  * The wallet is the real confirmation step, so this deliberately does not try
  * to be one. It shows the numbers, then hands over.
+ *
+ * One exception: a trade whose USD value crosses a threshold holds the
+ * primary button disabled for a couple of seconds, with a visible countdown
+ * and a one-line reason. Not a second signature gate — the wallet still owns
+ * that — but a forced pause on the one screen most likely to be misread in a
+ * hurry, for the one class of mistake (a fat-fingered amount, a plan that
+ * looks fine at a glance but is worth acting slowly on) a wallet's own prompt
+ * does nothing to catch.
  */
+
+/**
+ * The threshold itself, inlined at build time like every other
+ * `NEXT_PUBLIC_` value in this app. Not read from `trade-cap.ts`'s
+ * `MAINNET_MAX_TRADE_USD`: that is a server-side hard cap enforced at submit
+ * time, checked against the live price table rather than the client's
+ * `usdPrices` snapshot, and it exists to refuse a trade outright. This is a
+ * client-side pause that exists to slow a human down, and the two moving
+ * independently is deliberate — raising the hard cap to let bigger trades
+ * through should not silently also raise how much friction a human sees
+ * first, and vice versa.
+ */
+const CONFIRM_PAUSE_THRESHOLD_USD = Number(
+  process.env.NEXT_PUBLIC_SWAP_CONFIRM_THRESHOLD_USD ?? '500'
+)
+
+/** Seconds the primary button stays disabled once the threshold is crossed. */
+const CONFIRM_PAUSE_SECONDS = 2
+
+/**
+ * Counts down from `CONFIRM_PAUSE_SECONDS` once per distinct `(active, key)`
+ * pair; resets to 0 — no pause — whenever `active` is false. `key` identifies
+ * the specific amount being paused on, so a quote that refreshes to the same
+ * numbers keeps whatever the countdown already reached, but an edited amount
+ * — still over threshold, now a different number — gets a fresh pause rather
+ * than inheriting a countdown that was timing a different trade.
+ */
+function useConfirmPause(active: boolean, key: string): number {
+  const [secondsLeft, setSecondsLeft] = useState(active ? CONFIRM_PAUSE_SECONDS : 0)
+
+  useEffect(() => {
+    if (!active) {
+      setSecondsLeft(0)
+      return
+    }
+    setSecondsLeft(CONFIRM_PAUSE_SECONDS)
+    const interval = setInterval(() => {
+      setSecondsLeft((s) => Math.max(0, s - 1))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [active, key])
+
+  return secondsLeft
+}
 
 /** The USD value of an amount, or undefined when the price is unknown. */
 function sendUsdRaw(
@@ -230,6 +283,19 @@ export function SwapConfirm({
   onConfirm: () => void
   onReset: () => void
 }): JSX.Element | null {
+  // Computed, and the hook called, before any early return: a conditional
+  // hook call is a React error, and this one's inputs are all props, so
+  // nothing here depends on the branching below.
+  const pauseUsd = confirmPauseUsd(
+    sendUsdRaw(sendDisplay, quote?.from.code, usdPrices),
+    sendUsdRaw(receiveDisplay, quote?.to.code, usdPrices)
+  )
+  const pauseActive = phase === 'review' && needsConfirmPause(pauseUsd, CONFIRM_PAUSE_THRESHOLD_USD)
+  const pauseSecondsLeft = useConfirmPause(
+    pauseActive,
+    `${sendDisplay ?? ''}:${receiveDisplay ?? ''}`
+  )
+
   if (phase === 'idle') return null
 
   if (phase === 'quoting') {
@@ -424,14 +490,31 @@ export function SwapConfirm({
         </div>
       ) : null}
 
+      {/* Not a second signature gate — the wallet prompt right after this is
+          still the real one — but a forced pause before it, on the one
+          screen most likely to be misread in a hurry on a trade this size. */}
+      {pauseActive && pauseSecondsLeft > 0 ? (
+        <p className="text-muted-foreground text-xs">
+          This trade is worth about ${pauseUsd?.toFixed(0)}. Take a moment to check the amounts
+          above before signing.
+        </p>
+      ) : null}
+
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onConfirm} disabled={busy} className={cn(PRIMARY, 'flex-1')}>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy || (pauseActive && pauseSecondsLeft > 0)}
+          className={cn(PRIMARY, 'flex-1')}
+        >
           {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}
           {phase === 'signing'
             ? 'Confirm in your wallet'
             : phase === 'submitting'
               ? 'Submitting…'
-              : 'Sign & swap'}
+              : pauseActive && pauseSecondsLeft > 0
+                ? `Sign & swap (${pauseSecondsLeft})`
+                : 'Sign & swap'}
         </button>
         {!busy ? (
           <button type="button" onClick={onReset} className={SECONDARY}>

@@ -7,6 +7,7 @@ import { assertSelfSwap } from './build-tx'
 import { aquariusRouter, soroswapAggregator, soroswapRouter } from './contract-registry'
 import { readContractCall } from './plan-validator'
 import type { SwapQuote } from './quote'
+import { assertShapeOfPhoenixSwap } from './build-phoenix'
 
 /**
  * Deciding which builder signs a given quote, and which assertion re-checks
@@ -47,7 +48,7 @@ import type { SwapQuote } from './quote'
  * — the recipient sits sixth on the aggregator contract, fourth on the
  * router, and in `destination` on a classic path payment.
  */
-export type VenueKind = 'classic' | 'soroban' | 'aquarius' | 'aggregator'
+export type VenueKind = 'classic' | 'soroban' | 'aquarius' | 'aggregator' | 'phoenix'
 
 /**
  * Which builder a quote must go to.
@@ -76,6 +77,8 @@ export function builderFor(quote: SwapQuote): VenueKind {
       return 'aquarius'
     case 'soroswap-aggregator':
       return 'aggregator'
+    case 'phoenix':
+      return 'phoenix'
     default:
       throw new Error(`no builder for quotes from ${String(quote.source)}`)
   }
@@ -113,7 +116,7 @@ export function assertSelfSubmission(signedXdr: string, account: string): void {
     return
   }
 
-  const { contractId } = readContractCall(op)
+  const { contractId, functionName } = readContractCall(op)
   switch (contractId) {
     case aquariusRouter():
       assertSelfAquariusSwap(signedXdr, account)
@@ -125,6 +128,19 @@ export function assertSelfSubmission(signedXdr: string, account: string): void {
       assertSelfSoroswapSwap(signedXdr, account, 'aggregator')
       return
     default:
+      // No static id to match: Phoenix has no router, and the call target
+      // is one of 13-and-growing pool addresses with no allowlist entry —
+      // see contract-registry.ts's phoenixFactory comment. A call named
+      // "swap" against *some* contract is handed to the Phoenix shape
+      // check, which re-validates the function and recipient the same way
+      // every other venue's re-check does. Anything that fails that check
+      // (wrong argument count, wrong recipient, not actually named "swap")
+      // falls through to the same refusal every other unknown contract
+      // gets — this does not widen what is accepted, only what is tried.
+      if (functionName === 'swap') {
+        assertShapeOfPhoenixSwap(signedXdr, account)
+        return
+      }
       throw new Error(
         `refusing to submit: ${contractId ?? 'the contract called'} is not a swap contract this app builds calls to`
       )

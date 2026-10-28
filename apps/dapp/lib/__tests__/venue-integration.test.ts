@@ -76,12 +76,19 @@ describe('integration status is claimed accurately', () => {
 
   it('lists no Stellar venue the app cannot reach at all', () => {
     // A venue earns its place by being reachable — quotable at least, and
-    // ideally signable. Phoenix and Lumenswap were neither: Phoenix's testnet
-    // router resolves to a contract that does not exist, so a route through it
-    // would be priced and then fail at signing, and Lumenswap has been
-    // unmaintained since 2024 with an API that no longer answers. Listing
-    // either one offered the agents a venue no intent could ever use.
-    const gone = ['phoenix', 'lumenswap']
+    // ideally signable. Lumenswap is neither: unmaintained since 2024, with
+    // an API that no longer answers (the site still renders prices, which is
+    // why it looks alive). Listing it offered the agents a venue no intent
+    // could ever use.
+    //
+    // Phoenix was dropped here once too (#37, 2026-09-23), for a different
+    // and narrower reason: it was listed only as a label the Soroswap
+    // aggregator's testnet route list could name, pointing at a testnet
+    // contract that did not exist. It is relisted now as its own direct,
+    // mainnet-only integration — a real factory and 13 live pools, verified
+    // live, with its own quoter and builder — which is a different claim
+    // than the one #37 found false.
+    const gone = ['lumenswap']
     for (const id of gone) {
       expect(byId(id)).toBeUndefined()
     }

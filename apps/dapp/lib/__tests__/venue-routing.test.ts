@@ -48,6 +48,7 @@ const horizonQuote = {
 }
 
 const soroswapQuote = { ...horizonQuote, source: 'soroswap' as const, destAmount: '4737844000' }
+const phoenixQuote = { ...horizonQuote, source: 'phoenix' as const, destAmount: '4700000000' }
 
 describe('the venue on the quote picks the builder', () => {
   it('sends a Horizon route to the classic path-payment builder', () => {
@@ -58,6 +59,14 @@ describe('the venue on the quote picks the builder', () => {
     // The whole point of the phase: this route quotes 473 XLM against
     // Horizon's 128 for the same assets, and was unreachable.
     expect(builderFor(soroswapQuote)).toBe<VenueKind>('soroban')
+  })
+
+  it('sends a Phoenix route to its own builder, not the Aquarius one', () => {
+    // Shares no shape with either: no router argument to pin, no u128 pool
+    // index. Folding it into another venue's builder would sign against
+    // whichever contract that builder assumes rather than the pool this
+    // quote actually priced.
+    expect(builderFor(phoenixQuote)).toBe<VenueKind>('phoenix')
   })
 
   it('sends an aggregator route to the aggregator builder, not the Soroban one', () => {
@@ -166,6 +175,24 @@ function aggregatorCall(opts: { to?: string } = {}): string {
   )
 }
 
+const PHOENIX_POOL = 'CBHCRSVX3ZZ7EGTSYMKPEFGZNWRVCSESQR3UABET4MIW52N4EVU6BIZX'
+
+/** A Phoenix pool `swap`; the sender sits first, same as Aquarius but a different seven. */
+function phoenixCall(opts: { sender?: string; fn?: string; pool?: string } = {}): string {
+  return envelope(
+    new Contract(opts.pool ?? PHOENIX_POOL).call(
+      opts.fn ?? 'swap',
+      new Address(opts.sender ?? ME).toScVal(),
+      new Address(sacFor(XLM)).toScVal(),
+      nativeToScVal(BigInt('100000000'), { type: 'i128' }),
+      nativeToScVal(BigInt('1'), { type: 'i128' }),
+      xdr.ScVal.scvVoid(),
+      xdr.ScVal.scvVoid(),
+      xdr.ScVal.scvVoid()
+    )
+  )
+}
+
 function pathPayment(destination: string): string {
   return envelope(
     Operation.pathPaymentStrictSend({
@@ -238,6 +265,29 @@ describe('a signed envelope is re-asserted by the shape it actually has', () => 
     expect(() =>
       assertSelfSubmission(envelope(new Contract(blendPool()).call('submit'), ME), ME)
     ).toThrow(/not a swap contract/)
+  })
+
+  it('accepts a Phoenix swap, named "swap", with no static id to match', () => {
+    // No router id this switch can key on — Phoenix's call target is one of
+    // 13-and-growing pool addresses — so this reaches the default branch and
+    // the function-name fallback, not a case label.
+    expect(() => assertSelfSubmission(phoenixCall(), ME)).not.toThrow()
+  })
+
+  it('refuses a Phoenix swap that pays somebody else', () => {
+    expect(() => assertSelfSubmission(phoenixCall({ sender: STRANGER }), ME)).toThrow(
+      /pays .* not the signing account/
+    )
+  })
+
+  it('refuses a Phoenix-pool call that is not named swap, same as any other unknown contract', () => {
+    // withdraw_liquidity on the same pool contract is not a swap, and there
+    // is no router to say so by id — the function-name check is what
+    // catches it, and a contract call named anything else falls through to
+    // the ordinary "not a swap contract" refusal.
+    expect(() => assertSelfSubmission(phoenixCall({ fn: 'withdraw_liquidity' }), ME)).toThrow(
+      /not a swap contract/
+    )
   })
 
   it('still accepts a path payment back to the sender', () => {

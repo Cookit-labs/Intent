@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  RATE_LIMIT_DAILY,
   RATE_LIMIT_DEFAULTS,
   checkRateLimit,
   createRateLimiter,
+  dailyLimitFor,
   enforceRateLimit,
   limitFor,
   type RateLimiter,
@@ -116,6 +118,28 @@ describe('limitFor', () => {
     expect(limitFor('build', { RATE_LIMIT_BUILD: '0/60' })).toEqual(RATE_LIMIT_DEFAULTS.build)
     expect(limitFor('build', { RATE_LIMIT_BUILD: '5/0' })).toEqual(RATE_LIMIT_DEFAULTS.build)
     expect(limitFor('build', { RATE_LIMIT_SUBMIT: '5/10' })).toEqual(RATE_LIMIT_DEFAULTS.build)
+  })
+})
+
+describe('dailyLimitFor', () => {
+  it('has a daily cap only for compete', () => {
+    expect(dailyLimitFor('compete', {})).toEqual(RATE_LIMIT_DAILY.compete)
+    for (const family of ['build', 'submit', 'resolve', 'standing', 'auth'] as const) {
+      expect(dailyLimitFor(family, {})).toBeUndefined()
+    }
+  })
+
+  it('reads RATE_LIMIT_<FAMILY>_DAILY as count/seconds', () => {
+    expect(dailyLimitFor('compete', { RATE_LIMIT_COMPETE_DAILY: '50/3600' })).toEqual({
+      limit: 50,
+      windowSeconds: 3600,
+    })
+  })
+
+  it('keeps the default when the override cannot be read', () => {
+    expect(dailyLimitFor('compete', { RATE_LIMIT_COMPETE_DAILY: 'lots' })).toEqual(
+      RATE_LIMIT_DAILY.compete
+    )
   })
 })
 
@@ -281,6 +305,32 @@ describe('enforceRateLimit', () => {
       'ip:unknown:build',
       'ip:2001:0db8:85a3:0000:0000:8a2e:0370:7334:build',
     ])
+  })
+
+  it('enforces a daily cap independent of the per-minute window', async () => {
+    const env = { RATE_LIMIT_COMPETE: '100/60', RATE_LIMIT_COMPETE_DAILY: '2/86400' }
+    const req = (): Request => post({ 'x-forwarded-for': '1.2.3.4' })
+    // Well under the per-minute limit (100), but the daily cap is 2.
+    expect(await enforceRateLimit(req(), 'compete', undefined, deps(env))).toBeUndefined()
+    expect(await enforceRateLimit(req(), 'compete', undefined, deps(env))).toBeUndefined()
+
+    const res = await enforceRateLimit(req(), 'compete', undefined, deps(env))
+    expect(res?.status).toBe(429)
+  })
+
+  it('keys the daily cap separately from the per-minute window', async () => {
+    const env = { RATE_LIMIT_COMPETE: '1/60', RATE_LIMIT_COMPETE_DAILY: '50/86400' }
+    await enforceRateLimit(post({ 'x-forwarded-for': '1.2.3.4' }), 'compete', undefined, deps(env))
+
+    expect([...db.counts.keys()].map((k) => k.split('|')[0]).sort()).toEqual([
+      'ip:1.2.3.4:compete',
+      'ip:1.2.3.4:compete:daily',
+    ])
+  })
+
+  it('checks no daily cap for a family that has none configured', async () => {
+    await enforceRateLimit(post({ 'x-forwarded-for': '1.2.3.4' }), 'build', undefined, deps())
+    expect([...db.counts.keys()].map((k) => k.split('|')[0])).toEqual(['ip:1.2.3.4:build'])
   })
 
   it('also counts the account when one is given', async () => {

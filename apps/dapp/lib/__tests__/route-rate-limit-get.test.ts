@@ -17,6 +17,7 @@ vi.mock('../server/rate-limit', () => ({
 type Route = { GET: (request: Request) => Promise<Response> }
 
 const ROUTES: Record<string, () => Promise<Route>> = {
+  'agents/history': () => import('../../app/api/agents/history/route'),
   offers: () => import('../../app/api/offers/route'),
   'perps/session': () => import('../../app/api/perps/session/route'),
   sponsor: () => import('../../app/api/sponsor/route') as unknown as Promise<Route>,

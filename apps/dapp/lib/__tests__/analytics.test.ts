@@ -187,35 +187,36 @@ describe('failureCode', () => {
   })
 })
 
-describe('recording a race', () => {
-  const race = {
-    id: '11111111-1111-4111-8111-111111111111',
-    network: 'mainnet' as const,
-    startedAt: new Date('2026-10-07T10:00:00.000Z'),
-    durationMs: 8200,
-    intent: { type: 'swap', tokenIn: 'XLM', tokenOut: 'USDC', sizeUsd: 42.5 },
-    attempts: [
-      {
-        agent: 'halcyon',
-        model: 'deepseek-chat',
-        ok: true as const,
-        latencyMs: 4100,
-        routeId: 'r1',
-        executionMode: 'fill',
-      },
-      {
-        agent: 'orrin',
-        model: 'llama',
-        ok: false as const,
-        latencyMs: 60000,
-        error: 'aborted: timeout',
-      },
-    ],
-    scores: { halcyon: 87.5 },
-    winner: 'halcyon' as string | null,
-    unanimous: false as boolean | null,
-  }
+const halcyonAttempt = {
+  agent: 'halcyon',
+  model: 'deepseek-chat',
+  ok: true as const,
+  latencyMs: 4100,
+  routeId: 'r1',
+  executionMode: 'fill',
+  reasoning: undefined as string | undefined,
+}
+const orrinAttempt = {
+  agent: 'orrin',
+  model: 'llama',
+  ok: false as const,
+  latencyMs: 60000,
+  error: 'aborted: timeout',
+}
 
+const race = {
+  id: '11111111-1111-4111-8111-111111111111',
+  network: 'mainnet' as const,
+  startedAt: new Date('2026-10-07T10:00:00.000Z'),
+  durationMs: 8200,
+  intent: { type: 'swap', tokenIn: 'XLM', tokenOut: 'USDC', sizeUsd: 42.5 },
+  attempts: [halcyonAttempt, orrinAttempt],
+  scores: { halcyon: 87.5 },
+  winner: 'halcyon' as string | null,
+  unanimous: false as boolean | null,
+}
+
+describe('recording a race', () => {
   it('stores the race and one row per agent, with a fixed failure code', async () => {
     await repo.recordRace(raceRecordFrom(race))
     expect(db.races).toHaveLength(1)
@@ -288,5 +289,148 @@ describe('recording a race', () => {
       raceRecordFrom({ ...race, intent: { ...race.intent, sizeUsd: Number.NaN } })
     )
     expect(db.races[0]?.size_usd).toBeNull()
+  })
+
+  it('keeps the reasoning only on the winning agent', async () => {
+    await repo.recordRace(
+      raceRecordFrom({
+        ...race,
+        attempts: [
+          { ...halcyonAttempt, reasoning: 'Filling now; the book is deep enough.' },
+          orrinAttempt,
+        ],
+      })
+    )
+    expect(db.proposals.find((p) => p.agent === 'halcyon')?.reasoning).toBe(
+      'Filling now; the book is deep enough.'
+    )
+    expect(db.proposals.find((p) => p.agent === 'orrin')?.reasoning).toBeNull()
+  })
+
+  it('stores no reasoning for anyone when nobody won', async () => {
+    await repo.recordRace(
+      raceRecordFrom({
+        ...race,
+        winner: null,
+        unanimous: null,
+        attempts: [{ ...halcyonAttempt, reasoning: 'Would have filled here.' }],
+      })
+    )
+    expect(db.proposals.find((p) => p.agent === 'halcyon')?.reasoning).toBeNull()
+  })
+})
+
+describe("a wallet's agent history", () => {
+  it('returns only races this account actually executed, newest first', async () => {
+    await repo.recordRace(raceRecordFrom(race))
+    await repo.recordExecution({
+      network: 'mainnet',
+      account: 'GWALLET',
+      kind: 'swap',
+      feeSponsored: false,
+      ok: true,
+      hash: 'HASH1',
+      raceId: race.id,
+      at: new Date('2026-10-07T10:00:05.000Z'),
+    })
+    // A second race this account never executed must not appear.
+    await repo.recordRace(
+      raceRecordFrom({
+        ...race,
+        id: '22222222-2222-4222-8222-222222222222',
+        startedAt: new Date('2026-10-08T10:00:00.000Z'),
+      })
+    )
+
+    const page = await repo.historyForAccount({ network: 'mainnet', account: 'GWALLET' })
+    expect(page.entries).toHaveLength(1)
+    expect(page.entries[0]).toMatchObject({
+      raceId: race.id,
+      tokenIn: 'XLM',
+      tokenOut: 'USDC',
+      winner: 'halcyon',
+      executedHash: 'HASH1',
+    })
+  })
+
+  it("carries the winning agent's reasoning", async () => {
+    await repo.recordRace(
+      raceRecordFrom({
+        ...race,
+        attempts: [{ ...halcyonAttempt, reasoning: 'Filling now at the best quoted rate.' }],
+      })
+    )
+    await repo.recordExecution({
+      network: 'mainnet',
+      account: 'GWALLET',
+      kind: 'swap',
+      feeSponsored: false,
+      ok: true,
+      hash: 'HASH1',
+      raceId: race.id,
+      at: new Date('2026-10-07T10:00:05.000Z'),
+    })
+
+    const page = await repo.historyForAccount({ network: 'mainnet', account: 'GWALLET' })
+    expect(page.entries[0]?.reasoning).toBe('Filling now at the best quoted rate.')
+    expect(page.entries[0]?.winningModel).toBe('deepseek-chat')
+  })
+
+  it("never returns another account's races", async () => {
+    await repo.recordRace(raceRecordFrom(race))
+    await repo.recordExecution({
+      network: 'mainnet',
+      account: 'GSOMEONE_ELSE',
+      kind: 'swap',
+      feeSponsored: false,
+      ok: true,
+      hash: 'HASH1',
+      raceId: race.id,
+      at: new Date('2026-10-07T10:00:05.000Z'),
+    })
+
+    const page = await repo.historyForAccount({ network: 'mainnet', account: 'GWALLET' })
+    expect(page.entries).toEqual([])
+  })
+
+  it('pages, and says when there is more', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const id = `3333333${i}-3333-4333-8333-333333333333`
+      await repo.recordRace(
+        raceRecordFrom({
+          ...race,
+          id,
+          startedAt: new Date(`2026-10-0${i + 1}T10:00:00.000Z`),
+        })
+      )
+      await repo.recordExecution({
+        network: 'mainnet',
+        account: 'GWALLET',
+        kind: 'swap',
+        feeSponsored: false,
+        ok: true,
+        hash: `HASH${i}`,
+        raceId: id,
+        at: new Date(`2026-10-0${i + 1}T10:00:05.000Z`),
+      })
+    }
+
+    const first = await repo.historyForAccount({
+      network: 'mainnet',
+      account: 'GWALLET',
+      page: 1,
+      pageSize: 2,
+    })
+    expect(first.entries).toHaveLength(2)
+    expect(first.hasMore).toBe(true)
+
+    const second = await repo.historyForAccount({
+      network: 'mainnet',
+      account: 'GWALLET',
+      page: 2,
+      pageSize: 2,
+    })
+    expect(second.entries).toHaveLength(1)
+    expect(second.hasMore).toBe(false)
   })
 })

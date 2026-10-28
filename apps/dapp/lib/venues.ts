@@ -133,6 +133,23 @@ export const venues: Venue[] = [
       'Swaps route through Aquarius’s router against the pool the agent chose. Which router wins depends on the direction of the trade.',
   },
   {
+    // Mainnet only: Phoenix has no standing testnet instance to quote
+    // against, the mirror of Noether being testnet-only above. Each pair
+    // has its own pool contract rather than one router, so the agent's
+    // chosen pool travels on the quote and the builder signs only that one.
+    id: 'phoenix',
+    name: 'Phoenix',
+    family: 'stellar' as const,
+    category: 'swap',
+    chains: ['Stellar'],
+    bestFor: 'A second independent AMM to compare against Aquarius and Soroswap',
+    url: 'https://phoenix-hub.io',
+    integration: 'executes',
+    networks: ['mainnet'],
+    capability:
+      'Swaps route through the exact Phoenix pool the agent chose, resolved from Phoenix’s factory for the pair.',
+  },
+  {
     id: 'stellarx',
     name: 'StellarX',
     family: 'stellar' as const,

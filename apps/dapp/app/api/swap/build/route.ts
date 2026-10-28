@@ -11,6 +11,8 @@ import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter
 import { createSoroswapQuoter } from '../../../../lib/swap/sources/soroswap-quoter'
 import { createAquariusQuoter } from '../../../../lib/swap/sources/aquarius-quoter'
 import { buildAquariusSwap } from '../../../../lib/swap/build-aquarius'
+import { createPhoenixQuoter } from '../../../../lib/swap/sources/phoenix-quoter'
+import { buildPhoenixSwap } from '../../../../lib/swap/build-phoenix'
 import { assertAggregatorSwap, buildAggregatorSwap } from '../../../../lib/swap/build-aggregator'
 import { buildSorobanSwap, prepareSorobanSwap } from '../../../../lib/swap/build-soroban'
 import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
@@ -108,6 +110,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   if (venue === 'aquarius') {
     return await buildViaAquarius(body.account, submitted, chosenBps ?? DEFAULT_SLIPPAGE_BPS)
+  }
+  if (venue === 'phoenix') {
+    return await buildViaPhoenix(body.account, submitted, chosenBps ?? DEFAULT_SLIPPAGE_BPS)
   }
   if (venue === 'aggregator') {
     return await buildViaAggregator(body.account, submitted, chosenBps)
@@ -438,6 +443,83 @@ async function buildViaAquarius(
       sendAmount: fresh.sendAmount,
       minReceive,
       poolIndex: submitted.poolIndex,
+    })
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'could not build the transaction' },
+      { status: 400 }
+    )
+  }
+
+  // Venue-agnostic: it simulates and assembles whatever envelope it is given.
+  const prepared = await prepareSorobanSwap(built.xdr)
+  if (!prepared.ok) {
+    return NextResponse.json(
+      { error: 'simulation_failed', reason: prepared.reason },
+      { status: 409 }
+    )
+  }
+
+  return NextResponse.json({
+    xdr: prepared.xdr,
+    destMin: minReceive,
+    sendAmount: built.sendAmount,
+    slippageBps,
+    quote: fresh,
+  })
+}
+
+async function buildViaPhoenix(
+  account: string,
+  submitted: SwapQuote,
+  slippageBps: number
+): Promise<NextResponse> {
+  if (submitted.poolAddress === undefined) {
+    return NextResponse.json(
+      { error: 'a Phoenix route must name the pool it was quoted from' },
+      { status: 400 }
+    )
+  }
+
+  const all = await createPhoenixQuoter().quoteAll?.({
+    kind: 'strict_send',
+    from: submitted.from,
+    to: submitted.to,
+    sendAmount: submitted.sendAmount,
+  })
+
+  if (all === undefined || !all.ok) {
+    return NextResponse.json(
+      { error: 'no_route', reason: all?.ok === false ? all.failure.reason : 'no_route' },
+      { status: 200 }
+    )
+  }
+
+  const fresh = all.quotes.find((q) => q.poolAddress === submitted.poolAddress)
+  if (fresh === undefined) {
+    // The pool existed when quoted and does not now — Phoenix's factory
+    // can retire a pool between quote and build. Said plainly rather than
+    // silently substituting whichever pool remains.
+    return NextResponse.json(
+      { error: 'no_route', reason: 'the quoted pool is no longer available' },
+      { status: 200 }
+    )
+  }
+
+  const capped = await overCap(fresh.from.code, fresh.sendAmount)
+  if (capped !== undefined) return capped
+
+  const minReceive = applySlippage(fresh.destAmount, slippageBps)
+
+  let built
+  try {
+    built = await buildPhoenixSwap({
+      account,
+      from: fresh.from,
+      to: fresh.to,
+      sendAmount: fresh.sendAmount,
+      minReceive,
+      poolAddress: submitted.poolAddress,
     })
   } catch (e) {
     return NextResponse.json(

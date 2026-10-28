@@ -8,6 +8,11 @@ import { useState } from 'react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { useChain } from '../../providers/chain-provider'
+import {
+  agentHistoryByHash,
+  fetchAgentHistory,
+  type AgentHistoryEntry,
+} from '../../lib/agents/history'
 import { fetchSwapHistory } from '../../lib/swap/history'
 import { cashoutRecords, fetchCashouts } from '../../lib/naira/history'
 import type { SwapKind, SwapRecord } from '../../lib/swap/history'
@@ -34,6 +39,8 @@ import { SwapCircleIcon } from './intent-type-icon'
 interface HistoryRow extends SwapRecord {
   /** The other transactions this one was bundled with, when it was. */
   bundleSteps?: BundleStep[]
+  /** Which agent won the race this swap came from, and why, when known. */
+  agentHistory?: AgentHistoryEntry
 }
 
 /** What each kind is called, in the user's terms. */
@@ -125,6 +132,17 @@ export function SwapHistory(): JSX.Element | null {
     refetchOnMount: 'always',
   })
 
+  // The agent's own reasoning for the winning plan, when this swap came from
+  // a race. A failed fetch leaves rows exactly as they were before this
+  // existed: no detail, not an error.
+  const { data: agentHistory } = useQuery({
+    queryKey: ['agent-history', slug, address],
+    queryFn: () => fetchAgentHistory(address as string),
+    enabled: supported && isConnected && address !== undefined,
+    staleTime: 30_000,
+    refetchOnMount: 'always',
+  })
+
   if (!supported) {
     return (
       <Card className="text-muted-foreground p-6 text-sm">
@@ -167,19 +185,23 @@ export function SwapHistory(): JSX.Element | null {
   // that a swap was followed moments later by a supply of what it delivered —
   // which is what a bundled intent looks like from the outside.
   const bundles = bundlesByTxHash(slug)
+  const agentHistoryByTxHash = agentHistoryByHash(agentHistory ?? [])
   const swaps: HistoryRow[] = ledger.map((row) => {
+    const agent = agentHistoryByTxHash.get(row.txHash)
+    const withAgent = agent !== undefined ? { agentHistory: agent } : {}
+
     const recorded = bundles.get(row.txHash)
     if (recorded !== undefined) {
       // A bundle is what the person asked for, so it names the row even though
       // the ledger saw only a swap.
-      return { ...row, kind: 'bundle' as const, bundleSteps: recorded.steps }
+      return { ...row, kind: 'bundle' as const, bundleSteps: recorded.steps, ...withAgent }
     }
 
     if (row.bundledWith !== undefined && row.bundledWith.length > 1) {
-      return { ...row, bundleSteps: row.bundledWith }
+      return { ...row, bundleSteps: row.bundledWith, ...withAgent }
     }
 
-    return row
+    return { ...row, ...withAgent }
   })
 
   return (
@@ -313,6 +335,19 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
           </div>
 
           <p className="text-muted-foreground break-all font-mono text-xs">{swap.txHash}</p>
+
+          {/* The one thing about this swap the ledger never recorded: which
+              agent's plan this was, and what it said about it at the time.
+              Absent, not a placeholder, for a swap made before this existed
+              or outside a race entirely. */}
+          {swap.agentHistory?.reasoning !== null && swap.agentHistory?.reasoning !== undefined ? (
+            <div className="border-border bg-muted/30 rounded-md border p-3 text-xs">
+              <p className="text-muted-foreground mb-1 font-medium">
+                Why {swap.agentHistory.winningModel ?? swap.agentHistory.winner} picked this
+              </p>
+              <p className="text-foreground">{swap.agentHistory.reasoning}</p>
+            </div>
+          ) : null}
 
           {/* Every row is checkable: the ledger is the record, and this is the
               link to it. */}

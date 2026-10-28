@@ -21,7 +21,8 @@ vi.mock('../server/analytics', () => ({
     state.races.push(input)
   },
 }))
-vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
+const enforceRateLimit = vi.fn(async () => undefined)
+vi.mock('../server/rate-limit', () => ({ enforceRateLimit }))
 vi.mock('../agents/registry', () => ({ getRoster: () => state.roster }))
 vi.mock('../agents/market-context', () => ({
   buildMarketContextAsync: async () => ({ prices: { XLM: 0.1, USDC: 1 }, routes: [] }),
@@ -50,6 +51,7 @@ function proposal(agent: string) {
     executionMode: 'fill',
     projectedAvgPriceUsd: 0.1,
     projectedSlippagePct: 0.2,
+    reasoning: `${agent}'s reasoning`,
   }
 }
 
@@ -113,6 +115,7 @@ describe('POST /api/agents/compete', () => {
       model: 'model-a',
       routeId: 'route-halcyon',
       executionMode: 'fill',
+      reasoning: "halcyon's reasoning",
     })
     expect(attempts.find((a) => a.agent === 'orrin')).toMatchObject({
       ok: false,
@@ -146,5 +149,27 @@ describe('POST /api/agents/compete', () => {
     state.roster = undefined
     await (await POST(post({ text: 'swap 10 XLM to USDC', chain: 'stellar' }))).text()
     expect(state.races).toEqual([])
+  })
+
+  it('reads the account from the body and rate-limits by it before validating the rest', async () => {
+    enforceRateLimit.mockClear()
+    const { POST } = await import('../../app/api/agents/compete/route')
+    await (
+      await POST(
+        post({ text: 'swap 10 XLM to USDC', chain: 'stellar', account: 'G'.padEnd(56, 'A') })
+      )
+    ).text()
+
+    expect(enforceRateLimit).toHaveBeenCalledWith(expect.anything(), 'compete', 'G'.padEnd(56, 'A'))
+  })
+
+  it('rate-limits a request with a malformed account by IP only', async () => {
+    enforceRateLimit.mockClear()
+    const { POST } = await import('../../app/api/agents/compete/route')
+    await (
+      await POST(post({ text: 'swap 10 XLM to USDC', chain: 'stellar', account: 'x'.repeat(65) }))
+    ).text()
+
+    expect(enforceRateLimit).toHaveBeenCalledWith(expect.anything(), 'compete', undefined)
   })
 })

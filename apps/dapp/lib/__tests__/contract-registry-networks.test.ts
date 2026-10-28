@@ -103,6 +103,11 @@ describe('on testnet, nothing moved', () => {
     expect(registry.lookupContract(MAINNET.soroswapRouter)).toBeUndefined()
     expect(registry.lookupContract(MAINNET.blendPool)).toBeUndefined()
   })
+
+  it('leaves Phoenix undefined, the mirror of Noether, since it has no testnet deployment', async () => {
+    const { registry } = await on('testnet')
+    expect(registry.phoenixFactory()).toBeUndefined()
+  })
 })
 
 describe('on mainnet', () => {
@@ -120,6 +125,13 @@ describe('on mainnet', () => {
     expect(reserves.blendXlm()).toBe(MAINNET.xlmSac)
     expect(soroswap.soroswapRouter()).toBe(MAINNET.soroswapRouter)
     expect(soroswap.soroswapContracts()).toEqual({ XLM: MAINNET.xlmSac, USDC: MAINNET.usdcSac })
+  })
+
+  it('resolves Phoenix’s factory, the mirror asymmetry: mainnet-only, not testnet-only', async () => {
+    const { registry } = await on('mainnet')
+    expect(registry.phoenixFactory()).toBe(
+      'CB4SVAWJA6TSRNOJZ7W2AWFW46D5VR4ZMFZKDIKXEINZCZEGZCJZCKMI'
+    )
   })
 
   it('leaves Noether undefined, because it has no mainnet deployment', async () => {
