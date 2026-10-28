@@ -11,6 +11,7 @@ import { fromBaseUnits, resolveAsset } from '../swap/assets'
 import { activeSources, type QuoteSource, type SwapQuote } from '../swap/quote'
 import { createHorizonQuoter } from '../swap/sources/horizon-quoter'
 import { createAquariusQuoter } from '../swap/sources/aquarius-quoter'
+import { createPhoenixQuoter } from '../swap/sources/phoenix-quoter'
 import { createSoroswapQuoter } from '../swap/sources/soroswap-quoter'
 import { fetchFxPrices } from '../prices/reflector'
 import { createSoroswapAggregatorQuoter } from '../swap/sources/soroswap-aggregator-quoter'
@@ -80,6 +81,7 @@ export function defaultQuoteSources(): QuoteSource[] {
     createAquariusQuoter(),
     createSoroswapQuoter(),
     createSoroswapAggregatorQuoter(),
+    createPhoenixQuoter(),
   ]
 }
 

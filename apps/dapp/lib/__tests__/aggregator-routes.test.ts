@@ -64,6 +64,7 @@ describe('presence in the line-up', () => {
     expect(ids).toContain('soroswap')
     expect(ids).toContain('aquarius')
     expect(ids).toContain('soroswap-aggregator')
+    expect(ids).toContain('phoenix')
   })
 
   it('is skipped, not failed, when unconfigured', async () => {

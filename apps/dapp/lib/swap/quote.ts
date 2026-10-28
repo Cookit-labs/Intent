@@ -20,7 +20,7 @@ import { venueIdOn } from '../venues'
  * two apart — and the direct quoters stay in the line-up beside it rather
  * than being replaced by one vendor's view of them.
  */
-export type QuoteSourceId = 'horizon' | 'soroswap' | 'aquarius' | 'soroswap-aggregator'
+export type QuoteSourceId = 'horizon' | 'soroswap' | 'aquarius' | 'soroswap-aggregator' | 'phoenix'
 
 /** How each source is named where a person reads it. */
 const SOURCE_DISPLAY_NAMES: Record<QuoteSourceId, string> = {
@@ -28,6 +28,7 @@ const SOURCE_DISPLAY_NAMES: Record<QuoteSourceId, string> = {
   soroswap: 'Soroswap',
   aquarius: 'Aquarius',
   'soroswap-aggregator': 'Soroswap Aggregator',
+  phoenix: 'Phoenix',
 }
 
 /** A source's display name, or the raw id for one this build does not know. */
@@ -99,6 +100,16 @@ export interface SwapQuote {
    * pair, and the Aquarius builder refuses a quote without it.
    */
   poolIndex?: string
+  /**
+   * Which Phoenix pool this quote came from, as a contract address.
+   *
+   * Phoenix addresses pools by their own contract id rather than an index
+   * into one router — there is no router-held "pool 2 of 3" concept the way
+   * there is for Aquarius — so `poolIndex`'s hex-32-byte shape does not fit
+   * here. Same purpose as `poolIndex`: the builder refuses to sign a swap
+   * against any pool but the one this quote actually priced.
+   */
+  poolAddress?: string
   /**
    * How an aggregator splits the fill across venues, when it does.
    *
@@ -198,6 +209,7 @@ const VENUE_OF_SOURCE: Record<QuoteSourceId, string> = {
   soroswap: 'soroswap',
   aquarius: 'aquarius',
   'soroswap-aggregator': 'soroswap-aggregator',
+  phoenix: 'phoenix',
 }
 
 /**

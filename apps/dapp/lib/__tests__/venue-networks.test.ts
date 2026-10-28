@@ -46,6 +46,7 @@ describe('which venues are on mainnet at launch', () => {
         'etherfuse',
         'horizon',
         'linq',
+        'phoenix',
         'sorobandomains',
         'soroswap',
         'soroswap-aggregator',
@@ -55,11 +56,12 @@ describe('which venues are on mainnet at launch', () => {
     )
   })
 
-  it('keeps every Stellar venue on testnet, except one that has no testnet', () => {
-    // Linq pays real naira against mainnet XLM and USDC. There is no testnet
-    // service behind it, so it is deliberately absent there rather than listed
-    // and unusable.
-    const mainnetOnly = new Set(['linq'])
+  it('keeps every Stellar venue on testnet, except the ones with no testnet', () => {
+    // Linq pays real naira against mainnet XLM and USDC, with no testnet
+    // service behind it. Phoenix has no standing testnet deployment at all
+    // (see contract-registry.ts's phoenixFactory). Both are deliberately
+    // absent there rather than listed and unusable.
+    const mainnetOnly = new Set(['linq', 'phoenix'])
     for (const v of stellar) {
       expect(isVenueOn(v, 'testnet'), `${v.id} on testnet`).toBe(!mainnetOnly.has(v.id))
     }
@@ -91,6 +93,7 @@ describe('what the agents are offered', () => {
       'aquarius',
       'blend',
       'etherfuse',
+      'phoenix',
       'soroswap',
       'soroswap-aggregator',
       'stellar-pools',
@@ -125,8 +128,10 @@ describe('nothing is built against a venue that is not here', () => {
     expect(() => assertVenueOn('etherfuse', 'mainnet')).not.toThrow()
     expect(() => assertVenueOn('noether', 'mainnet')).toThrow('Noether is not on mainnet yet')
     expect(() => assertVenueOn('defindex', 'mainnet')).toThrow('DeFindex is not on mainnet yet')
+    // Phoenix has no testnet deployment, the mirror of Noether above.
+    expect(() => assertVenueOn('phoenix', 'testnet')).toThrow('Phoenix is not on testnet yet')
     // An id nobody listed is not a venue at all, and is refused the same way.
-    expect(() => assertVenueOn('phoenix', 'testnet')).toThrow('phoenix is not on testnet yet')
+    expect(() => assertVenueOn('uniswap-v4', 'testnet')).toThrow('uniswap-v4 is not on testnet yet')
   })
 })
 
@@ -212,9 +217,10 @@ describe('what the Apps page may call available, decided on the server', () => {
     expect(configured.has('testanchor')).toBe(false)
   })
 
-  it('has every Stellar venue on testnet, except the one that has no testnet', () => {
+  it('has every Stellar venue on testnet, except the ones that have no testnet', () => {
     const ids = availableVenueIds('testnet', {})
-    for (const v of stellar) expect(ids.has(v.id), v.id).toBe(v.id !== 'linq')
+    const mainnetOnly = new Set(['linq', 'phoenix'])
+    for (const v of stellar) expect(ids.has(v.id), v.id).toBe(!mainnetOnly.has(v.id))
   })
 
   it('labels by that decision, not by the static list alone', () => {
