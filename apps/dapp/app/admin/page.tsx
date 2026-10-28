@@ -4,8 +4,14 @@ import { DonutChart, OutcomeBars, RankedBars, TrendChart } from '../../component
 import { EmptyNote, Kpi, PageTitle, Panel, WithStats } from '../../components/admin/parts'
 import { formatCount, formatPercent, formatUsd, kindLabel } from '../../components/admin/stats'
 
-/** The types the headline volume adds up, so the donut and the total agree. */
-const COUNTED = ['swap', 'plan', 'offer', 'send']
+/**
+ * The types the headline volume adds up, so the donut and the total agree.
+ * Mirrors HEADLINE_KINDS in admin-metrics.ts — out of sync once already,
+ * when offramp was added there and not here: the total counted cash-outs,
+ * the donut silently dropped them, and a period that was 97% cash-outs by
+ * dollar value read as "100% Swaps".
+ */
+const COUNTED = ['swap', 'plan', 'offer', 'send', 'offramp']
 
 export default function AdminOverviewPage(): JSX.Element {
   return (
@@ -26,7 +32,7 @@ export default function AdminOverviewPage(): JSX.Element {
                   note={
                     overview.unvalued > 0
                       ? `${formatCount(overview.unvalued)} transactions had no price`
-                      : 'Swaps, limit and standing orders, sends'
+                      : 'Swaps, limit and standing orders, sends, cash-outs'
                   }
                 />
                 <Kpi
