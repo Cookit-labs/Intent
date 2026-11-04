@@ -16,6 +16,7 @@
  * leave the app exactly as capable as it was before this existed.
  */
 
+import { cashOutPrompt } from '../weave/corridors'
 import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
 
@@ -92,9 +93,7 @@ const SYSTEM_PROMPT = [
   'If the request is complete, set status to ready right away. Do not ask for confirmation of something already clear.',
   'Ask only for what the request cannot be carried out without, one question at a time, in plain words. Never use an em dash or an en dash.',
   'A trade needs the asset sold, the asset received, and a size (an amount of the asset, or a dollar amount).',
-  'Cashing out to a bank is possible only to Nigerian naira (NGN), from XLM or USDC. If the user says off-ramp or cash out',
-  'without a currency, ask which asset they are cashing out and say the payout is to naira.',
-  'If they ask for another currency, ready is wrong: ask whether they want naira instead.',
+  cashOutPrompt('stellar'),
   'Do NOT ask for a bank, an account number or an account name: a form collects those afterwards.',
   'Never ask about price, slippage, venue or route: the agents decide those.',
   'Never ask something the user already answered, or that the earlier conversation already settles.',

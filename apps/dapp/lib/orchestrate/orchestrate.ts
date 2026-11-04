@@ -1,3 +1,4 @@
+import { cashOutPrompt } from '../weave/corridors'
 import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
 import { capabilitySheet } from './capabilities'
@@ -208,15 +209,10 @@ const BASE_PROMPT = [
   'facts must never contain an account number or a person’s name.',
 ].join(' ')
 
-/** Only where a bank cash-out exists; elsewhere naming it would promise what the chain lacks. */
-const CASH_OUT_PROMPT = [
-  'Cashing out to a bank is possible only to Nigerian naira (NGN), from XLM or USDC. If the user says off-ramp or cash out',
-  'without an asset, ask which asset they are cashing out and say the payout is to naira.',
-  'If they ask for another currency, ask whether they want naira instead.',
-].join(' ')
-
+/** Only where a cash-out exists; elsewhere naming it would promise what the chain lacks. */
 function systemPrompt(chain: string): string {
-  return chain === 'stellar' ? `${BASE_PROMPT} ${CASH_OUT_PROMPT}` : BASE_PROMPT
+  const cashOut = cashOutPrompt(chain)
+  return cashOut === '' ? BASE_PROMPT : `${BASE_PROMPT} ${cashOut}`
 }
 
 /** Long enough for any sentence a person types here, short enough to bound what is passed on. */
