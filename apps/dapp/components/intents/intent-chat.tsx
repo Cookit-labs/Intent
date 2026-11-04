@@ -80,10 +80,22 @@ import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balanc
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
-import type { ChainActionRequest, WalletBalances } from '../../lib/chains/types'
+import { parseChainSequence } from '../../lib/chains/parse-sequence'
+import { followOnRefusal, type ChainSequenceRequest } from '../../lib/chains/sequence'
+import {
+  CASHOUT_UNDER_WAY,
+  cashoutSequence,
+  currencyStep,
+  endedNote,
+  followOnNotYet,
+  sequenceOutcome,
+} from '../../lib/chains/sequence-flow'
+import type { ChainActionRequest, ChainWithActions, WalletBalances } from '../../lib/chains/types'
 import { QUOTE_EXPIRED } from '../../lib/chains/signing-flow'
 import { useChainAction } from '../../hooks/use-chain-action'
+import { useChainSequence } from '../../hooks/use-chain-sequence'
 import { ChainActionConfirm } from './chain-action-confirm'
+import { ChainSequenceSteps } from './chain-sequence-steps'
 import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
 import { CashoutCard } from './cashout-card'
 import { CashoutCurrencyQuestion, type CashoutQuestionState } from './cashout-currency-question'
@@ -639,6 +651,15 @@ export function IntentChat({
   }, [chainRace, raceEnded, live.error, live.phase, restored])
   const cashout = useCashout()
   const [cashoutQuestion, setCashoutQuestion] = useState<CashoutQuestionState | null>(null)
+  // A swap and what follows it, on a chain with its own module. Step 1 is the race above.
+  const chainSequence = useChainSequence(chainAction, cashout)
+  // What a new message left behind by ending a swap that had settled.
+  const [sequenceNote, setSequenceNote] = useState<string | null>(null)
+  useEffect(() => {
+    chainSequence.clear()
+    setSequenceNote(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug])
   // A leveraged position on Noether. Its own shape again: no route, no
   // competition, and a sign-in with the venue before anything is built.
   const perp = usePerp()
@@ -905,6 +926,22 @@ export function IntentChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainOutcome])
 
+  const sequenceLine = sequenceOutcome(
+    chainSequence.stage,
+    chainSequence.delivered,
+    chainSequence.error
+  )
+  useEffect(() => {
+    if (sequenceLine === undefined) return
+    recordLive(
+      'agent',
+      sequenceLine,
+      undefined,
+      chainSequence.account ?? chainAction.account ?? chatOwner.current
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sequenceLine])
+
   useEffect(() => {
     recordSettled('The swap settled.', settledHash, swap.explorerUrl)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -993,10 +1030,12 @@ export function IntentChat({
   // Declared after the effects that record, so a transaction settling in the same
   // render as a switch is written to the wallet that signed it, before the reset.
   // A sequence with a step settled and the next unsigned counts as open: resetting
-  // would lose the only way to finish it.
+  // would lose the only way to finish it. So does a chain swap still being measured:
+  // it ends by itself, and `ready` after it is only a button the new wallet can't use.
   const signatureOpen =
     executionInFlight ||
     cashout.locked ||
+    chainSequence.stage === 'measuring' ||
     (sequence.phase !== 'settled' && sequence.steps.some((step) => step.hash !== undefined))
   useEffect(() => {
     const change = ownerChange(chatOwner.current, transcriptOwner, signatureOpen)
@@ -1009,6 +1048,7 @@ export function IntentChat({
       setAffordError((e) => (e === WALLET_SWITCHED_NOTICE ? null : e))
       return
     }
+    leaveSequence()
     clearOpenChat()
     // None of what follows is cleared by New chat, and all of it is the last wallet's.
     dialogue.current = []
@@ -1679,6 +1719,78 @@ export function IntentChat({
     })()
   }
 
+  /** Ends a chain sequence where it stands. Its USDC stays the person's, and they are told so. */
+  function leaveSequence(): void {
+    const note = endedNote(chainSequence.stage, chainSequence.delivered, chainSequence.sequence)
+    setSequenceNote(note ?? null)
+    if (note !== undefined) {
+      recordLive('agent', note, undefined, chainSequence.account ?? chatOwner.current)
+    }
+    chainSequence.clear()
+  }
+
+  /** Step 1: the same race as a plain swap, with the sequence watching its card. */
+  function runSequenceSwap(request: ChainSequenceRequest, text: string): void {
+    setAffordError(null)
+    // A new race is the one thing that lifts the "already signed" latch.
+    chainAction.release()
+    chainAction.reset()
+    chainSequence.start(request, text)
+    setChainRace({ request: request.swap, text })
+  }
+
+  /** A swap and what follows it. Whatever could not finish is refused here, before step 1. */
+  function startChainSequence(request: ChainSequenceRequest, text: string): void {
+    const capabilities = chainCapabilities(slug)
+    if (capabilities === undefined) return
+    const { followOn } = request
+    setMessage(text)
+    resetTurnState()
+    setParsed(null)
+    setTurnId(null)
+    setClarifying(null)
+    const refusal =
+      (followOn.kind === 'cashout' && cashout.locked ? CASHOUT_UNDER_WAY : undefined) ??
+      followOnRefusal(
+        slug as ChainWithActions,
+        descriptor.name,
+        followOn,
+        capabilities.map((c) => ({ kinds: [c.kind] }))
+      ) ??
+      followOnNotYet(followOn)
+    if (refusal !== undefined) {
+      chainAction.refuse(refusal, text)
+      return
+    }
+    if (followOn.kind !== 'cashout') {
+      runSequenceSwap(request, text)
+      return
+    }
+    // Asked of Weave before step 1, since a currency it can't pay is no use after it.
+    cashout.dismiss()
+    chainAction.reset()
+    setClarifyBusy(true)
+    const { turn, account, chain } = latest.current
+    void fetchCashoutCurrencies(slug).then((weave) => {
+      if (clarifyRuns.current === 0) setClarifyBusy(false)
+      // The person has moved on, and a swap must not start under what they did next.
+      const now = latest.current
+      if (turn !== now.turn || account !== now.account || chain !== now.chain) return
+      const step = currencyStep(followOn.currency, cashoutChoices(slug, weave))
+      if (step.kind === 'refuse') {
+        chainAction.refuse(step.message, text)
+      } else if (step.kind === 'ask') {
+        setCashoutQuestion({ choices: step.choices, sequence: request })
+        recordLive('agent', CURRENCY_QUESTION)
+      } else {
+        runSequenceSwap(
+          { ...request, followOn: { kind: 'cashout', currency: step.currency } },
+          text
+        )
+      }
+    })
+  }
+
   /** A cash-out read from the composer: the card, or a plain answer about what it can't do. */
   function startCashout(route: Exclude<CashoutRoute, { kind: 'pass' }>, text: string): void {
     if (executionInFlight) {
@@ -1706,6 +1818,11 @@ export function IntentChat({
     sequence.reset()
     supply.reset()
     perp.reset()
+
+    if (route.kind === 'sequence') {
+      startChainSequence(cashoutSequence(route), text)
+      return
+    }
 
     if (route.kind === 'ask') {
       if (cashout.locked) {
@@ -1807,6 +1924,16 @@ export function IntentChat({
     const asked = cashoutQuestion
     if (asked === null) return
     setCashoutQuestion({ ...asked, answer: said })
+    if (asked.sequence !== undefined) {
+      runSequenceSwap(
+        {
+          ...asked.sequence,
+          followOn: { kind: 'cashout', currency: currency as CashoutCurrencyCode },
+        },
+        message ?? said
+      )
+      return
+    }
     payOutIn(currency, asked.amount, message ?? said)
   }
 
@@ -1838,7 +1965,10 @@ export function IntentChat({
       executionInFlight &&
       (cashoutRoute.kind !== 'pass' ||
         (clarifying === null && open && classifyFollowUp(text) === 'note'))
-    if (!refused) recordLive('user', text)
+    if (!refused) {
+      recordLive('user', text)
+      leaveSequence()
+    }
 
     if (cashoutRoute.kind !== 'pass') {
       startCashout(cashoutRoute, text)
@@ -1872,6 +2002,17 @@ export function IntentChat({
     // question, still goes to the orchestrator.
     const capabilities = chainCapabilities(slug)
     if (capabilities !== undefined) {
+      const sequenceRead = parseChainSequence(text)
+      if (sequenceRead !== null) {
+        if ('refusal' in sequenceRead) {
+          setMessage(text)
+          clearChainRace()
+          chainAction.refuse(sequenceRead.refusal, text)
+        } else {
+          startChainSequence(sequenceRead, text)
+        }
+        return
+      }
       const action = parseChainAction(text)
       if (action !== null) {
         // The thread only renders once there is a message, so without this the
@@ -2060,6 +2201,8 @@ export function IntentChat({
     // The model wrote out a cash-out, perhaps from words no parser here would read.
     const writtenOut = routeCashout(parseCashout(answer.instruction), slug, isMainnet())
     if (writtenOut.kind !== 'pass') {
+      // A swap must not start under whatever was said while this was being read.
+      if (writtenOut.kind === 'sequence' && asked.turn !== latest.current.turn) return
       startCashout(writtenOut, turns[0]?.content ?? text)
       return
     }
@@ -2145,6 +2288,8 @@ export function IntentChat({
     // The card holds a signature in flight; closing it would orphan the transaction.
     if (chainSigning(chainAction.phase)) return
     latest.current.turn += 1
+    chainSequence.clear()
+    setSequenceNote(null)
     if (slug !== 'stellar') chainAction.reset()
     // The thread stays while a cash-out is under way: it carries the warning not to resend.
     setMessage(cashout.locked ? message : null)
@@ -2628,6 +2773,7 @@ export function IntentChat({
             turns={listedTurns}
             onSelect={(turn) => {
               if (chainSigning(chainAction.phase)) return
+              leaveSequence()
               // A race on screen ends when another turn is opened.
               if (chainRace !== null) {
                 clearChainRace()
@@ -2863,6 +3009,11 @@ export function IntentChat({
                       )
                     )
                 : null}
+              {sequenceNote !== null && restored === null ? (
+                <div className="flex justify-start">
+                  <div className={agentBubble}>{sequenceNote}</div>
+                </div>
+              ) : null}
               {cashoutQuestion !== null ? (
                 <CashoutCurrencyQuestion
                   question={cashoutQuestion}
@@ -3066,6 +3217,8 @@ export function IntentChat({
               {/* Supplying what the account already holds. One transaction,
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
+
+              {restored === null ? <ChainSequenceSteps steps={chainSequence} /> : null}
 
               {showDirectNote(directFallback, chainAction.phase) ? (
                 <p className={systemPill}>

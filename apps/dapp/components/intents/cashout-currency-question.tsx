@@ -2,6 +2,7 @@
 
 import { cn } from '@intent/ui'
 
+import type { ChainSequenceRequest } from '../../lib/chains/sequence'
 import { CURRENCY_QUESTION, type CashoutCurrency } from '../../lib/weave/cashout-view'
 import { currencyFlag } from '../../lib/weave/currency-flag'
 import { agentBubble, userBubble } from './bubble'
@@ -9,6 +10,8 @@ import { agentBubble, userBubble } from './bubble'
 export interface CashoutQuestionState {
   amount?: string
   choices: CashoutCurrency[]
+  /** A swap waiting on this answer: answering starts its race, not the form. */
+  sequence?: ChainSequenceRequest
   /** What the person answered. Set once, and the question stays in the thread as asked. */
   answer?: string
   /** An answer that couldn't be used, and what was said back. */
