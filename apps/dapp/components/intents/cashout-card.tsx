@@ -41,6 +41,7 @@ import {
   type CashoutOrderView,
   type CashoutQuote,
 } from '../../lib/weave/cashout-view'
+import { currencyFlag, payoutWord } from '../../lib/weave/currency-flag'
 import { isCashoutChain } from '../../lib/weave/types'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
@@ -660,6 +661,9 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
   const canReview =
     isValidAmount(amount) && estimate !== undefined && !overBalance && holder.data !== undefined
   const bankName = banks?.find((b) => b.code === bankCode)?.name
+  const word = payoutWord(institutions.data?.map((i) => i.type) ?? [])
+  const holderWord = picked?.type === 'mobile_money' ? 'mobile money provider' : 'bank'
+  const flag = currencyFlag(currency)
   const creating = phase === 'creating'
 
   return (
@@ -669,7 +673,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
         subtitle={
           isNaira
             ? 'Paid straight to a Nigerian bank account'
-            : `Paid straight to a bank or mobile money account in ${corridor?.country ?? currency}`
+            : `Paid straight to a ${word} account in ${corridor?.country ?? currency}`
         }
       />
 
@@ -715,8 +719,18 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
           <div className="border-bubble-agent-border mt-2 border-t pt-2 text-xs dark:border-white/[0.07]">
             {estimate !== undefined ? (
               <span className="flex flex-wrap items-baseline justify-between gap-x-2">
-                <span>
+                <span className="flex items-center gap-1.5">
                   ≈{' '}
+                  {flag !== undefined ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={flag.src}
+                      alt={`${flag.country} flag`}
+                      width={20}
+                      height={15}
+                      className="h-[15px] w-5 rounded-[2px] object-cover"
+                    />
+                  ) : null}
                   <span className="text-base font-semibold tabular-nums">
                     {formatPayout(estimate.destAmount, currency)}
                   </span>
@@ -729,7 +743,9 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
               <span className="text-muted-foreground">
                 {quote.isError && quoteReady
                   ? (quote.error as Error).message
-                  : 'Enter an amount to see what the bank receives.'}
+                  : isNaira
+                    ? 'Enter an amount to see what the bank receives.'
+                    : 'Enter an amount to see what you receive.'}
               </span>
             )}
           </div>
@@ -742,7 +758,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="cashout-bank" className="text-muted-foreground px-1 text-xs">
-            {isNaira ? 'Bank' : 'Bank or mobile money'}
+            {isNaira ? 'Bank' : word.charAt(0).toUpperCase() + word.slice(1)}
           </label>
           <BankPicker
             id="cashout-bank"
@@ -783,7 +799,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
             {holder.isFetching ? (
               <span className="text-muted-foreground flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
-                Checking with the bank…
+                Checking with the {holderWord}…
               </span>
             ) : holder.data !== undefined && accountReady ? (
               <motion.span
@@ -796,12 +812,12 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
                     <span className="font-medium">{titleCase(holder.data)}</span>
                     <BadgeCheck
                       className="text-brand h-3.5 w-3.5"
-                      aria-label="Verified by the bank"
+                      aria-label={`Verified by the ${holderWord}`}
                     />
                   </>
                 ) : (
                   <span className="text-warning">
-                    The bank can&apos;t confirm a name here, so check this number carefully.
+                    The {holderWord} can&apos;t confirm a name here, so check this number carefully.
                   </span>
                 )}
               </motion.span>
