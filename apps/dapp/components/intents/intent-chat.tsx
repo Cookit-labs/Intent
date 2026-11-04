@@ -62,7 +62,7 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
-import { balanceReplyIsCurrent, chainBalanceReply } from '../../lib/chains/balance-reply'
+import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
@@ -265,6 +265,8 @@ export function IntentChat(): JSX.Element {
   const dialogue = useRef<ClarifyTurn[]>([])
   // Where the chat is now, read after a slow answer to tell whether it is still wanted.
   const latest = useRef({ chain: '', account: undefined as string | undefined, turn: 0 })
+  // Clarify calls still waiting on an answer. The wait is over only when none are.
+  const clarifyRuns = useRef(0)
 
   function openInbox(): void {
     const items = inbox.items
@@ -1690,6 +1692,7 @@ export function IntentChat(): JSX.Element {
     }
     latest.current.turn += 1
     const asked = { ...latest.current }
+    clarifyRuns.current += 1
     setClarifying({ turns })
     setClarifyBusy(true)
 
@@ -1701,15 +1704,18 @@ export function IntentChat(): JSX.Element {
     // The busy indicator stays up until the holdings are read. A reply that arrives after the
     // person moved to another wallet, chain or message is not theirs any more, so it is dropped.
     const balanceText = answer.outcome === 'balance' ? await walletBalanceReply() : undefined
-    if (balanceText !== undefined && !balanceReplyIsCurrent(asked, latest.current)) {
-      // A newer message owns the screen; with none, only the wait is cleared.
-      if (latest.current.turn === asked.turn) {
-        setClarifyBusy(false)
-        setClarifying(null)
-      }
+    clarifyRuns.current -= 1
+    if (clarifyRuns.current === 0) setClarifyBusy(false)
+    const decision =
+      balanceText === undefined
+        ? { kind: 'show' as const }
+        : balanceReplyDecision(asked, latest.current)
+    if (decision.kind === 'drop') return
+    if (decision.kind === 'notice') {
+      setClarifying(null)
+      setAffordError(decision.text)
       return
     }
-    setClarifyBusy(false)
 
     if (answer.outcome === 'ask') {
       setClarifying({ turns: [...turns, { role: 'assistant', content: answer.question }] })
@@ -1823,6 +1829,7 @@ export function IntentChat(): JSX.Element {
 
   /** A clean slate: the open intent, the turns before it and any notes. */
   function newChat(): void {
+    latest.current.turn += 1
     handleReset()
     setThread([])
     setNotes([])
@@ -1836,6 +1843,7 @@ export function IntentChat(): JSX.Element {
   function handleReset(): void {
     // The card holds a signature in flight; closing it would orphan the transaction.
     if (chainSigning(chainAction.phase)) return
+    latest.current.turn += 1
     if (slug !== 'stellar') chainAction.reset()
     // The thread stays while a cash-out is under way: it carries the warning not to resend.
     setMessage(cashout.locked ? message : null)

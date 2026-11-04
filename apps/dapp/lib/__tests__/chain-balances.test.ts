@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { balanceReplyIsCurrent, chainBalanceReply } from '../chains/balance-reply'
+import {
+  balanceReplyDecision,
+  balanceReplyIsCurrent,
+  chainBalanceReply,
+  WALLET_CHANGED_NOTICE,
+} from '../chains/balance-reply'
 import { readEvmBalances } from '../chains/evm/balances'
 import type { EvmClient } from '../chains/evm/client'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from '../chains/evm/tokens'
@@ -449,6 +454,30 @@ describe('balanceReplyIsCurrent', () => {
 
   it('drops it when the wallet disconnected', () => {
     expect(balanceReplyIsCurrent(asked, { ...asked, account: undefined })).toBe(false)
+  })
+})
+
+describe('balanceReplyDecision', () => {
+  const asked = { chain: 'solana', account: 'A', turn: 3 }
+
+  it('shows the reply when nothing changed', () => {
+    expect(balanceReplyDecision(asked, { ...asked })).toEqual({ kind: 'show' })
+  })
+
+  it('tells the person to ask again when the wallet changed and they sent nothing since', () => {
+    expect(balanceReplyDecision(asked, { ...asked, account: 'B' })).toEqual({
+      kind: 'notice',
+      text: WALLET_CHANGED_NOTICE,
+    })
+    expect(balanceReplyDecision(asked, { ...asked, chain: 'sui' }).kind).toBe('notice')
+    expect(WALLET_CHANGED_NOTICE).toBe('Your wallet changed, so ask again for its balance.')
+  })
+
+  it('says nothing when a newer message was sent or the chat was cleared', () => {
+    expect(balanceReplyDecision(asked, { ...asked, turn: 4 })).toEqual({ kind: 'drop' })
+    expect(balanceReplyDecision(asked, { ...asked, turn: 4, account: 'B' })).toEqual({
+      kind: 'drop',
+    })
   })
 })
 

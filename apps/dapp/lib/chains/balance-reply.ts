@@ -35,6 +35,22 @@ export function balanceReplyIsCurrent(asked: BalanceAsk, now: BalanceAsk): boole
   )
 }
 
+export const WALLET_CHANGED_NOTICE = 'Your wallet changed, so ask again for its balance.'
+
+export type BalanceReplyDecision =
+  | { kind: 'show' }
+  /** The only message's reply is no longer for this wallet, so one line says why. */
+  | { kind: 'notice'; text: string }
+  /** A newer message or a cleared chat owns the screen. */
+  | { kind: 'drop' }
+
+export function balanceReplyDecision(asked: BalanceAsk, now: BalanceAsk): BalanceReplyDecision {
+  if (balanceReplyIsCurrent(asked, now)) return { kind: 'show' }
+  return asked.turn === now.turn
+    ? { kind: 'notice', text: WALLET_CHANGED_NOTICE }
+    : { kind: 'drop' }
+}
+
 export function chainBalanceReply(balances: WalletBalances | undefined, chainName: string): string {
   if (balances === undefined) return NOT_READ
   const held = balances.tokens.filter((t) => t.native || !isZero(t.amount))
