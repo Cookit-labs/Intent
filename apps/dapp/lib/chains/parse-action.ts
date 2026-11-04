@@ -22,8 +22,10 @@ const STAKE = new RegExp(
 const ACTION_VERB =
   /\b(swap|convert|exchange|trade|buy|sell|supply|lend|deposit|save|earn|stake|borrow|cash out|send|bridge|long|short)\b/i
 
+/** Plain decimal text: no separators, and a leading zero on ".5", which nothing downstream reads. */
 function amountOf(text: string): string {
-  return text.replace(/,/g, '')
+  const plain = text.replace(/,/g, '')
+  return plain.startsWith('.') ? `0${plain}` : plain
 }
 
 /**
