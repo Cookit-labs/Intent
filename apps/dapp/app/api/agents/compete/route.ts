@@ -3,11 +3,15 @@ import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
 import type { AgentProposalResult, MarketContext } from '../../../../lib/agents/brain'
-import { intentFromChainAction, quoteChainRoutes } from '../../../../lib/agents/chain-routes'
+import {
+  intentFromChainAction,
+  quoteChainRoutes,
+  type ChainRouteQuote,
+} from '../../../../lib/agents/chain-routes'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
-import { measureRoute } from '../../../../lib/agents/measure'
+import { measureChainRoute, measureRoute } from '../../../../lib/agents/measure'
 import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents/lineup'
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
@@ -29,6 +33,7 @@ import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
 import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
+import { settleChainPlan } from '../../../../lib/agents/settle-chain-plan'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
 import { logRace, type RaceInput } from '../../../../lib/server/analytics'
@@ -137,15 +142,9 @@ async function chainRaceFacts(
   const price =
     tokenIn === undefined ? undefined : await chainApi.priceUsd(tokenIn).catch(() => undefined)
 
-  // Stellar's assets, lending rates and anchors are left out: they describe a
-  // different chain, and an agent shown them would reason about venues that do
-  // not exist here.
-  const {
-    assets: _assets,
-    lending: _lending,
-    offramps: _offramps,
-    ...base
-  } = await buildMarketContextAsync(chain)
+  // The chain's market already leaves out Stellar's assets, prices, lending
+  // rates and anchors; see `buildMarketContext`.
+  const base = await buildMarketContextAsync(chain)
   const market: MarketContext = {
     ...base,
     prices: price !== undefined && tokenIn !== undefined ? { [tokenIn.symbol]: price } : {},
@@ -212,10 +211,18 @@ function settlePlan(
  */
 function measured(
   proposal: AgentProposalResult,
-  quote: SwapQuote | undefined,
+  quote: SwapQuote | ChainRouteQuote | undefined,
   prices: Record<string, number>
 ): AgentProposalResult {
   if (quote === undefined) return proposal
+  if ('kind' in quote && quote.kind === 'chain') {
+    // Slippage against an oracle is what a trade costs; a supply or a stake
+    // has none, and measureChainRoute reports it as zero. The agent's own
+    // price stays: it is a rate, and the quote has no single price to replace it.
+    const m = measureChainRoute(quote)
+    if (m === undefined) return proposal
+    return { ...proposal, projectedSlippagePct: Number(m.vsInPct.toFixed(2)) }
+  }
   const m = measureRoute(quote, prices)
   if (m === undefined) return proposal
   return {
@@ -497,8 +504,10 @@ export async function POST(request: Request): Promise<Response> {
             const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
 
             const proposal = measured(
-              settlePlan(outcome.proposal, intent, book),
-              own?.quote as SwapQuote | undefined,
+              chainFacts === undefined
+                ? settlePlan(outcome.proposal, intent, book)
+                : settleChainPlan(outcome.proposal),
+              own?.quote as SwapQuote | ChainRouteQuote | undefined,
               market.prices
             )
 
@@ -550,6 +559,15 @@ export async function POST(request: Request): Promise<Response> {
       const followOn = compound?.followOn.kind
       const anchorLimits = (market.offramps ?? []).find((o) => o.asset === 'USDC')
 
+      // A supply or a stake is ranked on the rate each route shows.
+      const apyEntries = (market.routes ?? []).flatMap((r) => {
+        const q = r.quote as Partial<ChainRouteQuote> | undefined
+        return q?.kind === 'chain' && q.apyPercent !== undefined
+          ? [[r.id, q.apyPercent] as const]
+          : []
+      })
+      const apyByRoute = apyEntries.length > 0 ? Object.fromEntries(apyEntries) : undefined
+
       const plan: PlanContext = {
         escrowUsd: intent.escrowUsd,
         referencePriceUsd: intent.referencePriceUsd,
@@ -565,6 +583,7 @@ export async function POST(request: Request): Promise<Response> {
         ...(book?.ask !== undefined ? { recentHighUsd: book.ask } : {}),
         ...(anchorLimits?.maxAmount !== undefined ? { offrampMaxUsd: anchorLimits.maxAmount } : {}),
         ...(anchorLimits?.minAmount !== undefined ? { offrampMinUsd: anchorLimits.minAmount } : {}),
+        ...(apyByRoute !== undefined ? { apyByRoute } : {}),
       }
 
       const scored = scoreProposals(proposals, { competitionId, plan })

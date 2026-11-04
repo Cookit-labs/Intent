@@ -393,21 +393,30 @@ export function buildMarketContext(
   // failing later. DeFindex needs a key; without one it does not exist here.
   const lendingOffered: string[] = configuredLendingVenues(env, network)
 
+  // Solana, Sui and NEAR have their own venues and tokens. The reference
+  // prices and the asset list below describe Stellar, and an agent shown them
+  // would reason about tokens that do not exist on its chain.
+  const ownChain = family === 'solana' || family === 'sui' || family === 'near'
+
   return {
     asOf: new Date().toISOString(),
-    prices: { ...REFERENCE_PRICES_USD },
+    prices: ownChain ? {} : { ...REFERENCE_PRICES_USD },
     // What the agent may actually trade, with a plain-English description of
     // each. Without this an agent has no way to know tokenized sovereign debt
     // is on the menu, and would reason only about the currencies it has seen
     // in prior prompts.
-    assets: tradeableSymbols().map((code) => ({
-      code,
-      what: verificationOf(code)?.description ?? code,
-      // How well the issuer is established. An agent weighing an unfamiliar
-      // asset should know whether the organisation named actually confirms it
-      // issued the thing, and the difference is invisible from a ticker.
-      trust: trustSummary(code) ?? 'Verification unknown.',
-    })),
+    ...(ownChain
+      ? {}
+      : {
+          assets: tradeableSymbols().map((code) => ({
+            code,
+            what: verificationOf(code)?.description ?? code,
+            // How well the issuer is established. An agent weighing an unfamiliar
+            // asset should know whether the organisation named actually confirms it
+            // issued the thing, and the difference is invisible from a ticker.
+            trust: trustSummary(code) ?? 'Verification unknown.',
+          })),
+        }),
     // Naming a venue that does not exist on the active chain is a plausible
     // failure for a model, so the list it may choose from is filtered here
     // rather than validated after the fact.
@@ -416,6 +425,9 @@ export function buildMarketContext(
       // And on this network. A Stellar venue whose mainnet contracts are not
       // verified is testnet-only, and an agent must not be offered it.
       .filter((v) => v.family !== 'stellar' || isVenueOn(v, network))
+      // On a chain with its own module, only a venue the app can sign for.
+      // One that is merely quoted would win a race it cannot complete.
+      .filter((v) => !ownChain || v.integration === 'executes')
       // Anchors are follow-on destinations, named through `thenVenue` and
       // validated against the anchor registry; they are not places a trade
       // executes and must not be selectable as a swap venue.

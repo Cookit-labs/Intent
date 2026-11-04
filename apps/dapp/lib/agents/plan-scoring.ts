@@ -46,6 +46,12 @@ export interface PlanContext {
   offrampMaxUsd?: number
   /** The anchor's published minimum, when an offramp was offered. */
   offrampMinUsd?: number
+  /**
+   * The APY each offered route shows, by route id, on a supply or a stake race.
+   * Those routes have no slippage to rank on, so the rate gap does it. Absent
+   * on a swap race.
+   */
+  apyByRoute?: Record<string, number>
 }
 
 export interface PlanPenalty {
@@ -57,6 +63,7 @@ export interface PlanPenalty {
     | 'follow_on_not_worth_fee'
     | 'offramp_outside_limits'
     | 'slices_without_split'
+    | 'lower_rate'
   /** Points subtracted from the route score. */
   points: number
   /** One line a person can read, naming the figures it was judged on. */
@@ -163,6 +170,22 @@ function followOnPenalties(proposal: AgentProposalResult, context: PlanContext):
   return out
 }
 
+/** One point of score per percentage point of APY given up against the best route offered. */
+function ratePenalty(proposal: AgentProposalResult, context: PlanContext): PlanPenalty | undefined {
+  const rates = context.apyByRoute
+  if (rates === undefined || proposal.routeId === undefined) return undefined
+  const own = rates[proposal.routeId]
+  if (own === undefined) return undefined
+  const best = Math.max(...Object.values(rates))
+  const gap = best - own
+  if (gap <= 0) return undefined
+  return {
+    reason: 'lower_rate',
+    points: Number(gap.toFixed(2)),
+    detail: `Takes ${own}% APY where ${best}% was offered.`,
+  }
+}
+
 function slicePenalty(proposal: AgentProposalResult): PlanPenalty | undefined {
   if (proposal.sliceCount <= 1) return undefined
   if (proposal.executionMode === 'split') return undefined
@@ -181,6 +204,9 @@ export function planPenalties(proposal: AgentProposalResult, context: PlanContex
   if (rest !== undefined) out.push(rest)
 
   out.push(...followOnPenalties(proposal, context))
+
+  const rate = ratePenalty(proposal, context)
+  if (rate !== undefined) out.push(rate)
 
   const slices = slicePenalty(proposal)
   if (slices !== undefined) out.push(slices)

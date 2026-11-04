@@ -1,4 +1,4 @@
-import type { ChainActionRequest, ChainModule } from '../chains/types'
+import { tokenBySymbol, type ChainActionRequest, type ChainModule } from '../chains/types'
 import type { ParsedIntent } from '../parse-intent'
 import type { QuotedRoute } from './brain'
 
@@ -36,11 +36,33 @@ export async function quoteChainRoutes(
       (named === undefined || v.id.toLowerCase() === named || v.name.toLowerCase().includes(named))
   )
 
+  // Dollars per display unit, from the chain's own price source. Display
+  // amounts times this is the only value computed here: base units are never
+  // converted, because token decimals differ from chain to chain.
+  const priceOf = async (symbol: string): Promise<number | undefined> => {
+    const token = tokenBySymbol(chainApi.tokens, symbol)
+    if (token === undefined) return undefined
+    const price = await chainApi.priceUsd(token).catch(() => undefined)
+    return price !== undefined && Number.isFinite(price) && price > 0 ? price : undefined
+  }
+  const priceIn = await priceOf(request.tokenIn)
+  const amountIn = Number(request.amount)
+  const valueInUsd =
+    priceIn !== undefined && Number.isFinite(amountIn) ? amountIn * priceIn : undefined
+
   const settled = await Promise.all(
     usable.map(async (venue): Promise<QuotedRoute | undefined> => {
       try {
         const quoted = await venue.quote?.(request, account)
         if (quoted === undefined) return undefined
+        // The venue's own dollar figure when it gives one; otherwise what it
+        // says it will hand over, priced here. Unpriced stays unknown.
+        let valueOutUsd = quoted.valueOutUsd
+        if (valueOutUsd === undefined && quoted.receive !== undefined) {
+          const priceOut = await priceOf(quoted.receive.symbol)
+          const qty = Number(quoted.receive.amount)
+          if (priceOut !== undefined && Number.isFinite(qty)) valueOutUsd = qty * priceOut
+        }
         const quote: ChainRouteQuote = {
           kind: 'chain',
           request,
@@ -49,7 +71,8 @@ export async function quoteChainRoutes(
           pay: { amount: request.amount, symbol: request.tokenIn },
           ...(quoted.receive !== undefined ? { receive: quoted.receive } : {}),
           ...(quoted.apyPercent !== undefined ? { apyPercent: quoted.apyPercent } : {}),
-          ...(quoted.valueOutUsd !== undefined ? { valueOutUsd: quoted.valueOutUsd } : {}),
+          ...(valueInUsd !== undefined ? { valueInUsd } : {}),
+          ...(valueOutUsd !== undefined ? { valueOutUsd } : {}),
         }
         return {
           id: `${venue.id}-1`,
