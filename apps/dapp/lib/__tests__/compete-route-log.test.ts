@@ -167,7 +167,7 @@ describe('POST /api/agents/compete', () => {
     enforceRateLimit.mockClear()
     const { POST } = await import('../../app/api/agents/compete/route')
     await (
-      await POST(post({ text: 'swap 10 XLM to USDC', chain: 'stellar', account: 'x'.repeat(65) }))
+      await POST(post({ text: 'swap 10 XLM to USDC', chain: 'stellar', account: 'x'.repeat(129) }))
     ).text()
 
     expect(enforceRateLimit).toHaveBeenCalledWith(expect.anything(), 'compete', undefined)

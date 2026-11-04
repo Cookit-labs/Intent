@@ -96,10 +96,23 @@ export interface ChainToken {
 /** Raised for a refusal the user should read, such as an unknown token or thin liquidity. */
 export class ChainActionRefused extends Error {}
 
+/** What a venue says it would give back, read without building anything to sign. */
+export interface VenueQuote {
+  receive?: { amount: string; symbol: string }
+  apyPercent?: number
+  valueOutUsd?: number
+}
+
 export interface ChainVenue {
   id: string
   name: string
   kinds: readonly ChainActionKind[]
+  /**
+   * A price for the agent race. Must not create a deposit address or any other
+   * thing that costs money or leaves state behind: a race quotes every venue,
+   * and only the one the user presses Review on may be built.
+   */
+  quote?: ((request: ChainActionRequest, account: string) => Promise<VenueQuote>) | undefined
   prepare: (request: ChainActionRequest, account: string) => Promise<PreparedAction>
   /**
    * Refuses a payload that does anything but what was asked: wrong signer, an

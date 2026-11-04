@@ -4,6 +4,7 @@ import {
   tokenBySymbol,
   type ChainActionRequest,
   type ChainModule,
+  type ChainToken,
   type ChainVenue,
   type PreparedAction,
 } from './types'
@@ -34,19 +35,11 @@ function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVen
 }
 
 /**
- * Prepares an action, with the same order of checks as every other money route:
- * known tokens, a dollar value under the cap, then the build, then a check of
- * what the venue's API returned before anyone is asked to sign it.
- *
- * The cap always reads as mainnet, because these chains only run on mainnet. The
- * Stellar network a deployment defaults to says nothing about Solana's funds.
+ * Refuses a token this chain does not list as verified, in the same words
+ * wherever it is asked: the signing route and the agent race both call this, so
+ * a refused token reads the same in each and no agent is ever consulted about it.
  */
-export async function prepareChainAction(
-  chainApi: ChainModule,
-  request: ChainActionRequest,
-  account: string,
-  env: Record<string, string | undefined> = process.env
-): Promise<PreparedAction> {
+export function assertKnownTokens(chainApi: ChainModule, request: ChainActionRequest): ChainToken {
   const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
   if (tokenIn === undefined) {
     throw new ChainActionRefused(
@@ -66,6 +59,24 @@ export async function prepareChainAction(
       throw new ChainActionRefused('Those are the same token.')
     }
   }
+  return tokenIn
+}
+
+/**
+ * Prepares an action, with the same order of checks as every other money route:
+ * known tokens, a dollar value under the cap, then the build, then a check of
+ * what the venue's API returned before anyone is asked to sign it.
+ *
+ * The cap always reads as mainnet, because these chains only run on mainnet. The
+ * Stellar network a deployment defaults to says nothing about Solana's funds.
+ */
+export async function prepareChainAction(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string,
+  env: Record<string, string | undefined> = process.env
+): Promise<PreparedAction> {
+  const tokenIn = assertKnownTokens(chainApi, request)
 
   const price = await chainApi.priceUsd(tokenIn)
   const amount = Number(request.amount)

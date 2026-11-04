@@ -2,7 +2,8 @@ import { activeNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
-import type { AgentProposalResult } from '../../../../lib/agents/brain'
+import type { AgentProposalResult, MarketContext } from '../../../../lib/agents/brain'
+import { intentFromChainAction, quoteChainRoutes } from '../../../../lib/agents/chain-routes'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
@@ -11,6 +12,14 @@ import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
+import { assertKnownTokens } from '../../../../lib/chains/prepare'
+import { chainModule } from '../../../../lib/chains/registry'
+import {
+  ChainActionRefused,
+  type ChainActionKind,
+  type ChainActionRequest,
+  type ChainModule,
+} from '../../../../lib/chains/types'
 import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { buildParsedIntent, parseIntent, type ReadingForIntent } from '../../../../lib/parse-intent'
@@ -57,7 +66,7 @@ const AGENT_TIMEOUT_MS = 60_000
 const WINDOW_SECONDS = 30
 
 /**
- * Chains a competition can execute on.
+ * Chains a competition can execute on: Stellar, and any chain with a module.
  *
  * Checked before anything runs, and by name. The chain used to default to
  * 'arc' when the body carried none, and an unrecognised slug fell through to
@@ -65,8 +74,90 @@ const WINDOW_SECONDS = 30
  * which the agents were offered Uniswap. Now a missing or unsupported chain is
  * an answer the user reads, not a race that quietly runs on the wrong facts.
  */
-const EXECUTING_CHAINS: Record<string, string> = {
-  stellar: 'Stellar',
+function canExecuteOn(chain: string): boolean {
+  return chain === 'stellar' || chainModule(chain) !== undefined
+}
+
+const CHAIN_ACTION_KINDS: readonly ChainActionKind[] = ['swap', 'supply', 'stake']
+
+/** The longest account a chain uses is a 64-character NEAR implicit account; Sui and EVM are shorter. */
+const MAX_ACCOUNT_CHARS = 128
+
+/**
+ * Reads the structured action from the body, or nothing. Only the shape is
+ * checked here; whether the tokens are real is checked against the chain.
+ */
+function chainActionFromBody(raw: unknown): ChainActionRequest | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { kind, amount, tokenIn, tokenOut, venue } = raw as Record<string, unknown>
+  if (typeof kind !== 'string' || !CHAIN_ACTION_KINDS.includes(kind as ChainActionKind)) {
+    return undefined
+  }
+  if (typeof amount !== 'string' || typeof tokenIn !== 'string') return undefined
+  return {
+    kind: kind as ChainActionKind,
+    amount: amount.slice(0, 40),
+    tokenIn: tokenIn.slice(0, 40),
+    ...(typeof tokenOut === 'string' ? { tokenOut: tokenOut.slice(0, 40) } : {}),
+    ...(typeof venue === 'string' ? { venue: venue.slice(0, 40) } : {}),
+  }
+}
+
+/**
+ * What the agents are given for an action on a chain that is not Stellar: the
+ * chain's own venues and real quotes, and none of Stellar's prices, assets or
+ * order book. Returns the sentence to show instead when there is nothing to race.
+ */
+async function chainRaceFacts(
+  chain: string,
+  chainApi: ChainModule,
+  action: ChainActionRequest,
+  account: string | undefined,
+  text: string
+): Promise<{ intent: ParsedIntent; market: MarketContext } | string> {
+  try {
+    assertKnownTokens(chainApi, action)
+  } catch (e) {
+    if (e instanceof ChainActionRefused) return `${e.message} Nothing was signed or sent.`
+    throw e
+  }
+  if (account === undefined) {
+    return 'No wallet account came with this request, so nothing could be priced. Nothing was signed or sent.'
+  }
+
+  const routes = await quoteChainRoutes(chainApi, action, account)
+  if (routes.length === 0) {
+    return 'No route on this chain could be priced right now, so the agents had nothing to judge. Nothing was signed or sent.'
+  }
+
+  const tokenIn = chainApi.tokens.find(
+    (t) => t.symbol.toUpperCase() === action.tokenIn.toUpperCase()
+  )
+  const price =
+    tokenIn === undefined ? undefined : await chainApi.priceUsd(tokenIn).catch(() => undefined)
+
+  // Stellar's assets, lending rates and anchors are left out: they describe a
+  // different chain, and an agent shown them would reason about venues that do
+  // not exist here.
+  const {
+    assets: _assets,
+    lending: _lending,
+    offramps: _offramps,
+    ...base
+  } = await buildMarketContextAsync(chain)
+  const market: MarketContext = {
+    ...base,
+    prices: price !== undefined && tokenIn !== undefined ? { [tokenIn.symbol]: price } : {},
+    venues: chainApi.venues
+      .filter((v) => routes.some((r) => r.id === `${v.id}-1`))
+      .map((v) => ({
+        id: v.id,
+        name: v.name,
+        category: action.kind === 'swap' ? 'dex' : action.kind === 'supply' ? 'lending' : 'staking',
+      })),
+    routes,
+  }
+  return { intent: intentFromChainAction(action, text, price), market }
 }
 
 /**
@@ -167,7 +258,7 @@ export async function POST(request: Request): Promise<Response> {
       b !== null &&
       'account' in b &&
       typeof b.account === 'string' &&
-      b.account.length <= 64
+      b.account.length <= MAX_ACCOUNT_CHARS
         ? b.account
         : undefined
     )
@@ -180,6 +271,7 @@ export async function POST(request: Request): Promise<Response> {
   let chain: string
   let context: string[]
   let reading: ReadingForIntent | undefined
+  let chainAction: ChainActionRequest | undefined
 
   try {
     const body = (await request.json()) as {
@@ -187,13 +279,17 @@ export async function POST(request: Request): Promise<Response> {
       chain?: unknown
       context?: unknown
       reading?: unknown
+      chainAction?: unknown
     }
     if (typeof body.text !== 'string' || body.text.trim() === '') {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
-    await ensureLiveAssets(tickersIn(text))
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
+    chainAction = chainActionFromBody(body.chainAction)
+    // Stellar's live-asset lookup is for Stellar's tickers; a chain action
+    // names its tokens itself and they are checked against the chain's own list.
+    if (chain === 'stellar' || chainAction === undefined) await ensureLiveAssets(tickersIn(text))
     reading = readingFromBody(body.reading, text)
     context = Array.isArray(body.context)
       ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)
@@ -211,11 +307,17 @@ export async function POST(request: Request): Promise<Response> {
       'No chain was named for this intent. Reload the app and try again.'
     )
   }
-  if (EXECUTING_CHAINS[chain] === undefined) {
+  if (!canExecuteOn(chain)) {
     return errorStream(
       'chain_unsupported',
-      `Agents can execute only on ${Object.values(EXECUTING_CHAINS).join(', ')} right now. ` +
-        `Switch the chain to run a competition.`
+      'Agents can execute only on Stellar, Solana, Sui and NEAR right now. ' +
+        'Switch the chain to run a competition.'
+    )
+  }
+  if (chain !== 'stellar' && chainAction === undefined) {
+    return errorStream(
+      'chain_unsupported',
+      'This request did not say what to do on this chain, so no race was run. Nothing was signed or sent.'
     )
   }
 
@@ -236,45 +338,57 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
+  // Off Stellar the facts come from the chain's own venues and quotes, and a
+  // refusal or an unpriceable action ends here, before any agent is called.
+  const chainApi = chain === 'stellar' ? undefined : chainModule(chain)
+  const chainFacts =
+    chainApi !== undefined && chainAction !== undefined
+      ? await chainRaceFacts(chain, chainApi, chainAction, account, text)
+      : undefined
+  if (typeof chainFacts === 'string') return errorStream('chain_unsupported', chainFacts)
+
   const competitionId = randomUUID()
   // Taken here, in the request, so the race is recorded for the network it ran on.
   const network = activeNetwork()
   const startedAt = new Date()
   // Prices are fetched first so the parser can size "$30 of XLM" against the
   // real market rather than an indicative table.
-  const market = await buildMarketContextAsync(chain)
+  const market = chainFacts?.market ?? (await buildMarketContextAsync(chain))
   // A structured reading, when the chat has one, is what the agents are given.
   // Re-reading the words would lose a paraphrase that no keyword recognises.
   const intent =
-    reading !== undefined
+    chainFacts?.intent ??
+    (reading !== undefined
       ? buildParsedIntent(reading, market.prices)
-      : parseIntent(text, market.prices)
+      : parseIntent(text, market.prices))
 
   // Priced before the agents run, so they choose between real routes rather
   // than describing hypothetical ones. Failing to quote is not fatal: the
   // competition proceeds without executable routes and says so.
-  try {
-    const routes = await quoteRoutes(
-      chain,
-      intent.input.tokenIn,
-      intent.input.tokenOut,
-      toBaseUnits(intent.input.amountIn),
-      undefined,
-      // A limit order states a price it will not trade through, expressed as
-      // a minimum output so the quoter can decline. Keyed on `limitPriceUsd`
-      // rather than `targetPriceUsd`: the latter falls back to spot when the
-      // user named no price, and a limit derived from the market is not one.
-      isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
-        ? {
-            minReceive: toBaseUnits(
-              (Number(intent.input.amountIn) * intent.limitPriceUsd).toFixed(7)
-            ),
-          }
-        : {}
-    )
-    if (routes.length > 0) market.routes = routes
-  } catch {
-    // Leaving routes unset is the honest outcome; agents reason without them.
+  if (chainFacts === undefined) {
+    try {
+      const routes = await quoteRoutes(
+        chain,
+        intent.input.tokenIn,
+        intent.input.tokenOut,
+        toBaseUnits(intent.input.amountIn),
+        undefined,
+        // A limit order states a price it will not trade through, expressed as
+        // a minimum output so the quoter can decline. Keyed on `limitPriceUsd`
+        // rather than `targetPriceUsd`: the latter falls back to spot when the
+        // user named no price, and a limit derived from the market is not one.
+        isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
+          ? {
+              minReceive: toBaseUnits(
+                (Number(intent.input.amountIn) * intent.limitPriceUsd).toFixed(7)
+              ),
+            }
+          : {}
+      )
+      if (routes.length > 0) market.routes = routes
+    } catch {
+      // Leaving routes unset is the honest outcome; agents reason without them.
+    }
   }
 
   // One read for the whole competition: every agent's resting price is checked
@@ -282,7 +396,7 @@ export async function POST(request: Request): Promise<Response> {
   let book: OrderBookTop | undefined
   const from = resolveAsset(intent.input.tokenIn)
   const to = resolveAsset(intent.input.tokenOut)
-  if (from !== undefined && to !== undefined) {
+  if (chainFacts === undefined && from !== undefined && to !== undefined) {
     const base = from.issuer === undefined ? from : to
     const counter = from.issuer === undefined ? to : from
     try {
@@ -430,7 +544,8 @@ export async function POST(request: Request): Promise<Response> {
       // What the user actually asked for, so a follow-on nobody requested
       // can be told apart from one they did. The same parser the sequence
       // flow uses, rather than a second opinion about the same sentence.
-      const compound = parseCompoundIntent(text, market.prices)
+      const compound =
+        chainFacts === undefined ? parseCompoundIntent(text, market.prices) : undefined
       const followOn = compound?.followOn.kind
       const anchorLimits = (market.offramps ?? []).find((o) => o.asset === 'USDC')
 
