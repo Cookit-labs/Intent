@@ -664,19 +664,23 @@ describe('lulo', () => {
 })
 
 describe('module', () => {
-  it('offers the four venues that need no key', () => {
-    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual([
+  it('adds 1Click once the secret that protects its deposits is there', () => {
+    expect(buildSolanaVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
       'jupiter',
       '1click-solana',
       'jupiter-lend',
       'kamino',
     ])
+  })
+
+  it('offers the three venues that need no key', () => {
+    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual(['jupiter', 'jupiter-lend', 'kamino'])
     expect(solanaModule.defaultVenue).toMatchObject({ swap: 'jupiter', supply: 'jupiter-lend' })
     expect(solanaModule.chain).toBe('solana')
   })
 
   it('lets only the swaps land their own transactions', () => {
-    const [swap, oneClick, lend, kamino] = buildSolanaVenues({})
+    const [swap, oneClick, lend, kamino] = buildSolanaVenues({ AUTH_SECRET: 'x'.repeat(48) })
     expect(swap?.submit).toBeTypeOf('function')
     expect(oneClick?.submit).toBeTypeOf('function')
     expect(lend?.submit).toBeUndefined()

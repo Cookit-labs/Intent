@@ -8,7 +8,7 @@ import { submitSui, type SuiExecutor } from '../chains/sui/submit'
 import { SUI_TOKENS } from '../chains/sui/tokens'
 import { suiCapabilities } from '../chains/sui/capabilities'
 import { suiVenues } from '../chains/sui/venues'
-import { suiModule } from '../chains/sui/module'
+import { buildSuiVenues, suiModule } from '../chains/sui/module'
 import { tokenBySymbol, ChainActionRefused } from '../chains/types'
 import { venues } from '../venues'
 
@@ -283,10 +283,18 @@ describe('submitting signed bytes', () => {
 })
 
 describe('the module', () => {
-  it('wires only swap, supply and stake, to Cetus, 1Click, NAVI and SpringSui', () => {
-    expect(suiModule.venues.map((v) => [v.id, v.kinds])).toEqual([
+  it('adds 1Click once the secret that protects its deposits is there', () => {
+    expect(buildSuiVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
+      'cetus',
+      '1click-sui',
+      'navi',
+      'springsui',
+    ])
+  })
+
+  it('wires only swap, supply and stake, to Cetus, NAVI and SpringSui', () => {
+    expect(buildSuiVenues({}).map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
-      ['1click-sui', ['swap']],
       ['navi', ['supply']],
       ['springsui', ['stake']],
     ])
@@ -318,7 +326,9 @@ describe('the venue list', () => {
   })
 
   it('claims execution only for what is wired, each with a capability', () => {
-    const wired = suiModule.venues.map((v) => v.id).sort()
+    const wired = buildSuiVenues({})
+      .map((v) => v.id)
+      .sort()
     const claimed = suiVenues.filter((v) => v.integration === 'executes')
     expect(claimed.map((v) => v.id).sort()).toEqual(wired)
     for (const venue of claimed) expect(venue.capability).toBeTruthy()

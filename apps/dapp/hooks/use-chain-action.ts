@@ -8,6 +8,7 @@ import {
   afterSigning,
   afterSubmitting,
   latchBeforeSign,
+  submitSigned,
 } from '../lib/chains/signing-flow'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
@@ -177,17 +178,12 @@ export function useChainAction(): ChainAction {
 
       setSigned(true)
       setState((s) => ({ ...s, phase: 'submitting' }))
-      const res = await fetch(`/api/chain/${slug}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          account,
-          venueId: prepared.venueId,
-          signed: step.signed,
-          ...(prepared.context !== undefined ? { context: prepared.context } : {}),
-        }),
+      const result = await submitSigned(`/api/chain/${slug}/submit`, {
+        account,
+        venueId: prepared.venueId,
+        signed: step.signed,
+        ...(prepared.context !== undefined ? { context: prepared.context } : {}),
       })
-      const result = (await res.json()) as unknown
       if (!current()) return
       const done = afterSubmitting(result, family)
       if (!done.latched) setSigned(false)

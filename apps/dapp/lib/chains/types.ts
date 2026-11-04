@@ -100,7 +100,13 @@ export class ChainActionRefused extends Error {}
 export interface VenueQuote {
   receive?: { amount: string; symbol: string }
   apyPercent?: number
+  /** Only where every route on the chain is valued by the same source, as on NEAR. */
   valueOutUsd?: number
+  /**
+   * What this route costs the wallet beyond what it delivers, as a route elsewhere would not.
+   * The race takes it off the route's value, at the chain's own price for this token.
+   */
+  walletCost?: { amount: string; symbol: string }
 }
 
 export interface ChainVenue {

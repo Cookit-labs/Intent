@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   accountMismatch,
   afterSigning,
   afterSubmitting,
   latchBeforeSign,
+  submitSigned,
 } from '../chains/signing-flow'
 import { panelErrorMessage, reviewChainRoute } from '../agents/chain-race'
 import type { ChainActionRequest } from '../chains/types'
@@ -169,6 +170,44 @@ describe('unknown outcomes keep the latch and Review closed', () => {
         expect(prepare).not.toHaveBeenCalled()
       }
     }
+  })
+})
+
+describe('an answer that can not be read, once a signature has gone to the server', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const request = { account: 'a', venueId: 'v' }
+
+  it.each([
+    ['the platform killing the function', () => new Response('<html>504</html>', { status: 504 })],
+    ['an empty answer', () => new Response('', { status: 200 })],
+    [
+      'the connection dropping',
+      () => {
+        throw new TypeError('fetch failed')
+      },
+    ],
+  ])('holds the latch after %s', async (_name, answer) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => answer())
+    )
+    const result = await submitSigned('/api/chain/solana/submit', request)
+    for (const family of ['solana', 'sui'] as const) {
+      expect(afterSubmitting(result, family)).toMatchObject({ phase: 'pending', latched: true })
+    }
+  })
+
+  it('posts the body as JSON and hands back a readable answer as it is', async () => {
+    const answer = { ok: false, error: 'The quote moved too far.' }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(answer), { status: 422 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(submitSigned('/api/chain/solana/submit', request)).resolves.toEqual(answer)
+    expect(fetchMock).toHaveBeenCalledWith('/api/chain/solana/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
   })
 })
 

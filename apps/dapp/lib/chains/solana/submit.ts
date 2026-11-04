@@ -91,6 +91,11 @@ export interface SolanaSubmitOptions {
   env?: Record<string, string | undefined>
   pollMs?: number
   maxPolls?: number
+  /**
+   * How long a submit may wait in all, for a route the platform would otherwise stop part way
+   * with no answer. Time up means pending, because the transaction may still land.
+   */
+  deadlineMs?: number
 }
 
 /**
@@ -102,14 +107,19 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
   const env = options.env ?? process.env
   const pollMs = options.pollMs ?? POLL_MS
   const maxPolls = options.maxPolls ?? MAX_POLLS
+  const { deadlineMs } = options
 
-  async function rpc(method: string, params: unknown[]): Promise<z.infer<typeof RpcReply>> {
+  async function rpc(
+    method: string,
+    params: unknown[],
+    timeoutMs = RPC_TIMEOUT_MS
+  ): Promise<z.infer<typeof RpcReply>> {
     const url = env['SOLANA_RPC_URL']?.trim() || DEFAULT_RPC_URL
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     })
     // A node answers JSON-RPC errors with a 200. Any other status came from something
     // in between, so its body can't prove what the node did.
@@ -118,9 +128,13 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
   }
 
   /** A status, `null` if the node answered and hasn't seen it, `undefined` if it didn't answer. */
-  async function readStatus(hash: string, config?: object): Promise<Status | null | undefined> {
+  async function readStatus(
+    hash: string,
+    timeoutMs: number,
+    config?: object
+  ): Promise<Status | null | undefined> {
     const params = config !== undefined ? [[hash], config] : [[hash]]
-    const reply = await rpc('getSignatureStatuses', params).catch(() => undefined)
+    const reply = await rpc('getSignatureStatuses', params, timeoutMs).catch(() => undefined)
     const statuses = Statuses.safeParse(reply?.result)
     return statuses.success ? statuses.data.value[0] : undefined
   }
@@ -136,6 +150,15 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
         ok: false,
         error: 'Your wallet returned this unsigned, so nothing was sent. Sign it again.',
       }
+    }
+
+    const startedAt = Date.now()
+    const timeLeft = (): number =>
+      deadlineMs === undefined ? Number.POSITIVE_INFINITY : startedAt + deadlineMs - Date.now()
+    const notConfirmed: SubmitResult = {
+      ok: false,
+      pending: true,
+      error: `This was sent, but not confirmed yet. Check ${explorerUrl(hash)} before trying again, in case it goes through.`,
     }
 
     const sent = await rpc('sendTransaction', [
@@ -156,14 +179,16 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
     // saw it means it reached a block. Either way, later silence no longer proves anything.
     let mayHaveLanded = false
     for (let poll = 0; poll < maxPolls; poll += 1) {
+      if (timeLeft() <= 0) return notConfirmed
       await new Promise((resolve) => setTimeout(resolve, pollMs))
-      const status = await readStatus(hash)
+      const status = await readStatus(hash, Math.max(1, Math.min(RPC_TIMEOUT_MS, timeLeft())))
       if (status === null) continue
       mayHaveLanded = true
       const settled = status !== undefined ? settledBy(status, hash) : undefined
       if (settled !== undefined) return settled
     }
 
+    if (timeLeft() <= 0) return notConfirmed
     const { blockhash } = decodeSolanaTransaction(signedTransaction)
     const validity = await rpc('isBlockhashValid', [blockhash, { commitment: 'confirmed' }]).catch(
       () => undefined
@@ -172,15 +197,11 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
     if (valid.success && !valid.data.value) {
       // An expired blockhash only rules out the future, so this read comes after it, to
       // catch a transaction that landed before the blockhash ran out.
-      const last = await readStatus(hash, { searchTransactionHistory: true })
+      const last = await readStatus(hash, RPC_TIMEOUT_MS, { searchTransactionHistory: true })
       if (last === null && !mayHaveLanded) return { ok: false, error: EXPIRED }
       const settled = last !== null && last !== undefined ? settledBy(last, hash) : undefined
       if (settled !== undefined) return settled
     }
-    return {
-      ok: false,
-      pending: true,
-      error: `This was sent, but not confirmed yet. Check ${explorerUrl(hash)} before trying again, in case it goes through.`,
-    }
+    return notConfirmed
   }
 }

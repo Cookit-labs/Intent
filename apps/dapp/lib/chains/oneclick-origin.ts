@@ -6,7 +6,7 @@ import { fromBase64, normalizeStructTag } from '@mysten/sui/utils'
 import { solanaDeposit } from '../weave/deposit/solana'
 import { suiDeposit } from '../weave/deposit/sui'
 import type { DepositChain, DepositExpectation } from '../weave/types'
-import { depositStatus, listTokens, notifyDeposit } from './near/oneclick'
+import { depositStatus, listTokens, notifyDeposit, type OneClickToken } from './near/oneclick'
 import {
   assertNoDepositMemo,
   costNote,
@@ -15,7 +15,7 @@ import {
   liveOneClick,
   ONECLICK_RISK_NOTE,
   previewOneClick,
-  venueQuoteFrom,
+  type CostWording,
   type Destination,
   type QuoteOrigin,
 } from './near/swap'
@@ -68,12 +68,36 @@ const CONFIRM_WAIT_MS = 40_000
 const STATUS_WAIT_MS = 50_000
 const STATUS_POLL_MS = 2_000
 
+const COST_WORDING: CostWording = {
+  withdrawFor: 'to deliver it to you',
+  total: "After 1Click's costs, and before your wallet's network costs,",
+}
+
+/**
+ * Rent for a Solana token account of 165 bytes, in SOL. Every swap pays a new deposit address,
+ * whose token account the transaction opens from this wallet and nobody returns. It is treated
+ * as always due: a dry quote has no address to look up, and a one-time address has no account
+ * yet, so a read at Review would only confirm it. If one somehow exists the transaction opens
+ * nothing and this overstates by the rent, which errs against 1Click, not the person.
+ */
+const SOLANA_DEPOSIT_RENT_SOL = '0.00203928'
+
+const SOLANA_RENT_NOTE =
+  "Your wallet also pays about 0.00204 SOL in rent to open a token account at the deposit address, and you don't get it back. Every swap uses a new address, so this is due each time."
+
 interface Origin {
   chainName: string
   family: 'solana' | 'sui'
   tokens: readonly ChainToken[]
-  /** The token id that stands for the native coin, which 1Click may list with no contract. */
+  /** The token id that stands for the native coin, which 1Click lists with no contract. */
   nativeId: string
+  /**
+   * Whether that id is the native coin itself. A mint for wrapped SOL is not SOL: paying out to
+   * it would leave wrapped tokens while the card says SOL. Sui's coin type is SUI itself.
+   */
+  nativeIdIsTheCoin: boolean
+  /** What the wallet pays beyond the transfer and the fee, with the sentence that says so. */
+  walletCost?: { amount: string; symbol: string; note: string }
   ownSwap: string
   deposit: DepositChain
   /** The chain's identifier for signed bytes, known before the network has answered. */
@@ -91,6 +115,8 @@ const ORIGINS: Partial<Record<OneClickOriginChain, Origin>> = {
     family: 'solana',
     tokens: SOLANA_TOKENS,
     nativeId: 'So11111111111111111111111111111111111111112',
+    nativeIdIsTheCoin: false,
+    walletCost: { amount: SOLANA_DEPOSIT_RENT_SOL, symbol: 'SOL', note: SOLANA_RENT_NOTE },
     ownSwap: 'Jupiter',
     deposit: solanaDeposit,
     hashOf: (signed) =>
@@ -102,6 +128,7 @@ const ORIGINS: Partial<Record<OneClickOriginChain, Origin>> = {
     family: 'sui',
     tokens: SUI_TOKENS,
     nativeId: '0x2::sui::SUI',
+    nativeIdIsTheCoin: true,
     ownSwap: 'Cetus',
     deposit: suiDeposit,
     hashOf: (signed) =>
@@ -128,8 +155,9 @@ function normalizeContract(chain: OneClickOriginChain, contract: string): string
  * anyone can name a token USDC, so a symbol alone never matches. Two entries for one contract
  * leave no way to say which is real, so that is no match either.
  *
- * A native coin has no contract on its chain, and the list may carry it with none. It matches
- * only as the chain's own native token id against the one entry with that symbol and no contract.
+ * A native coin has no contract, so it matches only as the chain's own native token id, against
+ * the one entry with its symbol and no contract. A contract that merely wraps it never matches,
+ * since what would arrive is not what the card says.
  */
 export async function oneClickAssetId(
   chain: OneClickOriginChain,
@@ -139,27 +167,33 @@ export async function oneClickAssetId(
     (entry) => entry.blockchain === BLOCKCHAIN[chain] && entry.decimals === token.decimals
   )
   const wanted = normalizeContract(chain, token.id)
-  const matching = entries.filter(
-    (entry) =>
-      typeof entry.contractAddress === 'string' &&
-      entry.contractAddress !== '' &&
-      normalizeContract(chain, entry.contractAddress) === wanted
-  )
-  if (matching.length === 1) return matching[0]?.assetId
-  if (matching.length > 1 || token.id !== ORIGINS[chain]?.nativeId) return undefined
-  const native = entries.filter(
-    (entry) =>
-      (entry.contractAddress === undefined ||
-        entry.contractAddress === null ||
-        entry.contractAddress === '') &&
-      entry.symbol.toUpperCase() === token.symbol.toUpperCase()
-  )
-  return native.length === 1 ? native[0]?.assetId : undefined
+  const hasContract = (entry: OneClickToken): boolean =>
+    entry.contractAddress !== undefined &&
+    entry.contractAddress !== null &&
+    entry.contractAddress !== ''
+  const isContract = (entry: OneClickToken): boolean =>
+    hasContract(entry) && normalizeContract(chain, entry.contractAddress as string) === wanted
+
+  const origin = ORIGINS[chain]
+  const matching =
+    token.id === origin?.nativeId
+      ? entries.filter(
+          (entry) =>
+            entry.symbol.toUpperCase() === token.symbol.toUpperCase() &&
+            (!hasContract(entry) || (origin.nativeIdIsTheCoin && isContract(entry)))
+        )
+      : entries.filter(isContract)
+  return matching.length === 1 ? matching[0]?.assetId : undefined
 }
 
-function secret(): string | undefined {
-  const value = process.env['AUTH_SECRET']
+function secret(env: Record<string, string | undefined> = process.env): string | undefined {
+  const value = env['AUTH_SECRET']
   return value !== undefined && value.length >= 32 ? value : undefined
+}
+
+/** Whether a chain should offer this venue at all. Nothing can be issued safely without it. */
+export function canIssueOneClick(env: Record<string, string | undefined>): boolean {
+  return secret(env) !== undefined
 }
 
 /** Without the secret nothing could be issued safely at Review, so no route is offered at all. */
@@ -381,7 +415,17 @@ export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
       route.destination,
       account
     )
-    return venueQuoteFrom(preview, route.destination)
+    // Only what arrives, not 1Click's own dollar figure. The other routes on this chain are
+    // valued by the chain's price source, and a gap between two sources could outweigh a gap
+    // between two routes, letting the one that delivers less win.
+    const cost = origin.walletCost
+    return {
+      receive: {
+        amount: formatUnits(preview.quote.amountOut, route.destination.decimals),
+        symbol: route.destination.symbol,
+      },
+      ...(cost !== undefined ? { walletCost: { amount: cost.amount, symbol: cost.symbol } } : {}),
+    }
   }
 
   async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
@@ -425,7 +469,8 @@ export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
         approximate: true,
       },
       notes: [
-        costNote(live, loss, destination.symbol, destination.decimals),
+        costNote(live, loss, destination.symbol, destination.decimals, COST_WORDING),
+        ...(origin.walletCost !== undefined ? [origin.walletCost.note] : []),
         depositNote(live, tokenIn, account),
         ONECLICK_RISK_NOTE,
       ],

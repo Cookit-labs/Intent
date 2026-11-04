@@ -212,11 +212,23 @@ function isPositive(amount: string | undefined): amount is string {
   return amount !== undefined && BigInt(amount) > BigInt(0)
 }
 
+/** The parts of the cost note that depend on what the chain's wallet pays for itself. */
+export interface CostWording {
+  withdrawFor: string
+  total: string
+}
+
+const NEAR_COST_WORDING: CostWording = {
+  withdrawFor: 'to register you on that token',
+  total: 'After all costs',
+}
+
 export function costNote(
   envelope: QuoteEnvelope,
   loss: number,
   symbol: string,
-  decimals: number
+  decimals: number,
+  wording: CostWording = NEAR_COST_WORDING
 ): string {
   const bps = feeBps(envelope)
   const fee =
@@ -225,10 +237,10 @@ export function costNote(
       : `The quote includes a ${(bps / 100).toFixed(2)}% fee, taken from what you send.`
   const withdraw = envelope.quote.withdrawFee
   const registration = isPositive(withdraw)
-    ? ` It also takes ${formatUnits(withdraw, decimals)} ${symbol} to register you on that token.`
+    ? ` It also takes ${formatUnits(withdraw, decimals)} ${symbol} ${wording.withdrawFor}.`
     : ''
   const percent = (Math.max(loss, 0) * 100).toFixed(2)
-  return `NEAR Intents runs on mainnet only, so this moves real funds. ${fee}${registration} After all costs you get about ${percent}% less in value than you pay, and at least ${formatUnits(envelope.quote.minAmountOut, decimals)} ${symbol}.`
+  return `NEAR Intents runs on mainnet only, so this moves real funds. ${fee}${registration} ${wording.total} you get about ${percent}% less in value than you pay, and at least ${formatUnits(envelope.quote.minAmountOut, decimals)} ${symbol}.`
 }
 
 export function depositNote(envelope: QuoteEnvelope, tokenIn: ChainToken, account: string): string {
@@ -307,7 +319,7 @@ export function assertNoDepositMemo(envelope: QuoteEnvelope): void {
   }
 }
 
-export function venueQuoteFrom(preview: QuoteEnvelope, destination: Destination): VenueQuote {
+function venueQuoteFrom(preview: QuoteEnvelope, destination: Destination): VenueQuote {
   return {
     receive: {
       amount: formatUnits(preview.quote.amountOut, destination.decimals),

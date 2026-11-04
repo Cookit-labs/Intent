@@ -37,6 +37,11 @@ import {
   type SubmitResult,
 } from '../chains/types'
 
+// The real modules are built once on load, and only offer 1Click when the secret is there.
+vi.hoisted(() => {
+  process.env['AUTH_SECRET'] = 'x'.repeat(48)
+})
+
 vi.mock('../chains/near/quote-signature', () => ({
   verifyQuoteSignature: vi.fn(() => true),
 }))
@@ -408,9 +413,44 @@ describe('oneClickAssetId', () => {
     await expect(oneClickAssetId('solana', SOL_USDC)).resolves.toBeUndefined()
   })
 
-  it('finds a native coin listed under its contract too', async () => {
-    sim.tokens = [{ ...tokenList()[2], contractAddress: SOL_NATIVE.id }]
+  it('never pays out wrapped SOL for SOL, even when 1Click lists the wrapped mint', async () => {
+    const native = tokenList()[2] as Json
+    const wrapped = { ...native, assetId: 'nep141:wsol.omft.near', contractAddress: SOL_NATIVE.id }
+    sim.tokens = [wrapped]
+    await expect(oneClickAssetId('solana', SOL_NATIVE)).resolves.toBeUndefined()
+    clearTokenCache()
+    sim.tokens = [wrapped, native]
     await expect(oneClickAssetId('solana', SOL_NATIVE)).resolves.toBe('nep141:sol.omft.near')
+  })
+
+  it('refuses a swap into SOL when only the wrapped mint is listed', async () => {
+    const native = tokenList()[2] as Json
+    sim.tokens = [
+      ...tokenList().filter((t) => t['assetId'] !== native['assetId']),
+      { ...native, assetId: 'nep141:wsol.omft.near', contractAddress: SOL_NATIVE.id },
+    ]
+    await expect(solana.quote?.(swap(), ME)).rejects.toBeInstanceOf(ChainActionRefused)
+    expect(sim.quotes).toHaveLength(0)
+  })
+
+  it('takes SUI under its own coin type, which is the native coin itself', async () => {
+    const native = tokenList()[6] as Json
+    sim.tokens = [{ ...native, contractAddress: `0x${'2'.padStart(64, '0')}::sui::SUI` }]
+    await expect(oneClickAssetId('sui', SUI_NATIVE)).resolves.toBe('nep141:sui.omft.near')
+  })
+
+  it('never takes another coin called SUI for SUI', async () => {
+    const native = tokenList()[6] as Json
+    const wrapped = {
+      ...native,
+      assetId: 'nep141:wsui.omft.near',
+      contractAddress: `${normalizeSuiAddress('0xbad')}::wsui::SUI`,
+    }
+    sim.tokens = [wrapped]
+    await expect(oneClickAssetId('sui', SUI_NATIVE)).resolves.toBeUndefined()
+    clearTokenCache()
+    sim.tokens = [wrapped, native]
+    await expect(oneClickAssetId('sui', SUI_NATIVE)).resolves.toBe('nep141:sui.omft.near')
   })
 
   it('still reads a list whose contract is null, so NEAR prices never break on it', async () => {
@@ -424,8 +464,9 @@ describe('quote', () => {
     const quoted = await solana.quote?.(swap(), ME)
     expect(quoted).toEqual({
       receive: { amount: '0.25', symbol: 'SOL' },
-      valueOutUsd: 24.875,
+      walletCost: { amount: '0.00203928', symbol: 'SOL' },
     })
+    expect(quoted).not.toHaveProperty('valueOutUsd')
     expect(sim.quotes).toHaveLength(1)
     expect(sim.quotes[0]).toMatchObject({
       dry: true,
@@ -438,6 +479,12 @@ describe('quote', () => {
       refundType: 'ORIGIN_CHAIN',
     })
     expect(JSON.stringify(quoted)).not.toContain(DEPOSIT)
+  })
+
+  it('has no rent to report on Sui, and leaves the valuing to the chain there too', async () => {
+    await expect(sui.quote?.(suiSwap(), SUI_ME)).resolves.toEqual({
+      receive: { amount: '12.5', symbol: 'SUI' },
+    })
   })
 
   it.each([
@@ -515,6 +562,37 @@ describe('prepare', () => {
     expect(prepared.signing.family).toBe('solana')
     expect(prepared.context?.['depositAddress']).toBe(DEPOSIT)
     expect(() => solana.assertSafe(prepared.signing, ME, prepared.context)).not.toThrow()
+  })
+
+  it('tells the truth about costs on Solana, including rent it can not get back', async () => {
+    const { notes } = await solana.prepare(swap(), ME)
+    const text = notes.join(' ')
+    expect(text).toMatch(/0\.00204 SOL/)
+    expect(text).toMatch(/rent/)
+    expect(text).toMatch(/don't get it back/)
+    expect(text).not.toMatch(/after all costs/i)
+    expect(text).toMatch(/before your wallet's network costs/)
+  })
+
+  it('still gives the rent note when SOL has no price anywhere', async () => {
+    sim.tokens = tokenList().map((t) =>
+      t['assetId'] === 'nep141:sol.omft.near' ? { ...t, price: undefined } : t
+    )
+    const { notes } = await solana.prepare(swap({ tokenOut: 'USDT' }), ME)
+    expect(notes.join(' ')).toMatch(/0\.00204 SOL/)
+  })
+
+  it('says nothing about rent on Sui, which has none, and no NEAR registration', async () => {
+    sim.depositAddress = SUI_DEPOSIT
+    sim.quoteOverride = (body) => {
+      const good = goodQuote(body)
+      return { ...good, quote: { ...(good['quote'] as Json), withdrawFee: '1000' } }
+    }
+    const text = (await sui.prepare(suiSwap(), SUI_ME)).notes.join(' ')
+    expect(text).not.toMatch(/rent/)
+    expect(text).not.toMatch(/after all costs/i)
+    expect(text).not.toMatch(/register/)
+    expect(text).toMatch(/to deliver it to you/)
   })
 
   it('spends the token asked for, not USDC by assumption', async () => {
@@ -698,6 +776,34 @@ describe('a browser that changes what it sends back', () => {
     expect(() => solana.assertSafe(payload({ to: THIEF }), ME, { ...context, proof })).toThrow(
       ChainActionRefused
     )
+  })
+
+  describe('with the right key', () => {
+    const signWith = (message: string): string =>
+      createHmac('sha256', 'x'.repeat(48)).update(message).digest('base64url')
+
+    const issuedMessage = (context: Record<string, string>): string =>
+      JSON.stringify([
+        '1click-solana',
+        ME,
+        SOL_USDC.id,
+        '25000000',
+        context['depositAddress'],
+        context['deadline'],
+      ])
+
+    it('rebuilds the real proof, so the case below tests only the prefix', () => {
+      const context: Record<string, string> = { ...prepared.context }
+      expect(signWith(`oneclick-origin:${issuedMessage(context)}`)).toBe(context['proof'])
+    })
+
+    it('refuses a signature made without the prefix, as any other use of the key would be', () => {
+      const context: Record<string, string> = { ...prepared.context, depositAddress: THIEF }
+      const proof = signWith(issuedMessage(context))
+      expect(() => solana.assertSafe(payload({ to: THIEF }), ME, { ...context, proof })).toThrow(
+        /not what this app issued/
+      )
+    })
   })
 
   it('cannot reuse a proof for another account or another chain', async () => {

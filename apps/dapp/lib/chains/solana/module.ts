@@ -1,4 +1,4 @@
-import { oneClickOriginVenue } from '../oneclick-origin'
+import { canIssueOneClick, oneClickOriginVenue } from '../oneclick-origin'
 import type { ChainModule, ChainVenue } from '../types'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
@@ -10,13 +10,16 @@ import { SOLANA_TOKENS } from './tokens'
 
 const priceUsd = createPriceSource()
 
+/** Inside the chain submit route's 60 seconds, leaving room to answer. Weave's route has its own. */
+const SUBMIT_DEADLINE_MS = 50_000
+
 export function buildSolanaVenues(
   env: Record<string, string | undefined> = process.env
 ): ChainVenue[] {
   const luloKey = env['LULO_API_KEY']?.trim()
   return [
     createJupiterSwapVenue({ priceUsd, env }),
-    oneClickOriginVenue('solana'),
+    ...(canIssueOneClick(env) ? [oneClickOriginVenue('solana')] : []),
     createJupiterLendVenue({ env }),
     createKaminoVenue(),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),
@@ -29,5 +32,5 @@ export const solanaModule: ChainModule = {
   venues: buildSolanaVenues(),
   defaultVenue: { swap: 'jupiter', supply: 'jupiter-lend' },
   priceUsd,
-  submit: createSolanaSubmit(),
+  submit: createSolanaSubmit({ deadlineMs: SUBMIT_DEADLINE_MS }),
 }

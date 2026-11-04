@@ -30,8 +30,11 @@ const REFERRAL_FEE_BPS = 50
  * and OKX land through programs not confirmable from their docs. See programs.ts.
  */
 const EXCLUDED_ROUTERS = 'jupiterz,dflow,okx'
-/** `/execute` waits for the transaction to land, so it gets longer than other calls. */
-const EXECUTE_TIMEOUT_MS = 70_000
+/**
+ * `/execute` waits for the transaction to land, so it gets longer than other calls, but stops
+ * short of the submit route's 60 seconds so that an answer can still be given.
+ */
+const EXECUTE_TIMEOUT_MS = 50_000
 
 const NEED_SOL_FOR_FEES =
   'This wallet needs at least 0.01 SOL to pay its own network fees before I can swap. Add a little SOL and try again.'
@@ -291,21 +294,28 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       }
     }
     const { signedTransaction } = input.signed
-    if (feePayerSignature(signedTransaction) === undefined) {
+    const sentSignature = feePayerSignature(signedTransaction)
+    if (sentSignature === undefined) {
       return {
         ok: false,
         error: 'Your wallet returned this unsigned, so nothing was sent. Sign it again.',
       }
     }
 
-    const response = await fetch(`${JUPITER_API}/swap/v2/execute`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...jupiterHeaders(env) },
-      body: JSON.stringify({ signedTransaction, requestId }),
-      signal: AbortSignal.timeout(EXECUTE_TIMEOUT_MS),
-    })
-    // A server failure or timeout leaves the outcome unknown. Throwing sends it to the
-    // route, which tells the user to check their wallet before trying again.
+    let response: Response
+    try {
+      response = await fetch(`${JUPITER_API}/swap/v2/execute`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...jupiterHeaders(env) },
+        body: JSON.stringify({ signedTransaction, requestId }),
+        signal: AbortSignal.timeout(EXECUTE_TIMEOUT_MS),
+      })
+    } catch {
+      // A timeout or dropped connection may have come after Jupiter broadcast it.
+      return unconfirmedSwap(sentSignature)
+    }
+    // A server failure leaves the outcome unknown. Throwing sends it to the route, which
+    // tells the user to check their wallet before trying again.
     if (response.status >= 500 || response.status === 429) {
       throw new Error(`Jupiter /execute answered ${response.status}`)
     }

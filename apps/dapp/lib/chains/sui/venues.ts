@@ -29,18 +29,14 @@ export const suiVenues: Venue[] = [
     integration: 'executes',
     capability: 'Swaps SUI, USDC, USDsui and USDT',
   },
-  {
-    id: '1click-sui',
-    family: 'sui',
-    name: 'NEAR Intents 1Click',
-    category: 'swap',
-    chains: ['Sui'],
-    url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
-    bestFor: 'A second swap price from competing market makers, spending USDC',
-    integration: 'executes',
-    capability:
-      'Swaps USDC for SUI in your Sui wallet, the pair 1Click lists here. Your wallet signs one transfer to a one-time deposit address. Mainnet only. No swap has been signed through this app yet.',
-  },
+  // Listed, as Lulo is on Solana: whether this runs depends on a secret this client-safe file can't read.
+  listed(
+    '1click-sui',
+    'NEAR Intents 1Click',
+    'swap',
+    'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+    'A second swap price from competing market makers, spending USDC or USDT'
+  ),
   {
     id: 'navi',
     family: 'sui',

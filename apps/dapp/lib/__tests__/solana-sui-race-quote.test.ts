@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { quoteChainRoutes } from '../agents/chain-routes'
+import type { AgentProposalResult } from '../agents/brain'
+import { quoteChainRoutes, type ChainRouteQuote } from '../agents/chain-routes'
+import { planScore } from '../agents/plan-scoring'
+import { applyChainMeasure, isUnmeasuredSwap } from '../agents/settle-chain-plan'
 import { clearTokenCache } from '../chains/near/oneclick'
 import { oneClickOriginVenue } from '../chains/oneclick-origin'
 import {
@@ -14,7 +17,7 @@ import { createLuloVenue } from '../chains/solana/lulo'
 import { buildSolanaVenues, solanaModule } from '../chains/solana/module'
 import { solanaVenues } from '../chains/solana/venues'
 import { cetusVenue } from '../chains/sui/cetus'
-import { suiModule } from '../chains/sui/module'
+import { buildSuiVenues, suiModule } from '../chains/sui/module'
 import { naviVenue } from '../chains/sui/navi'
 import { springsuiVenue } from '../chains/sui/springsui'
 import { suiVenues } from '../chains/sui/venues'
@@ -406,22 +409,47 @@ describe('the race on these chains', () => {
   })
 
   it('wires 1Click as a swap venue on both chains, keeping the defaults', () => {
-    expect(buildSolanaVenues({}).find((v) => v.id === '1click-solana')?.kinds).toEqual(['swap'])
-    expect(suiModule.venues.find((v) => v.id === '1click-sui')?.kinds).toEqual(['swap'])
+    const withSecret = { AUTH_SECRET: 'x'.repeat(48) }
+    expect(buildSolanaVenues(withSecret).find((v) => v.id === '1click-solana')?.kinds).toEqual([
+      'swap',
+    ])
+    expect(buildSuiVenues(withSecret).find((v) => v.id === '1click-sui')?.kinds).toEqual(['swap'])
     expect(solanaModule.defaultVenue.swap).toBe('jupiter')
     expect(suiModule.defaultVenue.swap).toBe('cetus')
   })
 
+  it.each([
+    ['no secret', {}],
+    ['one too short to trust', { AUTH_SECRET: 'short' }],
+  ])('wires no 1Click at all with %s, as Lulo waits for its key', (_name, env) => {
+    expect(buildSolanaVenues(env).map((v) => v.id)).not.toContain('1click-solana')
+    expect(buildSuiVenues(env).map((v) => v.id)).not.toContain('1click-sui')
+  })
+
   it('gives every venue on these chains a quote to race with', () => {
     const lulo = createLuloVenue({ apiKey: 'k' })
-    for (const venue of [...buildSolanaVenues({}), lulo, ...suiModule.venues]) {
+    const env = { AUTH_SECRET: 'x'.repeat(48) }
+    for (const venue of [...buildSolanaVenues(env), lulo, ...buildSuiVenues(env)]) {
       expect(venue.quote, venue.id).toBeTypeOf('function')
     }
   })
 
-  it('lists 1Click on the Apps page of both chains', () => {
-    expect(solanaVenues.find((v) => v.id === '1click-solana')?.integration).toBe('executes')
-    expect(suiVenues.find((v) => v.id === '1click-sui')?.integration).toBe('executes')
+  it('lists 1Click on the Apps page without claiming it executes, as Lulo does', () => {
+    // These rows reach the browser, which can't read the secret that decides it.
+    for (const row of [
+      solanaVenues.find((v) => v.id === '1click-solana'),
+      suiVenues.find((v) => v.id === '1click-sui'),
+    ]) {
+      expect(row).toBeDefined()
+      expect(row?.integration).toBeUndefined()
+      expect(row?.capability).toBeUndefined()
+      expect(row?.bestFor).toMatch(/USDC or USDT/)
+    }
+  })
+
+  it('makes no claim on Sui about which tokens 1Click lists today', () => {
+    const row = suiVenues.find((v) => v.id === '1click-sui')
+    expect(JSON.stringify(row)).not.toMatch(/the pair|lists here/)
   })
 
   it('says agents compete on Solana and Sui, and nothing these chains cannot do', () => {
@@ -432,5 +460,213 @@ describe('the race on these chains', () => {
     expect(onSui).toContain('Agents compete')
     expect(onSui).toContain('Stake:')
     expect(onSui).not.toMatch(/Send:|limit order/)
+  })
+})
+
+describe('what the race compares', () => {
+  const swapToSui = { kind: 'swap', amount: '10', tokenIn: 'USDC', tokenOut: 'SUI' } as const
+  const updated = (): string => new Date().toISOString()
+  const list = () => [
+    {
+      assetId: 'nep141:sui-usdc',
+      blockchain: 'sui',
+      symbol: 'USDC',
+      decimals: 6,
+      price: 1,
+      priceUpdatedAt: updated(),
+      contractAddress: USDC_SUI,
+    },
+    {
+      assetId: 'nep141:sui',
+      blockchain: 'sui',
+      symbol: 'SUI',
+      decimals: 9,
+      price: 2,
+      priceUpdatedAt: updated(),
+    },
+  ]
+
+  function suiRace(amountOut: string, ownUsd: string): void {
+    stubFetch((url, init) => {
+      if (url.endsWith('/v0/tokens')) return { body: list() }
+      if (url.endsWith('/v0/quote')) {
+        const body = JSON.parse(init?.body as string) as Record<string, unknown>
+        return {
+          status: 201,
+          body: {
+            quote: {
+              amountIn: body['amount'],
+              amountInFormatted: '10',
+              amountInUsd: '10',
+              minAmountIn: body['amount'],
+              amountOut,
+              amountOutFormatted: 'x',
+              amountOutUsd: ownUsd,
+              minAmountOut: ((BigInt(amountOut) * BigInt(995)) / BigInt(1000)).toString(),
+            },
+            quoteRequest: body,
+            signature: 'ed25519:x',
+            timestamp: '2026-11-04T00:00:00.000Z',
+          },
+        }
+      }
+      return undefined
+    })
+  }
+
+  const suiChain = (): ChainModule => ({
+    ...suiModule,
+    priceUsd: async (t) => (t.symbol === 'SUI' ? 2 : 1),
+    venues: [cetusVenue, oneClickOriginVenue('sui')],
+  })
+
+  /** Each route's score, as the race ranks them once the agents have picked. */
+  async function scores(): Promise<Record<string, number>> {
+    const routes = await quoteChainRoutes(suiChain(), swapToSui, SUI_ME)
+    const proposal = {
+      projectedAvgPriceUsd: 0,
+      projectedSlippagePct: 0,
+      executionMode: 'fill',
+      sliceCount: 1,
+    } as unknown as AgentProposalResult
+    return Object.fromEntries(
+      routes.map((r) => {
+        const measured = applyChainMeasure(
+          { ...proposal, routeId: r.id },
+          r.quote as ChainRouteQuote
+        )
+        return [
+          r.id,
+          planScore(measured, {
+            escrowUsd: 10,
+            referencePriceUsd: 1,
+            askedToLend: false,
+            askedToOfframp: false,
+          }),
+        ]
+      })
+    )
+  }
+
+  const cetusRoute = (amountOut: string) => ({
+    amountIn: { toString: () => '10000000' },
+    amountOut: { toString: () => amountOut },
+    deviationRatio: '0.001',
+    paths: [{}],
+  })
+
+  it('lets the route delivering more win, when 1Click values its smaller payout higher', async () => {
+    sui.findRouters.mockResolvedValue(cetusRoute('4950000000'))
+    suiRace('4900000000', '9.99')
+    const score = await scores()
+    expect(score['cetus-1']).toBeGreaterThan(score['1click-sui-1'] as number)
+  })
+
+  it('lets 1Click win when it delivers more, though its own figure says otherwise', async () => {
+    sui.findRouters.mockResolvedValue(cetusRoute('4900000000'))
+    suiRace('4980000000', '9.60')
+    const score = await scores()
+    expect(score['1click-sui-1']).toBeGreaterThan(score['cetus-1'] as number)
+  })
+
+  it('still drops a 1Click quote whose own figure fails its fair-value check', async () => {
+    sui.findRouters.mockResolvedValue(cetusRoute('4950000000'))
+    suiRace('4950000000', '1')
+    // 1Click's figure fails its own fair-value check here, so nothing of it can reach a score.
+    await expect(scores()).resolves.toEqual({ 'cetus-1': expect.any(Number) })
+  })
+
+  describe('rent on Solana', () => {
+    const SOLANA_LIST = () => [
+      {
+        assetId: 'nep141:sol-usdc',
+        blockchain: 'sol',
+        symbol: 'USDC',
+        decimals: 6,
+        price: 1,
+        priceUpdatedAt: updated(),
+        contractAddress: USDC,
+      },
+      {
+        assetId: 'nep141:sol-usdt',
+        blockchain: 'sol',
+        symbol: 'USDT',
+        decimals: 6,
+        price: 1,
+        priceUpdatedAt: updated(),
+        contractAddress: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+      },
+    ]
+
+    function stubStable(): void {
+      stubFetch((url, init) => {
+        if (url.endsWith('/v0/tokens')) return { body: SOLANA_LIST() }
+        if (url.endsWith('/v0/quote')) {
+          const body = JSON.parse(init?.body as string) as Record<string, unknown>
+          return {
+            status: 201,
+            body: {
+              quote: {
+                amountIn: body['amount'],
+                amountInFormatted: '10',
+                amountInUsd: '10',
+                minAmountIn: body['amount'],
+                amountOut: '10000000',
+                amountOutFormatted: '10',
+                amountOutUsd: '10',
+                minAmountOut: '9950000',
+              },
+              quoteRequest: body,
+              signature: 'ed25519:x',
+              timestamp: '2026-11-04T00:00:00.000Z',
+            },
+          }
+        }
+        return undefined
+      })
+    }
+
+    const toUsdt = { kind: 'swap', amount: '10', tokenIn: 'USDC', tokenOut: 'USDT' } as const
+    const solanaChain = (priceSol: number | undefined): ChainModule => ({
+      ...solanaModule,
+      priceUsd: async (t) => (t.symbol === 'SOL' ? priceSol : 1),
+      venues: [oneClickOriginVenue('solana')],
+    })
+
+    it('takes the rent off the value the race sees, at the chain’s SOL price', async () => {
+      stubStable()
+      const [route] = await quoteChainRoutes(solanaChain(100), toUsdt, CAPTURE_ACCOUNT)
+      const q = route?.quote as ChainRouteQuote
+      expect(q.valueOutUsd).toBeCloseTo(10 - 0.00203928 * 100, 6)
+      expect(q.receive).toEqual({ amount: '10', symbol: 'USDT' })
+      expect(isUnmeasuredSwap(q)).toBe(false)
+    })
+
+    it('counts the route as unmeasured when SOL has no price', async () => {
+      stubStable()
+      const [route] = await quoteChainRoutes(solanaChain(undefined), toUsdt, CAPTURE_ACCOUNT)
+      const q = route?.quote as ChainRouteQuote
+      expect(q.valueOutUsd).toBeUndefined()
+      expect(isUnmeasuredSwap(q)).toBe(true)
+    })
+
+    it('counts a swap the rent would swallow as unmeasured, never as a win', async () => {
+      stubStable()
+      const [route] = await quoteChainRoutes(solanaChain(100_000), toUsdt, CAPTURE_ACCOUNT)
+      const q = route?.quote as ChainRouteQuote
+      expect(q.valueOutUsd).toBeUndefined()
+      expect(isUnmeasuredSwap(q)).toBe(true)
+    })
+
+    it('leaves a venue with no wallet cost as it was', async () => {
+      stubFetch(() => undefined)
+      const venue = {
+        ...oneClickOriginVenue('solana'),
+        quote: async () => ({ receive: { amount: '10', symbol: 'USDT' } }),
+      }
+      const chain = { ...solanaChain(undefined), venues: [venue] }
+      const [route] = await quoteChainRoutes(chain, toUsdt, CAPTURE_ACCOUNT)
+      expect((route?.quote as ChainRouteQuote).valueOutUsd).toBe(10)
+    })
   })
 })

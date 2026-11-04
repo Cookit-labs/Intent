@@ -40,6 +40,24 @@ export function afterSigning(outcome: SignedOutcome, family: Family): AfterSigni
   return step
 }
 
+/**
+ * Hands signed bytes to the server. A dropped connection or an answer that can't be read, such
+ * as the platform's own page when it stops the function, says nothing about whether they went
+ * out, so it comes back as no answer, which `afterSubmitting` reads as pending.
+ */
+export async function submitSigned(url: string, body: unknown): Promise<unknown> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return (await res.json()) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 export type AfterSubmitting =
   | { phase: 'settled'; hash: string; explorerUrl: string | undefined; latched: true }
   | { phase: 'pending'; error: string; latched: true }

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { afterSubmitting } from '../chains/signing-flow'
 import { createJupiterSwapVenue } from '../chains/solana/jupiter-swap'
+import { solanaModule } from '../chains/solana/module'
 import { createSolanaSubmit } from '../chains/solana/submit'
 import {
   CAPTURE_ACCOUNT,
@@ -634,12 +635,104 @@ describe('jupiter execute', () => {
     await expect(venue.submit?.(executeInput)).resolves.toEqual({ ok: false, error: wording })
   })
 
-  it('leaves an unknown outcome to the route, which tells the user to check their wallet', async () => {
+  it('leaves a server failure to the route, which tells the user to check their wallet', async () => {
     answering({}, 500)
     await expect(venue.submit?.(executeInput)).rejects.toThrow()
+  })
+
+  it('answers for itself when execute times out, naming the swap to check', async () => {
     vi.stubGlobal('fetch', async () => {
       throw new DOMException('timed out', 'TimeoutError')
     })
-    await expect(venue.submit?.(executeInput)).rejects.toThrow()
+    const result = await venue.submit?.(executeInput)
+    expect(result).toMatchObject({ ok: false, pending: true })
+    expect(JSON.stringify(result)).toContain(`https://solscan.io/tx/${swapSigned.signature}`)
+    expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
+  })
+
+  it('gives up on execute inside the route’s 60 seconds', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    answering({ status: 'Success', signature: swapSigned.signature })
+    await venue.submit?.(executeInput)
+    expect(timeout.mock.calls.map(([ms]) => ms).every((ms) => ms <= 50_000)).toBe(true)
+    expect(timeout).toHaveBeenCalled()
+    timeout.mockRestore()
+  })
+})
+
+describe('the chain route\u2019s deadline on a Solana submit', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  const fakeTime = (): number => {
+    const startedAt = Date.now()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'], now: startedAt })
+    return startedAt
+  }
+
+  async function settle(pending: Promise<unknown>): Promise<unknown> {
+    let done = false
+    void pending.finally(() => {
+      done = true
+    })
+    for (let i = 0; i < 400 && !done; i += 1) await vi.advanceTimersByTimeAsync(1_000)
+    return pending
+  }
+
+  it('answers pending within the route’s limit when the status never comes', async () => {
+    const { calls } = stubRpc((method) =>
+      method === 'sendTransaction' ? ok(signed.signature) : status(null)
+    )
+    const startedAt = fakeTime()
+    const result = await settle(solanaModule.submit(input(signed.transaction)))
+    expect(result).toMatchObject({ ok: false, pending: true })
+    expect(Date.now() - startedAt).toBeLessThan(55_000)
+    expect(calls.map((c) => c.method)).not.toContain('isBlockhashValid')
+    expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
+  })
+
+  it('stays inside the limit when every read is slow, and shrinks what each may take', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const { method } = JSON.parse(String(init.body)) as { method: string }
+      if (method === 'sendTransaction') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: signed.signature }))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 14_000))
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, ...status(null) }))
+    })
+    const startedAt = fakeTime()
+    const result = await settle(solanaModule.submit(input(signed.transaction)))
+    expect(result).toMatchObject({ ok: false, pending: true })
+    // This stub ignores the abort, so the time taken here overstates what a real read would.
+    expect(Date.now() - startedAt).toBeLessThan(50_000 + 2_000 + 14_000)
+    const last = timeout.mock.calls.at(-1)?.[0] as number
+    expect(last).toBeLessThan(2_000)
+  })
+
+  it('still reports a confirmation inside the limit', async () => {
+    stubRpc((method) =>
+      method === 'sendTransaction'
+        ? ok(signed.signature)
+        : status({ confirmationStatus: 'confirmed', err: null })
+    )
+    fakeTime()
+    await expect(settle(solanaModule.submit(input(signed.transaction)))).resolves.toMatchObject({
+      ok: true,
+    })
+  })
+
+  it('leaves a submit without a deadline polling as long as before', async () => {
+    const { calls } = stubRpc((method) => {
+      if (method === 'sendTransaction') return ok(signed.signature)
+      return method === 'isBlockhashValid' ? ok({ value: true }) : status(null)
+    })
+    const startedAt = fakeTime()
+    const result = await settle(createSolanaSubmit({ env: {} })(input(signed.transaction)))
+    expect(result).toMatchObject({ ok: false, pending: true })
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(60_000)
+    expect(calls.map((c) => c.method)).toContain('isBlockhashValid')
   })
 })

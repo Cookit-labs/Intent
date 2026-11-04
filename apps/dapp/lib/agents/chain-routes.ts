@@ -63,6 +63,16 @@ export async function quoteChainRoutes(
           const qty = Number(quoted.receive.amount)
           if (priceOut !== undefined && Number.isFinite(qty)) valueOutUsd = qty * priceOut
         }
+        // A cost that can't be priced leaves what the route is worth unknown, not free of it.
+        // So does one that swallows the swap: the agents are never shown a negative value.
+        if (quoted.walletCost !== undefined && valueOutUsd !== undefined) {
+          const priceCost = await priceOf(quoted.walletCost.symbol)
+          const net =
+            priceCost === undefined
+              ? undefined
+              : valueOutUsd - Number(quoted.walletCost.amount) * priceCost
+          valueOutUsd = net !== undefined && net > 0 ? net : undefined
+        }
         const quote: ChainRouteQuote = {
           kind: 'chain',
           request,
