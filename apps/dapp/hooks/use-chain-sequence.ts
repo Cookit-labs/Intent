@@ -5,13 +5,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChainSequenceRequest } from '../lib/chains/sequence'
 import {
   beforeReadCounts,
+  keepsBefore,
   measureDelivered,
   moveOnCard,
   outputToken,
+  quoteStep,
+  readBeforeSwap,
+  readCashoutNote,
   readHolding,
   readyAction,
   stageOnForm,
+  swapLine,
   unmeasuredReply,
+  type Before,
+  type BeforeStatus,
   type SequenceProgress,
   type SequenceStage,
 } from '../lib/chains/sequence-flow'
@@ -28,12 +35,6 @@ interface Run extends SequenceProgress {
   account?: string
 }
 
-/** What the output token's balance was before the swap. Anything but `known` strands at settled. */
-type Before =
-  | { status: 'unknown' }
-  | { status: 'reading' }
-  | { status: 'known'; amount: string; token: ChainToken; account: string }
-
 const UNKNOWN: Before = { status: 'unknown' }
 
 export interface ChainSequence {
@@ -45,6 +46,10 @@ export interface ChainSequence {
   settled: boolean
   /** The wallet step 1 was built for, once it has settled. */
   account: string | undefined
+  /** How the balance before the swap stands. */
+  readStatus: BeforeStatus
+  /** What to say about step 2 while step 1 is unsigned. */
+  swapLine: string
   start: (request: ChainSequenceRequest, text: string) => void
   /** Step 2. Called from a press and nowhere else. */
   runNext: () => void
@@ -64,6 +69,8 @@ export function useChainSequence(
   const { slug } = useChain()
   const { address } = useWallet()
   const [run, setRun] = useState<Run | null>(null)
+  const [readStatus, setReadStatus] = useState<BeforeStatus>('unknown')
+  const [quoted, setQuoted] = useState<string | undefined>(undefined)
 
   // Read at the press, not the render the button was drawn in.
   const connected = useRef(address)
@@ -72,6 +79,8 @@ export function useChainSequence(
   // Read when a `before` answers, which is some way on from when it was asked.
   const phaseNow = useRef(phase)
   phaseNow.current = phase
+  const familyNow = useRef(prepared?.signing.family)
+  familyNow.current = prepared?.signing.family
 
   const before = useRef<Before>(UNKNOWN)
   // Each read, start and clear takes a number, so an answer to an older one is dropped.
@@ -80,28 +89,70 @@ export function useChainSequence(
   const request = run?.request
   const stage = run?.stage
 
-  // Before any signature, each time a card is put on offer: a wallet declined comes back here too.
+  const noteBefore = useCallback((next: Before) => {
+    before.current = next
+    setReadStatus(next.status)
+  }, [])
+
+  const readBefore = useCallback(
+    (account: string | undefined, token: ChainToken | undefined) => {
+      beforeRead.current += 1
+      const mine = beforeRead.current
+      if (account === undefined || token === undefined) {
+        noteBefore(UNKNOWN)
+        return
+      }
+      const counts = (): boolean =>
+        mine === beforeRead.current && beforeReadCounts(phaseNow.current, familyNow.current)
+      noteBefore({ status: 'reading', account, token })
+      void readBeforeSwap(() => readHolding(slug, account, token), counts).then((amount) => {
+        if (mine !== beforeRead.current) return
+        noteBefore(
+          amount !== undefined && counts() ? { status: 'known', amount, account, token } : UNKNOWN
+        )
+      })
+    },
+    [slug, noteBefore]
+  )
+
+  // From when the card starts building, which leaves a person no time to sign ahead of the read.
+  // The prepared card isn't there yet, so this goes by what was asked and who is connected, and
+  // the card is checked against that when it comes up. A wallet declined comes back to `review`
+  // and keeps what was read.
   useEffect(() => {
-    if (request === undefined || phase !== 'review') return
-    if (prepared === undefined || builtFor === undefined) return
-    beforeRead.current += 1
-    const mine = beforeRead.current
-    const token = outputToken(slug, prepared.receive?.symbol, request.swap.tokenOut)
-    if (token === undefined) {
-      before.current = UNKNOWN
+    if (request === undefined) return
+    const asked = request.swap.tokenOut
+    if (phase === 'building') {
+      readBefore(address, outputToken(slug, asked, asked))
       return
     }
-    const account = builtFor
-    const family = prepared.signing.family
-    before.current = { status: 'reading' }
-    void readHolding(slug, account, token).then((amount) => {
-      if (mine !== beforeRead.current) return
-      before.current =
-        amount !== undefined && beforeReadCounts(phaseNow.current, family)
-          ? { status: 'known', amount, token, account }
-          : UNKNOWN
+    if (phase !== 'review' || prepared === undefined || builtFor === undefined) return
+    const token = outputToken(slug, prepared.receive?.symbol, asked)
+    if (token !== undefined && keepsBefore(before.current, builtFor, token.id)) return
+    readBefore(builtFor, token)
+  }, [request, phase, prepared, builtFor, address, slug, readBefore])
+
+  // Whether Weave would take what this card should deliver. Never holds the card back: it only
+  // changes what is said, and a failed or slow read says nothing new.
+  useEffect(() => {
+    setQuoted(undefined)
+    if (request === undefined || prepared === undefined) return
+    const { followOn } = request
+    if (followOn.kind !== 'cashout' || followOn.currency === undefined) return
+    const step = quoteStep(prepared.receive?.amount)
+    if (step.kind === 'none') return
+    if (step.kind === 'note') {
+      setQuoted(step.note)
+      return
+    }
+    let replaced = false
+    void readCashoutNote(slug, followOn.currency, step.amount).then((note) => {
+      if (!replaced) setQuoted(note)
     })
-  }, [request, phase, prepared, builtFor, slug])
+    return () => {
+      replaced = true
+    }
+  }, [request, prepared, slug])
 
   useEffect(() => {
     setRun((r) => {
@@ -163,17 +214,20 @@ export function useChainSequence(
     })
   }, [formOpen, locked, paidHash])
 
-  const start = useCallback((next: ChainSequenceRequest) => {
-    beforeRead.current += 1
-    before.current = UNKNOWN
-    setRun({ request: next, stage: 'swap', settled: false })
-  }, [])
+  const start = useCallback(
+    (next: ChainSequenceRequest) => {
+      beforeRead.current += 1
+      noteBefore(UNKNOWN)
+      setRun({ request: next, stage: 'swap', settled: false })
+    },
+    [noteBefore]
+  )
 
   const clear = useCallback(() => {
     beforeRead.current += 1
-    before.current = UNKNOWN
+    noteBefore(UNKNOWN)
     setRun(null)
-  }, [])
+  }, [noteBefore])
 
   const runNext = useCallback(() => {
     if (run?.stage !== 'ready' || run.delivered === undefined || run.account === undefined) return
@@ -204,6 +258,8 @@ export function useChainSequence(
     error: run?.error,
     settled: run?.settled ?? false,
     account: run?.account,
+    readStatus,
+    swapLine: swapLine(phase, readStatus, quoted),
     start,
     runNext,
     clear,

@@ -231,7 +231,7 @@ describe('strandedReply', () => {
     const reply = strandedReply('USDC', undefined, { kind: 'stake' })
     expect(reply).not.toMatch(/\d/)
     expect(reply).toBe(
-      'The swap went through, but I could not confirm what reached your wallet, so the next step did not run. Check your wallet before doing anything else.'
+      'The swap went through, but I could not confirm what reached your wallet, so the next step did not run. What arrived stays in your wallet. Check your wallet before doing anything else.'
     )
   })
 

@@ -1,4 +1,5 @@
 import type { ChainActionPhase } from '../../hooks/use-chain-action'
+import { walletFetch } from '../api/network-fetch'
 import {
   NO_CASHOUTS,
   accountMismatch,
@@ -7,6 +8,7 @@ import {
   type CashoutCurrency,
 } from '../weave/cashout-view'
 import type { CashoutCurrencyCode, CashoutRoute } from '../weave/parse-cashout'
+import { MAX_COST_PERCENT } from '../weave/types'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from './evm/tokens'
 import { nearTokens } from './near/tokens'
 import {
@@ -18,12 +20,13 @@ import {
 } from './sequence'
 import { SOLANA_TOKENS } from './solana/tokens'
 import { SUI_TOKENS } from './sui/tokens'
-import type {
-  ChainToken,
-  ChainWithActions,
-  SigningPayload,
-  TokenBalance,
-  WalletBalances,
+import {
+  tokenBySymbol,
+  type ChainToken,
+  type ChainWithActions,
+  type SigningPayload,
+  type TokenBalance,
+  type WalletBalances,
 } from './types'
 
 /**
@@ -34,6 +37,7 @@ export type SequenceStage = 'swap' | 'measuring' | 'ready' | 'next' | 'stranded'
 
 export const MEASURE_INTERVAL_MS = 3_000
 export const MEASURE_ATTEMPTS = 20
+export const BEFORE_RETRY_MS = 1_500
 
 /** As long as the balances route may run, so one read that hangs still ends as one attempt. */
 const READ_TIMEOUT_MS = 20_000
@@ -44,6 +48,17 @@ export const CASHOUT_UNDER_WAY =
 /** Step 1 may or may not have moved money, so this says neither. */
 export const UNCONFIRMED_SWAP =
   "This swap is not confirmed, so the cash-out will not start. Check your wallet's activity before doing anything else. Nothing was paid out."
+
+export const SWAP_NEXT_STEP =
+  'Step 2 waits for your press. It uses what the swap actually delivers.'
+
+export const BALANCE_UNREAD =
+  'I could not read your USDC balance, so if you sign this swap the cash-out will not follow. You would hold the USDC and can cash it out yourself.'
+
+export const TOO_SMALL_FOR_WEAVE =
+  'Weave would refuse a cash-out this small, so this swap would leave you holding the USDC.'
+
+const LEFT_HOLDING = 'This swap would leave you holding the USDC.'
 
 /** Beside the card's own words for the failure, which may or may not say nothing moved. */
 export const CASHOUT_NOT_STARTED = 'The cash-out did not start.'
@@ -152,7 +167,8 @@ export function outputToken(
 ): ChainToken | undefined {
   if (receiveSymbol === undefined || asked === undefined) return undefined
   if (receiveSymbol.toUpperCase() !== asked.toUpperCase()) return undefined
-  return TOKEN_TABLES[chain as ChainWithActions]?.find((t) => t.symbol === receiveSymbol)
+  const table = TOKEN_TABLES[chain as ChainWithActions]
+  return table === undefined ? undefined : tokenBySymbol(table, receiveSymbol)
 }
 
 /**
@@ -196,17 +212,45 @@ export async function readHolding(
   }
 }
 
+/** The output token's balance before the swap. Anything but `known` strands at settled. */
+export type Before =
+  | { status: 'unknown' }
+  | { status: 'reading'; account: string; token: ChainToken }
+  | { status: 'known'; amount: string; account: string; token: ChainToken }
+
+export type BeforeStatus = Before['status']
+
 /**
- * Whether a `before` read that just answered is still from before the swap. It was asked at review,
- * so it holds while the card is on offer. In the wallet it holds only where the wallet sends
- * nothing itself. Any later and the swap may be in the figure, which would measure too little.
+ * Whether a `before` read that just answered is still from before the swap. It holds while the card
+ * is being built or is on offer. In the wallet it holds only where the wallet sends nothing itself.
+ * Any later and the swap may be in the figure, which would measure too little.
  */
 export function beforeReadCounts(
   phase: ChainActionPhase,
-  family: SigningPayload['family']
+  family: SigningPayload['family'] | undefined
 ): boolean {
-  if (phase === 'review') return true
-  return phase === 'signing' && !walletSends(family)
+  if (phase === 'building' || phase === 'review') return true
+  return phase === 'signing' && family !== undefined && !walletSends(family)
+}
+
+/** Whether the card that just came up can use the read already made for it. A decline can. */
+export function keepsBefore(before: Before, account: string, tokenId: string): boolean {
+  return before.status !== 'unknown' && before.account === account && before.token.id === tokenId
+}
+
+/** Reads the balance, and once more after a pause if that failed and the card is still unsigned. */
+export async function readBeforeSwap(
+  read: () => Promise<string | undefined>,
+  stillOpen: () => boolean,
+  wait: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms)
+    })
+): Promise<string | undefined> {
+  const first = await read()
+  if (first !== undefined || !stillOpen()) return first
+  await wait(BEFORE_RETRY_MS)
+  return stillOpen() ? read() : undefined
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -245,6 +289,68 @@ export async function measureDelivered(args: {
       return delivered !== undefined ? { stage: 'ready', delivered } : { stage: 'stranded' }
     }
     await wait(MEASURE_INTERVAL_MS, signal)
+  }
+}
+
+/** What the swap's card says about what follows it, in place of promising what won't happen. */
+export function swapLine(
+  phase: ChainActionPhase,
+  status: BeforeStatus,
+  quoted: string | undefined
+): string {
+  if (status === 'unknown' && (phase === 'review' || phase === 'signing')) return BALANCE_UNREAD
+  return quoted ?? SWAP_NEXT_STEP
+}
+
+export type QuoteStep =
+  | { kind: 'none' }
+  | { kind: 'note'; note: string }
+  | { kind: 'ask'; amount: string }
+
+/** What to ask Weave about a card's receive: the amount the button would open at, not all of it. */
+export function quoteStep(receive: string | undefined): QuoteStep {
+  if (receive === undefined) return { kind: 'none' }
+  const amount = cashoutAmountFrom(receive)
+  return amount === undefined
+    ? { kind: 'note', note: TOO_SMALL_FOR_WEAVE }
+    : { kind: 'ask', amount }
+}
+
+/**
+ * What a quote's answer means for this card. A cost past what the order route accepts and a refusal
+ * of the amount are said. Anything else, such as a busy or failed read, says nothing about the size.
+ */
+export function quoteNote(
+  status: number,
+  body: { error?: unknown; message?: unknown; costPercent?: unknown }
+): string | undefined {
+  if (status === 200) {
+    const { costPercent } = body
+    return typeof costPercent === 'number' && costPercent > MAX_COST_PERCENT
+      ? TOO_SMALL_FOR_WEAVE
+      : undefined
+  }
+  if (status === 400) return body.error === 'invalid_amount' ? TOO_SMALL_FOR_WEAVE : undefined
+  if (status !== 422) return undefined
+  const { message } = body
+  const plain = typeof message === 'string' && message.includes(' ') && !/[<>{}]/.test(message)
+  return plain ? `${message} ${LEFT_HOLDING}` : TOO_SMALL_FOR_WEAVE
+}
+
+/** A read of the price only: this route makes no order. Nothing on a failed or slow read. */
+export async function readCashoutNote(
+  chain: string,
+  currency: string,
+  amount: string
+): Promise<string | undefined> {
+  try {
+    const query = new URLSearchParams({ chain, currency, amount })
+    const response = await walletFetch(`/api/cashout/quote?${query.toString()}`, {
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    })
+    return quoteNote(response.status, (await response.json()) as Parameters<typeof quoteNote>[1])
+  } catch {
+    return undefined
   }
 }
 
@@ -370,6 +476,64 @@ export function currencyStep(
   return only !== undefined
     ? { kind: 'run', currency: only.code as CashoutCurrencyCode }
     : { kind: 'ask', choices }
+}
+
+const NOT_THE_AMOUNT =
+  'usd|usdc|dollars?|bucks?|naira|ngn|kes|ksh|ugx|tzs|shillings?|eur|euros?|gbp|pounds?'
+
+function canonicalNumber(text: string): string {
+  const [whole = '', fraction = ''] = text.replace(/,/g, '').split('.')
+  const trimmed = fraction.replace(/0+$/, '')
+  const digits = whole.replace(/^0+(?=\d)/, '') || '0'
+  return trimmed === '' ? digits : `${digits}.${trimmed}`
+}
+
+/**
+ * Whether the person themselves said this amount and this token. A model's text never sets what is
+ * signed, so a cash-out it wrote out runs only if the person's own words carry the same figures.
+ * The amount must stand alone, so 15 is not 5, and "$5", "5 dollars", "5k" and "5%" are not 5 of a
+ * token. The token must stand alone too, so SOLANA is not SOL: the parser reads it as its own word.
+ * Pass what the person typed, and none of the model's lines.
+ */
+export function sequenceWordsMatch(
+  instruction: { amount: string; token: string },
+  turns: readonly string[]
+): boolean {
+  const token = instruction.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wordEnd = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
+  const glued = new RegExp(String.raw`(\d)(${token})${wordEnd}`, 'gi')
+  const word = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])${token}${wordEnd}`, 'i')
+  const number = new RegExp(
+    String.raw`(?:^|[^\w.,$₦£€])(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${NOT_THE_AMOUNT})(?![\w+]))`,
+    'gi'
+  )
+  const wanted = canonicalNumber(instruction.amount)
+  const spaced = turns.map((turn) => turn.replace(glued, '$1 $2').replace(/([$₦£€])\s+/g, '$1'))
+  return (
+    spaced.some((turn) => word.test(turn)) &&
+    spaced.some((turn) =>
+      [...turn.matchAll(number)].some((match) => canonicalNumber(match[1] as string) === wanted)
+    )
+  )
+}
+
+/**
+ * The answer to "which currency?" when it was typed as a cash-out, "cash out to KES", while a swap
+ * waits on the question. Nothing for a request with its own amount, which is a new request.
+ */
+export function questionAnswerFrom(
+  question: { sequence?: unknown; answer?: string } | null,
+  route: CashoutRoute
+): CashoutCurrencyCode | undefined {
+  if (question?.sequence === undefined || question.answer !== undefined) return undefined
+  return route.kind === 'open' && route.amount === undefined ? route.currency : undefined
+}
+
+/** A question asked on one chain can't start a swap on another, whose follow-ons were not checked. */
+export function questionChainRefusal(asked: string, now: string): string | undefined {
+  return asked === now
+    ? undefined
+    : 'This was asked on another chain, so it did not start. Nothing was signed or sent.'
 }
 
 /**

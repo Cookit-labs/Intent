@@ -14,7 +14,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ chain: string }> }
 ): Promise<NextResponse> {
-  const limited = await enforceRateLimit(request, 'build')
+  const limited = await enforceRateLimit(request, 'read')
   if (limited !== undefined) return limited
 
   const chainApi = chainModule((await params).chain)

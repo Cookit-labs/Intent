@@ -11,6 +11,9 @@ export const CASHOUT_CHAINS: readonly CashoutChain[] = [
   'near',
 ]
 
+/** Above this, an order is refused rather than offered. */
+export const MAX_COST_PERCENT = 5
+
 export function isCashoutChain(value: string): value is CashoutChain {
   return (CASHOUT_CHAINS as readonly string[]).includes(value)
 }

@@ -88,7 +88,10 @@ import {
   currencyStep,
   endedNote,
   followOnNotYet,
+  questionAnswerFrom,
+  questionChainRefusal,
   sequenceOutcome,
+  sequenceWordsMatch,
 } from '../../lib/chains/sequence-flow'
 import type { ChainActionRequest, ChainWithActions, WalletBalances } from '../../lib/chains/types'
 import { QUOTE_EXPIRED } from '../../lib/chains/signing-flow'
@@ -658,6 +661,8 @@ export function IntentChat({
   useEffect(() => {
     chainSequence.clear()
     setSequenceNote(null)
+    // A question asked on the last chain can't start anything on this one.
+    setCashoutQuestion(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
   // A leveraged position on Noether. Its own shape again: no route, no
@@ -931,8 +936,14 @@ export function IntentChat({
     chainSequence.delivered,
     chainSequence.error
   )
+  // Leaving the form brings `ready` back, and what arrived was said the first time.
+  const deliveredRecordedFor = useRef<ChainSequenceRequest | null>(null)
   useEffect(() => {
     if (sequenceLine === undefined) return
+    if (chainSequence.stage === 'ready') {
+      if (deliveredRecordedFor.current === chainSequence.sequence) return
+      deliveredRecordedFor.current = chainSequence.sequence
+    }
     recordLive(
       'agent',
       sequenceLine,
@@ -1780,7 +1791,7 @@ export function IntentChat({
       if (step.kind === 'refuse') {
         chainAction.refuse(step.message, text)
       } else if (step.kind === 'ask') {
-        setCashoutQuestion({ choices: step.choices, sequence: request })
+        setCashoutQuestion({ choices: step.choices, sequence: { request, chain } })
         recordLive('agent', CURRENCY_QUESTION)
       } else {
         runSequenceSwap(
@@ -1920,14 +1931,32 @@ export function IntentChat({
     })
   }
 
+  /** A currency named in answer to the question: used if offered, and said back if not. */
+  function answerNamedCurrency(named: string, text: string): void {
+    if (cashoutQuestion === null) return
+    const offered = cashoutQuestion.choices
+    if (offered.some((choice) => choice.code === named)) {
+      answerCashoutQuestion(named, text)
+    } else {
+      const reply = unsupportedCurrencyReply(named, offered)
+      setCashoutQuestion({ ...cashoutQuestion, retry: { said: text, reply } })
+      recordLive('agent', reply)
+    }
+  }
+
   function answerCashoutQuestion(currency: string, said: string): void {
     const asked = cashoutQuestion
     if (asked === null) return
     setCashoutQuestion({ ...asked, answer: said })
     if (asked.sequence !== undefined) {
+      const elsewhere = questionChainRefusal(asked.sequence.chain, slug)
+      if (elsewhere !== undefined) {
+        chainAction.refuse(elsewhere, message ?? said)
+        return
+      }
       runSequenceSwap(
         {
-          ...asked.sequence,
+          ...asked.sequence.request,
           followOn: { kind: 'cashout', currency: currency as CashoutCurrencyCode },
         },
         message ?? said
@@ -1970,6 +1999,14 @@ export function IntentChat({
       leaveSequence()
     }
 
+    // "cash out to KES" at the question of a swap waiting on it answers that question,
+    // where read as a request it would drop the swap.
+    const routedAnswer = questionAnswerFrom(cashoutQuestion, cashoutRoute)
+    if (routedAnswer !== undefined) {
+      answerNamedCurrency(routedAnswer, text)
+      return
+    }
+
     if (cashoutRoute.kind !== 'pass') {
       startCashout(cashoutRoute, text)
       return
@@ -1980,15 +2017,7 @@ export function IntentChat({
     if (cashoutQuestion !== null && cashoutQuestion.answer === undefined) {
       const answer = parseCurrencyAnswer(text)
       if (answer !== null) {
-        const offered = cashoutQuestion.choices
-        const named = 'currency' in answer ? answer.currency : answer.unsupported
-        if (offered.some((choice) => choice.code === named)) {
-          answerCashoutQuestion(named, text)
-        } else {
-          const reply = unsupportedCurrencyReply(named, offered)
-          setCashoutQuestion({ ...cashoutQuestion, retry: { said: text, reply } })
-          recordLive('agent', reply)
-        }
+        answerNamedCurrency('currency' in answer ? answer.currency : answer.unsupported, text)
         return
       }
     }
@@ -2201,9 +2230,18 @@ export function IntentChat({
     // The model wrote out a cash-out, perhaps from words no parser here would read.
     const writtenOut = routeCashout(parseCashout(answer.instruction), slug, isMainnet())
     if (writtenOut.kind !== 'pass') {
-      // A swap must not start under whatever was said while this was being read.
-      if (writtenOut.kind === 'sequence' && asked.turn !== latest.current.turn) return
-      startCashout(writtenOut, turns[0]?.content ?? text)
+      const shown = turns[0]?.content ?? text
+      if (writtenOut.kind === 'sequence') {
+        // A swap must not start under whatever was said while this was being read.
+        if (asked.turn !== latest.current.turn || asked.chain !== latest.current.chain) return
+        // What gets signed comes from the person's own words, never from the model's.
+        const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
+        if (!sequenceWordsMatch(writtenOut, said)) {
+          startCashout({ kind: 'token', token: writtenOut.token }, shown)
+          return
+        }
+      }
+      startCashout(writtenOut, shown)
       return
     }
 

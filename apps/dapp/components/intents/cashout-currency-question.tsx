@@ -10,8 +10,8 @@ import { agentBubble, userBubble } from './bubble'
 export interface CashoutQuestionState {
   amount?: string
   choices: CashoutCurrency[]
-  /** A swap waiting on this answer: answering starts its race, not the form. */
-  sequence?: ChainSequenceRequest
+  /** A swap waiting on this answer, on the chain it was asked on: answering starts its race, not the form. */
+  sequence?: { request: ChainSequenceRequest; chain: string }
   /** What the person answered. Set once, and the question stays in the thread as asked. */
   answer?: string
   /** An answer that couldn't be used, and what was said back. */

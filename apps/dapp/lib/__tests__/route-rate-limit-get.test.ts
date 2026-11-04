@@ -23,6 +23,18 @@ const ROUTES: Record<string, () => Promise<Route>> = {
   sponsor: () => import('../../app/api/sponsor/route') as unknown as Promise<Route>,
 }
 
+describe('the balances route', () => {
+  it('counts against reads, not against what builds', async () => {
+    const { enforceRateLimit } = await import('../server/rate-limit')
+    const { GET } = await import('../../app/api/chain/[chain]/balances/route')
+    const res = await GET(new Request('http://localhost/api/chain/solana/balances'), {
+      params: Promise.resolve({ chain: 'solana' }),
+    })
+    expect(res.status).toBe(429)
+    expect(enforceRateLimit).toHaveBeenLastCalledWith(expect.anything(), 'read')
+  }, 30_000)
+})
+
 describe('the limiter runs first on GET routes that call out', () => {
   for (const [path, load] of Object.entries(ROUTES)) {
     it(`api/${path}`, async () => {

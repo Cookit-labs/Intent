@@ -73,9 +73,7 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
         </ol>
 
         {stage === 'swap' ? (
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            Step 2 waits for your press. It uses what the swap actually delivers.
-          </p>
+          <p className="text-muted-foreground text-xs leading-relaxed">{steps.swapLine}</p>
         ) : null}
 
         {stage === 'measuring' ? (

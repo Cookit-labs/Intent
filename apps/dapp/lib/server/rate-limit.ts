@@ -19,7 +19,14 @@ import { getPool, withTimeout, type QueryFn } from './db'
  * and is then quiet until the process restarts.
  */
 
-export type RateLimitFamily = 'build' | 'submit' | 'compete' | 'resolve' | 'standing' | 'auth'
+export type RateLimitFamily =
+  | 'build'
+  | 'read'
+  | 'submit'
+  | 'compete'
+  | 'resolve'
+  | 'standing'
+  | 'auth'
 
 export interface RateLimitWindow {
   limit: number
@@ -35,6 +42,8 @@ export interface RateLimitWindow {
  */
 export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitFamily, RateLimitWindow>> = {
   build: { limit: 30, windowSeconds: 60 },
+  // Balance reads, which a measure after a swap repeats and must not spend from what builds.
+  read: { limit: 120, windowSeconds: 60 },
   submit: { limit: 10, windowSeconds: 60 },
   // Four a minute, not ten: compete is the one family where every request
   // is several paid model calls (DeepSeek, Claude, up to two OpenRouter

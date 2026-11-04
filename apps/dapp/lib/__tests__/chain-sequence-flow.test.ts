@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   CASHOUT_UNDER_WAY,
+  BALANCE_UNREAD,
+  BEFORE_RETRY_MS,
   CASHOUT_NOT_STARTED,
   MEASURE_ATTEMPTS,
   MEASURE_INTERVAL_MS,
+  SWAP_NEXT_STEP,
+  TOO_SMALL_FOR_WEAVE,
   UNCONFIRMED_SWAP,
   beforeReadCounts,
   cashoutSequence,
@@ -13,18 +17,27 @@ import {
   endedNote,
   followOnNotYet,
   holdingOf,
+  keepsBefore,
   measureDelivered,
   moveOnCard,
   outputToken,
+  questionAnswerFrom,
+  questionChainRefusal,
+  quoteNote,
+  quoteStep,
+  readBeforeSwap,
+  readCashoutNote,
   readHolding,
   readyAction,
   sequenceOutcome,
+  sequenceWordsMatch,
   stageAfterMeasure,
   stageAfterSwap,
   stageOnCard,
   stageOnForm,
   stepLabels,
   stepMarks,
+  swapLine,
   unmeasuredReply,
 } from '../chains/sequence-flow'
 import { strandedReply, type ChainSequenceRequest } from '../chains/sequence'
@@ -237,6 +250,7 @@ describe('outputToken', () => {
     expect(outputToken('solana', 'USDC', undefined)).toBeUndefined()
     expect(outputToken('solana', 'USDT', 'USDC')).toBeUndefined()
     expect(outputToken('solana', 'FAKE', 'FAKE')).toBeUndefined()
+    expect(outputToken('solana', 'usdc', 'usdc')?.id).toBe(SOLANA_USDC)
     expect(outputToken('stellar', 'USDC', 'USDC')).toBeUndefined()
   })
 })
@@ -307,9 +321,14 @@ describe('readHolding', () => {
 })
 
 describe('beforeReadCounts', () => {
-  it('trusts a read that lands while the card is still on offer', () => {
+  it('trusts a read that lands while the card is being built or is on offer', () => {
+    expect(beforeReadCounts('building', undefined)).toBe(true)
     expect(beforeReadCounts('review', 'solana')).toBe(true)
     expect(beforeReadCounts('review', 'evm')).toBe(true)
+  })
+
+  it('does not trust one that lands in the wallet when the wallet is not known', () => {
+    expect(beforeReadCounts('signing', undefined)).toBe(false)
   })
 
   it('trusts one that lands in the wallet only where the wallet sends nothing itself', () => {
@@ -319,7 +338,7 @@ describe('beforeReadCounts', () => {
     expect(beforeReadCounts('signing', 'near')).toBe(false)
   })
 
-  it.each(['submitting', 'settled', 'pending', 'failed', 'idle', 'building'] as const)(
+  it.each(['submitting', 'settled', 'pending', 'failed', 'idle'] as const)(
     'does not trust one that lands at %s',
     (phase) => {
       expect(beforeReadCounts(phase, 'solana')).toBe(false)
@@ -594,5 +613,279 @@ describe('followOnNotYet', () => {
   ])('says not yet for %j, with nothing signed', (followOn) => {
     expect(followOnNotYet(followOn)).toMatch(/not yet/i)
     expect(followOnNotYet(followOn)).toContain('Nothing was signed or sent.')
+  })
+})
+
+describe('sequenceWordsMatch', () => {
+  const asked = { amount: '5', token: 'SOL' }
+
+  it('finds the amount and the token in what the person typed', () => {
+    expect(sequenceWordsMatch(asked, ['please cash out 5 SOL'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['get my sol to my bank', '5'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['5sol to my bank'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['sell SOL, 5 of it.'])).toBe(true)
+  })
+
+  it('compares numbers, not text', () => {
+    expect(sequenceWordsMatch(asked, ['cash out 5.0 SOL'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '5.0', token: 'SOL' }, ['cash out 5 SOL'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '0.5', token: 'SOL' }, ['cash out .5 SOL'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '1000', token: 'SOL' }, ['cash 1,000 sol'])).toBe(true)
+  })
+
+  it('refuses a different amount', () => {
+    expect(sequenceWordsMatch({ amount: '12', token: 'SOL' }, ['get my SOL to my bank'])).toBe(
+      false
+    )
+    expect(sequenceWordsMatch(asked, ['cash out 6 SOL'])).toBe(false)
+  })
+
+  it.each(['cash out 15 SOL', 'cash out 0.5 SOL', 'cash out 5.5 SOL', 'cash out 55 SOL'])(
+    'does not find 5 inside another number: %s',
+    (said) => {
+      expect(sequenceWordsMatch(asked, [said])).toBe(false)
+    }
+  )
+
+  it.each([
+    'cash out $5 of SOL',
+    'cash out $ 5 of SOL',
+    'cash out ₦5 of SOL',
+    'cash out 5 dollars of SOL',
+    'cash out 5 usd of my sol',
+    '5k SOL',
+    '5% of my SOL',
+  ])('does not take a figure of something else for an amount of the token: %s', (said) => {
+    expect(sequenceWordsMatch(asked, [said])).toBe(false)
+  })
+
+  it('reads SOLANA as its own word, as the parser does, so it is not SOL', () => {
+    expect(sequenceWordsMatch(asked, ['cash out 5 solana'])).toBe(false)
+    expect(sequenceWordsMatch({ amount: '5', token: 'SOLANA' }, ['cash out 5 solana'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['cash out 5 SOLfoo'])).toBe(false)
+  })
+
+  it('refuses a token only the model named, since only the person is passed in', () => {
+    expect(sequenceWordsMatch(asked, ['put 5 into my bank'])).toBe(false)
+    expect(sequenceWordsMatch(asked, [])).toBe(false)
+  })
+
+  it('escapes a token, so its symbols are read as themselves', () => {
+    expect(sequenceWordsMatch({ amount: '5', token: 'USD+' }, ['cash out 5 USD+'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '5', token: 'USD+' }, ['cash out 5 USDD'])).toBe(false)
+  })
+})
+
+describe('readBeforeSwap', () => {
+  const noWait = async (): Promise<void> => {}
+
+  it('reads once when the first answers', async () => {
+    const read = vi.fn(async () => '3')
+    expect(await readBeforeSwap(read, () => true, noWait)).toBe('3')
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('tries once more after the pause while the card is unsigned', async () => {
+    const read = vi.fn<() => Promise<string | undefined>>()
+    read.mockResolvedValueOnce(undefined).mockResolvedValueOnce('3')
+    const wait = vi.fn(noWait)
+    expect(await readBeforeSwap(read, () => true, wait)).toBe('3')
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(wait).toHaveBeenCalledWith(BEFORE_RETRY_MS)
+    expect(BEFORE_RETRY_MS).toBe(1_500)
+  })
+
+  it('tries only once more', async () => {
+    const read = vi.fn(async () => undefined)
+    expect(await readBeforeSwap(read, () => true, noWait)).toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry once the card has moved on', async () => {
+    const read = vi.fn(async () => undefined)
+    expect(await readBeforeSwap(read, () => false, noWait)).toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry if the card moves on during the pause', async () => {
+    const read = vi.fn(async () => undefined)
+    let open = true
+    const wait = async (): Promise<void> => {
+      open = false
+    }
+    expect(await readBeforeSwap(read, () => open, wait)).toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('keepsBefore', () => {
+  const token = { symbol: 'USDC', id: SOLANA_USDC, decimals: 6 }
+
+  it('keeps a read under way or known for this wallet and token, so a decline reads nothing again', () => {
+    expect(keepsBefore({ status: 'reading', account: ALICE, token }, ALICE, SOLANA_USDC)).toBe(true)
+    expect(
+      keepsBefore({ status: 'known', amount: '1', account: ALICE, token }, ALICE, SOLANA_USDC)
+    ).toBe(true)
+  })
+
+  it('reads again for another wallet, another token, or after a read that failed', () => {
+    expect(keepsBefore({ status: 'reading', account: ALICE, token }, BOB, SOLANA_USDC)).toBe(false)
+    expect(keepsBefore({ status: 'reading', account: ALICE, token }, ALICE, 'other')).toBe(false)
+    expect(keepsBefore({ status: 'unknown' }, ALICE, SOLANA_USDC)).toBe(false)
+  })
+})
+
+describe('swapLine', () => {
+  it('says step 2 follows while nothing says otherwise', () => {
+    expect(swapLine('idle', 'unknown', undefined)).toBe(SWAP_NEXT_STEP)
+    expect(swapLine('building', 'reading', undefined)).toBe(SWAP_NEXT_STEP)
+    expect(swapLine('building', 'unknown', undefined)).toBe(SWAP_NEXT_STEP)
+    expect(swapLine('review', 'reading', undefined)).toBe(SWAP_NEXT_STEP)
+    expect(swapLine('review', 'known', undefined)).toBe(SWAP_NEXT_STEP)
+  })
+
+  it('does not promise step 2 on a card whose balance could not be read', () => {
+    expect(swapLine('review', 'unknown', undefined)).toBe(BALANCE_UNREAD)
+    expect(swapLine('signing', 'unknown', undefined)).toBe(BALANCE_UNREAD)
+    expect(BALANCE_UNREAD).toBe(
+      'I could not read your USDC balance, so if you sign this swap the cash-out will not follow. You would hold the USDC and can cash it out yourself.'
+    )
+  })
+
+  it('shows a refused size in its place', () => {
+    expect(swapLine('review', 'known', 'Too small.')).toBe('Too small.')
+    expect(swapLine('review', 'reading', 'Too small.')).toBe('Too small.')
+  })
+
+  it('says the unread balance first, since no size matters without it', () => {
+    expect(swapLine('review', 'unknown', 'Too small.')).toBe(BALANCE_UNREAD)
+  })
+})
+
+describe('quoteStep', () => {
+  it('asks about what the button would open, not the whole receive', () => {
+    expect(quoteStep('10.2')).toEqual({ kind: 'ask', amount: '10' })
+  })
+
+  it('needs no answer for an amount that rounds to nothing or cannot be read', () => {
+    expect(quoteStep('0.005')).toEqual({ kind: 'note', note: TOO_SMALL_FOR_WEAVE })
+    expect(quoteStep('about five')).toEqual({ kind: 'note', note: TOO_SMALL_FOR_WEAVE })
+  })
+
+  it('says nothing with no amount on the card', () => {
+    expect(quoteStep(undefined)).toEqual({ kind: 'none' })
+  })
+})
+
+describe('quoteNote', () => {
+  it('says nothing for a quote Weave would take', () => {
+    expect(quoteNote(200, { costPercent: 1 })).toBeUndefined()
+    expect(quoteNote(200, { costPercent: 5 })).toBeUndefined()
+  })
+
+  it('says so past the cost the order route refuses at', () => {
+    expect(quoteNote(200, { costPercent: 5.01 })).toBe(TOO_SMALL_FOR_WEAVE)
+    expect(TOO_SMALL_FOR_WEAVE).toBe(
+      'Weave would refuse a cash-out this small, so this swap would leave you holding the USDC.'
+    )
+  })
+
+  it('uses a refusal in the route own plain words, and what it means here', () => {
+    const message = 'No price is available for this cash-out right now. No money has moved.'
+    expect(quoteNote(422, { error: 'rejected', message })).toBe(
+      `${message} This swap would leave you holding the USDC.`
+    )
+  })
+
+  it('falls back when a refusal has no plain words', () => {
+    expect(quoteNote(422, { error: 'rejected' })).toBe(TOO_SMALL_FOR_WEAVE)
+    expect(quoteNote(422, { message: 'E_MIN' })).toBe(TOO_SMALL_FOR_WEAVE)
+    expect(quoteNote(422, { message: '<html>not a sentence</html>' })).toBe(TOO_SMALL_FOR_WEAVE)
+  })
+
+  it('says so for an amount the route cannot read', () => {
+    expect(quoteNote(400, { error: 'invalid_amount', message: 'Enter an amount.' })).toBe(
+      TOO_SMALL_FOR_WEAVE
+    )
+  })
+
+  it.each([
+    [503, { error: 'unavailable', message: 'Cash-outs are busy right now.' }],
+    [429, { error: 'rate_limited' }],
+    [401, { error: 'unauthenticated', message: 'Connect your wallet to cash out.' }],
+    [400, { error: 'unknown_currency', message: 'This chain does not cash out to that currency.' }],
+    [200, {}],
+  ])('adds nothing for %i %j, which says nothing about the size', (status, body) => {
+    expect(quoteNote(status, body)).toBeUndefined()
+  })
+})
+
+describe('readCashoutNote', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('asks the quote route for this chain, currency and amount, and reads the refusal', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'rejected' }), { status: 422 }))
+    )
+    expect(await readCashoutNote('solana', 'KES', '1.4')).toBe(TOO_SMALL_FOR_WEAVE)
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string]
+    expect(url).toBe('/api/cashout/quote?chain=solana&currency=KES&amount=1.4')
+  })
+
+  it('adds nothing when the read fails or is not JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline')
+      })
+    )
+    expect(await readCashoutNote('solana', 'KES', '1.4')).toBeUndefined()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>', { status: 200 }))
+    )
+    expect(await readCashoutNote('solana', 'KES', '1.4')).toBeUndefined()
+  })
+})
+
+describe('questionAnswerFrom', () => {
+  const sequence = { request: REQUEST, chain: 'solana' }
+  const open = { sequence }
+
+  it('reads "cash out to KES" as the answer to the swap waiting on it', () => {
+    expect(questionAnswerFrom(open, { kind: 'open', currency: 'KES' })).toBe('KES')
+  })
+
+  it('does not take a request with its own amount for an answer', () => {
+    expect(questionAnswerFrom(open, { kind: 'open', amount: '5', currency: 'KES' })).toBeUndefined()
+  })
+
+  it('leaves every other route alone', () => {
+    expect(questionAnswerFrom(open, { kind: 'pass' })).toBeUndefined()
+    expect(questionAnswerFrom(open, { kind: 'ask' })).toBeUndefined()
+    expect(questionAnswerFrom(open, { kind: 'open' })).toBeUndefined()
+    expect(questionAnswerFrom(open, { kind: 'currency', currency: 'USD' })).toBeUndefined()
+  })
+
+  it('leaves a plain question, an answered one and no question alone', () => {
+    const route = { kind: 'open', currency: 'KES' } as const
+    expect(questionAnswerFrom({}, route)).toBeUndefined()
+    expect(questionAnswerFrom({ sequence, answer: 'Kenya' }, route)).toBeUndefined()
+    expect(questionAnswerFrom(null, route)).toBeUndefined()
+  })
+})
+
+describe('questionChainRefusal', () => {
+  it('lets an answer through on the chain it was asked on', () => {
+    expect(questionChainRefusal('avalanche', 'avalanche')).toBeUndefined()
+  })
+
+  it('refuses one from another chain, with nothing signed', () => {
+    const refusal = questionChainRefusal('avalanche', 'monad')
+    expect(refusal).toContain('another chain')
+    expect(refusal).toContain('Nothing was signed or sent.')
   })
 })

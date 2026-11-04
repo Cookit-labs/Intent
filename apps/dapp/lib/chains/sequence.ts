@@ -88,7 +88,7 @@ export function strandedReply(
 ): string {
   const paidOut = followOn.kind === 'cashout' ? ' Nothing was paid out.' : ''
   if (delivered === undefined) {
-    return `The swap went through, but I could not confirm what reached your wallet, so the next step did not run. Check your wallet before doing anything else.${paidOut}`
+    return `The swap went through, but I could not confirm what reached your wallet, so the next step did not run. What arrived stays in your wallet. Check your wallet before doing anything else.${paidOut}`
   }
   return `The swap went through and about ${delivered} ${symbol} reached your wallet, but the next step did not run.${paidOut}`
 }
