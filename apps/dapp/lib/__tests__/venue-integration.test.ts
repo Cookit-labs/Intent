@@ -131,12 +131,15 @@ describe('DeFindex is claimed as far as it has been proven', () => {
 })
 
 describe('the integrated venues are on the right chain', () => {
-  it('keeps every executing venue on Stellar', () => {
-    // Execution is Stellar-only today. An EVM venue marked executable would
-    // send a user to a confirm screen that cannot build anything.
+  it('keeps every executing venue on a chain that can execute', () => {
+    // An EVM venue marked executable would send a user to a confirm screen that
+    // cannot build anything: EVM chains connect but have no signing path yet.
     for (const v of venues) {
       if (v.integration === 'executes') {
-        expect(v.family, `${v.id} claims execution but is ${v.family}`).toBe('stellar')
+        expect(
+          ['stellar', 'solana', 'sui', 'near'],
+          `${v.id} claims execution but is ${v.family}`
+        ).toContain(v.family)
       }
     }
   })

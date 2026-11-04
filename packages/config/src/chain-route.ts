@@ -20,9 +20,11 @@ import {
  * with several, `/stellar` is a legacy address that redirects to the default
  * network's own.
  */
+const SINGLE_NETWORK_CHAINS = ['arc', 'solana', 'avalanche', 'sui', 'monad', 'near'] as const
+
 export interface ChainRoute {
   slug: ChainSlug
-  /** Set for Stellar; absent for Arc. */
+  /** Set for Stellar; absent for every other chain. */
   network?: StellarNetworkName
   /** The bare `/stellar` segment, with the network left to the default. */
   legacy?: true
@@ -32,7 +34,8 @@ export function parseChainSegment(
   segment: string,
   enabled: readonly StellarNetworkName[] = enabledNetworks()
 ): ChainRoute | undefined {
-  if (segment === 'arc') return { slug: 'arc' }
+  const single = SINGLE_NETWORK_CHAINS.find((slug) => slug === segment)
+  if (single !== undefined) return { slug: single }
   if (segment === 'stellar') return { slug: 'stellar', legacy: true }
   if (segment === 'stellar-mainnet' && enabled.includes('mainnet')) {
     return { slug: 'stellar', network: 'mainnet' }
@@ -45,7 +48,7 @@ export function parseChainSegment(
 
 /** The path segment for a chain: network-specific when several networks are served. */
 export function chainSegment(slug: ChainSlug, network?: StellarNetworkName): string {
-  if (slug === 'arc' || !isMultiNetwork()) return slug
+  if (slug !== 'stellar' || !isMultiNetwork()) return slug
   return `stellar-${network ?? defaultNetwork()}`
 }
 
@@ -65,6 +68,6 @@ export function homePath(enabled: readonly StellarNetworkName[] = enabledNetwork
 
 /** Every segment this deployment answers to, for static generation and menus. */
 export function chainSegments(): string[] {
-  if (!isMultiNetwork()) return ['arc', 'stellar']
-  return ['arc', ...enabledNetworks().map((n) => `stellar-${n}`)]
+  const stellar = isMultiNetwork() ? enabledNetworks().map((n) => `stellar-${n}`) : ['stellar']
+  return [...SINGLE_NETWORK_CHAINS, ...stellar]
 }

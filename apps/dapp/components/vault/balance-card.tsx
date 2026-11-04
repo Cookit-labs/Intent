@@ -1,7 +1,7 @@
 'use client'
 
 import { STELLAR_USDC, stellarNetwork } from '@intent/config'
-import { Badge, Button, Card, Skeleton } from '@intent/ui'
+import { Button, Card, Skeleton } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 
 import { fetchStellarBalances } from '../../lib/stellar-account'
@@ -46,10 +46,7 @@ export function BalanceCard(): JSX.Element {
 
   return (
     <Card className="flex flex-col gap-3 p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-muted-foreground text-sm">Native balance</span>
-        <Badge variant="outline">{descriptor.networkLabel}</Badge>
-      </div>
+      <span className="text-muted-foreground text-sm">Native balance</span>
 
       {balance === undefined ? (
         <Skeleton className="h-8 w-40" />

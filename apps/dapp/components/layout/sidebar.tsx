@@ -1,10 +1,13 @@
 'use client'
 
 import { ChainMark, cn } from '@intent/ui'
-import { BarChart3, Boxes, History, Sparkles, Vault, Wallet } from 'lucide-react'
-import Link from 'next/link'
+import { BarChart3, Boxes, History, Loader2, Sparkles, Vault, Wallet } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 
+import { createNavGuard } from '../../lib/nav-guard'
 import { useChain } from '../../providers/chain-provider'
 import { MobileAppCard } from './mobile-app-card'
 import { BrandMark } from './brand-mark'
@@ -18,6 +21,16 @@ const nav = [
   { href: '/vault', label: 'Vault', icon: Vault, soon: true },
 ] as const
 
+/** A spinner while its link loads, so a click that is working looks like it. */
+function NavIcon({ icon: Icon }: { icon: LucideIcon }): JSX.Element {
+  const { pending } = useLinkStatus()
+  return pending ? (
+    <Loader2 className="h-4 w-4 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
+  ) : (
+    <Icon className="h-4 w-4 shrink-0" />
+  )
+}
+
 export function Sidebar({
   onNavigate,
   className,
@@ -28,6 +41,9 @@ export function Sidebar({
 } = {}): JSX.Element {
   const pathname = usePathname()
   const { slug, segment, descriptor } = useChain()
+  const [guard] = useState(() => createNavGuard())
+
+  useEffect(() => guard.settle(), [guard, pathname])
 
   return (
     <aside
@@ -50,9 +66,15 @@ export function Sidebar({
             <Link
               key={href}
               href={href}
-              // Closes the drawer on mobile. Without it the menu stays open
-              // over the page the user just asked for.
-              onClick={() => onNavigate?.()}
+              onClick={(e) => {
+                if (pathname !== href && !guard.follow(href)) {
+                  e.preventDefault()
+                  return
+                }
+                // Closes the drawer on mobile. Without it the menu stays open
+                // over the page the user just asked for.
+                onNavigate?.()
+              }}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 active
@@ -60,7 +82,7 @@ export function Sidebar({
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <NavIcon icon={Icon} />
               {label}
               {soon ? (
                 <span

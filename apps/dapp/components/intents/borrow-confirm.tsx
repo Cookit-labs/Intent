@@ -1,5 +1,6 @@
 'use client'
 
+import { isMainnet } from '@intent/config'
 import { Button, Card } from '@intent/ui'
 import { CheckCircle2, ExternalLink, Loader2, TriangleAlert } from 'lucide-react'
 
@@ -215,10 +216,12 @@ export function BorrowConfirm({
         </p>
       ) : null}
 
-      <p className="text-muted-foreground text-xs">
-        Testnet prices come from the pool&apos;s own oracle and are set by its administrators, so
-        these figures describe testnet only.
-      </p>
+      {isMainnet() ? null : (
+        <p className="text-muted-foreground text-xs">
+          Testnet prices come from the pool&apos;s own oracle and are set by its administrators, so
+          these figures describe testnet only.
+        </p>
+      )}
 
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={borrow.confirm} disabled={busy || tooRisky}>

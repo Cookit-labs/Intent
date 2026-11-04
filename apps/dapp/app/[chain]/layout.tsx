@@ -1,6 +1,8 @@
 import { chainSegments, parseChainSegment } from '@intent/config'
+import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
 
+import { WalletGate } from '../../components/connect/wallet-gate'
 import { AppShell } from '../../components/layout/app-shell'
 import { tradeCapUsd } from '../../lib/server/trade-cap'
 import { ChainProvider } from '../../providers/chain-provider'
@@ -35,9 +37,17 @@ export default async function ChainLayout({
     cap = undefined
   }
 
+  // For the browser tests, which have no wallet. Needs the server's own setting
+  // as well as the cookie, so a visitor cannot switch the gate off in production.
+  const bypass =
+    process.env['E2E_WALLET_GATE_BYPASS'] === '1' &&
+    (await cookies()).get('e2e-no-wallet-gate') !== undefined
+
   return (
     <ChainProvider segment={chain}>
-      <AppShell tradeCapUsd={cap}>{children}</AppShell>
+      <WalletGate bypass={bypass}>
+        <AppShell tradeCapUsd={cap}>{children}</AppShell>
+      </WalletGate>
     </ChainProvider>
   )
 }

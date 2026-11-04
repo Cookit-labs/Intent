@@ -1,9 +1,15 @@
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
 import type { Venue } from '@intent/types'
 
+import { nearVenues } from './chains/near/venues'
+import { solanaVenues } from './chains/solana/venues'
+import { suiVenues } from './chains/sui/venues'
 import { anchorsOn } from './offramp/anchors'
 
 export const venues: Venue[] = [
+  ...solanaVenues,
+  ...suiVenues,
+  ...nearVenues,
   {
     id: 'cow-swap',
     family: 'evm' as const,
@@ -360,6 +366,25 @@ export function notOnNetworkLabel(
 ): string | undefined {
   if (network !== 'mainnet' || venue.family !== 'stellar') return undefined
   return onNetwork ? undefined : 'Not on mainnet yet'
+}
+
+/** The test anchor exists only for testnet. On mainnet it is not coming, so it is not listed. */
+export function isListedOn(
+  venue: Pick<Venue, 'id'>,
+  network: StellarNetworkName = activeNetwork()
+): boolean {
+  return !(venue.id === 'testanchor' && network === 'mainnet')
+}
+
+/**
+ * What a venue's card says it does. A capability describes the network it works
+ * on, so a venue not on this one gets only its summary.
+ */
+export function venueDetail(
+  venue: Pick<Venue, 'bestFor' | 'capability'>,
+  notHere: string | undefined
+): string {
+  return notHere === undefined ? (venue.capability ?? venue.bestFor) : venue.bestFor
 }
 
 /**

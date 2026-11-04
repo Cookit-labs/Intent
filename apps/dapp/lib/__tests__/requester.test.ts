@@ -30,7 +30,13 @@ describe('requesterOf', () => {
     expect(requesterOf(req())).toBeUndefined()
   })
 
-  it('is nobody for a wallet header that is not a Stellar account', () => {
+  it('keys records by a wallet on any connectable chain', () => {
+    expect(requesterOf(req({ [WALLET_HEADER]: 'alice.near' }))).toEqual({
+      email: 'wallet:alice.near',
+    })
+  })
+
+  it('is nobody for a wallet header that is not an address', () => {
     expect(requesterOf(req({ [WALLET_HEADER]: 'not-an-address' }))).toBeUndefined()
     expect(requesterOf(req({ [WALLET_HEADER]: `${wallet},${wallet}` }))).toBeUndefined()
   })

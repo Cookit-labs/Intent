@@ -1,5 +1,6 @@
 'use client'
 
+import { isMainnet } from '@intent/config'
 import { ChainMark, cn } from '@intent/ui'
 import {
   ArrowDown,
@@ -539,8 +540,9 @@ export function SwapConfirm({
 
       {distorted ? (
         <p className="text-warning text-xs">
-          This testnet venue&apos;s rate differs sharply from the real market, so the amount you
-          receive is not what this trade would return on mainnet.
+          {isMainnet()
+            ? 'This venue’s rate differs sharply from the wider market. Check the amount you receive before signing.'
+            : 'This testnet venue’s rate differs sharply from the real market, so the amount you receive is not what this trade would return on mainnet.'}
         </p>
       ) : null}
 

@@ -1,4 +1,4 @@
-import type { ChainConfig, SupportedNetwork } from '@intent/types'
+import type { ChainConfig, DeployedNetwork } from '@intent/types'
 
 /**
  * Arc testnet. Values verified against the live chain, not the docs alone.
@@ -34,7 +34,7 @@ export const arcMainnet: ChainConfig = {
   nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
 }
 
-export const chains: Record<SupportedNetwork, ChainConfig> = {
+export const chains: Record<DeployedNetwork, ChainConfig> = {
   'arc-testnet': arcTestnet,
   'arc-mainnet': arcMainnet,
   local: {

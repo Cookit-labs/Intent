@@ -13,6 +13,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { ChainAdapter, ChainWallet, SignOutcome, SignRequest } from '../chain-adapter'
+import type { SignedOutcome, SigningPayload } from '../chains/types'
+import { orderWallets, type WalletConnector } from '../wallet/connector'
 import { walletErrorMessage } from '../wallet/error-message'
 import { lobstrNeedsConnection } from '../wallet/lobstr'
 import { Networks } from '@creit.tech/stellar-wallets-kit/types'
@@ -78,6 +80,8 @@ const listeners = new Set<() => void>()
 
 let sharedAddress: string | undefined
 let sharedNetwork: string | undefined
+/** Undecided until the first restore finishes, so a reload does not flash the connect page. */
+let sharedRestoring = true
 
 function publish(): void {
   for (const notify of listeners) notify()
@@ -92,6 +96,12 @@ function setSharedAddress(next: string | undefined): void {
 function setSharedNetwork(next: string | undefined): void {
   if (sharedNetwork === next) return
   sharedNetwork = next
+  publish()
+}
+
+function finishRestoring(): void {
+  if (!sharedRestoring) return
+  sharedRestoring = false
   publish()
 }
 
@@ -142,6 +152,64 @@ function buildLoginMessage(address: string): string {
     '',
     'Signing proves you control this account. It authorises no transaction and moves no funds.',
   ].join('\n')
+}
+
+/**
+ * Makes an address the app's Stellar connection, and proves control of it once.
+ *
+ * This used to sign a locally-built message, discard the signature, and then
+ * have `ensureSession` prompt a *second* time for the server's challenge: two
+ * wallet popups per connect, the first proving nothing to anyone. The server's
+ * challenge is the only signature that establishes anything, so it is the only
+ * one asked for.
+ *
+ * Failure of that step is not fatal: swapping and placing orders are on-chain
+ * and need no server. Only saved history does, so a declined or unreachable
+ * sign-in still leaves a usable wallet rather than blocking the connection.
+ */
+async function establishConnection(picked: string): Promise<void> {
+  setSharedAddress(picked)
+
+  try {
+    await ensureSession(picked)
+    // Marked verified only once a signature actually succeeded. This flag is
+    // what lets a reload restore the session without prompting again, so setting
+    // it on an unsigned connection would restore a session nobody proved.
+    writeSession({ address: picked, verified: true })
+  } catch {
+    // The wallet is connected and usable; the backend simply has no session for
+    // it. Recorded as unverified so a reload asks again rather than silently
+    // restoring an unproven address.
+    writeSession({ address: picked, verified: false })
+  }
+
+  setSharedNetwork(
+    await walletPassphrase(() => StellarWalletsKit.getNetwork(), stellarNetwork.networkPassphrase)
+  )
+}
+
+/** The connect dialog's view of Stellar: the kit's wallets, without the kit's modal. */
+export const stellarConnector: WalletConnector = {
+  isConnected: () => sharedAddress !== undefined,
+  listWallets: async () => {
+    ensureKit()
+    const wallets = await StellarWalletsKit.refreshSupportedWallets()
+    return orderWallets(
+      wallets.map((w) => ({
+        id: w.id,
+        name: w.name,
+        icon: w.icon,
+        detected: w.isAvailable,
+        installUrl: w.url,
+      }))
+    )
+  },
+  connect: async (walletId) => {
+    alignKitNetwork()
+    StellarWalletsKit.setWallet(walletId)
+    const { address } = await StellarWalletsKit.fetchAddress()
+    await establishConnection(address)
+  },
 }
 
 /**
@@ -205,7 +273,7 @@ function useStellarWallet(): ChainWallet {
       }
     }
 
-    void restore()
+    void restore().finally(finishRestoring)
     return () => {
       cancelled = true
     }
@@ -218,43 +286,8 @@ function useStellarWallet(): ChainWallet {
       setError(undefined)
 
       try {
-        // Step 1: the user picks a wallet from the kit's modal.
         const { address: picked } = await StellarWalletsKit.authModal()
-
-        // Step 2: prove control of it, once.
-        //
-        // This used to sign a locally-built message, discard the signature, and
-        // then have `ensureSession` prompt a *second* time for the server's
-        // challenge — two wallet popups per connect, the first proving nothing
-        // to anyone. The server's challenge is the only signature that
-        // establishes anything, so it is the only one asked for.
-        //
-        // Failure is not fatal: swapping and placing orders are on-chain and
-        // need no server. Only saved history does, so a declined or unreachable
-        // sign-in still leaves a usable wallet rather than blocking the
-        // connection.
-        setSharedAddress(picked)
-
-        try {
-          await ensureSession(picked)
-          // Marked verified only once a signature actually succeeded. This flag
-          // is what lets a reload restore the session without prompting again,
-          // so setting it on an unsigned connection would restore a session
-          // nobody proved.
-          writeSession({ address: picked, verified: true })
-        } catch {
-          // The wallet is connected and usable; the backend simply has no
-          // session for it. Recorded as unverified so a reload asks again
-          // rather than silently restoring an unproven address.
-          writeSession({ address: picked, verified: false })
-        }
-
-        setSharedNetwork(
-          await walletPassphrase(
-            () => StellarWalletsKit.getNetwork(),
-            stellarNetwork.networkPassphrase
-          )
-        )
+        await establishConnection(picked)
       } catch (e) {
         // The kit throws when the user closes the modal or rejects the
         // signature — both are ordinary outcomes, not faults.
@@ -357,6 +390,7 @@ function useStellarWallet(): ChainWallet {
     address,
     isConnected: address !== undefined,
     isConnecting,
+    isRestoring: sharedRestoring,
     isWrongNetwork,
     // Not shown while the wallet is on another network: the last read may be
     // from the network it was on before, and a number beside a mismatch
@@ -466,6 +500,21 @@ async function signStellarTransaction(req: SignRequest): Promise<SignOutcome> {
   }
 }
 
+/** The shared signing outcome, for flows that are not tied to Stellar by shape. */
+async function signStellarPrepared(payload: SigningPayload): Promise<SignedOutcome> {
+  if (payload.family !== 'stellar') {
+    return { ok: false, reason: 'wallet_error', detail: 'That is not a Stellar transaction.' }
+  }
+  const outcome = await signStellarTransaction({ xdr: payload.xdr, address: payload.account })
+  if (outcome.ok) return { ok: true, signed: { family: 'stellar', signedXdr: outcome.signedXdr } }
+  if (outcome.reason === 'rejected') return { ok: false, reason: 'rejected' }
+  return {
+    ok: false,
+    reason: 'wallet_error',
+    detail: outcome.detail ?? 'The wallet could not sign this.',
+  }
+}
+
 const adapters = new Map<StellarNetworkName, ChainAdapter>()
 
 /**
@@ -484,6 +533,7 @@ export function stellarAdapterFor(network: StellarNetworkName): ChainAdapter {
     // Testnet only. On mainnet there is no faucet and the field is absent.
     ...(net.friendbotUrl !== undefined ? { faucetUrl: net.friendbotUrl } : {}),
     signTransaction: signStellarTransaction,
+    signPrepared: signStellarPrepared,
   }
   adapters.set(network, built)
   return built

@@ -2,7 +2,7 @@
 
 import {
   CHAIN_DESCRIPTORS,
-  CHAIN_ORDER,
+  CONNECT_CHAINS,
   activeNetwork,
   chainSegment,
   enabledNetworks,
@@ -11,35 +11,20 @@ import {
   type StellarNetworkName,
 } from '@intent/config'
 import type { ChainSlug } from '@intent/types'
-import { ChainMark, type ChainLogoId } from '@intent/ui'
+import { ChainMark } from '@intent/ui'
 import { cn } from '@intent/ui'
 import { ArrowUpRight, Check, ChevronDown } from 'lucide-react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
+import { useGoToChain } from '../../hooks/use-go-to-chain'
+import { chainTitle } from '../../lib/chain-title'
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
+import { pathUnderChain } from '../../lib/wallet/chain-path'
+import { connectorFor } from '../../lib/wallet/connectors'
 import { useWallet } from '../../hooks/use-wallet'
+import { ConnectDialog } from '../connect/connect-dialog'
 import { useChain } from '../../providers/chain-provider'
-
-/**
- * The network as a short tag beside the chain's name. Testnet is amber so it
- * cannot be mistaken for the network that moves real money.
- */
-function NetworkTag({ label, className }: { label: string; className?: string }): JSX.Element {
-  const test = /test/i.test(label)
-  const short = label.replace(/^(stellar|arc)\s+/i, '')
-  return (
-    <span
-      className={cn(
-        'rounded-full px-2 py-0.5 text-[11px] font-medium capitalize',
-        test ? 'bg-warning/15 text-warning' : 'bg-bubble-me text-bubble-me-foreground',
-        className
-      )}
-    >
-      {short}
-    </span>
-  )
-}
 
 /**
  * Switches chain, and Stellar network, while staying on the same screen.
@@ -54,12 +39,6 @@ function NetworkTag({ label, className }: { label: string; className?: string })
  * what the wallet session, the cached data and every API call mean, and none
  * of it should carry across from the other network.
  */
-/** Planned, not built. Listed so the roadmap is visible; never selectable. */
-const COMING_SOON: { id: ChainLogoId; name: string }[] = [
-  { id: 'solana', name: 'Solana' },
-  { id: 'avalanche', name: 'Avalanche' },
-]
-
 interface Entry {
   key: string
   segment: string
@@ -72,10 +51,10 @@ interface Entry {
 /** One entry per place a user can be, when several networks are served. */
 function entriesFor(): Entry[] {
   const out: Entry[] = []
-  for (const option of CHAIN_ORDER) {
-    if (option === 'arc') {
-      const d = CHAIN_DESCRIPTORS.arc
-      out.push({ key: 'arc', segment: 'arc', slug: 'arc', name: d.name, label: d.networkLabel })
+  for (const option of CONNECT_CHAINS) {
+    if (option !== 'stellar') {
+      const d = CHAIN_DESCRIPTORS[option]
+      out.push({ key: option, segment: option, slug: option, name: d.name, label: d.networkLabel })
       continue
     }
     for (const network of enabledNetworks()) {
@@ -100,9 +79,10 @@ export function ChainSwitcher({
   caption?: ReactNode
 } = {}): JSX.Element {
   const { slug, network, descriptor } = useChain()
-  const router = useRouter()
   const pathname = usePathname()
+  const goToChain = useGoToChain()
   const [open, setOpen] = useState(false)
+  const [connecting, setConnecting] = useState<ChainSlug | undefined>(undefined)
   const rootRef = useRef<HTMLDivElement>(null)
   const multi = isMultiNetwork()
   const { isConnected } = useWallet()
@@ -131,24 +111,23 @@ export function ChainSwitcher({
     }
   }, [open])
 
-  /** The same screen under another segment; everything deeper is chain-independent. */
-  function pathUnder(segment: string): string {
-    const rest = pathname.split('/').slice(2).join('/')
-    return `/${segment}${rest === '' ? '/intents' : `/${rest}`}`
-  }
-
   function switchTo(entry: Entry): void {
     setOpen(false)
     const active = entry.slug === slug && entry.network === network
     if (active) return
+    if (entry.slug !== 'stellar') {
+      switchChain(entry.slug)
+      return
+    }
     // A full load, so nothing from the other network is carried into this one.
-    window.location.assign(pathUnder(entry.segment))
+    window.location.assign(pathUnderChain(pathname, entry.segment))
   }
 
-  function switchChain(next: string): void {
+  function switchChain(next: ChainSlug): void {
     setOpen(false)
     if (next === slug) return
-    router.push(pathUnder(next))
+    if (connectorFor(next).isConnected()) goToChain(next)
+    else setConnecting(next)
   }
 
   const rowClass = (active: boolean): string =>
@@ -179,8 +158,7 @@ export function ChainSwitcher({
             title={isConnected ? 'Wallet connected' : 'No wallet connected'}
           />
         </span>
-        {descriptor.name}
-        <NetworkTag label={descriptor.networkLabel} />
+        {chainTitle(descriptor.name, descriptor.networkLabel)}
         <ChevronDown
           className={cn(
             'text-muted-foreground h-3.5 w-3.5 transition-transform',
@@ -210,16 +188,13 @@ export function ChainSwitcher({
                   className={rowClass(entry.slug === slug && entry.network === network)}
                 >
                   <ChainMark chain={entry.slug} className="h-7 w-7 shrink-0" />
-                  <span className="flex flex-1 items-center gap-2">
-                    {entry.name}
-                    <NetworkTag label={entry.label} />
-                  </span>
+                  <span className="flex-1">{chainTitle(entry.name, entry.label)}</span>
                   {entry.slug === slug && entry.network === network ? (
                     <Check className="text-brand h-4 w-4" />
                   ) : null}
                 </button>
               ))
-            : CHAIN_ORDER.map((option) => {
+            : CONNECT_CHAINS.map((option) => {
                 const d = CHAIN_DESCRIPTORS[option]
                 return (
                   <button
@@ -231,10 +206,7 @@ export function ChainSwitcher({
                     className={rowClass(option === slug)}
                   >
                     <ChainMark chain={option} className="h-7 w-7 shrink-0" />
-                    <span className="flex flex-1 items-center gap-2">
-                      {d.name}
-                      <NetworkTag label={d.networkLabel} />
-                    </span>
+                    <span className="flex-1">{chainTitle(d.name, d.networkLabel)}</span>
                     {option === slug ? <Check className="text-brand h-4 w-4" /> : null}
                   </button>
                 )
@@ -248,44 +220,21 @@ export function ChainSwitcher({
               className="hover:bg-muted/60 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
             >
               <ChainMark chain="stellar" className="h-7 w-7 shrink-0" />
-              <span className="flex flex-1 items-center gap-2">
-                Stellar
-                <NetworkTag label={other.label} />
-              </span>
+              <span className="flex-1">{chainTitle('Stellar', other.label)}</span>
               <ArrowUpRight className="text-muted-foreground ml-auto h-3.5 w-3.5" />
             </a>
           ) : null}
-          {!multi && other.href === undefined ? (
-            <div
-              role="menuitem"
-              aria-disabled="true"
-              aria-label={`Stellar ${other.label.replace(/^stellar\s+/i, '')}, not set up here`}
-              className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm"
-            >
-              <ChainMark chain="stellar" className="h-7 w-7 shrink-0 opacity-60" />
-              <span className="flex flex-col leading-tight">
-                <span>Stellar</span>
-                <span className="text-xs">{other.label} · not set up here</span>
-              </span>
-            </div>
-          ) : null}
-
-          <p className="text-muted-foreground px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider">
-            Coming soon
-          </p>
-          {COMING_SOON.map((c) => (
-            <div
-              key={c.id}
-              role="menuitem"
-              aria-disabled="true"
-              aria-label={`${c.name}, coming soon`}
-              className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm"
-            >
-              <ChainMark chain={c.id} className="h-7 w-7 shrink-0 opacity-60 grayscale" />
-              <span>{c.name}</span>
-            </div>
-          ))}
         </div>
+      ) : null}
+      {connecting !== undefined ? (
+        <ConnectDialog
+          initialChain={connecting}
+          onConnected={(next) => {
+            setConnecting(undefined)
+            goToChain(next)
+          }}
+          onClose={() => setConnecting(undefined)}
+        />
       ) : null}
     </div>
   )

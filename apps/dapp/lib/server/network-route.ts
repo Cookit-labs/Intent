@@ -1,4 +1,4 @@
-import type { StellarNetworkName } from '@intent/config'
+import { homeSegment, parseChainSegment, type StellarNetworkName } from '@intent/config'
 
 /**
  * Reading a network out of an address, for middleware. Pure and free of Node
@@ -41,15 +41,44 @@ const BARE_SCREENS = [
 ]
 
 /**
- * Where the bare root, and the old unprefixed screens, go: the same screen on the
- * home chain, keeping the rest of the path and the query. Nothing for any other
- * address.
+ * Where the bare root, and the old unprefixed screens, go. The root is the connect
+ * page, so it stays put unless a chain is remembered from an earlier visit. The old
+ * screens open on the home chain, keeping the rest of the path and the query.
+ * Nothing for any other address.
  */
-export function bareRedirect(pathname: string, search: string, home: string): string | undefined {
-  if (pathname === '/') return `/${home}/intents${search}`
+export function bareRedirect(
+  pathname: string,
+  search: string,
+  home: string,
+  remembered: string | undefined
+): string | undefined {
+  if (pathname === '/') {
+    return remembered === undefined ? undefined : `/${remembered}/intents${search}`
+  }
   const first = pathname.split('/')[1] ?? ''
   if (!BARE_SCREENS.includes(first)) return undefined
   return `/${home}${pathname}${search}`
+}
+
+/**
+ * The chain last connected to, so a returning visitor goes back to their wallet.
+ * It comes from a cookie anyone can edit, so it counts only if it names a real chain.
+ */
+export function rememberedChain(
+  remembered: string | undefined,
+  enabled: readonly StellarNetworkName[]
+): string | undefined {
+  return remembered !== undefined && parseChainSegment(remembered, enabled) !== undefined
+    ? remembered
+    : undefined
+}
+
+/** The chain an old unprefixed screen opens on. */
+export function homeFor(
+  remembered: string | undefined,
+  enabled: readonly StellarNetworkName[]
+): string {
+  return rememberedChain(remembered, enabled) ?? homeSegment(enabled)
 }
 
 /** Pages that are not part of the app's chain screens and are never behind the gate. */

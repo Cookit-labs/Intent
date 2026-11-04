@@ -1,11 +1,12 @@
 'use client'
 
 import type { IntentStatus } from '@intent/types'
-import { Badge, Button, Card, Separator, cn } from '@intent/ui'
+import { Button, Card, Separator, cn } from '@intent/ui'
 import { ArrowRight, Check, ExternalLink, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 
+import { chainTitle } from '../../../../lib/chain-title'
 import { IntentStatusBadge } from '../../../../components/intents/intent-status-badge'
 import { useCancelIntent, useIntent } from '../../../../hooks/use-intent'
 import { intentTypeLabel } from '../../../../lib/intent-format'
@@ -193,9 +194,8 @@ export default function IntentDetailPage(): JSX.Element {
             {/* Read from the active chain rather than hardcoded: this said
                 "USDC on Arc" on every intent, including Stellar ones signed
                 with a Stellar wallet. */}
-            <p className="text-foreground flex items-center gap-1">
-              {intent.tokenIn} on {descriptor.name}{' '}
-              <Badge variant="outline">{descriptor.networkLabel}</Badge>
+            <p className="text-foreground">
+              {intent.tokenIn} on {chainTitle(descriptor.name, descriptor.networkLabel)}
             </p>
           </div>
         </div>

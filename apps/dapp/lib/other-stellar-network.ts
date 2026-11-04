@@ -14,7 +14,8 @@ export interface OtherStellarNetwork {
  * lists, the sponsor and the session gate are all decided for that network.
  * So the other network is a separate deployment, reached by a link. The
  * address comes from configuration and is used only if it is http or https,
- * so a bad value cannot become a `javascript:` link in the menu.
+ * so a bad value cannot become a `javascript:` link in the menu. A mainnet
+ * deployment never links to testnet: people there should not see it exists.
  */
 export function otherStellarNetwork(
   active: StellarNetworkName,
@@ -23,6 +24,8 @@ export function otherStellarNetwork(
 ): OtherStellarNetwork {
   const label = active === 'mainnet' ? 'Stellar testnet' : 'Stellar mainnet'
   const base = otherUrl?.trim().replace(/\/+$/, '')
-  if (base === undefined || !/^https?:\/\/[^/]/i.test(base)) return { label }
+  if (active === 'mainnet' || base === undefined || !/^https?:\/\/[^/]/i.test(base)) {
+    return { label }
+  }
   return { label, href: `${base}${path}` }
 }

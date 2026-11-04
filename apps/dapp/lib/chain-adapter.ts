@@ -1,5 +1,7 @@
 import type { ChainDescriptor, ChainSlug } from '@intent/types'
 
+import type { SignedOutcome, SigningPayload } from './chains/types'
+
 /**
  * The wallet surface every chain must provide, and the only wallet API that
  * components are allowed to see.
@@ -18,6 +20,8 @@ export interface WalletSnapshot {
   address: string | undefined
   isConnected: boolean
   isConnecting: boolean
+  /** A remembered wallet is reconnecting, so "not connected" is not yet an answer. */
+  isRestoring?: boolean
   /** Connected, but the wallet is pointed at a different network. */
   isWrongNetwork: boolean
   /** Formatted native balance (Arc: USDC, Stellar: XLM). Undefined until read. */
@@ -92,6 +96,11 @@ export interface ChainAdapter {
    * execute, so callers must check rather than assume.
    */
   signTransaction?: (req: SignRequest) => Promise<SignOutcome>
+  /**
+   * Asks the wallet to sign a prepared action on a chain that is not Stellar.
+   * Separate from `signTransaction` because that one is Stellar XDR by shape.
+   */
+  signPrepared?: (payload: SigningPayload) => Promise<SignedOutcome>
 }
 
 export const EMPTY_WALLET: ChainWallet = {

@@ -5,7 +5,6 @@ import {
   NETWORK_HEADER,
   defaultNetwork,
   enabledNetworks,
-  homeSegment,
   resolveRequestedNetwork,
 } from '@intent/config'
 
@@ -13,11 +12,14 @@ import { gateEnabled } from './lib/server/access-gate'
 import { constantTimeEqual } from './lib/server/constant-time-equal'
 import {
   bareRedirect,
+  homeFor,
+  rememberedChain,
   isGateFree,
   legacyStellarRedirect,
   segmentNetwork,
 } from './lib/server/network-route'
 import { SESSION_COOKIE } from './lib/server/session-constants'
+import { CHAIN_COOKIE } from './lib/wallet/chain-cookie'
 
 /**
  * Blocks the dApp behind the access gate.
@@ -97,8 +99,15 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     const moved = legacyStellarRedirect(pathname, search, multi, fallback)
     if (moved !== undefined) return NextResponse.redirect(new URL(moved, request.url))
 
-    // The bare root and the old unprefixed screens open on the home chain.
-    const home = bareRedirect(pathname, search, homeSegment(enabled))
+    // The bare root is the connect page, unless a chain is remembered. The old
+    // unprefixed screens open on the chain last connected to, or the home chain.
+    const cookie = request.cookies.get(CHAIN_COOKIE)?.value
+    const home = bareRedirect(
+      pathname,
+      search,
+      homeFor(cookie, enabled),
+      rememberedChain(cookie, enabled)
+    )
     if (home !== undefined) return NextResponse.redirect(new URL(home, request.url))
   }
 

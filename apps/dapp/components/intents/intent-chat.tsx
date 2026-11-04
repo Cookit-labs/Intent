@@ -52,6 +52,27 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
+import { chainCapabilities } from '../../lib/chains/capabilities'
+import { chainHelp } from '../../lib/chains/explain'
+import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
+import { useChainAction } from '../../hooks/use-chain-action'
+import { ChainActionConfirm } from './chain-action-confirm'
+import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
+import { CashoutCard } from './cashout-card'
+import { CashoutCurrencyQuestion, type CashoutQuestionState } from './cashout-currency-question'
+import {
+  cashoutChoices,
+  NO_CASHOUTS,
+  unsupportedCurrencyReply,
+  unsupportedTokenReply,
+} from '../../lib/weave/cashout-view'
+import {
+  parseCashout,
+  parseCurrencyAnswer,
+  routeCashout,
+  type CashoutCurrencyCode,
+  type CashoutRoute,
+} from '../../lib/weave/parse-cashout'
 import {
   cashoutFormOutcome,
   cashoutOutcome,
@@ -110,6 +131,7 @@ import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
 import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
+import { NativeCoinTicker } from './native-coin-ticker'
 import { PriceTicker } from './price-ticker'
 import { agentBubble, systemPill, userBubble } from './bubble'
 import { AgentAvatar } from '../agents/agent-avatar'
@@ -281,7 +303,7 @@ export function IntentChat(): JSX.Element {
   const slippageEdit =
     strategy.slippageBps !== undefined ? { slippageBps: strategy.slippageBps } : {}
 
-  const { slug } = useChain()
+  const { slug, descriptor } = useChain()
   const { address, isConnected, balance: nativeBalance, balanceSymbol } = useWallet()
 
   // Checked once the wallet that owns it is known — historyOwner, which
@@ -433,6 +455,9 @@ export function IntentChat(): JSX.Element {
   // Supplying an asset already held. A separate shape from a sequence: there is
   // no earlier step whose output has to be carried.
   const supply = useSupply()
+  const chainAction = useChainAction()
+  const cashout = useCashout()
+  const [cashoutQuestion, setCashoutQuestion] = useState<CashoutQuestionState | null>(null)
   // A leveraged position on Noether. Its own shape again: no route, no
   // competition, and a sign-in with the venue before anything is built.
   const perp = usePerp()
@@ -1294,6 +1319,124 @@ export function IntentChat(): JSX.Element {
     })()
   }
 
+  /** A cash-out read from the composer: the card, or a plain answer about what it can't do. */
+  function startCashout(route: Exclude<CashoutRoute, { kind: 'pass' }>, text: string): void {
+    if (executionInFlight) {
+      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      return
+    }
+    setMessage(text)
+    setRestored(null)
+    setHistoryOpen(false)
+    setTurnId(null)
+    setParsed(null)
+    setFollowOn(null)
+    setPending(null)
+    setClarifying(null)
+    setCashoutQuestion(null)
+    setAffordError(null)
+    setNairaForm(null)
+    sequence.reset()
+    supply.reset()
+    perp.reset()
+
+    if (route.kind === 'ask') {
+      if (cashout.locked) {
+        chainAction.refuse(
+          'A cash-out is already under way. Follow it here, and do not send it again.',
+          text
+        )
+        return
+      }
+      cashout.dismiss()
+      chainAction.reset()
+      setClarifyBusy(true)
+      void fetchCashoutCurrencies(slug).then((weave) => {
+        setClarifyBusy(false)
+        const choices = cashoutChoices(slug, weave)
+        const only = choices.length === 1 ? choices[0] : undefined
+        if (choices.length === 0) {
+          chainAction.refuse(NO_CASHOUTS, text)
+        } else if (only !== undefined) {
+          // Nothing to ask about when one currency is all there is.
+          payOutIn(only.code, route.amount, text)
+        } else {
+          setCashoutQuestion({
+            choices,
+            ...(route.amount !== undefined ? { amount: route.amount } : {}),
+          })
+        }
+      })
+      return
+    }
+
+    if (route.kind === 'open') {
+      if (cashout.locked) {
+        chainAction.refuse(
+          'A cash-out is already under way. Follow it here, and do not send it again.',
+          text
+        )
+      } else if (slug === 'stellar' && !isMainnet()) {
+        chainAction.refuse(
+          'Cash-outs pay real money and run on Stellar mainnet only. Switch to mainnet to cash out.',
+          text
+        )
+      } else {
+        chainAction.reset()
+        cashout.open({
+          ...(route.amount !== undefined ? { amount: route.amount } : {}),
+          ...(route.currency !== undefined ? { currency: route.currency } : {}),
+        })
+      }
+      return
+    }
+
+    cashout.dismiss()
+    if (route.kind === 'token') {
+      chainAction.refuse(unsupportedTokenReply(route.token), text)
+      return
+    }
+    void fetchCashoutCurrencies(slug).then((currencies) => {
+      chainAction.refuse(unsupportedCurrencyReply(route.currency, currencies), text)
+    })
+  }
+
+  /** The currency is settled: the form that pays it. Naira on Stellar stays on the Linq form. */
+  function payOutIn(currency: string, amount: string | undefined, text: string): void {
+    chainAction.reset()
+    if (slug === 'stellar' && currency === 'NGN') {
+      const id = crypto.randomUUID()
+      setTurnId(id)
+      saveTurn({
+        id,
+        chain: slug,
+        text,
+        createdAt: new Date().toISOString(),
+        proposals: {},
+        winner: null,
+      })
+      setTurns(loadTurns(slug))
+      setNairaForm({
+        key: Date.now(),
+        path: 'xlm',
+        asset: 'usdc',
+        ...(amount !== undefined ? { amountXlm: Number(amount) } : {}),
+      })
+      return
+    }
+    cashout.open({
+      ...(amount !== undefined ? { amount } : {}),
+      currency: currency as CashoutCurrencyCode,
+    })
+  }
+
+  function answerCashoutQuestion(currency: string, said: string): void {
+    const asked = cashoutQuestion
+    if (asked === null) return
+    setCashoutQuestion({ ...asked, answer: said })
+    payOutIn(currency, asked.amount, message ?? said)
+  }
+
   /**
    * One request or answer from the composer.
    *
@@ -1306,6 +1449,57 @@ export function IntentChat(): JSX.Element {
   function handleSubmit(typed: string): void {
     // A misspelled verb is corrected before anything reads the sentence.
     const text = fixVerbTypo(typed)
+
+    const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
+    if (cashoutRoute.kind !== 'pass') {
+      startCashout(cashoutRoute, text)
+      return
+    }
+
+    // The answer to "which currency?". Anything that isn't one closes the question
+    // and is read as what it is, so nobody is held in it.
+    if (cashoutQuestion !== null && cashoutQuestion.answer === undefined) {
+      const answer = parseCurrencyAnswer(text)
+      if (answer !== null) {
+        const offered = cashoutQuestion.choices
+        const named = 'currency' in answer ? answer.currency : answer.unsupported
+        if (offered.some((choice) => choice.code === named)) {
+          answerCashoutQuestion(named, text)
+        } else {
+          setCashoutQuestion({
+            ...cashoutQuestion,
+            retry: { said: text, reply: unsupportedCurrencyReply(named, offered) },
+          })
+        }
+        return
+      }
+    }
+    setCashoutQuestion(null)
+
+    cashout.dismiss()
+    if (chainCapabilities(slug) === undefined) chainAction.reset()
+
+    // Solana, Sui and NEAR have their own path: the race and the swap routes
+    // below are Stellar's. Anything that isn't an instruction, such as a
+    // question, still goes to the orchestrator.
+    const capabilities = chainCapabilities(slug)
+    if (capabilities !== undefined) {
+      const action = parseChainAction(text)
+      if (action !== null) {
+        // The thread only renders once there is a message, so without this the
+        // card below would be built and never seen.
+        setMessage(text)
+        chainAction.prepare(action, text)
+        return
+      }
+      if (looksLikeChainAction(text)) {
+        setMessage(text)
+        chainAction.refuse(chainHelp(descriptor.name, capabilities), text)
+        return
+      }
+      chainAction.reset()
+    }
+
     // An answer to a question already asked.
     if (clarifying !== null) {
       void clarify(text, clarifying.turns)
@@ -1431,6 +1625,13 @@ export function IntentChat(): JSX.Element {
     // conversation the next message belongs to.
     dialogue.current = []
 
+    // The model wrote out a cash-out, perhaps from words no parser here would read.
+    const writtenOut = routeCashout(parseCashout(answer.instruction), slug, isMainnet())
+    if (writtenOut.kind !== 'pass') {
+      startCashout(writtenOut, turns[0]?.content ?? text)
+      return
+    }
+
     // Tokens the server proved for this request, so the page can trade them
     // without a hand-written entry.
     for (const asset of answer.read.liveAssets) {
@@ -1492,12 +1693,16 @@ export function IntentChat(): JSX.Element {
     setNotes([])
     setClarifying(null)
     setClarifyBusy(false)
+    setCashoutQuestion(null)
     setBrief([])
     setStrategy({})
   }
 
   function handleReset(): void {
-    setMessage(null)
+    // The thread stays while a cash-out is under way: it carries the warning not to resend.
+    setMessage(cashout.locked ? message : null)
+    cashout.dismiss()
+    setCashoutQuestion(null)
     setParsed(null)
     setExecutingKey(null)
     setPlacedId(null)
@@ -1857,9 +2062,12 @@ export function IntentChat(): JSX.Element {
             showing it lets the user see the conversion before writing the
             sentence rather than after signing it. Hidden on narrow screens,
             where the centred label and the actions already compete. */}
-        <span className="bg-muted/60 ml-4 hidden rounded-full px-3 py-1 md:inline-flex">
-          <PriceTicker prices={swap.priceDetail} />
-        </span>
+        <div
+          data-testid="chain-price"
+          className="border-border ml-4 hidden border-l pl-4 empty:hidden md:block"
+        >
+          {slug === 'stellar' ? <PriceTicker prices={swap.priceDetail} /> : <NativeCoinTicker />}
+        </div>
         {/* Past conversations. The chat keeps nothing across a reload on its
             own, so without this the agents' reasoning is lost the moment the
             page refreshes or a second intent is composed. */}
@@ -2155,6 +2363,14 @@ export function IntentChat(): JSX.Element {
                       )
                     )
                 : null}
+              {cashoutQuestion !== null ? (
+                <CashoutCurrencyQuestion
+                  question={cashoutQuestion}
+                  onChoose={(choice) =>
+                    answerCashoutQuestion(choice.code, `${choice.name} (${choice.code})`)
+                  }
+                />
+              ) : null}
               {clarifyBusy ? (
                 <div className={cn(agentBubble, 'text-muted-foreground w-fit')}>Thinking…</div>
               ) : null}
@@ -2343,6 +2559,12 @@ export function IntentChat(): JSX.Element {
               {/* Supplying what the account already holds. One transaction,
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
+
+              {chainAction.phase !== 'idle' ? <ChainActionConfirm action={chainAction} /> : null}
+
+              {cashout.session !== null ? (
+                <CashoutCard key={cashout.session.key} cashout={cashout} />
+              ) : null}
 
               {/* A leveraged position. One transaction, one signature, and a
                 liquidation price to read before it. */}

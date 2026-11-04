@@ -110,16 +110,11 @@ describe('the gate, per network', () => {
 describe('where the root and the old unprefixed addresses go', () => {
   const location = (res: Response): URL => new URL(res.headers.get('location') as string)
 
-  it('opens on Stellar mainnet when both networks are served', async () => {
-    const res = await run('http://app.test/', { env: BOTH })
-    expect(res.status).toBe(307)
-    expect(location(res).pathname).toBe('/stellar-mainnet/intents')
-  })
-
-  it('opens on the one Stellar address when one network is served', async () => {
-    const res = await run('http://app.test/', {})
-    expect(res.status).toBe(307)
-    expect(location(res).pathname).toBe('/stellar/intents')
+  it('leaves the root where it is: it is the connect page, with no chain in the address', async () => {
+    for (const env of [BOTH, {}]) {
+      const res = await run('http://app.test/', { env })
+      expect(res.headers.get('location')).toBeNull()
+    }
   })
 
   it('sends an old unprefixed screen to the same screen on the home chain, keeping the query', async () => {
@@ -135,14 +130,10 @@ describe('where the root and the old unprefixed addresses go', () => {
     }
   })
 
-  it('does not put the root behind the gate: the visitor lands on mainnet and is then asked to verify', async () => {
-    const root = await run('http://app.test/', { env: BOTH })
-    expect(location(root).pathname).toBe('/stellar-mainnet/intents')
-    const page = await run('http://app.test/stellar-mainnet/intents', {
-      env: { ...BOTH, ACCESS_GATE: 'on' },
-    })
-    expect(location(page).pathname).toBe('/verify')
-    expect(location(page).searchParams.get('next')).toBe('/stellar-mainnet/intents')
+  it('asks for verification before the connect page when the email gate is on', async () => {
+    const root = await run('http://app.test/', { env: { ...BOTH, ACCESS_GATE: 'on' } })
+    expect(location(root).pathname).toBe('/verify')
+    expect(location(root).searchParams.get('next')).toBe('/')
   })
 })
 

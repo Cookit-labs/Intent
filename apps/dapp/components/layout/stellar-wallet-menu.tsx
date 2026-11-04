@@ -23,6 +23,7 @@ import {
   type Activity,
   type Holding,
 } from '../../lib/wallet/account-activity'
+import { chainTitle } from '../../lib/chain-title'
 import { timeAgo } from '../../lib/wallet/time-ago'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
@@ -164,7 +165,9 @@ export function StellarWalletMenu({
             <WalletBadge icon={walletIcon} className="h-9 w-9" />
             <div className="min-w-0 flex-1">
               <p className="font-mono text-sm">{short(address)}</p>
-              <p className="text-muted-foreground text-xs">{descriptor.networkLabel}</p>
+              <p className="text-muted-foreground text-xs">
+                {chainTitle(descriptor.name, descriptor.networkLabel)}
+              </p>
             </div>
             <button
               type="button"
