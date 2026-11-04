@@ -1,3 +1,5 @@
+import { accountMismatch } from '../weave/cashout-view'
+
 /**
  * What was said in the chat, kept until New chat.
  *
@@ -15,6 +17,7 @@ export interface LiveTurn {
 
 const STORAGE_BASE = 'intent.chat.live.v1'
 const MAX_TURNS = 200
+const MAX_TEXT = 2000
 
 export function liveSessionKey(chain: string, account: string): string {
   return `${STORAGE_BASE}:${chain}:${account}`
@@ -38,6 +41,14 @@ function httpsUrl(value: unknown): string | undefined {
   }
 }
 
+/**
+ * A bank account number typed into a cash-out line must not sit in storage, and
+ * one long paste must not use up the quota and silently stop later turns.
+ */
+function storedText(text: string): string {
+  return text.replace(/\d{8,}/g, (run) => `••••${run.slice(-4)}`).slice(0, MAX_TEXT)
+}
+
 /** Rebuilt field by field, so nothing else in an entry can come through. */
 function toLiveTurn(value: unknown): LiveTurn | undefined {
   if (typeof value !== 'object' || value === null) return undefined
@@ -45,7 +56,7 @@ function toLiveTurn(value: unknown): LiveTurn | undefined {
   if (role !== 'user' && role !== 'agent') return undefined
   if (typeof text !== 'string' || typeof at !== 'number' || !Number.isFinite(at)) return undefined
   const link = httpsUrl(explorerUrl)
-  return { role, text, at, ...(link !== undefined ? { explorerUrl: link } : {}) }
+  return { role, text: storedText(text), at, ...(link !== undefined ? { explorerUrl: link } : {}) }
 }
 
 export function loadLiveSession(
@@ -94,6 +105,44 @@ export function clearLiveSession(
     // Nothing to do: the chat on screen is cleared either way.
   }
 }
+
+/**
+ * What a change of wallet does to the chat on screen. Another wallet must never
+ * see this one's chat, and resetting under an open signature would orphan it, so
+ * that waits. A wallet arriving or going away is the gate's business, not a switch.
+ */
+export function ownerChange(
+  previous: string | undefined,
+  next: string | undefined,
+  busy: boolean
+): 'keep' | 'reset' | 'defer' {
+  if (previous === undefined || next === undefined) return 'keep'
+  if (accountMismatch(next, previous) === undefined) return 'keep'
+  return busy ? 'defer' : 'reset'
+}
+
+export const WALLET_SWITCHED_NOTICE = 'Your wallet changed. Finish the open signature first.'
+export const FINISH_SIGNATURE_NOTICE =
+  'Finish or cancel the signature first, then continue the chat.'
+
+/** Notices about a signature answer nothing the person said, so a reload would show them alone. */
+export function recordableReply(text: string): boolean {
+  return text !== WALLET_SWITCHED_NOTICE && text !== FINISH_SIGNATURE_NOTICE
+}
+
+const CARD_WITHOUT_DEADLINE_MS = 5 * 60_000
+
+/** Whether a card still open when the person comes back has outlived what it was built on. */
+export function cardIsStale(card: { deadline?: string; shownAt: number }, now: number): boolean {
+  const deadline = card.deadline === undefined ? Number.NaN : Date.parse(card.deadline)
+  return Number.isNaN(deadline) ? now - card.shownAt > CARD_WITHOUT_DEADLINE_MS : now >= deadline
+}
+
+/**
+ * The label of the bank list's search box, in `bank-picker.tsx`. That file is not
+ * ours to change, so a test reads it to keep the two in step.
+ */
+export const BANK_SEARCH_LABEL = 'Search banks'
 
 /** Turns read for one wallet are shown to that wallet only, even for the render after a switch. */
 export function ownedTurns(

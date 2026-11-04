@@ -4,7 +4,7 @@ import { cn } from '@intent/ui'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 
-import { showChatOnPath } from '../../lib/chat/live-session'
+import { BANK_SEARCH_LABEL, showChatOnPath } from '../../lib/chat/live-session'
 import { intentIntro } from '../../lib/intent-intro-copy'
 import { useChain } from '../../providers/chain-provider'
 import { IntentChat } from './intent-chat'
@@ -12,7 +12,9 @@ import { IntentChat } from './intent-chat'
 /** A link that opens a rule still works when the chat is already mounted. */
 function ChatFromLink({ showing }: { showing: boolean }): JSX.Element {
   const rule = useSearchParams().get('rule')
-  return <IntentChat {...(showing && rule !== null ? { linkedRule: rule } : {})} />
+  return (
+    <IntentChat showing={showing} {...(showing && rule !== null ? { linkedRule: rule } : {})} />
+  )
 }
 
 /**
@@ -39,7 +41,7 @@ export function ChatHost({ children }: { children: ReactNode }): JSX.Element {
     }
     // The bank list is drawn on the body, which `hidden` cannot reach. Escape is its own way out.
     document
-      .querySelector('input[aria-label="Search banks"]')
+      .querySelector(`input[aria-label="${BANK_SEARCH_LABEL}"]`)
       ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   }, [showing])
 

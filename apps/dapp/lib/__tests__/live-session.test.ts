@@ -1,13 +1,22 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   appendLiveTurn,
+  BANK_SEARCH_LABEL,
+  cardIsStale,
   chainOutcomeSentence,
   clearLiveSession,
+  FINISH_SIGNATURE_NOTICE,
   liveSessionKey,
   loadLiveSession,
   ownedTurns,
+  ownerChange,
+  recordableReply,
   showChatOnPath,
+  WALLET_SWITCHED_NOTICE,
   type LiveTurn,
 } from '../chat/live-session'
 
@@ -254,5 +263,131 @@ describe('the one sentence a chain race settles to', () => {
       'A cash-out is under way.'
     )
     expect(chainOutcomeSentence({ phase: 'failed' })).toBeUndefined()
+  })
+})
+
+describe('another wallet connecting over an open chat', () => {
+  it('starts that wallet fresh when nothing is in flight', () => {
+    expect(ownerChange('alice', 'bob', false)).toBe('reset')
+  })
+
+  it('waits while a signature is open, since resetting would orphan it', () => {
+    expect(ownerChange('alice', 'bob', true)).toBe('defer')
+  })
+
+  it.each([
+    ['the same wallet', 'alice', 'alice'],
+    ['the same hex address in another case', '0xAbC1', '0xaBc1'],
+    ['a first connection', undefined, 'alice'],
+    ['a wallet going away', 'alice', undefined],
+    ['nobody at all', undefined, undefined],
+  ])('leaves the chat alone for %s', (_name, previous, next) => {
+    expect(ownerChange(previous, next, false)).toBe('keep')
+    expect(ownerChange(previous, next, true)).toBe('keep')
+  })
+
+  it('treats case as part of an address that is not hex', () => {
+    expect(ownerChange('SoLaNa', 'solana', false)).toBe('reset')
+  })
+})
+
+describe('what is said without being a reply', () => {
+  it('keeps a notice about a signature out of the transcript', () => {
+    expect(recordableReply(FINISH_SIGNATURE_NOTICE)).toBe(false)
+    expect(recordableReply(WALLET_SWITCHED_NOTICE)).toBe(false)
+  })
+
+  it('keeps a reply', () => {
+    expect(recordableReply('You can swap and send.')).toBe(true)
+  })
+})
+
+describe('a card still open when the person comes back', () => {
+  const shownAt = 1_000_000
+  const minute = 60_000
+
+  it('goes stale at its own deadline', () => {
+    const deadline = new Date(shownAt + 30 * minute).toISOString()
+    expect(cardIsStale({ deadline, shownAt }, shownAt + 29 * minute)).toBe(false)
+    expect(cardIsStale({ deadline, shownAt }, shownAt + 30 * minute)).toBe(true)
+  })
+
+  it('goes stale after five minutes when it names no deadline', () => {
+    expect(cardIsStale({ shownAt }, shownAt + 5 * minute)).toBe(false)
+    expect(cardIsStale({ shownAt }, shownAt + 5 * minute + 1)).toBe(true)
+  })
+
+  it('falls back to five minutes on a deadline it cannot read', () => {
+    expect(cardIsStale({ deadline: 'soon', shownAt }, shownAt + minute)).toBe(false)
+    expect(cardIsStale({ deadline: 'soon', shownAt }, shownAt + 6 * minute)).toBe(true)
+  })
+})
+
+describe('the words a saved turn keeps', () => {
+  function saved(text: string): string | undefined {
+    const storage = memoryStorage()
+    appendLiveTurn(storage, 'solana', 'a', turn(text))
+    return loadLiveSession(storage, 'solana', 'a')[0]?.text
+  }
+
+  it('hides all but the last four digits of a long number', () => {
+    expect(saved('0123456789')).toBe('••••6789')
+    expect(saved('send it to 0123456789 at GTBank')).toBe('send it to ••••6789 at GTBank')
+    expect(saved('12345678')).toBe('••••5678')
+  })
+
+  it('leaves short numbers alone', () => {
+    expect(saved('5.05 USDC')).toBe('5.05 USDC')
+    expect(saved('1234567')).toBe('1234567')
+  })
+
+  it('leaves an address alone when it holds no long run of digits', () => {
+    const hex = '0xAbCd1234EfAb5678CdEf9012AbCd3456EfAb7890'
+    const base58 = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV'
+    expect(saved(hex)).toBe(hex)
+    expect(saved(base58)).toBe(base58)
+  })
+
+  it('masks what was already stored, on load', () => {
+    const storage = memoryStorage()
+    storage.setItem(
+      liveSessionKey('solana', 'a'),
+      JSON.stringify([{ role: 'user', text: 'acct 0123456789', at: 1 }])
+    )
+    expect(loadLiveSession(storage, 'solana', 'a')[0]?.text).toBe('acct ••••6789')
+  })
+
+  it('stays the same when saved and read again', () => {
+    const storage = memoryStorage()
+    appendLiveTurn(storage, 'solana', 'a', turn('0123456789'))
+    appendLiveTurn(storage, 'solana', 'a', turn('next'))
+    expect(loadLiveSession(storage, 'solana', 'a')[0]?.text).toBe('••••6789')
+  })
+
+  it('cuts a long paste at 2000 characters', () => {
+    expect(saved('a'.repeat(5000))).toHaveLength(2000)
+    expect(saved('a'.repeat(2000))).toHaveLength(2000)
+  })
+
+  it('cuts on load as well', () => {
+    const storage = memoryStorage()
+    storage.setItem(
+      liveSessionKey('solana', 'a'),
+      JSON.stringify([{ role: 'user', text: 'a'.repeat(3000), at: 1 }])
+    )
+    expect(loadLiveSession(storage, 'solana', 'a')[0]?.text).toHaveLength(2000)
+  })
+})
+
+describe('closing the bank list from outside it', () => {
+  const read = (file: string): string =>
+    readFileSync(join(__dirname, '../../components/intents', file), 'utf8')
+
+  it('finds the label the picker really uses, so a rename fails here', () => {
+    expect(read('bank-picker.tsx')).toContain(`aria-label="${BANK_SEARCH_LABEL}"`)
+  })
+
+  it('queries by that label', () => {
+    expect(read('chat-host.tsx')).toContain('input[aria-label="${BANK_SEARCH_LABEL}"]')
   })
 })

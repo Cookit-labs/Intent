@@ -21,11 +21,16 @@ import {
 import { rememberExchange } from '../../lib/chat/dialogue'
 import {
   appendLiveTurn,
+  cardIsStale,
   chainOutcomeSentence,
   clearLiveSession,
+  FINISH_SIGNATURE_NOTICE,
   liveSessionStorage,
   loadLiveSession,
   ownedTurns,
+  ownerChange,
+  recordableReply,
+  WALLET_SWITCHED_NOTICE,
   type LiveTurn,
 } from '../../lib/chat/live-session'
 import { fixVerbTypo } from '../../lib/chat/typos'
@@ -76,6 +81,7 @@ import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
 import type { ChainActionRequest, WalletBalances } from '../../lib/chains/types'
+import { QUOTE_EXPIRED } from '../../lib/chains/signing-flow'
 import { useChainAction } from '../../hooks/use-chain-action'
 import { ChainActionConfirm } from './chain-action-confirm'
 import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
@@ -230,7 +236,14 @@ function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
   )
 }
 
-export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element {
+export function IntentChat({
+  showing,
+  linkedRule,
+}: {
+  /** False while the person is on another page and this is kept mounted behind it. */
+  showing: boolean
+  linkedRule?: string
+}): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
   const settleIntent = useSettleIntent()
@@ -377,9 +390,12 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
   // account it was read for only. Writing it never touches saveTurn.
   const [savedTurns, setSavedTurns] = useState<{ account: string; turns: LiveTurn[] } | null>(null)
   const transcriptOwner = isConnected ? address : undefined
-  const transcriptOwnerRef = useRef(transcriptOwner)
-  transcriptOwnerRef.current = transcriptOwner
+  // Whose chat is on screen, which is who it is recorded for. Differs from the
+  // connected wallet only while a switch waits on an open signature.
+  const chatOwner = useRef(transcriptOwner)
   const transcript = restored === null ? ownedTurns(savedTurns, transcriptOwner) : []
+  // Earlier turns and notes kept for the agents, already shown among the saved turns.
+  const [inSaved, setInSaved] = useState({ thread: 0, notes: 0 })
   useEffect(() => {
     setSavedTurns(
       transcriptOwner !== undefined && message === null && thread.length === 0
@@ -397,7 +413,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     role: LiveTurn['role'],
     text: string,
     explorerUrl?: string,
-    account: string | undefined = transcriptOwnerRef.current
+    account: string | undefined = chatOwner.current
   ): void {
     if (account === undefined) return
     appendLiveTurn(liveSessionStorage(), segment, account, {
@@ -846,7 +862,12 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
   // The transcript, as things are said and settle. Words and links only: a label
   // or a card's figures come from what is signed, so none of them are kept.
   useEffect(() => {
-    if (affordError !== null && message !== null && restored === null) {
+    if (
+      affordError !== null &&
+      message !== null &&
+      restored === null &&
+      recordableReply(affordError)
+    ) {
       recordLive('agent', affordError)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -879,7 +900,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
       'agent',
       chainOutcome,
       chainAction.phase === 'settled' ? chainAction.explorerUrl : undefined,
-      chainAction.account ?? transcriptOwnerRef.current
+      chainAction.account ?? chatOwner.current
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainOutcome])
@@ -968,6 +989,91 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     sequence.phase === 'signing' ||
     sequence.phase === 'submitting' ||
     chainSigning(chainAction.phase)
+
+  // Declared after the effects that record, so a transaction settling in the same
+  // render as a switch is written to the wallet that signed it, before the reset.
+  // A sequence with a step settled and the next unsigned counts as open: resetting
+  // would lose the only way to finish it.
+  const signatureOpen =
+    executionInFlight ||
+    cashout.locked ||
+    (sequence.phase !== 'settled' && sequence.steps.some((step) => step.hash !== undefined))
+  useEffect(() => {
+    const change = ownerChange(chatOwner.current, transcriptOwner, signatureOpen)
+    if (change === 'defer') {
+      setAffordError(WALLET_SWITCHED_NOTICE)
+      return
+    }
+    if (change === 'keep') {
+      if (transcriptOwner !== undefined) chatOwner.current = transcriptOwner
+      setAffordError((e) => (e === WALLET_SWITCHED_NOTICE ? null : e))
+      return
+    }
+    clearOpenChat()
+    // None of what follows is cleared by New chat, and all of it is the last wallet's.
+    dialogue.current = []
+    setPending(null)
+    supply.reset()
+    perp.reset()
+    planExec.reset()
+    limit.reset()
+    chainAction.reset()
+    setHistoryOpen(false)
+    setRulesOpen(false)
+    setInboxOpen(false)
+    chatOwner.current = transcriptOwner
+    setSavedTurns(
+      transcriptOwner === undefined
+        ? null
+        : {
+            account: transcriptOwner,
+            turns: loadLiveSession(liveSessionStorage(), segment, transcriptOwner),
+          }
+    )
+    // Runs on a new wallet, and again when the signature it was waiting on ends.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcriptOwner, signatureOpen])
+
+  // Coming back to a card left open. A chain's card or a position holds what was
+  // built when it was shown, and not every one is refused later: NEAR's wallet sends
+  // for itself with no check of the deadline. A Stellar swap is rebuilt and aged by
+  // the server at signing, and its other envelopes lapse on the network, so neither
+  // is touched here.
+  const chainCardShownAt = useRef(0)
+  useEffect(() => {
+    chainCardShownAt.current = Date.now()
+  }, [chainAction.prepared])
+  const perpCardShownAt = useRef(0)
+  useEffect(() => {
+    perpCardShownAt.current = Date.now()
+  }, [perp.xdr])
+  const wasShowing = useRef(showing)
+  useEffect(() => {
+    const cameBack = showing && !wasShowing.current
+    wasShowing.current = showing
+    if (!cameBack) return
+    const now = Date.now()
+    const deadline = chainAction.prepared?.context?.['deadline']
+    if (
+      chainAction.phase === 'review' &&
+      cardIsStale(
+        {
+          ...(deadline !== undefined ? { deadline } : {}),
+          shownAt: chainCardShownAt.current,
+        },
+        now
+      )
+    ) {
+      chainAction.refuse(QUOTE_EXPIRED, chainAction.asked ?? message ?? '')
+    }
+    if (perp.phase === 'review' && cardIsStale({ shownAt: perpCardShownAt.current }, now)) {
+      perp.reset()
+      setAffordError(QUOTE_EXPIRED)
+    }
+    // Only the moment of coming back decides this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showing])
+
   /** Something came of the open intent: a trade settled, or an order was placed. */
   const turnExecuted = swap.phase === 'settled' || sequence.phase === 'settled' || placedId !== null
 
@@ -1110,7 +1216,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     if (!continuing && message !== null && parsed !== null && restored === null && !turnExecuted) {
       if (classifyFollowUp(text) === 'note') {
         if (executionInFlight) {
-          setAffordError('Finish or cancel the signature first, then continue the chat.')
+          setAffordError(FINISH_SIGNATURE_NOTICE)
           return
         }
         setNotes((n) => [...n, text])
@@ -1224,6 +1330,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
       const mentionsBase = /(xlm|usdc)/i.test(text)
       if (other !== undefined && (source.kind === 'other' || !mentionsBase)) {
         const wanted = other.symbol
+        const wantedBy = latest.current.account
         void (async () => {
           let found: VerifiedAsset | undefined
           try {
@@ -1233,6 +1340,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
           } catch {
             found = undefined
           }
+          if (wantedBy !== latest.current.account) return
           if (found === undefined) {
             setAffordError(
               `I can't confirm ${wanted} as a verified token on Stellar, so I won't cash it out. Which token do you mean?`
@@ -1383,6 +1491,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     // ways of writing one instruction it understood five, and the misses split
     // evenly between an unmatched marker and an unlisted verb. Widening either
     // list closes those and fails on the next seven.
+    const readFor = latest.current.account
     void (async () => {
       setParsing(true)
       let read: UnderstoodIntent | null = null
@@ -1399,6 +1508,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
                   body: JSON.stringify({ text, chain: slug }),
                 })
               ).json()
+        if (readFor !== latest.current.account) return
         const body = raw as {
           understood?: boolean
           action?: 'swap' | 'supply' | 'borrow' | 'repay' | 'offramp'
@@ -1572,7 +1682,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
   /** A cash-out read from the composer: the card, or a plain answer about what it can't do. */
   function startCashout(route: Exclude<CashoutRoute, { kind: 'pass' }>, text: string): void {
     if (executionInFlight) {
-      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      setAffordError(FINISH_SIGNATURE_NOTICE)
       return
     }
     setMessage(text)
@@ -1609,8 +1719,10 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
       chainAction.reset()
       setClarifyBusy(true)
       const asked = latest.current.turn
+      const askedFor = latest.current.account
       void fetchCashoutCurrencies(slug).then((weave) => {
         setClarifyBusy(false)
+        if (askedFor !== latest.current.account) return
         const choices = cashoutChoices(slug, weave)
         const only = choices.length === 1 ? choices[0] : undefined
         if (choices.length === 0) {
@@ -1655,7 +1767,9 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
       chainAction.refuse(unsupportedTokenReply(route.token), text)
       return
     }
+    const refusedFor = latest.current.account
     void fetchCashoutCurrencies(slug).then((currencies) => {
+      if (refusedFor !== latest.current.account) return
       chainAction.refuse(unsupportedCurrencyReply(route.currency, currencies), text)
     })
   }
@@ -1712,7 +1826,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
 
     // A chain signature is with the wallet: a new message must not close its card.
     if (chainSigning(chainAction.phase)) {
-      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      setAffordError(FINISH_SIGNATURE_NOTICE)
       return
     }
 
@@ -1815,7 +1929,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
    */
   async function refine(note: string): Promise<void> {
     if (executionInFlight) {
-      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      setAffordError(FINISH_SIGNATURE_NOTICE)
       return
     }
     await clarify(
@@ -1880,6 +1994,8 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     const balanceText = answer.outcome === 'balance' ? await walletBalanceReply() : undefined
     clarifyRuns.current -= 1
     if (clarifyRuns.current === 0) setClarifyBusy(false)
+    // The last wallet's question, answered after it left. A balance has its own rule below.
+    if (balanceText === undefined && asked.account !== latest.current.account) return
     const decision =
       balanceText === undefined
         ? { kind: 'show' as const }
@@ -2004,14 +2120,20 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
 
   /** A clean slate: the open intent, the turns before it and any notes. */
   function newChat(): void {
-    latest.current.turn += 1
-    if (transcriptOwner !== undefined) {
+    // While a switch waits on a signature the chat on screen is neither wallet's to clear.
+    if (transcriptOwner !== undefined && transcriptOwner === chatOwner.current) {
       clearLiveSession(liveSessionStorage(), segment, transcriptOwner)
     }
+    clearOpenChat()
     setSavedTurns(null)
+  }
+
+  function clearOpenChat(): void {
+    latest.current.turn += 1
     handleReset()
     setThread([])
     setNotes([])
+    setInSaved({ thread: 0, notes: 0 })
     setClarifying(null)
     setClarifyBusy(false)
     setCashoutQuestion(null)
@@ -2045,6 +2167,15 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
     // read as a stuck transaction that had never existed.
     setFollowOn(null)
     sequence.reset()
+    // The turns so far stay on screen as a reload would show them. The thread and
+    // notes behind them still go to the agents, so they are hidden, not dropped.
+    const owner = chatOwner.current
+    if (owner === undefined) return
+    const turns = loadLiveSession(liveSessionStorage(), segment, owner)
+    setSavedTurns({ account: owner, turns })
+    setInSaved(
+      turns.length > 0 ? { thread: thread.length, notes: notes.length } : { thread: 0, notes: 0 }
+    )
   }
 
   /**
@@ -2632,7 +2763,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
               ) : null}
 
               {/* The turns before this one, quieter than the open intent. */}
-              {thread.map((turn) => (
+              {thread.slice(inSaved.thread).map((turn) => (
                 <div key={turn.id} className="flex flex-col gap-3">
                   <div className="flex flex-col items-end gap-1">
                     <div className={userBubble}>{turn.text}</div>
@@ -2710,7 +2841,7 @@ export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element
               ) : null}
 
               {/* What was added to the open intent while it was being decided. */}
-              {notes.map((note, i) => (
+              {notes.slice(inSaved.notes).map((note, i) => (
                 <div key={`${i}-${note}`} className="flex justify-end">
                   <div className={userBubble}>{note}</div>
                 </div>
