@@ -12,7 +12,7 @@ import type {
 import { DECIDE_AT, RACE_DURATION, WINDOW_SECONDS, revealFloor } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
 import type { ChainActionRequest } from '../lib/chains/types'
-import { routeFigures } from '../lib/agents/chain-race'
+import { routeFigures, routeSource } from '../lib/agents/chain-race'
 import { setAttributedRace } from '../lib/api/network-fetch'
 import { planDecision, planReveal } from '../lib/agents/pacing'
 import type { ParsedIntent } from '../lib/parse-intent'
@@ -292,7 +292,7 @@ export function useCompetition(
                 setRoutesByAgent((prev) => ({ ...prev, [key]: frame.route }))
               }
               const figures = routeFigures(frame.route, chainRace?.request)
-              const source = (frame.route as { source?: unknown } | undefined)?.source
+              const source = routeSource(frame.route)
 
               setProposals((prev) => ({
                 ...prev,
@@ -306,7 +306,7 @@ export function useCompetition(
                   vsOraclePct: frame.proposal.projectedSlippagePct,
                   score: 0,
                   reasoning: frame.proposal.reasoning,
-                  ...(typeof source === 'string' ? { source } : {}),
+                  ...(source !== undefined ? { source } : {}),
                   ...(figures !== undefined ? { figures } : {}),
                   sliceCount: frame.proposal.sliceCount,
                   horizonMinutes: frame.proposal.horizonMinutes,

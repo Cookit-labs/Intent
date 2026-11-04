@@ -7,17 +7,23 @@ import {
   chainSigning,
   isChainRoute,
   needsDirectRoute,
+  recommendationLine,
   reviewChainRoute,
   routeForSwap,
   routeFigures,
+  routeSource,
   selectionHolds,
   showDirectNote,
   singleRouteNote,
 } from '../agents/chain-race'
 import type { ChainRouteQuote } from '../agents/chain-routes'
+import { describePlan } from '../agents/competition'
 import type { ChainActionRequest } from '../chains/types'
 
 const asked: ChainActionRequest = { kind: 'swap', amount: '5', tokenIn: 'NEAR', tokenOut: 'USDC' }
+
+const tagged = (source: string | undefined): { source?: string } =>
+  source === undefined ? {} : { source }
 
 function route(over: Partial<ChainRouteQuote> = {}, request: ChainActionRequest = asked) {
   return {
@@ -102,8 +108,21 @@ describe('reviewChainRoute', () => {
     expect(args.refuse).not.toHaveBeenCalled()
   })
 
-  it('may replace a built, unsigned card', () => {
-    const args = { ...base(), phase: 'review' as const }
+  it('may replace a built, unsigned card with another venue', () => {
+    const args = { ...base(), phase: 'review' as const, preparedVenueId: 'other' }
+    expect(reviewChainRoute(args)).toBe('prepared')
+    expect(args.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds nothing for the venue already on the card, so its deposit address stays', () => {
+    const args = { ...base(), phase: 'review' as const, preparedVenueId: 'ref' }
+    expect(reviewChainRoute(args)).toBe('ignored')
+    expect(args.prepare).not.toHaveBeenCalled()
+    expect(args.refuse).not.toHaveBeenCalled()
+  })
+
+  it('builds again for the same venue once the card has failed', () => {
+    const args = { ...base(), phase: 'failed' as const, preparedVenueId: 'ref' }
     expect(reviewChainRoute(args)).toBe('prepared')
   })
 
@@ -258,6 +277,51 @@ describe('reviewChainRoute after a signature', () => {
     const a = args({ route: undefined, phase: 'idle' })
     expect(reviewChainRoute(a)).toBe('refused')
     expect(a.refuse).toHaveBeenCalledWith(expect.stringContaining("didn't choose a route"), 't')
+  })
+})
+
+describe('routeSource', () => {
+  it('names the venue of a chain route, which the plan tag then shows', () => {
+    const jupiter = routeSource(route({ venueName: 'Jupiter' }))
+    const oneClick = routeSource(route({ venueName: 'NEAR Intents 1Click' }))
+    expect(describePlan({ executionMode: 'fill', ...tagged(jupiter) })).toBe(
+      'fills now via Jupiter'
+    )
+    expect(describePlan({ executionMode: 'fill', ...tagged(oneClick) })).toBe(
+      'fills now via NEAR Intents 1Click'
+    )
+  })
+
+  it('keeps the source of a Stellar quote', () => {
+    expect(routeSource({ id: 'x', source: 'SDEX' })).toBe('SDEX')
+  })
+
+  it('has nothing to say with no route', () => {
+    expect(routeSource(undefined)).toBeUndefined()
+    expect(routeSource({ source: 5 })).toBeUndefined()
+  })
+})
+
+describe('recommendationLine', () => {
+  it('says what Stellar and a priced swap always said', () => {
+    expect(recommendationLine('Halcyon', undefined)).toBe(
+      'Recommended: Halcyon, best measured fill. You pick who executes.'
+    )
+  })
+
+  it('gives a supply or a stake its rate, and claims no fill', () => {
+    expect(recommendationLine('Halcyon', { headline: '5.20% APY' })).toBe(
+      'Recommended: Halcyon, 5.20% APY. You pick who executes.'
+    )
+    expect(recommendationLine('Halcyon', { headline: 'Rate not available' })).toBe(
+      'Recommended: Halcyon, rate not available. You pick who executes.'
+    )
+  })
+
+  it('claims no measured fill for a swap nobody could price', () => {
+    expect(recommendationLine('Halcyon', { headline: 'Price unknown' })).toBe(
+      'Recommended: Halcyon, price unknown. You pick who executes.'
+    )
   })
 })
 

@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
-import { panelErrorMessage, singleRouteNote } from '../../lib/agents/chain-race'
+import { panelErrorMessage, recommendationLine, singleRouteNote } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
@@ -332,10 +332,11 @@ export function CompetitionPanel({
           {/* Recommended on the measured fill, which is the only thing scored.
               "Strongest strategy" implied a judgement of the reasoning; there
               is none — the route's real output decides, and a tie is broken
-              by a draw the agents cannot influence. */}
+              by a draw the agents cannot influence. A supply or a stake is
+              ranked on its rate instead, and the line says that rate. */}
           {unanimous
             ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
-            : `Recommended: ${proposals[winner]?.name}, best measured fill. You pick who executes.`}
+            : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
         </motion.div>
       ) : null}
     </div>

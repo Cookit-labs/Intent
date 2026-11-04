@@ -113,7 +113,8 @@ export type ReviewOutcome = 'prepared' | 'refused' | 'ignored'
  * A press while a build is under way does nothing, so one press makes one
  * build (and one deposit address). Once a signature is with the wallet or the network
  * the route can no longer change. A built card that is not yet signed may be
- * replaced by choosing another route.
+ * replaced by choosing another venue. Choosing its own venue again, from this agent
+ * or another, builds nothing, so the deposit address on screen is the only one.
  */
 export function reviewChainRoute(args: {
   route: unknown
@@ -122,6 +123,8 @@ export function reviewChainRoute(args: {
   phase: ChainActionPhaseName
   /** A signature was given for this race. */
   signed?: boolean
+  /** The venue of the card on screen. */
+  preparedVenueId?: string | undefined
   /** The race this route was proposed in, so the signed action can be credited to it. */
   raceId?: string
   prepare: (request: ChainActionRequest, asked: string, raceId?: string) => void
@@ -143,6 +146,7 @@ export function reviewChainRoute(args: {
     )
     return 'refused'
   }
+  if (phase === 'review' && request.venue === args.preparedVenueId) return 'ignored'
   if (args.raceId === undefined) args.prepare(request, args.text)
   else args.prepare(request, args.text, args.raceId)
   return 'prepared'
@@ -194,6 +198,28 @@ export function routeFigures(
   if (route !== undefined) return chainFigures(route)
   if (asked === undefined) return undefined
   return { headline: asked.kind === 'swap' ? 'Price unknown' : 'Rate not available' }
+}
+
+/** The venue a route executes on: a Stellar quote's source, or a chain route's venue. */
+export function routeSource(route: unknown): string | undefined {
+  const r = route as { source?: unknown; venueName?: unknown } | null | undefined
+  const name = r?.source ?? r?.venueName
+  return typeof name === 'string' ? name : undefined
+}
+
+/**
+ * The line under a decided race. Only a route with a measured price has a measured fill to be
+ * best at. Anything else, such as a supply's rate, is named for what it is.
+ */
+export function recommendationLine(
+  name: string | undefined,
+  figures: { headline: string } | undefined
+): string {
+  const why =
+    figures === undefined
+      ? 'best measured fill'
+      : `${figures.headline.charAt(0).toLowerCase()}${figures.headline.slice(1)}`
+  return `Recommended: ${name}, ${why}. You pick who executes.`
 }
 
 /**

@@ -251,6 +251,42 @@ describe('ranking deposits and stakes by rate', () => {
     const { apyByRoute: _ignored, ...swapPlan } = plan
     expect(planPenalties({ ...base, routeId: 'b-1' }, swapPlan)).toEqual([])
   })
+
+  it('puts a route with no rate below the worst route with one', () => {
+    const rated = planScore({ ...base, routeId: 'b-1' }, plan)
+    const unrated = planScore({ ...base, routeId: 'kamino-1' }, plan)
+    expect(unrated).toBeLessThan(rated)
+    expect(planPenalties({ ...base, routeId: 'kamino-1' }, plan)[0]?.reason).toBe('unrated_route')
+  })
+
+  it('never lets a route with no rate be crowned over one that shows a rate', () => {
+    // Several races, because a tie would be broken by a hash of the race's id.
+    const winners = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(
+      (competitionId) =>
+        scoreProposals(
+          [
+            { ...base, agent: 'halcyon', routeId: 'kamino-1' },
+            { ...base, agent: 'meridian', routeId: 'a-1' },
+          ] as AgentProposalResult[],
+          { competitionId, plan }
+        )[0]?.agent
+    )
+    expect(new Set(winners)).toEqual(new Set(['meridian']))
+  })
+
+  it('keeps that order however far apart the rates are', () => {
+    const wide = { ...plan, apyByRoute: { 'a-1': 250, 'b-1': 4.1 } }
+    const rated = planScore({ ...base, routeId: 'b-1' }, wide)
+    const unrated = planScore({ ...base, routeId: 'kamino-1' }, wide)
+    expect(unrated).toBeLessThan(rated)
+  })
+
+  it('leaves the routes level when none of them has a rate', () => {
+    const { apyByRoute: _ignored, ...noRates } = plan
+    expect(planScore({ ...base, routeId: 'kamino-1' }, noRates)).toBe(100)
+    expect(planPenalties({ ...base, routeId: 'kamino-1' }, noRates)).toEqual([])
+    expect(planPenalties({ ...base, routeId: 'kamino-1' }, { ...plan, apyByRoute: {} })).toEqual([])
+  })
 })
 
 describe('what the panel is shown for a chain route', () => {
