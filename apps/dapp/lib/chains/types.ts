@@ -138,6 +138,22 @@ export interface ChainVenue {
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
 }
 
+export interface TokenBalance {
+  symbol: string
+  id: string
+  amount: string
+  decimals: number
+  native: boolean
+  /** In this chain's token table. An unlisted token can't be traded here yet. */
+  listed: boolean
+}
+
+export interface WalletBalances {
+  tokens: TokenBalance[]
+  /** False when only known tokens could be read. */
+  complete: boolean
+}
+
 export interface ChainModule {
   chain: ChainWithActions
   tokens: readonly ChainToken[]
@@ -147,6 +163,8 @@ export interface ChainModule {
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+  /** Every token the account holds, read now. Throws on a malformed account (a refusal) or an unreadable chain. */
+  balances: (account: string) => Promise<WalletBalances>
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
 }

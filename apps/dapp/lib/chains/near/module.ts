@@ -1,4 +1,5 @@
 import type { ChainModule } from '../types'
+import { readNearBalances } from './balances'
 import { EARN_VENUE_ID, earnVenue } from './earn'
 import { assetIdOf, oneClickPrice } from './oneclick'
 import { confirmStake, metapoolVenue, METAPOOL_VENUE_ID, rnearVenue } from './stake'
@@ -21,4 +22,5 @@ export const nearModule: ChainModule = {
   },
   priceUsd: (token) => oneClickPrice(assetIdOf(token), token.decimals),
   submit: confirmStake,
+  balances: readNearBalances,
 }

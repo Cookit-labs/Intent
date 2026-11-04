@@ -157,3 +157,14 @@ export async function waitForTransaction(
   }
   return { state: 'unknown' }
 }
+
+/** Yocto of NEAR an account holds in total, storage included, read at final. */
+export async function accountBalance(account: string): Promise<string> {
+  const result = (await rpcCall(
+    'query',
+    { request_type: 'view_account', finality: 'final', account_id: account },
+    VIEW_TIMEOUT_MS
+  )) as { amount?: unknown }
+  if (typeof result.amount !== 'string') throw new NearRpcError('account balance unreadable')
+  return result.amount
+}

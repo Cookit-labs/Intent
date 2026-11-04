@@ -503,6 +503,7 @@ describe('naming the chain you are on', () => {
       defaultVenue: { swap: 'beta' },
       priceUsd: async () => 1,
       submit: async () => ({ ok: false, error: 'unused here' }),
+      balances: async () => ({ tokens: [], complete: true }),
     }
   }
   const ab = (venue: string): ChainActionRequest => ({

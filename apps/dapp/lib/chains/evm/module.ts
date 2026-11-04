@@ -1,6 +1,7 @@
 import { oneClickPrice } from '../near/oneclick'
 import { canIssueOneClick, oneClickAssetId, oneClickOriginVenue } from '../oneclick-origin'
 import type { ChainModule, ChainToken, ChainVenue } from '../types'
+import { readEvmBalances } from './balances'
 import { EVM_CHAINS, type EvmChain } from './tokens'
 
 export function buildEvmVenues(
@@ -37,6 +38,7 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
       error:
         "This app can't follow that from here. Check your wallet's activity before trying again.",
     }),
+    balances: (account) => readEvmBalances(chain, account),
     ...(tokenHints !== undefined ? { tokenHints } : {}),
   }
 }

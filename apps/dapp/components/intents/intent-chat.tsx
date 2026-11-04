@@ -62,10 +62,11 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
+import { chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
-import type { ChainActionRequest } from '../../lib/chains/types'
+import type { ChainActionRequest, WalletBalances } from '../../lib/chains/types'
 import { useChainAction } from '../../hooks/use-chain-action'
 import { ChainActionConfirm } from './chain-action-confirm'
 import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
@@ -323,7 +324,7 @@ export function IntentChat(): JSX.Element {
     strategy.slippageBps !== undefined ? { slippageBps: strategy.slippageBps } : {}
 
   const { slug, descriptor } = useChain()
-  const { address, isConnected, balance: nativeBalance, balanceSymbol } = useWallet()
+  const { address, isConnected } = useWallet()
 
   // Checked once the wallet that owns it is known — historyOwner, which
   // pendingCashOut reads, is set from this same address elsewhere — so a
@@ -1646,11 +1647,21 @@ export function IntentChat(): JSX.Element {
     )
   }
 
-  /** What the wallet holds, from balances already read: Stellar lists every asset, other chains their native one. */
-  function walletBalanceReply(): string {
+  /** What the wallet holds. Stellar lists every asset from balances already read; other chains are read from the chain now. */
+  async function walletBalanceReply(): Promise<string> {
     if (slug === 'stellar') return balanceMessage(isConnected ? balances : undefined)
-    if (!isConnected || nativeBalance === undefined) return balanceMessage(undefined)
-    return `Your wallet holds:${String.fromCharCode(10)}• ${nativeBalance} ${balanceSymbol}`
+    if (!isConnected || address === undefined) return balanceMessage(undefined)
+    let held: WalletBalances | undefined
+    try {
+      const response = await fetch(
+        `/api/chain/${slug}/balances?account=${encodeURIComponent(address)}`,
+        { cache: 'no-store' }
+      )
+      if (response.ok) held = (await response.json()) as WalletBalances
+    } catch {
+      held = undefined
+    }
+    return chainBalanceReply(held, descriptor.name)
   }
 
   async function clarify(
@@ -1697,7 +1708,7 @@ export function IntentChat(): JSX.Element {
         answer.outcome === 'help'
           ? (answer.reply ?? helpMessage(slug))
           : answer.outcome === 'balance'
-            ? walletBalanceReply()
+            ? await walletBalanceReply()
             : answer.outcome === 'out_of_scope'
               ? outOfScopeMessage(slug, answer.reply)
               : answer.outcome === 'unclear'

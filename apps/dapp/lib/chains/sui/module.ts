@@ -1,5 +1,6 @@
 import { canIssueOneClick, oneClickOriginVenue } from '../oneclick-origin'
 import type { ChainModule, ChainVenue } from '../types'
+import { readSuiBalances } from './balances'
 import { cetusVenue } from './cetus'
 import { naviVenue } from './navi'
 import { priceFromLlama } from './price'
@@ -25,4 +26,5 @@ export const suiModule: ChainModule = {
   defaultVenue: { swap: 'cetus', supply: 'navi', stake: 'springsui' },
   priceUsd: (token) => priceFromLlama(token),
   submit: (input) => submitSui(input),
+  balances: readSuiBalances,
 }

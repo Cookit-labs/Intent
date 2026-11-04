@@ -1,5 +1,6 @@
 import { canIssueOneClick, oneClickOriginVenue } from '../oneclick-origin'
 import type { ChainModule, ChainVenue } from '../types'
+import { readSolanaBalances } from './balances'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
 import { createKaminoVenue } from './kamino'
@@ -33,4 +34,5 @@ export const solanaModule: ChainModule = {
   defaultVenue: { swap: 'jupiter', supply: 'jupiter-lend' },
   priceUsd,
   submit: createSolanaSubmit({ deadlineMs: SUBMIT_DEADLINE_MS }),
+  balances: readSolanaBalances,
 }
