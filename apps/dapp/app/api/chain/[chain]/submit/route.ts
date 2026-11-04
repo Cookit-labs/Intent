@@ -58,16 +58,31 @@ export async function POST(
     return NextResponse.json({ error: 'wrong_chain' }, { status: 400 })
   }
 
-  try {
-    // A NEAR wallet has already sent its transactions, so there are no bytes left to check.
-    if (signed.family !== 'near') {
-      const payload: SigningPayload =
-        signed.family === 'solana'
-          ? { family: 'solana', transaction: signed.signedTransaction }
-          : { family: 'sui', transaction: signed.transaction }
+  // A NEAR wallet has already sent its transactions, so there are no bytes left to check.
+  if (signed.family !== 'near') {
+    const payload: SigningPayload =
+      signed.family === 'solana'
+        ? { family: 'solana', transaction: signed.signedTransaction }
+        : { family: 'sui', transaction: signed.transaction }
+    try {
       venue.assertSafe(payload, account)
+    } catch (e) {
+      // This route is what sends the bytes, so any failure here means they never left.
+      if (e instanceof ChainActionRefused) {
+        return NextResponse.json({ ok: false, error: e.message }, { status: 422 })
+      }
+      reportError('chain/submit', e, { chain: chainApi.chain })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'This transaction could not be checked, so nothing was sent. Build it again.',
+        },
+        { status: 422 }
+      )
     }
+  }
 
+  try {
     const input = { account, venueId, signed, ...(context !== undefined ? { context } : {}) }
     const result = await (venue.submit ?? chainApi.submit)(input)
     await logExecution({
@@ -82,13 +97,11 @@ export async function POST(
       status: result.ok ? 200 : result.pending === true ? 202 : 422,
     })
   } catch (e) {
-    if (e instanceof ChainActionRefused) {
-      return NextResponse.json({ ok: false, error: e.message }, { status: 422 })
-    }
     reportError('chain/submit', e, { chain: chainApi.chain })
     return NextResponse.json(
       {
         ok: false,
+        // Sending may have started, so no throw from here on can prove nothing moved.
         // Sent with no outcome known: the same contract as the cash-out route.
         pending: true,
         error:

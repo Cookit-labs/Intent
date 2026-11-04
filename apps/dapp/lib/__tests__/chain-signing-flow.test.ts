@@ -152,7 +152,7 @@ describe('unknown outcomes keep the latch and Review closed', () => {
     ok: false,
     pending: true,
     error:
-      'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.',
+      'Jupiter hasn’t confirmed this swap, and it may still have gone through, so don’t send it again. Check your wallet’s activity first, and get a fresh quote only if nothing changed.',
   }
 
   it.each([

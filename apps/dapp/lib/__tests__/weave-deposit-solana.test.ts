@@ -670,6 +670,40 @@ describe('submit', () => {
     expect(result).toMatchObject({ ok: false, pending: true })
   })
 
+  it('reports a node error that proves nothing as pending', async () => {
+    stubRpc({ send: () => ({ error: { code: -32603, message: 'Internal error' } }) })
+    const result = await solanaDeposit.submit(
+      { family: 'solana', signedTransaction: good },
+      EXPECTATION
+    )
+    expect(result).toMatchObject({ ok: false, pending: true })
+    if (!result.ok) expect(result.error).toMatch(/send it again/i)
+  })
+
+  it('reports a failed status read before expiry as pending, not as expired', async () => {
+    stubRpc({
+      statuses: { error: { code: -32005, message: 'Node is behind' } },
+      isValid: false,
+    })
+    const result = await solanaDeposit.submit(
+      { family: 'solana', signedTransaction: good },
+      EXPECTATION
+    )
+    expect(result).toMatchObject({ ok: false, pending: true })
+    if (!result.ok) expect(result.error).toMatch(/send it again/i)
+  })
+
+  it('reports a failure seen only at processed as pending', async () => {
+    stubRpc({
+      statuses: { result: { value: [{ confirmationStatus: 'processed', err: { x: 1 } }] } },
+    })
+    const result = await solanaDeposit.submit(
+      { family: 'solana', signedTransaction: good },
+      EXPECTATION
+    )
+    expect(result).toMatchObject({ ok: false, pending: true })
+  })
+
   it('reports an expired transaction as a plain failure', async () => {
     stubRpc({ statuses: { result: { value: [null] } }, isValid: false })
     const result = await solanaDeposit.submit(

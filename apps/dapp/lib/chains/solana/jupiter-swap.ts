@@ -55,8 +55,8 @@ const Order = z.object({
 })
 
 const Executed = z.object({
-  status: z.string(),
-  signature: z.string().optional(),
+  status: z.string().optional(),
+  signature: z.string().min(1).optional(),
   code: z.number().optional(),
 })
 
@@ -77,35 +77,27 @@ function explainOrderError(code: number | undefined, tokenIn: ChainToken): strin
 }
 
 /**
- * A code that proves the swap did not land is a clean failure. Any other code
- * leaves open that it did, so it is reported as unknown.
+ * The sentence for a code that proves the swap did not land, or nothing. -1000 and -2000
+ * only say "Failed to land", and Jupiter's docs treat the blockhash's last valid height as
+ * the real expiry, so those leave open that it still lands and don't get a sentence here.
  */
-function explainExecuteFailure(code: number | undefined): { error: string; clean: boolean } {
+function explainCleanFailure(code: number | undefined): string | undefined {
   if (code === -1 || code === -1004 || code === -1005 || code === -2003) {
-    return {
-      error:
-        'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.',
-      clean: true,
-    }
-  }
-  if (code === -1000 || code === -2000) {
-    return {
-      error:
-        'This swap did not land on the network, so nothing moved. Get a fresh quote and try again.',
-      clean: true,
-    }
+    return 'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.'
   }
   if (code === -2 || code === -3 || code === -1002 || code === -1003 || code === -2002) {
-    return {
-      error:
-        'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.',
-      clean: true,
-    }
+    return 'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.'
   }
+  return undefined
+}
+
+/** The swap may have landed, so this must not read as a failure that invites a retry. */
+function unconfirmedSwap(signature: string | undefined): SubmitResult {
+  const where = signature !== undefined ? explorerUrl(signature) : 'your wallet’s activity'
   return {
-    error:
-      'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.',
-    clean: false,
+    ok: false,
+    pending: true,
+    error: `Jupiter hasn’t confirmed this swap, and it may still have gone through, so don’t send it again. Check ${where} first, and get a fresh quote only if nothing changed.`,
   }
 }
 
@@ -294,30 +286,18 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       throw new Error(`Jupiter /execute answered ${response.status}`)
     }
     const parsed = Executed.safeParse(await response.json().catch(() => undefined))
-    // A 200 whose body cannot be read says nothing about whether the swap landed.
-    if (response.ok && !parsed.success) {
-      return {
-        ok: false,
-        pending: true,
-        error:
-          'Jupiter answered, but the reply could not be read, so this swap may have gone through. Check your wallet’s activity before trying again.',
-      }
-    }
-    if (!response.ok || !parsed.success) {
-      return {
-        ok: false,
-        error:
-          'Jupiter would not take this swap, so nothing was sent. Get a fresh quote and try again.',
-      }
-    }
+    // A body that cannot be read says nothing about whether the swap landed.
+    if (!parsed.success) return unconfirmedSwap(undefined)
     const { status, signature, code } = parsed.data
-    if (status === 'Success' && signature !== undefined) {
+    if (response.ok && status === 'Success' && signature !== undefined) {
       return { ok: true, hash: signature, explorerUrl: explorerUrl(signature) }
     }
-    const failure = explainExecuteFailure(code)
-    return failure.clean
-      ? { ok: false, error: failure.error }
-      : { ok: false, pending: true, error: failure.error }
+    // /execute can answer long after broadcast and documents no non-2xx statuses, so the
+    // status alone proves nothing. Only a failure carrying a known code does, and an error
+    // body may not repeat the status field.
+    const failed = status === 'Failed' || (!response.ok && status === undefined)
+    const refusal = failed ? explainCleanFailure(code) : undefined
+    return refusal !== undefined ? { ok: false, error: refusal } : unconfirmedSwap(signature)
   }
 
   return {

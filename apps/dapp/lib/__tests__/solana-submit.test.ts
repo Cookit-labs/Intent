@@ -1,6 +1,7 @@
 import { getBase58Decoder } from '@solana/kit'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { afterSubmitting } from '../chains/signing-flow'
 import { createJupiterSwapVenue } from '../chains/solana/jupiter-swap'
 import { createSolanaSubmit } from '../chains/solana/submit'
 import {
@@ -173,7 +174,7 @@ describe('solana submit', () => {
     })
     const result = await submit({}, 3)(input(signed.transaction))
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/expired/i) })
-    expect(calls.filter((c) => c.method === 'getSignatureStatuses')).toHaveLength(3)
+    expect(calls.filter((c) => c.method === 'getSignatureStatuses')).toHaveLength(4)
   })
 
   it('does not claim failure while the transaction could still land', async () => {
@@ -212,6 +213,266 @@ describe('solana submit', () => {
       )
     })
     await expect(submit()(input(signed.transaction))).resolves.toMatchObject({ ok: true })
+  })
+
+  describe('blockhash invalid after the send was accepted', () => {
+    const EXPIRED =
+      'This transaction expired before it reached the network, so nothing moved. Build it again and sign right away.'
+    const THROWS = Symbol('the read never got an answer')
+    const RPC_ERROR = Symbol('the read was answered with a JSON-RPC error')
+    const EMPTY = Symbol('the read was answered with an empty list')
+    const processed = { confirmationStatus: 'processed', err: null }
+    const confirmed = { confirmationStatus: 'confirmed', err: null }
+
+    /** Three polls and then the final read, each answered in turn. */
+    function reads(answers: unknown[], blockhashValid = false) {
+      let read = 0
+      return stubRpc((method) => {
+        if (method === 'sendTransaction') return ok(signed.signature)
+        if (method === 'isBlockhashValid')
+          return ok({ context: { slot: 1 }, value: blockhashValid })
+        const answer = answers[read]
+        read += 1
+        if (answer === THROWS) throw new Error('socket hang up')
+        if (answer === RPC_ERROR) return { error: { code: -32005, message: 'Node is behind' } }
+        if (answer === EMPTY) return ok({ context: { slot: 1 }, value: [] })
+        return status(answer)
+      })
+    }
+
+    it('stays pending when a poll failed while the transaction landed', async () => {
+      reads([THROWS, null, null, null])
+      const result = await submit()(input(signed.transaction))
+      expect(result).toMatchObject({ ok: false, pending: true })
+      expect(JSON.stringify(result)).not.toContain('nothing moved')
+      expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
+    })
+
+    it.each([
+      ['every poll and the final read throw', [THROWS, THROWS, THROWS, THROWS]],
+      ['only the last poll throws', [null, null, THROWS, null]],
+      ['a poll gets a JSON-RPC error', [null, RPC_ERROR, null, null]],
+      ['a poll gets an empty list', [EMPTY, null, null, null]],
+      ['only the final read throws', [null, null, null, THROWS]],
+      ['only the final read gets a JSON-RPC error', [null, null, null, RPC_ERROR]],
+      ['a poll saw it processed and later reads lost it', [processed, null, null, null]],
+      ['the final read sees it processed', [null, null, null, processed]],
+    ])('stays pending when %s', async (_name, answers) => {
+      reads(answers)
+      const result = await submit()(input(signed.transaction))
+      expect(result).toMatchObject({ ok: false, pending: true })
+    })
+
+    it('counts a status read answered with a server error as unanswered', async () => {
+      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        const { method } = JSON.parse(String(init.body)) as { method: string }
+        if (method === 'sendTransaction') {
+          return new Response(JSON.stringify({ result: signed.signature }))
+        }
+        if (method === 'isBlockhashValid') {
+          return new Response(JSON.stringify({ result: { value: false } }))
+        }
+        return new Response(JSON.stringify({ result: { value: [null] } }), { status: 503 })
+      })
+      await expect(submit()(input(signed.transaction))).resolves.toMatchObject({
+        ok: false,
+        pending: true,
+      })
+    })
+
+    it('is final only when every poll and the final read answered and none saw it', async () => {
+      reads([null, null, null, null])
+      await expect(submit()(input(signed.transaction))).resolves.toEqual({
+        ok: false,
+        error: EXPIRED,
+      })
+    })
+
+    it('makes the final read after the blockhash answer, searching history', async () => {
+      const { calls } = reads([null, null, null, null])
+      await submit()(input(signed.transaction))
+      expect(calls.at(-2)?.method).toBe('isBlockhashValid')
+      expect(calls.at(-1)?.method).toBe('getSignatureStatuses')
+      expect(calls.at(-1)?.params[0]).toEqual([signed.signature])
+      expect(calls.at(-1)?.params[1]).toEqual({ searchTransactionHistory: true })
+    })
+
+    it('reports success when the final read finds it confirmed', async () => {
+      reads([THROWS, null, null, confirmed])
+      await expect(submit()(input(signed.transaction))).resolves.toEqual({
+        ok: true,
+        hash: signed.signature,
+        explorerUrl: `https://solscan.io/tx/${signed.signature}`,
+      })
+    })
+
+    it('does not make a final read while the blockhash is still valid', async () => {
+      const { calls } = reads([null, null, null], true)
+      const result = await submit()(input(signed.transaction))
+      expect(result).toMatchObject({ ok: false, pending: true })
+      expect(calls.filter((c) => c.method === 'getSignatureStatuses')).toHaveLength(3)
+    })
+  })
+
+  describe('a transaction that failed in a block', () => {
+    const failed = { InstructionError: [0, 'x'] }
+
+    it('does not believe a processed failure, which can sit on a dropped fork', async () => {
+      stubRpc((method) => {
+        if (method === 'sendTransaction') return ok(signed.signature)
+        if (method === 'isBlockhashValid') return ok({ context: { slot: 1 }, value: true })
+        return status({ confirmationStatus: 'processed', err: failed })
+      })
+      const result = await submit()(input(signed.transaction))
+      expect(result).toMatchObject({ ok: false, pending: true })
+      expect(JSON.stringify(result)).not.toContain('did not move')
+    })
+
+    it('stays pending when a processed failure is all there is at expiry', async () => {
+      stubRpc((method) => {
+        if (method === 'sendTransaction') return ok(signed.signature)
+        if (method === 'isBlockhashValid') return ok({ context: { slot: 1 }, value: false })
+        return status({ confirmationStatus: 'processed', err: failed })
+      })
+      await expect(submit()(input(signed.transaction))).resolves.toMatchObject({
+        ok: false,
+        pending: true,
+      })
+    })
+
+    it('reports the success that follows a processed failure on a dropped fork', async () => {
+      let polls = 0
+      stubRpc((method) => {
+        if (method === 'sendTransaction') return ok(signed.signature)
+        polls += 1
+        return polls === 1
+          ? status({ confirmationStatus: 'processed', err: failed })
+          : status({ confirmationStatus: 'confirmed', err: null })
+      })
+      await expect(submit()(input(signed.transaction))).resolves.toMatchObject({ ok: true })
+    })
+
+    it.each(['confirmed', 'finalized'])('believes a failure at %s', async (confirmationStatus) => {
+      stubRpc((method) =>
+        method === 'sendTransaction'
+          ? ok(signed.signature)
+          : status({ confirmationStatus, err: failed })
+      )
+      const result = await submit()(input(signed.transaction))
+      expect(result).toEqual({
+        ok: false,
+        error: `This transaction landed but failed, so your tokens did not move. Network fees may still apply. Details: https://solscan.io/tx/${signed.signature}`,
+      })
+    })
+  })
+
+  describe('what the node answered to the send', () => {
+    it.each([
+      [
+        'an instruction failing in simulation',
+        {
+          code: -32002,
+          message: 'Transaction simulation failed',
+          data: { err: { InstructionError: [1, { Custom: 6001 }] }, logs: [] },
+        },
+        'The network’s simulation of this transaction failed, so nothing was sent. Check your balance and build it again, since prices may have moved.',
+      ],
+      [
+        'BlockhashNotFound',
+        {
+          code: -32002,
+          message: 'Transaction simulation failed: Blockhash not found',
+          data: { err: 'BlockhashNotFound', logs: [] },
+        },
+        'This transaction expired before it reached the network, so nothing moved. Build it again and sign right away.',
+      ],
+      [
+        'a blockhash that is only named in the -32002 message',
+        { code: -32002, message: 'Transaction simulation failed: Blockhash not found' },
+        'This transaction expired before it reached the network, so nothing moved. Build it again and sign right away.',
+      ],
+      [
+        'AccountNotFound',
+        { code: -32002, message: 'simulation failed', data: { err: 'AccountNotFound', logs: [] } },
+        'This wallet doesn’t have enough SOL to pay the network fee, so nothing was sent. Add a little SOL and try again.',
+      ],
+      [
+        'InsufficientFundsForFee',
+        {
+          code: -32002,
+          message: 'simulation failed',
+          data: { err: 'InsufficientFundsForFee', logs: [] },
+        },
+        'This wallet doesn’t have enough SOL to pay the network fee, so nothing was sent. Add a little SOL and try again.',
+      ],
+      [
+        'a balance error in the simulation logs',
+        {
+          code: -32002,
+          message: 'Transaction simulation failed',
+          data: {
+            err: { InstructionError: [1, { Custom: 1 }] },
+            logs: ['Program log: Error: insufficient funds'],
+          },
+        },
+        'This wallet’s balance is too low for this transaction, so nothing was sent. Check your balance, including a little SOL for fees, and try again.',
+      ],
+    ])('keeps %s clean, as written', async (_name, error, wording) => {
+      const { calls } = stubRpc(() => ({ error }))
+      const result = await submit()(input(signed.transaction))
+      expect(result).toEqual({ ok: false, error: wording })
+      expect(calls).toHaveLength(1)
+      expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'failed', latched: false })
+    })
+
+    it.each([
+      ['an internal error', { code: -32603, message: 'Internal error' }],
+      ['a node that is behind', { code: -32005, message: 'Node is behind by 42 slots' }],
+      ['a gateway error with no code', { message: 'Bad gateway' }],
+      ['a gateway that mentions simulation', { code: -32603, message: 'Simulation timed out' }],
+      ['a gateway that mentions the blockhash', { code: -32000, message: 'Blockhash not found' }],
+      [
+        'balance words outside a preflight failure',
+        { code: -32603, message: 'x', data: { logs: ['insufficient funds'] } },
+      ],
+      [
+        'a transaction that already landed',
+        {
+          code: -32002,
+          message: 'Transaction simulation failed: This transaction has already been processed',
+          data: { err: 'AlreadyProcessed', logs: [] },
+        },
+      ],
+      [
+        'an already processed message with no error name',
+        {
+          code: -32002,
+          message: 'Transaction simulation failed: This transaction has already been processed',
+        },
+      ],
+    ])('treats %s as unknown', async (_name, error) => {
+      stubRpc(() => ({ error }))
+      const result = await submit()(input(signed.transaction))
+      expect(result).toMatchObject({
+        ok: false,
+        pending: true,
+        error: expect.stringContaining(`https://solscan.io/tx/${signed.signature}`),
+      })
+      expect(JSON.stringify(result)).not.toMatch(/nothing was sent|nothing moved/)
+      expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
+    })
+
+    it('does not read a refusal out of a non-2xx answer', async () => {
+      vi.stubGlobal(
+        'fetch',
+        async () =>
+          new Response(
+            JSON.stringify({ error: { code: -32002, message: 'Transaction simulation failed' } }),
+            { status: 502 }
+          )
+      )
+      await expect(submit()(input(signed.transaction))).rejects.toThrow()
+    })
   })
 })
 
@@ -274,42 +535,103 @@ describe('jupiter execute', () => {
     expect(urls).toHaveLength(0)
   })
 
+  const EXPIRED_SWAP =
+    'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.'
+  const UNREADABLE_SWAP =
+    'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.'
+
   it.each([
-    [-1, /expired|fresh quote/i],
-    [-1005, /expired/i],
-    [-1004, /expired/i],
-    [-1000, /did not land/i],
-    [-1003, /sign/i],
-    [-9999, /did not go through/i],
-  ])('explains execute code %i', async (code, message) => {
+    [-1, EXPIRED_SWAP],
+    [-1004, EXPIRED_SWAP],
+    [-1005, EXPIRED_SWAP],
+    [-2003, EXPIRED_SWAP],
+    [-2, UNREADABLE_SWAP],
+    [-3, UNREADABLE_SWAP],
+    [-1002, UNREADABLE_SWAP],
+    [-1003, UNREADABLE_SWAP],
+    [-2002, UNREADABLE_SWAP],
+  ])('keeps execute code %i clean, as written', async (code, wording) => {
     answering({ status: 'Failed', code, error: 'upstream text' })
     const result = await venue.submit?.(executeInput)
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(message) })
-    expect(JSON.stringify(result)).not.toContain('upstream text')
+    expect(result).toEqual({ ok: false, error: wording })
+    expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'failed', latched: false })
   })
 
-  it('marks only an unknown execute code as pending', async () => {
-    answering({ status: 'Failed', code: -9999 })
-    await expect(venue.submit?.(executeInput)).resolves.toMatchObject({ ok: false, pending: true })
-    answering({ status: 'Failed', code: -1000 })
-    const clean = await venue.submit?.(executeInput)
-    expect(clean).toMatchObject({ ok: false })
-    expect(clean).not.toHaveProperty('pending')
-  })
-
-  it('treats a 200 with an unreadable body as unknown, not as nothing sent', async () => {
-    answering('not an execute reply', 200)
+  it.each([
+    ['-1000, which only says it failed to land', { status: 'Failed', code: -1000 }],
+    ['-2000, which only says it failed to land', { status: 'Failed', code: -2000 }],
+    ['an unknown code', { status: 'Failed', code: -9999, error: 'upstream text' }],
+    ['a failure with no code', { status: 'Failed' }],
+    ['Success with no signature', { status: 'Success', code: 0 }],
+    ['Success with a clean code and no signature', { status: 'Success', code: -1 }],
+    ['a status it has never used', { status: 'Processing', code: -1 }],
+    ['a clean code with no status on a 200', { code: -1 }],
+    ['an unreadable body on a 200', 'not an execute reply'],
+  ])('treats %s as unknown', async (_name, body) => {
+    answering(body)
     const result = await venue.submit?.(executeInput)
-    expect(result).toMatchObject({ ok: false, pending: true })
-    expect(JSON.stringify(result)).not.toContain('nothing was sent')
+    expect(result).toMatchObject({
+      ok: false,
+      pending: true,
+      error: expect.stringMatching(/don.t send it again/i),
+    })
+    expect(result).toMatchObject({ error: expect.stringMatching(/wallet.s activity/i) })
+    expect(JSON.stringify(result)).not.toMatch(
+      /did not go through|did not land|nothing moved|nothing was sent|upstream text/
+    )
+    expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
   })
 
-  it('reports a rejected request as nothing sent', async () => {
-    answering({ error: 'bad' }, 400)
-    await expect(venue.submit?.(executeInput)).resolves.toMatchObject({
+  it.each([
+    ['-1000', { status: 'Failed', code: -1000, signature: 'jupiter-signature' }, 200],
+    ['an unknown code', { status: 'Failed', code: -9999, signature: 'jupiter-signature' }, 200],
+    ['a non-2xx answer', { status: 'Success', signature: 'jupiter-signature' }, 400],
+  ])('points at Jupiter’s signature for %s', async (_name, body, statusCode) => {
+    answering(body, statusCode)
+    const result = await venue.submit?.(executeInput)
+    expect(result).toMatchObject({
       ok: false,
-      error: expect.stringMatching(/fresh quote/i),
+      pending: true,
+      error: expect.stringContaining('https://solscan.io/tx/jupiter-signature'),
     })
+    expect(result).toMatchObject({ error: expect.stringMatching(/don.t send it again/i) })
+  })
+
+  it.each([400, 401, 403, 404, 408, 409, 422])(
+    'treats a %i with no known code as unknown',
+    async (statusCode) => {
+      answering({ error: 'bad' }, statusCode)
+      const result = await venue.submit?.(executeInput)
+      expect(result).toMatchObject({
+        ok: false,
+        pending: true,
+        error: expect.stringMatching(/don.t send it again/i),
+      })
+      expect(JSON.stringify(result)).not.toContain('nothing was sent')
+      expect(afterSubmitting(result, 'solana')).toMatchObject({ phase: 'pending', latched: true })
+    }
+  )
+
+  it('treats a non-2xx with an unreadable body as unknown', async () => {
+    vi.stubGlobal('fetch', async () => new Response('<html>Bad request</html>', { status: 400 }))
+    await expect(venue.submit?.(executeInput)).resolves.toMatchObject({ ok: false, pending: true })
+  })
+
+  it.each([
+    ['-1000', { status: 'Failed', code: -1000 }],
+    ['an unknown code', { code: -9999 }],
+    ['a clean code beside a Success status', { status: 'Success', code: -1 }],
+  ])('treats a 400 carrying %s as unknown', async (_name, body) => {
+    answering(body, 400)
+    await expect(venue.submit?.(executeInput)).resolves.toMatchObject({ ok: false, pending: true })
+  })
+
+  it.each([
+    ['with a Failed status', { status: 'Failed', code: -1005 }, EXPIRED_SWAP],
+    ['with no status', { code: -2 }, UNREADABLE_SWAP],
+  ])('believes a known clean code on a 400 %s', async (_name, body, wording) => {
+    answering(body, 400)
+    await expect(venue.submit?.(executeInput)).resolves.toEqual({ ok: false, error: wording })
   })
 
   it('leaves an unknown outcome to the route, which tells the user to check their wallet', async () => {
