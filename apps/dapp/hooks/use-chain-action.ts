@@ -7,10 +7,18 @@ import {
   accountMismatch,
   afterSigning,
   afterSubmitting,
+  attemptNotice,
+  attemptStorage,
+  earlierAttempt,
   latchBeforeSign,
+  noteSubmitAnswer,
+  noteWalletAnswer,
   QUOTE_EXPIRED,
   quoteExpiredBeforeSigning,
+  recordAttempt,
   submitSigned,
+  type AttemptNotice,
+  type SignAttempt,
 } from '../lib/chains/signing-flow'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
@@ -37,6 +45,8 @@ export interface ChainActionState {
   account?: string
   /** The race this action was chosen from; absent for the direct route built when no race gave one. */
   raceId?: string
+  /** This same action was already started recently, perhaps before a reload. */
+  earlier?: AttemptNotice
 }
 
 export interface ChainAction extends ChainActionState {
@@ -118,12 +128,19 @@ export function useChainAction(): ChainAction {
           })
           return
         }
+        const earlier = earlierAttempt(attemptStorage(), {
+          chain: slug,
+          account,
+          tokenIn: body.prepared.pay.symbol,
+          amount: body.prepared.pay.amount,
+        })
         setState({
           phase: 'review',
           asked,
           prepared: body.prepared,
           account,
           ...(raceId !== undefined ? { raceId } : {}),
+          ...(earlier !== undefined ? { earlier: attemptNotice(earlier) } : {}),
         })
       }
 
@@ -162,6 +179,15 @@ export function useChainAction(): ChainAction {
         return
       }
       const family = prepared.signing.family
+      const storage = attemptStorage()
+      const attempt: SignAttempt = {
+        chain: slug,
+        account,
+        tokenIn: prepared.pay.symbol,
+        amount: prepared.pay.amount,
+        at: Date.now(),
+      }
+      recordAttempt(storage, attempt)
       // A wallet that sends for itself may send and then report an error, so
       // the latch is set before it is called, not after it answers.
       if (latchBeforeSign(family)) setSigned(true)
@@ -172,12 +198,14 @@ export function useChainAction(): ChainAction {
       })
 
       const outcome = await adapter.signPrepared?.(prepared.signing)
+      const step = outcome === undefined ? undefined : afterSigning(outcome, family)
+      // Noted even for a card replaced since: the answer is as true either way.
+      noteWalletAnswer(storage, attempt, step)
       if (!current()) return
-      if (outcome === undefined) {
+      if (step === undefined) {
         setState((s) => ({ ...s, phase: 'failed', error: 'This wallet cannot sign here yet.' }))
         return
       }
-      const step = afterSigning(outcome, family)
       if (step.next === 'review') {
         setState((s) => ({ ...s, phase: 'review' }))
         return
@@ -203,6 +231,7 @@ export function useChainAction(): ChainAction {
         },
         raceId
       )
+      noteSubmitAnswer(storage, attempt, result)
       if (!current()) return
       const done = afterSubmitting(result, family)
       if (!done.latched) setSigned(false)
