@@ -438,7 +438,7 @@ describe('the race on these chains', () => {
     })
     expect(capabilitySheet('avalanche')).toContain('Agents compete')
     expect(capabilitySheet('monad')).toContain('Agents compete')
-    expect(capabilitySheet('monad')).not.toMatch(/Supply:|Stake:|Send:|limit order/)
+    expect(capabilitySheet('monad')).not.toMatch(/Supply:|Stake:|limit order/)
     expect(capabilitySheet('arc')).not.toContain('Agents compete')
   })
 

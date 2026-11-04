@@ -209,10 +209,22 @@ const BASE_PROMPT = [
   'facts must never contain an account number or a person’s name.',
 ].join(' ')
 
+/**
+ * What differs off Stellar, where the opening line and the follow-ons above are written for
+ * Stellar. The facts below list what this chain can run, and the app checks everything signed
+ * against what the person typed, so an address or an amount is copied and never filled in.
+ */
+const OFF_STELLAR_PROMPT = [
+  'The person is not on Stellar: the app runs on the chain named in the facts below, so ignore the Stellar network, Blend, DeFindex and anchors above.',
+  "followOn is 'lend' only for a deposit that the facts list under Swap then deposit, and 'offramp' only for a cash-out that the facts list under Swap then cash out. Anything else that follows a swap, such as a send or a stake, is not a followOn: write the whole request in instruction.",
+  'When a swap is followed by something, write the instruction as one sentence like "Swap 5 SOL to USDC, then send to ADDRESS", with every amount, token and address copied character for character from what the person typed. Never invent, shorten or correct an address, and never add an amount they did not give.',
+].join(' ')
+
 /** Only where a cash-out exists; elsewhere naming it would promise what the chain lacks. */
 function systemPrompt(chain: string): string {
   const cashOut = cashOutPrompt(chain)
-  return cashOut === '' ? BASE_PROMPT : `${BASE_PROMPT} ${cashOut}`
+  const base = cashOut === '' ? BASE_PROMPT : `${BASE_PROMPT} ${cashOut}`
+  return chain === 'stellar' ? base : `${base} ${OFF_STELLAR_PROMPT}`
 }
 
 /** Long enough for any sentence a person types here, short enough to bound what is passed on. */

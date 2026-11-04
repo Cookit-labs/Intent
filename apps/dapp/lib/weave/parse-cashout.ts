@@ -274,14 +274,20 @@ export function routeCashout(
     }
     return { kind: 'token', token: read.unsupportedToken }
   }
+  // Off Stellar a leading zero may be a decimal comma, "0,500" read as 0500: the form opens
+  // with no seed and the person types the amount.
+  const seed =
+    read.amount !== undefined && (chain === 'stellar' || !/^0\d/.test(read.amount))
+      ? { amount: read.amount }
+      : {}
   if (read.currency === undefined) {
     if (chain === 'stellar' && !stellarMainnet) return { kind: 'pass' }
-    return { kind: 'ask', ...(read.amount !== undefined ? { amount: read.amount } : {}) }
+    return { kind: 'ask', ...seed }
   }
   if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
   return {
     kind: 'open',
-    ...(read.amount !== undefined ? { amount: read.amount } : {}),
+    ...seed,
     ...(read.currency !== undefined ? { currency: read.currency } : {}),
   }
 }

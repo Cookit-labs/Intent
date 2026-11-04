@@ -975,6 +975,16 @@ describe('sequenceWordsMatch', () => {
     expect(sequenceWordsMatch(asked, ['sell SOL, 5 of it.'])).toBe(true)
   })
 
+  it('counts 5 USDC as 5 of the token only when the token is USDC', () => {
+    expect(sequenceWordsMatch({ amount: '5', token: 'USDC' }, ['send 5 USDC to bob.near'])).toBe(
+      true
+    )
+    expect(sequenceWordsMatch({ amount: '5', token: 'USDC' }, ['send 5 USDT to bob.near'])).toBe(
+      false
+    )
+    expect(sequenceWordsMatch(asked, ['cash out SOL, I want 5 USDC'])).toBe(false)
+  })
+
   it('compares numbers, not text', () => {
     expect(sequenceWordsMatch(asked, ['cash out 5.0 SOL'])).toBe(true)
     expect(sequenceWordsMatch({ amount: '5.0', token: 'SOL' }, ['cash out 5 SOL'])).toBe(true)

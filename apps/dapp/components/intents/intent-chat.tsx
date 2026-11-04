@@ -82,7 +82,7 @@ import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balanc
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction, racesFirst } from '../../lib/chains/parse-action'
-import { parseChainSequence } from '../../lib/chains/parse-sequence'
+import { chainRouteFromReading, parseChainSequence } from '../../lib/chains/parse-sequence'
 import { followOnRefusal, type ChainSequenceRequest } from '../../lib/chains/sequence'
 import {
   CASHOUT_UNDER_WAY,
@@ -1755,6 +1755,30 @@ export function IntentChat({
     setChainRace({ request: request.swap, text })
   }
 
+  /** A plain chain action, typed or read by the orchestrator: the race, or the card for a send. */
+  function startChainAction(action: ChainActionRequest, text: string): void {
+    // The thread only renders once there is a message, so without this the
+    // card below would be built and never seen.
+    setMessage(text)
+    // A reopened turn, an open Stellar intent and its saved id all end here,
+    // so the race is the only thing on screen and is not saved over them.
+    resetTurnState()
+    setParsed(null)
+    setTurnId(null)
+    setAffordError(null)
+    // The agents race first; Review on a route is what builds it. A new
+    // race is the one thing that lifts the "already signed" latch.
+    chainAction.release()
+    chainAction.reset()
+    if (racesFirst(action)) {
+      setChainRace({ request: action, text })
+    } else {
+      // Nothing to price or choose, so a stale race is cleared and the card comes straight up.
+      clearChainRace()
+      chainAction.prepare(action, text)
+    }
+  }
+
   /** A swap and what follows it. Whatever could not finish is refused here, before step 1. */
   function startChainSequence(request: ChainSequenceRequest, text: string): void {
     const capabilities = chainCapabilities(slug)
@@ -2064,26 +2088,7 @@ export function IntentChat({
       }
       const action = parseChainAction(text)
       if (action !== null) {
-        // The thread only renders once there is a message, so without this the
-        // card below would be built and never seen.
-        setMessage(text)
-        // A reopened turn, an open Stellar intent and its saved id all end here,
-        // so the race is the only thing on screen and is not saved over them.
-        resetTurnState()
-        setParsed(null)
-        setTurnId(null)
-        setAffordError(null)
-        // The agents race first; Review on a route is what builds it. A new
-        // race is the one thing that lifts the "already signed" latch.
-        chainAction.release()
-        chainAction.reset()
-        if (racesFirst(action)) {
-          setChainRace({ request: action, text })
-        } else {
-          // Nothing to price or choose, so a stale race is cleared and the card comes straight up.
-          clearChainRace()
-          chainAction.prepare(action, text)
-        }
+        startChainAction(action, text)
         return
       }
       if (looksLikeChainAction(text)) {
@@ -2268,6 +2273,30 @@ export function IntentChat({
         }
       }
       startCashout(writtenOut, shown)
+      return
+    }
+
+    // Off Stellar a reading never reaches Stellar's swap and lend flows below. It goes where a typed
+    // sentence goes, and only what the person typed themselves can be signed.
+    const chainCaps = chainCapabilities(slug)
+    if (chainCaps !== undefined) {
+      // A swap must not start under whatever was said while this was being read.
+      if (asked.turn !== latest.current.turn || asked.chain !== latest.current.chain) return
+      const shown = turns[0]?.content ?? text
+      const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
+      const route = chainRouteFromReading(answer.read, answer.instruction, said)
+      if (route !== null && 'sequence' in route) {
+        startChainSequence(route.sequence, shown)
+      } else if (route !== null && 'action' in route) {
+        startChainAction(route.action, shown)
+      } else {
+        setMessage(shown)
+        clearChainRace()
+        chainAction.refuse(
+          route !== null ? route.refusal : chainHelp(descriptor.name, chainCaps),
+          shown
+        )
+      }
       return
     }
 

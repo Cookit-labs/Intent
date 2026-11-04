@@ -697,8 +697,12 @@ export function sequenceWordsMatch(
           String.raw`\b(?:on|in|from|to|into|at|via|using|through)\s+(?:my\s+|the\s+)?(?:${names.join('|')})\b|\b(?:${names.join('|')})\s+(?:wallet|account|address|chain|network|blockchain)\b`,
           'gi'
         )
+  // "5 USDC" is 5 of a token when the token is USDC, and a sum of money when it is another's.
+  const notAmount = NOT_THE_AMOUNT.split('|')
+    .filter((unit) => unit !== symbol.toLowerCase())
+    .join('|')
   const number = new RegExp(
-    String.raw`(?:^|[^\w.,$₦£€])(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${NOT_THE_AMOUNT})(?![\w+]))`,
+    String.raw`(?:^|[^\w.,$₦£€])(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${notAmount})(?![\w+]))`,
     'gi'
   )
   const wanted = canonicalNumber(instruction.amount)

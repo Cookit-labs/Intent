@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { assertNativeReserve } from '../chains/prepare'
-import { parseChainSequence } from '../chains/parse-sequence'
+import { chainHelp } from '../chains/explain'
+import { chainCapabilities } from '../chains/capabilities'
+import {
+  chainRouteFromReading,
+  parseChainSequence,
+  type ReadSwap,
+  sequenceFromReading,
+  swapFromReading,
+} from '../chains/parse-sequence'
 import {
   SEQUENCE_CASHOUT_CHAINS,
   cashoutAmountFrom,
@@ -416,5 +424,198 @@ describe('assertNativeReserve', () => {
         'a'
       )
     ).rejects.toThrow(/Keep about 0.05 NEAR/)
+  })
+})
+
+const RECIPIENT = ADDRESS
+const reading = (over: Partial<ReadSwap> = {}) => ({
+  text: 'swap 5 SOL to USDC then send it',
+  tokenIn: 'SOL',
+  tokenOut: 'USDC',
+  amountUsd: 5,
+  amountStated: true,
+  followOn: null as ReadSwap['followOn'],
+  ...over,
+})
+
+describe('sequenceFromReading', () => {
+  const said = [`swap 5 SOL to USDC then send to ${RECIPIENT}`]
+
+  it('reads a swap with a cash-out, a deposit and a send, and nothing without a follow-on', () => {
+    const swap = { kind: 'swap', amount: '5', tokenIn: 'SOL', tokenOut: 'USDC', venue: undefined }
+    expect(
+      sequenceFromReading(reading({ followOn: { kind: 'offramp', venue: 'weave' } }), said)
+    ).toEqual({ swap, followOn: { kind: 'cashout' } })
+    expect(
+      sequenceFromReading(reading({ followOn: { kind: 'lend', venue: 'blend' } }), said)
+    ).toEqual({ swap, followOn: { kind: 'supply' } })
+    expect(
+      sequenceFromReading(
+        reading({ followOn: { kind: 'send', venue: '', recipient: RECIPIENT } }),
+        said
+      )
+    ).toEqual({ swap, followOn: { kind: 'send', recipient: RECIPIENT } })
+    expect(sequenceFromReading(reading(), said)).toBeNull()
+  })
+
+  it('refuses a send to a recipient the person never typed, character for character', () => {
+    const other = `${ADDRESS.slice(0, -1)}V`
+    const out = sequenceFromReading(
+      reading({ followOn: { kind: 'send', venue: '', recipient: other } }),
+      said
+    )
+    expect(out).toMatchObject({ refusal: expect.stringContaining('Nothing was signed or sent.') })
+    expect(out).toHaveProperty('refusal')
+    const lower = sequenceFromReading(
+      reading({ followOn: { kind: 'send', venue: '', recipient: RECIPIENT.toLowerCase() } }),
+      said
+    )
+    expect(lower).toHaveProperty('refusal')
+    const inside = sequenceFromReading(
+      reading({ followOn: { kind: 'send', venue: '', recipient: RECIPIENT.slice(1) } }),
+      said
+    )
+    expect(inside).toHaveProperty('refusal')
+  })
+
+  it('refuses an amount the person never typed', () => {
+    const out = sequenceFromReading(
+      reading({ amountUsd: 500, followOn: { kind: 'offramp', venue: 'weave' } }),
+      said
+    )
+    expect(out).toHaveProperty('refusal')
+  })
+
+  it('refuses a token the person never typed', () => {
+    const out = sequenceFromReading(
+      reading({ tokenIn: 'JUP', followOn: { kind: 'offramp', venue: 'weave' } }),
+      said
+    )
+    expect(out).toHaveProperty('refusal')
+  })
+
+  it('refuses a dollar amount, a received amount and a cash-out not ending in USDC', () => {
+    const f = { followOn: { kind: 'offramp', venue: 'weave' } }
+    expect(sequenceFromReading(reading({ ...f, amountIsUsd: true }), said)).toHaveProperty(
+      'refusal'
+    )
+    expect(sequenceFromReading(reading({ ...f, amountOf: 'received' }), said)).toHaveProperty(
+      'refusal'
+    )
+    expect(sequenceFromReading(reading({ ...f, tokenOut: 'USDT' }), said)).toHaveProperty('refusal')
+  })
+
+  it('keeps a venue only when the person named it, and refuses one they did not', () => {
+    const named = reading({ followOn: { kind: 'lend', venue: 'kamino', venueNamed: true } })
+    expect(sequenceFromReading(named, ['swap 5 SOL to USDC then deposit on Kamino'])).toMatchObject(
+      { followOn: { kind: 'supply', venue: 'kamino' } }
+    )
+    expect(sequenceFromReading(named, said)).toHaveProperty('refusal')
+  })
+})
+
+describe('swapFromReading', () => {
+  it('reads a plain swap from the persons own words only', () => {
+    expect(swapFromReading(reading(), ['swap 5 SOL to USDC'])).toEqual({
+      kind: 'swap',
+      amount: '5',
+      tokenIn: 'SOL',
+      tokenOut: 'USDC',
+      venue: undefined,
+    })
+    expect(swapFromReading(reading({ amountUsd: 9 }), ['swap 5 SOL to USDC'])).toHaveProperty(
+      'refusal'
+    )
+  })
+})
+
+describe('chainHelp in the new forms', () => {
+  it('lists swap then cash out, deposit and send per chain', () => {
+    const help = (chain: 'solana' | 'near' | 'monad' | 'sui' | 'avalanche', name: string): string =>
+      chainHelp(name, chainCapabilities(chain) ?? [])
+    expect(help('solana', 'Solana')).toContain('"swap 5 SOL to USDC then cash out"')
+    expect(help('solana', 'Solana')).toContain('"swap 5 SOL to USDC then send to an address"')
+    expect(help('sui', 'Sui')).toContain('"swap 5 SUI to USDC then cash out"')
+    expect(help('avalanche', 'Avalanche')).toContain('"swap 5 AVAX to USDC then cash out"')
+    expect(help('near', 'NEAR')).toContain('"swap 5 NEAR to USDC then deposit"')
+    expect(help('near', 'NEAR')).not.toContain('then cash out')
+    expect(help('near', 'NEAR')).not.toContain('then stake')
+    expect(help('monad', 'Monad')).toContain('"swap 5 MON to USDC then send to an address"')
+    expect(help('monad', 'Monad')).not.toMatch(/then (cash out|deposit)/)
+    expect(help('monad', 'Monad')).toContain('"send 5 USDC to an address"')
+  })
+})
+
+describe('routeCashout plain form on a chain', () => {
+  it('drops a leading-zero amount off Stellar so the person types it', () => {
+    expect(routeCashout(parseCashout('cash out 0,500 usdc to kes'), 'solana')).toEqual({
+      kind: 'open',
+      currency: 'KES',
+    })
+    expect(routeCashout(parseCashout('cash out 0,500 usdc'), 'solana')).toEqual({ kind: 'ask' })
+    expect(routeCashout(parseCashout('cash out 05 usdc'), 'sui')).toEqual({ kind: 'ask' })
+    expect(routeCashout(parseCashout('cash out 0.5 usdc'), 'solana')).toEqual({
+      kind: 'ask',
+      amount: '0.5',
+    })
+  })
+
+  it('leaves Stellar as it was', () => {
+    expect(routeCashout(parseCashout('cash out 0,500 usdc to kes'), 'stellar')).toEqual({
+      kind: 'open',
+      amount: '0500',
+      currency: 'KES',
+    })
+    expect(routeCashout(parseCashout('cash out 0,500 usdc'), 'stellar')).toEqual({
+      kind: 'ask',
+      amount: '0500',
+    })
+  })
+})
+
+describe('chainRouteFromReading', () => {
+  const read = (over: Partial<ReadSwap & { action: string }> = {}) => ({
+    ...reading(),
+    action: 'swap',
+    ...over,
+  })
+  const SENT = `swap 5 SOL to USDC then send to ${ADDRESS}`
+
+  it('reads a sequence the model wrote out when it set no follow-on, from the persons words', () => {
+    expect(chainRouteFromReading(read(), SENT, [SENT])).toMatchObject({
+      sequence: { followOn: { kind: 'send', recipient: ADDRESS } },
+    })
+  })
+
+  it('refuses a written-out send to an address the person never typed', () => {
+    const typed = ['swap 5 SOL to USDC then send it to my friend']
+    expect(chainRouteFromReading(read(), SENT, typed)).toHaveProperty('refusal')
+    expect(chainRouteFromReading(read(), `send 5 USDC to ${ADDRESS}`, typed)).toHaveProperty(
+      'refusal'
+    )
+  })
+
+  it('refuses a written-out amount the person never typed', () => {
+    const typed = ['swap SOL to USDC then send to ' + ADDRESS]
+    expect(chainRouteFromReading(read(), SENT, typed)).toHaveProperty('refusal')
+  })
+
+  it('runs a plain send and a plain swap that are in the persons words', () => {
+    const send = `send 5 USDC to ${ADDRESS}`
+    expect(chainRouteFromReading(read(), send, [send])).toMatchObject({
+      action: { kind: 'send', recipient: ADDRESS },
+    })
+    expect(
+      chainRouteFromReading(read(), 'Flip 5 SOL into USDC', ['flip 5 sol into dollars'])
+    ).toMatchObject({ action: { kind: 'swap', amount: '5', tokenIn: 'SOL', tokenOut: 'USDC' } })
+    expect(
+      chainRouteFromReading(read({ amountUsd: 9 }), 'Flip 9 SOL into USDC', [
+        'flip 5 sol into dollars',
+      ])
+    ).toHaveProperty('refusal')
+  })
+
+  it('reads nothing from a model that is not swapping and wrote no action', () => {
+    expect(chainRouteFromReading(read({ action: 'borrow' }), 'borrow some', ['borrow'])).toBeNull()
   })
 })

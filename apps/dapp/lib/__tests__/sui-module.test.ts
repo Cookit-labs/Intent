@@ -309,7 +309,7 @@ describe('the module', () => {
 
   it('offers one capability per wired kind', () => {
     expect(suiCapabilities).toEqual([
-      { kind: 'swap', venue: 'Cetus', symbol: 'SUI' },
+      { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
     ])
