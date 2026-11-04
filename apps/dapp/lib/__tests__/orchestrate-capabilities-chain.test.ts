@@ -18,9 +18,9 @@ describe('capabilitySheet per chain', () => {
     expect(sheet).not.toMatch(/Send:|Accumulate|Hedge|limit order/)
   })
 
-  it('does not promise a race on Solana or Sui before their venues can be quoted', () => {
-    expect(capabilitySheet('solana')).not.toContain('Agents compete')
-    expect(capabilitySheet('sui')).not.toContain('Agents compete')
+  it('says agents compete on Solana and Sui now their venues can be quoted', () => {
+    expect(capabilitySheet('solana')).toContain('Agents compete')
+    expect(capabilitySheet('sui')).toContain('Agents compete')
     expect(capabilitySheet('solana')).not.toContain('Stake:')
   })
 })

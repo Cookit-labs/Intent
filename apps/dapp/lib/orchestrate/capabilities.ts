@@ -16,7 +16,7 @@ import { chainCapabilities } from '../chains/capabilities'
  * once its venues can be quoted, so the sheet never promises a race that does
  * not run.
  */
-const AGENT_RACE_CHAINS = ['stellar', 'near']
+const AGENT_RACE_CHAINS = ['stellar', 'near', 'solana', 'sui']
 
 const SWAP_RACED =
   'Swap: trade one asset for another at the market price, or place a limit order at a price you name. Agents compete to propose the best route; you review it and sign in your wallet.'

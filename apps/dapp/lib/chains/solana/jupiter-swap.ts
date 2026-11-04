@@ -11,6 +11,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { assertWrapAtMost, solanaAssertSafe } from './assert-safe'
 import { JUPITER_API, jupiterHeaders, venueFetch } from './http'
@@ -126,7 +127,11 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
   const env = options.env ?? process.env
   const assertSafe = solanaAssertSafe(JUPITER_SWAP_POLICY)
 
-  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  /**
+   * The order call and every check on what comes back. The race and Review both go through
+   * it, so a quote the agents can pick is one Review would build.
+   */
+  async function checkedOrder(request: ChainActionRequest, account: string) {
     if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
     if (request.kind !== 'swap') {
       throw new ChainActionRefused(`Jupiter swaps tokens. It can't ${request.kind} here.`)
@@ -225,6 +230,25 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
 
     if (tokenIn.id === WRAPPED_SOL) assertWrapAtMost(order.transaction, BigInt(amount))
 
+    const { transaction, requestId } = order
+    return { order, transaction, requestId, tokenIn, tokenOut, minimum, referral }
+  }
+
+  /** What the swap would give back. The transaction is left here, since nothing signs it. */
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const { order, tokenOut } = await checkedOrder(request, account)
+    return {
+      receive: {
+        amount: fromBaseUnits(order.outAmount, tokenOut.decimals),
+        symbol: tokenOut.symbol,
+      },
+    }
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { order, transaction, requestId, tokenIn, tokenOut, minimum, referral } =
+      await checkedOrder(request, account)
+
     const received = fromBaseUnits(order.outAmount, tokenOut.decimals)
     const notes = [
       `The price can move before this lands. You get at least ${minimum} ${tokenOut.symbol} or the swap fails, and network fees still apply.`,
@@ -249,8 +273,8 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       pay: { amount: request.amount, symbol: tokenIn.symbol },
       receive: { amount: received, symbol: tokenOut.symbol, approximate: true },
       notes,
-      signing: { family: 'solana', transaction: order.transaction },
-      context: { requestId: order.requestId },
+      signing: { family: 'solana', transaction },
+      context: { requestId },
     }
   }
 
@@ -304,6 +328,7 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
     id: 'jupiter',
     name: 'Jupiter',
     kinds: ['swap'],
+    quote,
     prepare,
     assertSafe,
     submit,

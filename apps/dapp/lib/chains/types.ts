@@ -119,8 +119,15 @@ export interface ChainVenue {
    * unexpected program, a transfer out. Runs on what the venue's API returned
    * before the user sees it, and again on signed bytes at submit, because the
    * venue's API and the browser are both outside what this server controls.
+   *
+   * `context` is what `prepare` issued, handed back by the browser. A venue that reads it
+   * must prove the server wrote it before believing any of it.
    */
-  assertSafe: (payload: SigningPayload, account: string) => void
+  assertSafe: (
+    payload: SigningPayload,
+    account: string,
+    context?: Record<string, string> | undefined
+  ) => void
   /** Overrides the module's submit where a venue lands its own transactions. */
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
 }
@@ -134,6 +141,14 @@ export interface ChainModule {
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+}
+
+/**
+ * A venue's rate as the race reads it: base and reward together, since the agents compare
+ * one figure. No rate read means no rate here, never a zero or a guess.
+ */
+export function quotedApy(apy: PreparedAction['apy']): VenueQuote {
+  return apy === undefined ? {} : { apyPercent: apy.basePercent + (apy.rewardPercent ?? 0) }
 }
 
 export function tokenBySymbol(

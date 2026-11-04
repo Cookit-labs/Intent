@@ -19,6 +19,18 @@ export const solanaVenues: Venue[] = [
       'Swaps USDC, USDT, SOL, JitoSOL and ONyc through Jupiter’s on-chain router. Refuses thin liquidity, and checks every transaction before you sign.',
   },
   {
+    id: '1click-solana',
+    family: 'solana',
+    name: 'NEAR Intents 1Click',
+    category: 'swap',
+    chains: ['Solana'],
+    bestFor: 'A second swap price from competing market makers, spending USDC or USDT',
+    url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+    integration: 'executes',
+    capability:
+      'Swaps USDC or USDT for another token in your Solana wallet that 1Click also lists. Your wallet signs one transfer to a one-time deposit address. Mainnet only. No swap has been signed through this app yet.',
+  },
+  {
     id: 'jupiter-lend',
     family: 'solana',
     name: 'Jupiter Lend Earn',

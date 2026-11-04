@@ -1,3 +1,4 @@
+import { oneClickOriginVenue } from '../oneclick-origin'
 import type { ChainModule, ChainVenue } from '../types'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
@@ -15,6 +16,7 @@ export function buildSolanaVenues(
   const luloKey = env['LULO_API_KEY']?.trim()
   return [
     createJupiterSwapVenue({ priceUsd, env }),
+    oneClickOriginVenue('solana'),
     createJupiterLendVenue({ env }),
     createKaminoVenue(),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),

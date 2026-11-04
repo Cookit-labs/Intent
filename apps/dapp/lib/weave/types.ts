@@ -1,4 +1,4 @@
-import type { SignedPayload, SigningPayload, SubmitResult } from '../chains/types'
+import type { ChainToken, SignedPayload, SigningPayload, SubmitResult } from '../chains/types'
 
 /** The chains a person can cash out from through Weave. Only USDC, on every one of them. */
 export type CashoutChain = 'stellar' | 'solana' | 'avalanche' | 'sui' | 'near'
@@ -41,8 +41,10 @@ export interface DepositExpectation {
   depositAddress: string
   /** Absent when the order has no memo. Refused by chains that cannot carry one. */
   memo: string | undefined
-  /** USDC in display units. */
+  /** The token in display units. */
   amount: string
+  /** What to transfer. Absent means USDC, which is all a Weave order ever sends. */
+  token?: ChainToken | undefined
 }
 
 /**

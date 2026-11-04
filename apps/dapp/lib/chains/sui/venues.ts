@@ -30,6 +30,18 @@ export const suiVenues: Venue[] = [
     capability: 'Swaps SUI, USDC, USDsui and USDT',
   },
   {
+    id: '1click-sui',
+    family: 'sui',
+    name: 'NEAR Intents 1Click',
+    category: 'swap',
+    chains: ['Sui'],
+    url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+    bestFor: 'A second swap price from competing market makers, spending USDC',
+    integration: 'executes',
+    capability:
+      'Swaps USDC for SUI in your Sui wallet, the pair 1Click lists here. Your wallet signs one transfer to a one-time deposit address. Mainnet only. No swap has been signed through this app yet.',
+  },
+  {
     id: 'navi',
     family: 'sui',
     name: 'NAVI',

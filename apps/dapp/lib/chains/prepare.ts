@@ -115,6 +115,6 @@ export async function prepareChainAction(
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
-  venue.assertSafe(prepared.signing, account)
+  venue.assertSafe(prepared.signing, account, prepared.context)
   return prepared
 }

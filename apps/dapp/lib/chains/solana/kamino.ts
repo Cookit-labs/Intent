@@ -3,11 +3,14 @@ import { z } from 'zod'
 
 import {
   ChainActionRefused,
+  quotedApy,
   tokenBySymbol,
   toBaseUnits,
   type ChainActionRequest,
+  type ChainToken,
   type ChainVenue,
   type PreparedAction,
+  type VenueQuote,
 } from '../types'
 import { assertDepositAmount, solanaAssertSafe } from './assert-safe'
 import { venueFetch } from './http'
@@ -120,7 +123,11 @@ export function createKaminoVenue(options: KaminoOptions = {}): ChainVenue {
     return rewardPercent === 0 ? { basePercent } : { basePercent, rewardPercent }
   }
 
-  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  /** The vault a deposit would use, after every check that needs no transaction. */
+  async function checkedDeposit(
+    request: ChainActionRequest,
+    account: string
+  ): Promise<{ token: ChainToken; amount: string; vault: Vault }> {
     if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
     const token = tokenBySymbol(SOLANA_TOKENS, request.tokenIn)
     if (request.kind !== 'supply' || token === undefined || token.symbol !== USDC) {
@@ -142,7 +149,16 @@ export function createKaminoVenue(options: KaminoOptions = {}): ChainVenue {
         `This vault takes at least ${fromBaseUnits(minimum, token.decimals)} USDC. Try a larger amount.`
       )
     }
+    return { token, amount, vault }
+  }
 
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const { vault } = await checkedDeposit(request, account)
+    return quotedApy(await readApy(vault.address))
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { token, amount, vault } = await checkedDeposit(request, account)
     const apy = await readApy(vault.address)
     const { status, body } = await venueFetch(`${KAMINO_API}/ktx/kvault/deposit`, {
       label: 'Kamino',
@@ -178,6 +194,7 @@ export function createKaminoVenue(options: KaminoOptions = {}): ChainVenue {
     id: 'kamino',
     name: 'Kamino Earn',
     kinds: ['supply'],
+    quote,
     prepare,
     assertSafe: solanaAssertSafe(KAMINO_POLICY),
   }

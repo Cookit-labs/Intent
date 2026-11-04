@@ -283,9 +283,10 @@ describe('submitting signed bytes', () => {
 })
 
 describe('the module', () => {
-  it('wires only swap, supply and stake, to Cetus, NAVI and SpringSui', () => {
+  it('wires only swap, supply and stake, to Cetus, 1Click, NAVI and SpringSui', () => {
     expect(suiModule.venues.map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
+      ['1click-sui', ['swap']],
       ['navi', ['supply']],
       ['springsui', ['stake']],
     ])
@@ -303,8 +304,8 @@ describe('the module', () => {
 
 describe('the venue list', () => {
   it('has every row of the report', () => {
-    expect(suiVenues).toHaveLength(14)
-    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(14)
+    expect(suiVenues).toHaveLength(15)
+    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(15)
   })
 
   it('is all Sui, with a real link and an honest reason', () => {

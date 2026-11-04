@@ -10,6 +10,8 @@ import { isWalletAddress } from '../../../../../lib/wallet/address'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// A send waits for the network to confirm, and a 1Click swap then waits on 1Click too.
+export const maxDuration = 60
 
 const Signed = z.discriminatedUnion('family', [
   z.object({ family: z.literal('solana'), signedTransaction: z.string().min(1).max(8192) }),
@@ -65,7 +67,7 @@ export async function POST(
         ? { family: 'solana', transaction: signed.signedTransaction }
         : { family: 'sui', transaction: signed.transaction }
     try {
-      venue.assertSafe(payload, account)
+      venue.assertSafe(payload, account, context)
     } catch (e) {
       // This route is what sends the bytes, so any failure here means they never left.
       if (e instanceof ChainActionRefused) {

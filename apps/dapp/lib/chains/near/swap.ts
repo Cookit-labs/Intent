@@ -45,13 +45,26 @@ const CONFIRM_WAIT_MS = 10_000
 const STATUS_WAIT_MS = 23_000
 const STATUS_POLL_MS = 2_000
 
-const EXPLORER_NOTE = 'You can follow it at explorer.near-intents.org by searching for'
+export const EXPLORER_NOTE = 'You can follow it at explorer.near-intents.org by searching for'
 
-interface Destination {
+export const ONECLICK_RISK_NOTE =
+  'NEAR Intents had an exploit of about $3.8M around 1 October 2026 in its bridge links. Funds were reported returned, but bridges and solvers it relies on remain a risk.'
+
+export interface Destination {
   assetId: string
   symbol: string
   decimals: number
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
+}
+
+/** What a swap spends, as 1Click names it. Off NEAR the id comes from `oneClickAssetId`. */
+export interface QuoteOrigin {
+  assetId: string
+  decimals: number
+}
+
+function nearOrigin(token: ChainToken): QuoteOrigin {
+  return { assetId: assetIdOf(token), decimals: token.decimals }
 }
 
 function lossBetween(paid: number, received: number): number {
@@ -68,12 +81,12 @@ function lossBetween(paid: number, received: number): number {
  */
 async function assertFairValue(
   envelope: QuoteEnvelope,
-  tokenIn: ChainToken,
+  origin: QuoteOrigin,
   destination: Destination
 ): Promise<number> {
   const { quote } = envelope
   const [priceIn, priceOut] = await Promise.all([
-    oneClickPrice(assetIdOf(tokenIn), tokenIn.decimals),
+    oneClickPrice(origin.assetId, origin.decimals),
     oneClickPrice(destination.assetId, destination.decimals),
   ])
   const quoted = lossBetween(Number(quote.amountInUsd), Number(quote.amountOutUsd))
@@ -81,7 +94,7 @@ async function assertFairValue(
     priceIn === undefined || priceOut === undefined
       ? Number.NaN
       : lossBetween(
-          toDisplayNumber(quote.amountIn, tokenIn.decimals) * priceIn,
+          toDisplayNumber(quote.amountIn, origin.decimals) * priceIn,
           toDisplayNumber(quote.amountOut, destination.decimals) * priceOut
         )
   if (!Number.isFinite(quoted) || !Number.isFinite(listed)) {
@@ -199,7 +212,12 @@ function isPositive(amount: string | undefined): amount is string {
   return amount !== undefined && BigInt(amount) > BigInt(0)
 }
 
-function costNote(envelope: QuoteEnvelope, loss: number, symbol: string, decimals: number): string {
+export function costNote(
+  envelope: QuoteEnvelope,
+  loss: number,
+  symbol: string,
+  decimals: number
+): string {
   const bps = feeBps(envelope)
   const fee =
     bps === undefined
@@ -213,6 +231,14 @@ function costNote(envelope: QuoteEnvelope, loss: number, symbol: string, decimal
   return `NEAR Intents runs on mainnet only, so this moves real funds. ${fee}${registration} After all costs you get about ${percent}% less in value than you pay, and at least ${formatUnits(envelope.quote.minAmountOut, decimals)} ${symbol}.`
 }
 
+export function depositNote(envelope: QuoteEnvelope, tokenIn: ChainToken, account: string): string {
+  const refundFee = envelope.quote.refundFee
+  const refundNote = isPositive(refundFee)
+    ? `, minus a fee of ${formatUnits(refundFee, tokenIn.decimals)} ${tokenIn.symbol}`
+    : ''
+  return `Your funds go to a one-time deposit address from 1Click, which this app can't check on-chain. Sign within 5 minutes, because a late deposit may be refunded instead of swapped. If the swap can't finish, 1Click returns your funds to ${account}${refundNote}.`
+}
+
 interface DepositFlow {
   venueId: string
   venueName: string
@@ -221,23 +247,27 @@ interface DepositFlow {
   extraNotes: string[]
 }
 
-/**
- * The preview half of every 1Click flow: a dry quote, checked against what was asked and
- * against live prices. A dry quote makes no deposit address, so the race can run it for
- * every venue, and Review runs it again before the real quote.
- */
-async function previewOneClick(
-  amountText: string,
-  tokenIn: ChainToken,
-  destination: Destination,
-  account: string
-) {
+function assertNearAccount(account: string): void {
   if (!NEAR_ACCOUNT.test(account)) {
     throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
   }
-  const amount = toBaseUnits(amountText, tokenIn.decimals)
+}
+
+/**
+ * The preview half of every 1Click flow: a dry quote, checked against what was asked and
+ * against live prices. A dry quote makes no deposit address, so the race can run it for
+ * every venue, and Review runs it again before the real quote. The caller has already
+ * checked the account belongs to the origin chain.
+ */
+export async function previewOneClick(
+  amountText: string,
+  origin: QuoteOrigin,
+  destination: Destination,
+  account: string
+) {
+  const amount = toBaseUnits(amountText, origin.decimals)
   const shared = {
-    originAsset: assetIdOf(tokenIn),
+    originAsset: origin.assetId,
     destinationAsset: destination.assetId,
     amount,
     account,
@@ -248,8 +278,43 @@ async function previewOneClick(
   const dryDeadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
   const preview = await requestQuote({ ...shared, dry: true, deadline: dryDeadline })
   assertQuoteMatches(preview, { ...shared, dry: true, deadline: dryDeadline })
-  await assertFairValue(preview, tokenIn, destination)
+  await assertFairValue(preview, origin, destination)
   return { shared, preview }
+}
+
+/**
+ * The real quote, which creates a deposit address, under the same checks as the preview.
+ * The address itself is left to the caller, because its shape depends on the chain.
+ */
+export async function liveOneClick(
+  shared: Awaited<ReturnType<typeof previewOneClick>>['shared'],
+  origin: QuoteOrigin,
+  destination: Destination
+) {
+  const deadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
+  const live = await requestQuote({ ...shared, dry: false, deadline })
+  assertQuoteMatches(live, { ...shared, dry: false, deadline })
+  const loss = await assertFairValue(live, origin, destination)
+  return { live, loss, deadline }
+}
+
+export function assertNoDepositMemo(envelope: QuoteEnvelope): void {
+  const { depositMemo } = envelope.quote
+  if (depositMemo !== undefined && depositMemo !== '') {
+    throw new ChainActionRefused(
+      'NEAR Intents asked for a deposit memo, which this app does not send. Nothing was signed or sent.'
+    )
+  }
+}
+
+export function venueQuoteFrom(preview: QuoteEnvelope, destination: Destination): VenueQuote {
+  return {
+    receive: {
+      amount: formatUnits(preview.quote.amountOut, destination.decimals),
+      symbol: destination.symbol,
+    },
+    valueOutUsd: Number(preview.quote.amountOutUsd),
+  }
 }
 
 /** What a dry quote says the swap would give back. Never reads a deposit address. */
@@ -259,14 +324,9 @@ export async function quoteOneClick(
   destination: Destination,
   account: string
 ): Promise<VenueQuote> {
-  const { preview } = await previewOneClick(amountText, tokenIn, destination, account)
-  return {
-    receive: {
-      amount: formatUnits(preview.quote.amountOut, destination.decimals),
-      symbol: destination.symbol,
-    },
-    valueOutUsd: Number(preview.quote.amountOutUsd),
-  }
+  assertNearAccount(account)
+  const { preview } = await previewOneClick(amountText, nearOrigin(tokenIn), destination, account)
+  return venueQuoteFrom(preview, destination)
 }
 
 /** The quote flow behind every 1Click venue. Only the destination and the wording differ. */
@@ -277,31 +337,22 @@ export async function prepareOneClickDeposit(
   destination: Destination,
   account: string
 ): Promise<PreparedAction> {
-  const { shared } = await previewOneClick(amountText, tokenIn, destination, account)
+  assertNearAccount(account)
+  const origin = nearOrigin(tokenIn)
+  const { shared } = await previewOneClick(amountText, origin, destination, account)
   const amount = shared.amount
 
-  const deadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
-  const live = await requestQuote({ ...shared, dry: false, deadline })
-  assertQuoteMatches(live, { ...shared, dry: false, deadline })
-  const loss = await assertFairValue(live, tokenIn, destination)
+  const { live, loss, deadline } = await liveOneClick(shared, origin, destination)
 
-  const { depositAddress, depositMemo } = live.quote
+  const { depositAddress } = live.quote
   if (depositAddress === undefined || !DEPOSIT_ADDRESS.test(depositAddress)) {
     throw new ChainActionRefused(
       "NEAR Intents' deposit address didn't look right, so it was not used. Nothing was signed or sent."
     )
   }
-  if (depositMemo !== undefined && depositMemo !== '') {
-    throw new ChainActionRefused(
-      'NEAR Intents asked for a deposit memo, which this app does not send. Nothing was signed or sent.'
-    )
-  }
+  assertNoDepositMemo(live)
 
   const transaction = await buildDepositTransaction(tokenIn, account, depositAddress, amount)
-  const refundFee = live.quote.refundFee
-  const refundNote = isPositive(refundFee)
-    ? `, minus a fee of ${formatUnits(refundFee, tokenIn.decimals)} ${tokenIn.symbol}`
-    : ''
 
   return {
     venueId: flow.venueId,
@@ -316,7 +367,7 @@ export async function prepareOneClickDeposit(
     },
     notes: [
       costNote(live, loss, destination.symbol, destination.decimals),
-      `Your funds go to a one-time deposit address from 1Click, which this app can't check on-chain. Sign within 5 minutes, because a late deposit may be refunded instead of swapped. If the swap can't finish, 1Click returns your funds to ${account}${refundNote}.`,
+      depositNote(live, tokenIn, account),
       ...flow.extraNotes,
     ],
     signing: { family: 'near', transactions: [transaction] },
@@ -363,9 +414,7 @@ async function prepareSwap(request: ChainActionRequest, account: string): Promis
           : toNear
             ? `Swap ${amount} ${token.symbol} for NEAR through NEAR Intents, delivered to your NEAR account as NEAR or wNEAR.`
             : `Swap ${amount} ${token.symbol} for ${tokenOut.symbol} through NEAR Intents, into your NEAR account.`,
-      extraNotes: [
-        'NEAR Intents had an exploit of about $3.8M around 1 October 2026 in its bridge links. Funds were reported returned, but bridges and solvers it relies on remain a risk.',
-      ],
+      extraNotes: [ONECLICK_RISK_NOTE],
     },
     request.amount,
     tokenIn,

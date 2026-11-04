@@ -664,15 +664,21 @@ describe('lulo', () => {
 })
 
 describe('module', () => {
-  it('offers the three venues that need no key', () => {
-    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual(['jupiter', 'jupiter-lend', 'kamino'])
+  it('offers the four venues that need no key', () => {
+    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual([
+      'jupiter',
+      '1click-solana',
+      'jupiter-lend',
+      'kamino',
+    ])
     expect(solanaModule.defaultVenue).toMatchObject({ swap: 'jupiter', supply: 'jupiter-lend' })
     expect(solanaModule.chain).toBe('solana')
   })
 
-  it('lets only Jupiter land its own transactions', () => {
-    const [swap, lend, kamino] = buildSolanaVenues({})
+  it('lets only the swaps land their own transactions', () => {
+    const [swap, oneClick, lend, kamino] = buildSolanaVenues({})
     expect(swap?.submit).toBeTypeOf('function')
+    expect(oneClick?.submit).toBeTypeOf('function')
     expect(lend?.submit).toBeUndefined()
     expect(kamino?.submit).toBeUndefined()
   })
@@ -732,8 +738,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(14)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(14)
+    expect(solanaVenues).toHaveLength(15)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(15)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])

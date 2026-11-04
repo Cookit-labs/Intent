@@ -1,0 +1,528 @@
+import { createHmac, timingSafeEqual } from 'node:crypto'
+
+import { TransactionDataBuilder } from '@mysten/sui/transactions'
+import { fromBase64, normalizeStructTag } from '@mysten/sui/utils'
+
+import { solanaDeposit } from '../weave/deposit/solana'
+import { suiDeposit } from '../weave/deposit/sui'
+import type { DepositChain, DepositExpectation } from '../weave/types'
+import { depositStatus, listTokens, notifyDeposit } from './near/oneclick'
+import {
+  assertNoDepositMemo,
+  costNote,
+  depositNote,
+  EXPLORER_NOTE,
+  liveOneClick,
+  ONECLICK_RISK_NOTE,
+  previewOneClick,
+  venueQuoteFrom,
+  type Destination,
+  type QuoteOrigin,
+} from './near/swap'
+import { formatUnits } from './near/tokens'
+import { explorerUrl as solanaExplorerUrl, feePayerSignature } from './solana/submit'
+import { SOLANA_TOKENS } from './solana/tokens'
+import { SUI_TOKENS } from './sui/tokens'
+import {
+  ChainActionRefused,
+  tokenBySymbol,
+  type ChainActionRequest,
+  type ChainToken,
+  type ChainVenue,
+  type PreparedAction,
+  type SignedPayload,
+  type SigningPayload,
+  type SubmitInput,
+  type SubmitResult,
+  type VenueQuote,
+} from './types'
+
+/**
+ * NEAR Intents 1Click as a swap route on a chain other than NEAR. The wallet signs one
+ * transfer to a one-time deposit address, and 1Click pays the swap out on the same chain.
+ *
+ * The browser carries `context` between prepare and submit, so nothing in it is believed
+ * until `readIssued` proves this server wrote it. See `proofOf`.
+ */
+
+export type OneClickOriginChain = 'solana' | 'sui' | 'avalanche' | 'monad'
+
+const VENUE_NAME = 'NEAR Intents 1Click'
+
+/** What 1Click calls each chain in its token list. */
+const BLOCKCHAIN: Record<OneClickOriginChain, string> = {
+  solana: 'sol',
+  sui: 'sui',
+  avalanche: 'avax',
+  monad: 'monad',
+}
+
+/** Only these are spent through 1Click in this app so far. Native coins go through the chain's own swap. */
+const SPENDABLE = new Set(['USDC', 'USDT'])
+
+/**
+ * The limits inside the submit route's 60 seconds. The status wait counts from the start and
+ * includes the confirm wait. One last status request and a pause on top keep it under 60.
+ */
+const CONFIRM_WAIT_MS = 40_000
+const STATUS_WAIT_MS = 50_000
+const STATUS_POLL_MS = 2_000
+
+interface Origin {
+  chainName: string
+  family: 'solana' | 'sui'
+  tokens: readonly ChainToken[]
+  /** The token id that stands for the native coin, which 1Click may list with no contract. */
+  nativeId: string
+  ownSwap: string
+  deposit: DepositChain
+  /** The chain's identifier for signed bytes, known before the network has answered. */
+  hashOf: (signed: SignedPayload) => string | undefined
+  explorerUrl: (hash: string) => string
+}
+
+function suiExplorerUrl(hash: string): string {
+  return `https://suiscan.xyz/mainnet/tx/${hash}`
+}
+
+const ORIGINS: Partial<Record<OneClickOriginChain, Origin>> = {
+  solana: {
+    chainName: 'Solana',
+    family: 'solana',
+    tokens: SOLANA_TOKENS,
+    nativeId: 'So11111111111111111111111111111111111111112',
+    ownSwap: 'Jupiter',
+    deposit: solanaDeposit,
+    hashOf: (signed) =>
+      signed.family === 'solana' ? feePayerSignature(signed.signedTransaction) : undefined,
+    explorerUrl: solanaExplorerUrl,
+  },
+  sui: {
+    chainName: 'Sui',
+    family: 'sui',
+    tokens: SUI_TOKENS,
+    nativeId: '0x2::sui::SUI',
+    ownSwap: 'Cetus',
+    deposit: suiDeposit,
+    hashOf: (signed) =>
+      signed.family === 'sui'
+        ? TransactionDataBuilder.getDigestFromBytes(fromBase64(signed.transaction))
+        : undefined,
+    explorerUrl: suiExplorerUrl,
+  },
+}
+
+/** The form two copies of a contract compare in. Case is part of a base58 mint, so it stays. */
+function normalizeContract(chain: OneClickOriginChain, contract: string): string {
+  if (chain === 'solana') return contract
+  if (chain !== 'sui') return contract.toLowerCase()
+  try {
+    return normalizeStructTag(contract)
+  } catch {
+    return contract
+  }
+}
+
+/**
+ * The 1Click asset for a token, matched on chain and contract. The list repeats symbols, and
+ * anyone can name a token USDC, so a symbol alone never matches. Two entries for one contract
+ * leave no way to say which is real, so that is no match either.
+ *
+ * A native coin has no contract on its chain, and the list may carry it with none. It matches
+ * only as the chain's own native token id against the one entry with that symbol and no contract.
+ */
+export async function oneClickAssetId(
+  chain: OneClickOriginChain,
+  token: ChainToken
+): Promise<string | undefined> {
+  const entries = (await listTokens()).filter(
+    (entry) => entry.blockchain === BLOCKCHAIN[chain] && entry.decimals === token.decimals
+  )
+  const wanted = normalizeContract(chain, token.id)
+  const matching = entries.filter(
+    (entry) =>
+      typeof entry.contractAddress === 'string' &&
+      entry.contractAddress !== '' &&
+      normalizeContract(chain, entry.contractAddress) === wanted
+  )
+  if (matching.length === 1) return matching[0]?.assetId
+  if (matching.length > 1 || token.id !== ORIGINS[chain]?.nativeId) return undefined
+  const native = entries.filter(
+    (entry) =>
+      (entry.contractAddress === undefined ||
+        entry.contractAddress === null ||
+        entry.contractAddress === '') &&
+      entry.symbol.toUpperCase() === token.symbol.toUpperCase()
+  )
+  return native.length === 1 ? native[0]?.assetId : undefined
+}
+
+function secret(): string | undefined {
+  const value = process.env['AUTH_SECRET']
+  return value !== undefined && value.length >= 32 ? value : undefined
+}
+
+/** Without the secret nothing could be issued safely at Review, so no route is offered at all. */
+function signingKey(): string {
+  const key = secret()
+  if (key === undefined) {
+    throw new ChainActionRefused(`${VENUE_NAME} isn't available here right now.`)
+  }
+  return key
+}
+
+interface Issued {
+  depositAddress: string
+  /** The token's id. */
+  token: string
+  /** Base units. */
+  amount: string
+  deadline: string
+}
+
+/**
+ * Proves a deposit came from this server. The browser hands `context` back at submit, and
+ * could change it along with the bytes it wants sent, so every field that decides where funds
+ * go is signed here, for this venue and this account. The prefix keeps this signature from
+ * ever passing as a session's, which shares the secret.
+ */
+function proofOf(venueId: string, account: string, issued: Issued, key: string): string {
+  const message = JSON.stringify([
+    venueId,
+    account,
+    issued.token,
+    issued.amount,
+    issued.depositAddress,
+    issued.deadline,
+  ])
+  return createHmac('sha256', key).update(`oneclick-origin:${message}`).digest('base64url')
+}
+
+function sameProof(given: string, expected: string): boolean {
+  const a = Buffer.from(given)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+function notIssued(): never {
+  throw new ChainActionRefused(
+    "This swap's details are not what this app issued, so nothing was sent. Get a fresh quote and sign that."
+  )
+}
+
+/** The deposit this server issued, or a refusal. Never returns anything it did not sign. */
+function readIssued(
+  origin: Origin,
+  venueId: string,
+  account: string,
+  context: Record<string, string> | undefined
+): DepositExpectation {
+  const key = secret()
+  const depositAddress = context?.['depositAddress']
+  const tokenId = context?.['token']
+  const amount = context?.['amount']
+  const deadline = context?.['deadline']
+  const proof = context?.['proof']
+  if (
+    key === undefined ||
+    depositAddress === undefined ||
+    tokenId === undefined ||
+    amount === undefined ||
+    deadline === undefined ||
+    proof === undefined ||
+    !sameProof(
+      proof,
+      proofOf(venueId, account, { depositAddress, token: tokenId, amount, deadline }, key)
+    )
+  ) {
+    return notIssued()
+  }
+  const token = origin.tokens.find((t) => t.id === tokenId)
+  if (token === undefined) return notIssued()
+  if (!(Date.parse(deadline) > Date.now())) {
+    throw new ChainActionRefused(
+      'This quote expired before it was sent, so nothing was sent. Get a fresh quote and sign right away.'
+    )
+  }
+  return {
+    account,
+    depositAddress,
+    memo: undefined,
+    amount: formatUnits(amount, token.decimals, token.decimals),
+    token,
+  }
+}
+
+function originOf(chain: OneClickOriginChain): Origin {
+  const origin = ORIGINS[chain]
+  if (origin === undefined) {
+    throw new ChainActionRefused(`${VENUE_NAME} can't swap on this chain yet.`)
+  }
+  return origin
+}
+
+interface Route {
+  tokenIn: ChainToken
+  tokenOut: ChainToken
+  origin: QuoteOrigin
+  destination: Destination
+}
+
+/** What the swap would touch, or the sentence for why not. A refusal drops the route from the race. */
+async function routeFor(
+  origin: Origin,
+  chain: OneClickOriginChain,
+  request: ChainActionRequest,
+  account: string
+): Promise<Route> {
+  if (request.kind !== 'swap') {
+    throw new ChainActionRefused(`${VENUE_NAME} swaps tokens. It can't ${request.kind} here.`)
+  }
+  if (!origin.deposit.isAccount(account)) {
+    throw new ChainActionRefused(`That is not a ${origin.chainName} wallet address.`)
+  }
+  const tokenIn = tokenBySymbol(origin.tokens, request.tokenIn)
+  const tokenOut = tokenBySymbol(origin.tokens, request.tokenOut ?? '')
+  if (tokenIn === undefined || tokenOut === undefined) {
+    throw new ChainActionRefused(`I can only swap tokens I have confirmed on ${origin.chainName}.`)
+  }
+  if (tokenIn.id === tokenOut.id) throw new ChainActionRefused('Those are the same token.')
+  if (!SPENDABLE.has(tokenIn.symbol)) {
+    throw new ChainActionRefused(
+      `${VENUE_NAME} here spends USDC or USDT, not ${tokenIn.symbol}. ${origin.ownSwap} can swap ${tokenIn.symbol}.`
+    )
+  }
+
+  let ids: [string | undefined, string | undefined]
+  try {
+    ids = await Promise.all([oneClickAssetId(chain, tokenIn), oneClickAssetId(chain, tokenOut)])
+  } catch {
+    throw new ChainActionRefused(
+      "NEAR Intents isn't answering right now. Try again in a minute. Nothing was signed or sent."
+    )
+  }
+  const [originAsset, destinationAsset] = ids
+  if (originAsset === undefined || destinationAsset === undefined) {
+    const missing = originAsset === undefined ? tokenIn.symbol : tokenOut.symbol
+    throw new ChainActionRefused(
+      `${VENUE_NAME} doesn't list ${missing} on ${origin.chainName}. Nothing was signed or sent.`
+    )
+  }
+  return {
+    tokenIn,
+    tokenOut,
+    origin: { assetId: originAsset, decimals: tokenIn.decimals },
+    destination: {
+      assetId: destinationAsset,
+      symbol: tokenOut.symbol,
+      decimals: tokenOut.decimals,
+      recipientType: 'DESTINATION_CHAIN',
+    },
+  }
+}
+
+function stillProcessing(hash: string, depositAddress: string): SubmitResult {
+  return {
+    ok: false,
+    pending: true,
+    error: `Your deposit was sent (${hash}) and the swap is still processing, which can take up to 15 minutes. Don't send it again. ${EXPLORER_NOTE} ${depositAddress}.`,
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Sends through the chain's own deposit submit, which checks the bytes again first. Its
+ * refusals only ever come before the send, so they prove nothing moved. Anything else thrown,
+ * or no answer inside the limit, leaves open that the transfer went out.
+ */
+async function send(
+  origin: Origin,
+  signed: SignedPayload,
+  expectation: DepositExpectation
+): Promise<SubmitResult> {
+  const unconfirmed = (): SubmitResult => {
+    const hash = origin.hashOf(signed)
+    const where = hash === undefined ? "your wallet's activity" : origin.explorerUrl(hash)
+    return {
+      ok: false,
+      pending: true,
+      error: `This may have been sent and isn't confirmed yet, so don't send it again. Check ${where} first.`,
+    }
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const limit = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), CONFIRM_WAIT_MS)
+  })
+  try {
+    return (
+      (await Promise.race([origin.deposit.submit(signed, expectation), limit])) ?? unconfirmed()
+    )
+  } catch (e) {
+    return e instanceof ChainActionRefused ? { ok: false, error: e.message } : unconfirmed()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** The venue behind a 1Click swap from `chain`. Refuses plainly on a chain with no deposit built. */
+export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
+  const venueId = `1click-${chain}`
+
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const origin = originOf(chain)
+    const route = await routeFor(origin, chain, request, account)
+    signingKey()
+    const { preview } = await previewOneClick(
+      request.amount,
+      route.origin,
+      route.destination,
+      account
+    )
+    return venueQuoteFrom(preview, route.destination)
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const origin = originOf(chain)
+    const {
+      tokenIn,
+      tokenOut,
+      origin: spending,
+      destination,
+    } = await routeFor(origin, chain, request, account)
+    const key = signingKey()
+    const { shared } = await previewOneClick(request.amount, spending, destination, account)
+    const { live, loss, deadline } = await liveOneClick(shared, spending, destination)
+
+    const { depositAddress } = live.quote
+    if (depositAddress === undefined || !origin.deposit.isDepositAddress(depositAddress)) {
+      throw new ChainActionRefused(
+        "NEAR Intents' deposit address didn't look right, so it was not used. Nothing was signed or sent."
+      )
+    }
+    assertNoDepositMemo(live)
+
+    const signing = await origin.deposit.build({
+      account,
+      depositAddress,
+      memo: undefined,
+      amount: request.amount,
+      token: tokenIn,
+    })
+
+    const issued: Issued = { depositAddress, token: tokenIn.id, amount: shared.amount, deadline }
+    return {
+      venueId,
+      venueName: VENUE_NAME,
+      kind: 'swap',
+      summary: `Swap ${request.amount} ${tokenIn.symbol} for ${tokenOut.symbol} through NEAR Intents, into your ${origin.chainName} account.`,
+      pay: { amount: request.amount, symbol: tokenIn.symbol },
+      receive: {
+        amount: formatUnits(live.quote.amountOut, destination.decimals),
+        symbol: destination.symbol,
+        approximate: true,
+      },
+      notes: [
+        costNote(live, loss, destination.symbol, destination.decimals),
+        depositNote(live, tokenIn, account),
+        ONECLICK_RISK_NOTE,
+      ],
+      signing,
+      context: { ...issued, proof: proofOf(venueId, account, issued, key) },
+    }
+  }
+
+  function assertSafe(
+    payload: SigningPayload,
+    account: string,
+    context?: Record<string, string>
+  ): void {
+    const origin = originOf(chain)
+    origin.deposit.assertSafe(payload, readIssued(origin, venueId, account, context))
+  }
+
+  /**
+   * Every `{ ok: false }` without `pending` here comes before the transfer was sent, or from
+   * the chain's own submit having proved it did not move. Once the network has the transfer,
+   * a swap that fails at 1Click still has funds in flight or on their way back, so that is
+   * always pending and the latch stays closed.
+   */
+  async function submit(input: SubmitInput): Promise<SubmitResult> {
+    const { account, signed, context } = input
+    const origin = originOf(chain)
+    if (signed.family !== origin.family) {
+      return {
+        ok: false,
+        error: `That is not a ${origin.chainName} transaction, so nothing was sent.`,
+      }
+    }
+    let expectation: DepositExpectation
+    try {
+      expectation = readIssued(origin, venueId, account, context)
+    } catch (e) {
+      if (e instanceof ChainActionRefused) return { ok: false, error: e.message }
+      throw e
+    }
+    const { depositAddress } = expectation
+
+    const startedAt = Date.now()
+    const sent = await send(origin, signed, expectation)
+    if (!sent.ok) {
+      return sent.pending === true
+        ? { ...sent, error: `${sent.error} ${EXPLORER_NOTE} ${depositAddress}.` }
+        : sent
+    }
+
+    const { hash } = sent
+    await notifyDeposit(depositAddress, hash)
+
+    while (Date.now() - startedAt < STATUS_WAIT_MS) {
+      const body = await depositStatus(depositAddress)
+      const recipient = body?.quoteResponse?.quoteRequest?.recipient
+      if (recipient !== undefined && recipient !== account) {
+        return {
+          ok: false,
+          pending: true,
+          error: `That deposit address belongs to a different swap. Your transfer is ${hash}. Check your wallet's activity before trying again.`,
+        }
+      }
+      switch (body?.status) {
+        case 'SUCCESS':
+          return sent
+        case 'REFUNDED':
+          return {
+            ok: false,
+            pending: true,
+            error: `The swap did not go through, and NEAR Intents says your funds were refunded to ${account}. Check your balance before trying again. ${EXPLORER_NOTE} ${depositAddress}.`,
+          }
+        case 'FAILED':
+          return {
+            ok: false,
+            pending: true,
+            error: `The swap failed after your deposit (${hash}). The refund address is ${account}, so that is where your funds should return. ${EXPLORER_NOTE} ${depositAddress}.`,
+          }
+        case 'INCOMPLETE_DEPOSIT':
+          return {
+            ok: false,
+            pending: true,
+            error: `NEAR Intents received less than the quote needed, so it won't swap. What arrived is due back at ${account}. ${EXPLORER_NOTE} ${depositAddress}.`,
+          }
+        default:
+          await delay(STATUS_POLL_MS)
+      }
+    }
+    return stillProcessing(hash, depositAddress)
+  }
+
+  return {
+    id: venueId,
+    name: VENUE_NAME,
+    kinds: ['swap'],
+    quote,
+    prepare,
+    assertSafe,
+    submit,
+  }
+}

@@ -4,12 +4,14 @@ import { depositCoinPTB, getPools } from '@naviprotocol/lending'
 
 import {
   ChainActionRefused,
+  quotedApy,
   tokenBySymbol,
   toBaseUnits,
   type ChainActionRequest,
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenueQuote,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import { naviApy, poolNotes } from './navi-rules'
@@ -23,7 +25,8 @@ const POOL_CACHE_MS = 30_000
 /** NAVI reports pool amounts with nine decimals, whatever the token's own. */
 const POOL_AMOUNT_SCALE = 1e9
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+/** The pool a deposit would use, after every check that needs no transaction. */
+async function checkedPool(request: ChainActionRequest, account: string) {
   assertSuiAccount(account)
   const token = tokenBySymbol(SUI_TOKENS, request.tokenIn)
   if (token?.symbol !== 'USDC') {
@@ -49,6 +52,16 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
       `NAVI's USDC pool only has room for about ${Math.floor(room)} more USDC. Try a smaller amount.`
     )
   }
+  return { token, amount, pool }
+}
+
+async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { pool } = await checkedPool(request, account)
+  return quotedApy(naviApy(pool))
+}
+
+async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const { token, amount, pool } = await checkedPool(request, account)
 
   const tx = new Transaction()
   tx.setSender(account)
@@ -80,6 +93,7 @@ export const naviVenue: ChainVenue = {
   id: 'navi',
   name: 'NAVI',
   kinds: ['supply'],
+  quote,
   prepare,
   assertSafe: (payload: SigningPayload, account: string) =>
     assertPtbSafe(payload, account, NAVI_POLICY),
