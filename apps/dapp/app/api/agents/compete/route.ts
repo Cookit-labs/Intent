@@ -12,7 +12,7 @@ import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
-import { assertKnownTokens } from '../../../../lib/chains/prepare'
+import { assertAmountWithinCap, assertKnownTokens } from '../../../../lib/chains/prepare'
 import { chainModule } from '../../../../lib/chains/registry'
 import {
   ChainActionRefused,
@@ -116,7 +116,8 @@ async function chainRaceFacts(
   text: string
 ): Promise<{ intent: ParsedIntent; market: MarketContext } | string> {
   try {
-    assertKnownTokens(chainApi, action)
+    const known = assertKnownTokens(chainApi, action)
+    await assertAmountWithinCap(chainApi, action, known)
   } catch (e) {
     if (e instanceof ChainActionRefused) return `${e.message} Nothing was signed or sent.`
     throw e

@@ -32,7 +32,7 @@ vi.mock('../swap/limit-price', () => ({ fetchOrderBookTop: async () => undefined
 
 const action = { kind: 'swap', amount: '5', tokenIn: 'NEAR', tokenOut: 'USDC' }
 
-function nearModule(quote: unknown) {
+function nearModule(quote: unknown, price: number | null = 4) {
   return {
     chain: 'near',
     tokens: [
@@ -41,7 +41,7 @@ function nearModule(quote: unknown) {
     ],
     venues: [{ id: 'ref', name: 'Ref', kinds: ['swap'], quote }],
     defaultVenue: {},
-    priceUsd: async () => 4,
+    priceUsd: async () => price ?? undefined,
   }
 }
 
@@ -152,5 +152,35 @@ describe('POST /api/agents/compete on a chain', () => {
     const { POST } = await import('../../app/api/agents/compete/route')
     await (await POST(post({ text: 'swap', chain: 'near', account }))).text()
     expect(enforceRateLimit).toHaveBeenCalledWith(expect.anything(), 'compete', account)
+  })
+
+  describe('refuses an amount before any venue or agent is called', () => {
+    const cases: [string, string, number | null][] = [
+      ['a non-numeric amount', 'lots', 4],
+      ['a zero amount', '0', 4],
+      ['a negative amount', '-3', 4],
+      ['an amount over the trade cap', '1000000000', 4],
+      ['a token with no live price', '5', null],
+    ]
+    it.each(cases)('%s', async (_name, amount, price) => {
+      const quote = vi.fn(async () => ({ receive: { amount: '1', symbol: 'USDC' } }))
+      state.module = nearModule(quote, price)
+      const { POST } = await import('../../app/api/agents/compete/route')
+      const out = await frames(
+        await POST(
+          post({
+            text: 'swap NEAR to USDC',
+            chain: 'near',
+            account: 'a.near',
+            chainAction: { ...action, amount },
+          })
+        )
+      )
+      expect(out).toHaveLength(1)
+      expect(out[0]?.type).toBe('competition:error')
+      expect(out[0]?.message).toContain('Nothing was signed or sent')
+      expect(quote).not.toHaveBeenCalled()
+      expect(state.propose).not.toHaveBeenCalled()
+    })
   })
 })

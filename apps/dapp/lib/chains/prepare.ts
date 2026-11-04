@@ -63,21 +63,19 @@ export function assertKnownTokens(chainApi: ChainModule, request: ChainActionReq
 }
 
 /**
- * Prepares an action, with the same order of checks as every other money route:
- * known tokens, a dollar value under the cap, then the build, then a check of
- * what the venue's API returned before anyone is asked to sign it.
+ * Refuses an amount that is not a positive number, a token with no live price,
+ * and a trade over the dollar cap. Shared with the agent race so a refused
+ * amount is refused in the same words before any agent or venue is called.
  *
  * The cap always reads as mainnet, because these chains only run on mainnet. The
  * Stellar network a deployment defaults to says nothing about Solana's funds.
  */
-export async function prepareChainAction(
+export async function assertAmountWithinCap(
   chainApi: ChainModule,
   request: ChainActionRequest,
-  account: string,
+  tokenIn: ChainToken,
   env: Record<string, string | undefined> = process.env
-): Promise<PreparedAction> {
-  const tokenIn = assertKnownTokens(chainApi, request)
-
+): Promise<void> {
   const price = await chainApi.priceUsd(tokenIn)
   const amount = Number(request.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -95,6 +93,25 @@ export async function prepareChainAction(
         : 'This trade could not be valued in dollars right now, so it was not built. Try again shortly.'
     )
   }
+}
+
+/**
+ * Prepares an action, with the same order of checks as every other money route:
+ * known tokens, a dollar value under the cap, then the build, then a check of
+ * what the venue's API returned before anyone is asked to sign it.
+ *
+ * The cap always reads as mainnet, because these chains only run on mainnet. The
+ * Stellar network a deployment defaults to says nothing about Solana's funds.
+ */
+export async function prepareChainAction(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string,
+  env: Record<string, string | undefined> = process.env
+): Promise<PreparedAction> {
+  const tokenIn = assertKnownTokens(chainApi, request)
+
+  await assertAmountWithinCap(chainApi, request, tokenIn, env)
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
