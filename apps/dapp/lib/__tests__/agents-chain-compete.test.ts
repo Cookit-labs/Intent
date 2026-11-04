@@ -2,7 +2,7 @@ import { StrKey } from '@stellar/stellar-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { networkFetch, setAttributedRace } from '../api/network-fetch'
-import { reviewChainRoute } from '../agents/chain-race'
+import { needsDirectRoute, reviewChainRoute } from '../agents/chain-race'
 import { submitSigned } from '../chains/signing-flow'
 import { fakeAnalyticsDb, type FakeAnalyticsDb } from './fakes/analytics-db'
 
@@ -168,6 +168,80 @@ describe('POST /api/agents/compete on a chain', () => {
     expect(out[0]).toMatchObject({ type: 'competition:error', code: 'chain_unsupported' })
     expect(out[0]?.message).toContain('Nothing was signed or sent')
     expect(state.propose).not.toHaveBeenCalled()
+  })
+
+  describe('with no venue on the chain for what was asked', () => {
+    const noVenue = (venues: unknown[]) => ({ ...(nearModule(vi.fn()) as object), venues })
+
+    it('refuses in one sentence, so nothing races and nothing falls back', async () => {
+      const quote = vi.fn()
+      state.module = noVenue([{ id: 'ref', name: 'Ref', kinds: ['swap'], quote }])
+      const { POST } = await import('../../app/api/agents/compete/route')
+      const out = await frames(
+        await POST(
+          post({
+            text: 'supply 5 NEAR',
+            chain: 'near',
+            account: 'a.near',
+            chainAction: { kind: 'supply', amount: '5', tokenIn: 'NEAR' },
+          })
+        )
+      )
+      expect(out).toHaveLength(1)
+      expect(out[0]).toMatchObject({
+        type: 'competition:error',
+        code: 'action_refused',
+        message: 'Nothing here can supply on this chain yet, so nothing was signed or sent.',
+      })
+      expect(
+        needsDirectRoute({
+          phase: 'decided',
+          winner: null,
+          anyAnswered: false,
+          error: out[0] as never,
+        })
+      ).toBe(false)
+      expect(quote).not.toHaveBeenCalled()
+      expect(state.propose).not.toHaveBeenCalled()
+    })
+
+    it('says so before looking up a price, as a chain with no venues has no reason to', async () => {
+      const priceUsd = vi.fn(async () => undefined)
+      state.module = { ...noVenue([]), priceUsd }
+      const { POST } = await import('../../app/api/agents/compete/route')
+      const out = await frames(
+        await POST(post({ text: 'swap', chain: 'near', account: 'a.near', chainAction: action }))
+      )
+      expect(out[0]?.message).toBe(
+        'Nothing here can swap on this chain yet, so nothing was signed or sent.'
+      )
+      expect(priceUsd).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('with the agents offline', () => {
+    const LAST_SENTENCE = 'Nothing can be executed until they are.'
+
+    it('does not say nothing can run where the direct route is built next', async () => {
+      state.roster = undefined
+      const { POST } = await import('../../app/api/agents/compete/route')
+      const out = await frames(
+        await POST(post({ text: 'swap', chain: 'near', account: 'a.near', chainAction: action }))
+      )
+      expect(out[0]).toMatchObject({
+        code: 'agents_offline',
+        message: 'The agents are not online right now, so nothing was proposed.',
+      })
+    })
+
+    it('says what it always said on stellar', async () => {
+      state.roster = undefined
+      const { POST } = await import('../../app/api/agents/compete/route')
+      const out = await frames(await POST(post({ text: 'swap 10 XLM to USDC', chain: 'stellar' })))
+      expect(out[0]?.message).toBe(
+        `The agents are not online right now, so nothing was proposed. ${LAST_SENTENCE}`
+      )
+    })
   })
 
   it('rate-limits by an account of 66 characters', async () => {

@@ -127,6 +127,12 @@ async function chainRaceFacts(
   account: string | undefined,
   text: string
 ): Promise<{ intent: ParsedIntent; market: MarketContext } | string | { refusal: string }> {
+  // No venue to quote, and none for the direct route to build on, so nothing is worth trying.
+  if (!chainApi.venues.some((v) => v.kinds.includes(action.kind))) {
+    return {
+      refusal: `Nothing here can ${action.kind} on this chain yet, so nothing was signed or sent.`,
+    }
+  }
   try {
     const known = assertKnownTokens(chainApi, action)
     await assertAmountWithinCap(chainApi, action, known)
@@ -337,7 +343,10 @@ export async function POST(request: Request): Promise<Response> {
   if (full === undefined) {
     return errorStream(
       'agents_offline',
-      'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+      // Off Stellar the chat builds the direct route next, so something can still be signed.
+      chain === 'stellar'
+        ? 'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+        : 'The agents are not online right now, so nothing was proposed.'
     )
   }
   const roster = lineUp(full)
