@@ -11,9 +11,8 @@ import {
   type PreparedAction,
 } from './types'
 
-const CHAIN_NAMES = new Set(
-  Object.values(CHAIN_DESCRIPTORS).flatMap((chain) => [chain.slug, chain.name.toLowerCase()])
-)
+/** Keys only: each chain's name is its slug, and reading Stellar's descriptor at load would throw. */
+const CHAIN_NAMES = new Set(Object.keys(CHAIN_DESCRIPTORS))
 
 /**
  * The venue a request names, in lower case. "swap 10 USDC to MON on monad" reads "monad" as one,
