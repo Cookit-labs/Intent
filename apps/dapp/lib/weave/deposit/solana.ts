@@ -255,22 +255,33 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
   return status === 200 ? body : undefined
 }
 
-const RpcTokenBalance = z.object({
-  result: z.object({ value: z.object({ amount: z.string() }) }).optional(),
-  error: z.object({ message: z.string().optional() }).optional(),
+const RpcTokenAccount = z.object({
+  result: z.object({
+    value: z
+      .object({
+        data: z.object({
+          parsed: z.object({ info: z.object({ tokenAmount: z.object({ amount: z.string() }) }) }),
+        }),
+      })
+      .nullable(),
+  }),
 })
 
-/** A wallet that has never held USDC has no token account, which is a balance of zero. */
+/**
+ * Read from the account itself, because the public RPC refuses the balance calls it
+ * counts as indexed. A wallet that has never held USDC has no token account, which
+ * is a balance of zero. Anything else unreadable throws rather than reading as zero.
+ */
 async function usdcBalance(account: string): Promise<bigint> {
-  const reply = RpcTokenBalance.parse(
-    await rpc('getTokenAccountBalance', [
+  const { result } = RpcTokenAccount.parse(
+    await rpc('getAccountInfo', [
       associatedTokenAccount(account, USDC.id),
-      { commitment: 'confirmed' },
+      { encoding: 'jsonParsed', commitment: 'confirmed' },
     ])
   )
-  if (reply.result !== undefined) return BigInt(reply.result.value.amount)
-  if (reply.error?.message?.includes('could not find account') === true) return BigInt(0)
-  throw new Error('Solana’s network could not be read just now.')
+  return result.value === null
+    ? BigInt(0)
+    : BigInt(result.value.data.parsed.info.tokenAmount.amount)
 }
 
 /**

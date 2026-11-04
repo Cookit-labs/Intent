@@ -12,10 +12,10 @@ import {
   depositExplorerUrl,
   cashoutChoices,
   explorerName,
-  formatCost,
   formatPayout,
   formatUsdc,
   isLocked,
+  isRealHolderName,
   isValidAmount,
   nextAttempt,
   orderPhase,
@@ -60,8 +60,10 @@ describe('formatting', () => {
     expect(formatPayout(100, 'XYZ')).toBe('100.00 XYZ')
   })
 
-  it('states the cost plainly', () => {
-    expect(formatCost(1.234)).toBe('1.2%')
+  it('does not take a bare OK for a holder’s name', () => {
+    expect(isRealHolderName('OK')).toBe(false)
+    expect(isRealHolderName(' ok ')).toBe(false)
+    expect(isRealHolderName('JANE ADEYEMI')).toBe(true)
   })
 
   it('names each chain’s explorer', () => {

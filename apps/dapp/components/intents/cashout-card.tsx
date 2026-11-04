@@ -29,9 +29,9 @@ import {
   depositExplorerUrl,
   DO_NOT_RESEND,
   explorerName,
-  formatCost,
   formatPayout,
   formatUsdc,
+  isRealHolderName,
   isValidAmount,
   NO_CASHOUTS,
   shouldPoll,
@@ -224,7 +224,9 @@ function PayoutProgress({
       <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm dark:divide-white/[0.07]">
         <div className="flex items-center justify-between gap-4 py-2">
           <dt className="text-muted-foreground">Account holder</dt>
-          <dd className="text-right font-medium">{order.accountName}</dd>
+          <dd className="text-right font-medium">
+            {isRealHolderName(order.accountName) ? order.accountName : 'Not confirmed'}
+          </dd>
         </div>
         <div className="flex items-center justify-between gap-4 py-2">
           <dt className="text-muted-foreground">{isNaira ? 'Bank' : 'Paid to'}</dt>
@@ -533,7 +535,9 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
               <ArrowDown className="h-3.5 w-3.5" />
             </span>
           )}
-          <span className="text-muted-foreground text-xs">{order.accountName} receives</span>
+          <span className="text-muted-foreground text-xs">
+            {isRealHolderName(order.accountName) ? order.accountName : 'This account'} receives
+          </span>
           <span className="text-3xl font-semibold tracking-tight">
             ≈ {formatPayout(destination, order.currency)}
           </span>
@@ -546,7 +550,10 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
                 'Rate',
                 `≈ ${formatPayout(destination / Number(order.amount), order.currency)} per USDC`,
               ],
-              ['Account holder', order.accountName],
+              [
+                'Account holder',
+                isRealHolderName(order.accountName) ? order.accountName : 'Not confirmed',
+              ],
               [isNaira ? 'Bank' : 'Paid to', `${order.institutionName} ${order.accountMask}`],
             ] as const
           ).map(([k, v]) => (
@@ -715,7 +722,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
                   </span>
                 </span>
                 <span className="text-muted-foreground">
-                  Estimate, after about {formatCost(estimate.costPercent)} in fees.
+                  Estimate. You see the exact amount before you sign.
                 </span>
               </span>
             ) : (
@@ -784,8 +791,19 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
                 animate={{ opacity: 1, y: 0 }}
                 className="flex items-center gap-1.5"
               >
-                <span className="font-medium">{titleCase(holder.data)}</span>
-                <BadgeCheck className="text-brand h-3.5 w-3.5" aria-label="Verified by the bank" />
+                {isRealHolderName(holder.data) ? (
+                  <>
+                    <span className="font-medium">{titleCase(holder.data)}</span>
+                    <BadgeCheck
+                      className="text-brand h-3.5 w-3.5"
+                      aria-label="Verified by the bank"
+                    />
+                  </>
+                ) : (
+                  <span className="text-warning">
+                    The bank can&apos;t confirm a name here, so check this number carefully.
+                  </span>
+                )}
               </motion.span>
             ) : holder.isError ? (
               <span className="text-destructive">{(holder.error as Error).message}</span>

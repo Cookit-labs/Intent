@@ -390,6 +390,27 @@ export function readUsdcAmount(text: string, decimals: number): string | undefin
   return places > decimals ? undefined : amount
 }
 
+/**
+ * Weave adds its costs on top of the amount asked for: 5 USDC came back live as a
+ * deposit of 5.05322. So the deposit may run a little over, and never under, what
+ * the person asked to send. Whatever it is, they see it before they sign.
+ */
+const MAX_DEPOSIT_OVER_PERCENT = 2
+const SCALE_PLACES = 18
+
+function scaled(amount: string): bigint {
+  const [whole = '0', fraction = ''] = amount.split('.')
+  return BigInt(whole + fraction.padEnd(SCALE_PLACES, '0'))
+}
+
+function isFairDeposit(deposit: string, asked: string, decimals: number): boolean {
+  const paid = readUsdcAmount(deposit, decimals)
+  const wanted = canonicalDecimal(asked)
+  if (paid === undefined || wanted === undefined) return false
+  const most = (scaled(wanted) * BigInt(100 + MAX_DEPOSIT_OVER_PERCENT)) / BigInt(100)
+  return scaled(paid) >= scaled(wanted) && scaled(paid) <= most
+}
+
 function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
@@ -403,12 +424,13 @@ function sameName(a: string, b: string): boolean {
 export function orderMismatch(
   order: WeaveOrder,
   asked: { chain: CashoutChain; currency: string; amount: string },
-  deposit: Pick<DepositChain, 'isDepositAddress' | 'supportsMemo'>
+  deposit: Pick<DepositChain, 'isDepositAddress' | 'supportsMemo' | 'usdcDecimals'>
 ): string | undefined {
   if (!sameName(order.deposit.chain, weaveChainId(asked.chain))) return 'chain'
   if (!sameName(order.deposit.token, 'USDC')) return 'token'
-  const paid = canonicalDecimal(order.deposit.amount.trim())
-  if (paid === undefined || paid !== canonicalDecimal(asked.amount)) return 'amount'
+  if (!isFairDeposit(order.deposit.amount.trim(), asked.amount, deposit.usdcDecimals)) {
+    return 'amount'
+  }
   if (!deposit.isDepositAddress(order.deposit.address)) return 'address'
   if (cleanMemo(order.deposit.memo) !== undefined && !deposit.supportsMemo) return 'memo'
   if (

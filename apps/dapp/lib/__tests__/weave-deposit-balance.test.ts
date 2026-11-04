@@ -55,26 +55,30 @@ describe('usdcBalance', () => {
     expect(await suiDeposit.usdcBalance('0x1')).toBe(BigInt(1234567))
   })
 
-  it('reads Solana from the wallet’s USDC account', async () => {
+  it('reads Solana from the wallet’s USDC account, without an indexed call', async () => {
     mocks.venueFetch.mockResolvedValue({
       status: 200,
-      body: { result: { value: { amount: '4200000' } } },
+      body: {
+        result: {
+          value: { owner: 'x', data: { parsed: { info: { tokenAmount: { amount: '4200000' } } } } },
+        },
+      },
     })
     expect(await solanaDeposit.usdcBalance(SOLANA_WALLET)).toBe(BigInt(4200000))
+    // The public RPC refuses getTokenAccountBalance without a personal token.
+    const [, request] = mocks.venueFetch.mock.calls[0] as [string, { body: { method: string } }]
+    expect(request.body.method).toBe('getAccountInfo')
   })
 
   it('reads a Solana wallet with no USDC account as holding none', async () => {
-    mocks.venueFetch.mockResolvedValue({
-      status: 200,
-      body: { error: { code: -32602, message: 'Invalid param: could not find account' } },
-    })
+    mocks.venueFetch.mockResolvedValue({ status: 200, body: { result: { value: null } } })
     expect(await solanaDeposit.usdcBalance(SOLANA_WALLET)).toBe(BigInt(0))
   })
 
-  it('does not read any other Solana failure as an empty wallet', async () => {
+  it('does not read a Solana failure as an empty wallet', async () => {
     mocks.venueFetch.mockResolvedValue({ status: 200, body: { error: { message: 'busy' } } })
     await expect(solanaDeposit.usdcBalance(SOLANA_WALLET)).rejects.toThrow()
-    mocks.venueFetch.mockResolvedValue({ status: 503, body: {} })
+    mocks.venueFetch.mockResolvedValue({ status: 403, body: {} })
     await expect(solanaDeposit.usdcBalance(SOLANA_WALLET)).rejects.toThrow()
   })
 

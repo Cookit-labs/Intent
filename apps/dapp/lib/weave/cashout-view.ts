@@ -93,8 +93,13 @@ export function formatPayout(amount: string | number, currency: string): string 
   return prefix !== undefined ? `${prefix}${value}` : `${value} ${currency}`
 }
 
-export function formatCost(percent: number): string {
-  return `${percent.toFixed(1)}%`
+/**
+ * Whether a holder name is one. Outside Nigeria the check can answer a bare "OK"
+ * even for a made-up number, as seen live on KES: the account was not confirmed, and
+ * saying so is the point, because a wrong number can send the money to a stranger.
+ */
+export function isRealHolderName(name: string): boolean {
+  return name.trim().toUpperCase() !== 'OK'
 }
 
 function bankKey(name: string): string {

@@ -196,6 +196,19 @@ describe('a retry of the same attempt', () => {
     depositAddress: 'weave.near',
   }
 
+  it('stores and shows what Weave needs to receive, when it runs a little over', async () => {
+    state.weave = weave({
+      createOrder: vi.fn(async () => ({
+        ok: true,
+        value: { ...placed, deposit: { ...placed.deposit, amount: '25.77' } },
+      })),
+    })
+    const res = await POST(post())
+    expect(res.status).toBe(200)
+    expect((await res.json()).order.amount).toBe('25.77')
+    expect(called(state.repo['insert']).mock.calls[0]?.[0].amount).toBe('25.77')
+  })
+
   it('refuses a new order while an earlier deposit from this wallet is unconfirmed', async () => {
     state.repo = repo({ hasUnconfirmedSend: vi.fn(async () => true) })
     const res = await POST(post())
@@ -362,7 +375,7 @@ describe('checking the answer against what was asked', () => {
   it.each([
     ['chain', { chain: 'SOLANA' }, {}],
     ['token', { token: 'USDT' }, {}],
-    ['amount', { amount: '26' }, {}],
+    ['amount', { amount: '26.1' }, {}],
     ['address', { address: 'evil.sol' }, {}],
     ['memo', { memo: 'M1' }, {}],
     ['dest_asset', {}, { destAssetKey: 'fiat:NGN' }],

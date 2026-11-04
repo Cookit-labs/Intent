@@ -82,7 +82,11 @@ describe('readUsdcAmount', () => {
 
 describe('orderMismatch', () => {
   const asked = { chain: 'near', currency: 'KES', amount: '25.5' } as const
-  const near = { isDepositAddress: (a: string) => a.endsWith('.near'), supportsMemo: false }
+  const near = {
+    isDepositAddress: (a: string) => a.endsWith('.near'),
+    supportsMemo: false,
+    usdcDecimals: 6,
+  }
   const answer: WeaveOrder = {
     id: 'ord_1',
     status: 'awaiting_deposit',
@@ -113,14 +117,29 @@ describe('orderMismatch', () => {
 
   it('compares the amount as a number, not as text', () => {
     expect(orderMismatch(withDeposit({ amount: '25.50' }), asked, near)).toBeUndefined()
-    expect(orderMismatch(withDeposit({ amount: '025.5000000' }), asked, near)).toBeUndefined()
+    expect(orderMismatch(withDeposit({ amount: '025.500000' }), asked, near)).toBeUndefined()
+  })
+
+  it('allows the fee Weave adds on top, as seen live: 5.05322 asked for on 5', () => {
+    expect(
+      orderMismatch(withDeposit({ amount: '5.05322' }), { ...asked, amount: '5' }, near)
+    ).toBeUndefined()
+    expect(orderMismatch(withDeposit({ amount: '26.01' }), asked, near)).toBeUndefined()
+  })
+
+  it.each([
+    ['more than 2% over', '26.02'],
+    ['less than was asked', '25.49'],
+    ['far too much', '255'],
+    ['more places than the token has', '25.5000001'],
+    ['not a plain amount', '1e3'],
+  ])('refuses a deposit of %s', (_name, amount) => {
+    expect(orderMismatch(withDeposit({ amount }), asked, near)).toBe('amount')
   })
 
   it.each([
     ['chain', { chain: 'SOLANA' }],
     ['token', { token: 'USDT' }],
-    ['amount', { amount: '25.51' }],
-    ['amount', { amount: '1e3' }],
     ['address', { address: 'weave.sol' }],
     ['memo', { memo: 'M1' }],
   ])('names a wrong %s', (field, over) => {

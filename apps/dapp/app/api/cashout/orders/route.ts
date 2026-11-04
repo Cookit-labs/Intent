@@ -278,7 +278,9 @@ export async function POST(request: Request): Promise<Response> {
     accountName,
     depositAddress: order.deposit.address,
     depositMemo: cleanMemo(order.deposit.memo),
-    amount,
+    // What Weave needs to receive, which can be a little over what was asked. This
+    // is what the person signs, and orderMismatch has already bounded it.
+    amount: readUsdcAmount(order.deposit.amount.trim(), deposit.usdcDecimals) as string,
     estimatedDest: String(quote.value.destAmount),
     expiresAt: order.deposit.expiresAt,
     status: nextStatus('waiting', order.status),
