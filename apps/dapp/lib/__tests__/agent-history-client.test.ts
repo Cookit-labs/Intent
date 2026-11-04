@@ -5,6 +5,7 @@ import { agentHistoryByHash, fetchAgentHistory, type AgentHistoryEntry } from '.
 function entry(overrides: Partial<AgentHistoryEntry> = {}): AgentHistoryEntry {
   return {
     raceId: 'r1',
+    chain: 'stellar',
     startedAt: '2026-10-07T10:00:00.000Z',
     tokenIn: 'XLM',
     tokenOut: 'USDC',

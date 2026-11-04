@@ -283,6 +283,36 @@ describe('GET /api/agents/history', () => {
     expect(body.entries.map((e) => e.executedHash)).toEqual(['HASH'])
   })
 
+  it('says which chain each race ran on, so one evm address can tell its chains apart', async () => {
+    const account = `0x${'c'.repeat(40)}`
+    const { logRace, getAnalyticsRepo } = await import('../server/analytics')
+    const repo = await getAnalyticsRepo()
+    const races = [
+      ['avalanche', '44444444-4444-4444-8444-444444444444'],
+      ['monad', '55555555-5555-4555-8555-555555555555'],
+    ] as const
+    for (const [chain, id] of races) {
+      await logRace({ ...raceInput(chain), id })
+      await repo.recordExecution({
+        network: 'mainnet',
+        account,
+        kind: chain,
+        feeSponsored: false,
+        ok: true,
+        hash: `HASH-${chain}`,
+        raceId: id,
+      })
+    }
+    const { GET } = await import('../../app/api/agents/history/route')
+    const body = (await (await GET(get(account))).json()) as {
+      entries: { executedHash: string; chain: string }[]
+    }
+    expect(body.entries.map((e) => [e.executedHash, e.chain]).sort()).toEqual([
+      ['HASH-avalanche', 'avalanche'],
+      ['HASH-monad', 'monad'],
+    ])
+  })
+
   it.each([
     ['a mixed-case read of a lower-case row', `0x${'ab'.repeat(20)}`, `0x${'Ab'.repeat(20)}`],
     ['a lower-case read of a mixed-case row', `0x${'Ab'.repeat(20)}`, `0x${'ab'.repeat(20)}`],

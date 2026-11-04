@@ -317,6 +317,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
             const winning = proposals.find((pr) => pr.race_id === race.id && pr.won)
             return {
               race_id: race.id,
+              chain: race.chain,
               started_at: race.started_at,
               token_in: race.token_in,
               token_out: race.token_out,

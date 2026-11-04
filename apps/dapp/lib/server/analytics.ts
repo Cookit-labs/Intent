@@ -334,6 +334,8 @@ export interface HistoryQuery {
 
 export interface HistoryEntry {
   raceId: string
+  /** The chain the race ran on, since one EVM address can have raced on several. */
+  chain: string
   startedAt: string
   tokenIn: string
   tokenOut: string
@@ -484,7 +486,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       const limit = Math.max(1, Math.min(100, pageSize))
       const offset = Math.max(0, (Math.max(1, page) - 1) * limit)
       const { rows } = await query(
-        `SELECT r.id AS race_id, r.started_at, r.token_in, r.token_out, r.size_usd,
+        `SELECT r.id AS race_id, r.chain, r.started_at, r.token_in, r.token_out, r.size_usd,
                 r.winner, p.model AS winning_model, p.reasoning, e.hash AS executed_hash
            FROM usage_executions e
            JOIN agent_races r ON r.id = e.race_id
@@ -498,6 +500,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       )
       const entries = rows.slice(0, limit).map((row) => ({
         raceId: String(row['race_id']),
+        chain: String(row['chain']),
         startedAt: new Date(row['started_at'] as string).toISOString(),
         tokenIn: String(row['token_in']),
         tokenOut: String(row['token_out']),
