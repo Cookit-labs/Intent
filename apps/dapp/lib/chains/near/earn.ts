@@ -2,12 +2,14 @@ import {
   ChainActionRefused,
   tokenBySymbol,
   type ChainActionRequest,
+  type ChainToken,
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenueQuote,
 } from '../types'
 import { assertOneClickSafe } from './safety'
-import { prepareOneClickDeposit, submitOneClick } from './swap'
+import { prepareOneClickDeposit, quoteOneClick, submitOneClick } from './swap'
 import { nearTokens, USDC_NEAR, USDT_NEAR } from './tokens'
 
 export const EARN_VENUE_ID = '1click-earn'
@@ -31,11 +33,25 @@ const VAULT = {
 const EARN_NOTE =
   "Your stablecoin becomes a share in Gauntlet USDC Prime, a Morpho vault on Base, held in your NEAR Intents balance. That stacks bridge, NEAR Intents and vault risk, the principal isn't guaranteed, and 1Click publishes no rate to show here. This app can't show this position or withdraw it yet. Getting out takes a separate signed withdrawal through NEAR Intents."
 
-async function prepareEarn(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+function stablecoinIn(request: ChainActionRequest): ChainToken {
   const tokenIn = tokenBySymbol(nearTokens, request.tokenIn)
-  if (request.kind !== 'supply' || (tokenIn?.id !== USDC_NEAR && tokenIn?.id !== USDT_NEAR)) {
+  if (
+    request.kind !== 'supply' ||
+    tokenIn === undefined ||
+    (tokenIn.id !== USDC_NEAR && tokenIn.id !== USDT_NEAR)
+  ) {
     throw new ChainActionRefused(`${VENUE_NAME} here takes USDC or USDT.`)
   }
+  return tokenIn
+}
+
+/** No apyPercent: 1Click publishes no rate for the vault, and a rate is never invented. */
+async function quoteEarn(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  return quoteOneClick(request.amount, stablecoinIn(request), VAULT, account)
+}
+
+async function prepareEarn(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const tokenIn = stablecoinIn(request)
   return prepareOneClickDeposit(
     {
       venueId: EARN_VENUE_ID,
@@ -68,6 +84,7 @@ export const earnVenue: ChainVenue = {
   id: EARN_VENUE_ID,
   name: VENUE_NAME,
   kinds: ['supply'],
+  quote: quoteEarn,
   prepare: prepareEarn,
   assertSafe: assertEarnSafe,
   submit: submitOneClick,

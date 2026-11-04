@@ -9,6 +9,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import {
@@ -220,14 +221,17 @@ interface DepositFlow {
   extraNotes: string[]
 }
 
-/** The quote flow behind every 1Click venue. Only the destination and the wording differ. */
-export async function prepareOneClickDeposit(
-  flow: DepositFlow,
+/**
+ * The preview half of every 1Click flow: a dry quote, checked against what was asked and
+ * against live prices. A dry quote makes no deposit address, so the race can run it for
+ * every venue, and Review runs it again before the real quote.
+ */
+async function previewOneClick(
   amountText: string,
   tokenIn: ChainToken,
   destination: Destination,
   account: string
-): Promise<PreparedAction> {
+) {
   if (!NEAR_ACCOUNT.test(account)) {
     throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
   }
@@ -245,6 +249,36 @@ export async function prepareOneClickDeposit(
   const preview = await requestQuote({ ...shared, dry: true, deadline: dryDeadline })
   assertQuoteMatches(preview, { ...shared, dry: true, deadline: dryDeadline })
   await assertFairValue(preview, tokenIn, destination)
+  return { shared, preview }
+}
+
+/** What a dry quote says the swap would give back. Never reads a deposit address. */
+export async function quoteOneClick(
+  amountText: string,
+  tokenIn: ChainToken,
+  destination: Destination,
+  account: string
+): Promise<VenueQuote> {
+  const { preview } = await previewOneClick(amountText, tokenIn, destination, account)
+  return {
+    receive: {
+      amount: formatUnits(preview.quote.amountOut, destination.decimals),
+      symbol: destination.symbol,
+    },
+    valueOutUsd: Number(preview.quote.amountOutUsd),
+  }
+}
+
+/** The quote flow behind every 1Click venue. Only the destination and the wording differ. */
+export async function prepareOneClickDeposit(
+  flow: DepositFlow,
+  amountText: string,
+  tokenIn: ChainToken,
+  destination: Destination,
+  account: string
+): Promise<PreparedAction> {
+  const { shared } = await previewOneClick(amountText, tokenIn, destination, account)
+  const amount = shared.amount
 
   const deadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
   const live = await requestQuote({ ...shared, dry: false, deadline })
@@ -290,13 +324,33 @@ export async function prepareOneClickDeposit(
   }
 }
 
-async function prepareSwap(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+function swapTokens(request: ChainActionRequest): { tokenIn: ChainToken; tokenOut: ChainToken } {
   const tokenIn = tokenBySymbol(nearTokens, request.tokenIn)
   const tokenOut = tokenBySymbol(nearTokens, request.tokenOut ?? '')
   if (request.kind !== 'swap' || tokenIn === undefined || tokenOut === undefined) {
     throw new ChainActionRefused('NEAR Intents here swaps between NEAR, USDC and USDT.')
   }
   if (tokenIn.id === tokenOut.id) throw new ChainActionRefused('Those are the same token.')
+  return { tokenIn, tokenOut }
+}
+
+async function quoteSwap(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { tokenIn, tokenOut } = swapTokens(request)
+  return quoteOneClick(
+    request.amount,
+    tokenIn,
+    {
+      assetId: assetIdOf(tokenOut),
+      symbol: tokenOut.symbol,
+      decimals: tokenOut.decimals,
+      recipientType: 'DESTINATION_CHAIN',
+    },
+    account
+  )
+}
+
+async function prepareSwap(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const { tokenIn, tokenOut } = swapTokens(request)
   const toNear = tokenOut.id === WRAP_NEAR
   return prepareOneClickDeposit(
     {
@@ -427,6 +481,7 @@ export const oneClickVenue: ChainVenue = {
   id: ONECLICK_VENUE_ID,
   name: 'NEAR Intents 1Click',
   kinds: ['swap'],
+  quote: quoteSwap,
   prepare: prepareSwap,
   assertSafe: assertOneClickSafe,
   submit: submitOneClick,

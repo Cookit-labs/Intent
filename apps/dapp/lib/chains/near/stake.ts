@@ -8,6 +8,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import { isRegistered, viewCall, waitForTransaction } from './rpc'
@@ -78,6 +79,38 @@ function stakeCall(amount: string, gas: bigint): NearTransaction['actions'][numb
   return {
     type: 'FunctionCall',
     params: { methodName: 'deposit_and_stake', args: {}, gas: gas.toString(), deposit: amount },
+  }
+}
+
+/**
+ * What a stake would give back, without building the transaction. A rate Rhea does not
+ * give is left out rather than guessed. Meta Pool has no rate endpoint here, so its quote
+ * carries none.
+ */
+async function quoteRnear(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  assertStakeRequest(request, account, 'rNEAR')
+  const amount = toBaseUnits(request.amount, 24)
+  let receive: string
+  try {
+    receive = receiptAmount(amount, await viewCall<string>(RNEAR_CONTRACT, 'ft_price'))
+  } catch {
+    throw cannotRead('rNEAR')
+  }
+  const apyPercent = await rnearApyPercent()
+  return {
+    receive: { amount: receive, symbol: 'rNEAR' },
+    ...(apyPercent !== undefined ? { apyPercent } : {}),
+  }
+}
+
+async function quoteMetapool(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  assertStakeRequest(request, account, 'Meta Pool')
+  const amount = toBaseUnits(request.amount, 24)
+  try {
+    const price = await viewCall<string>(METAPOOL_CONTRACT, 'get_st_near_price')
+    return { receive: { amount: receiptAmount(amount, price), symbol: 'stNEAR' } }
+  } catch {
+    throw cannotRead('Meta Pool')
   }
 }
 
@@ -190,6 +223,7 @@ export const rnearVenue: ChainVenue = {
   id: RNEAR_VENUE_ID,
   name: 'rNEAR',
   kinds: ['stake'],
+  quote: quoteRnear,
   prepare: prepareRnear,
   assertSafe: assertRnearSafe,
 }
@@ -198,6 +232,7 @@ export const metapoolVenue: ChainVenue = {
   id: METAPOOL_VENUE_ID,
   name: 'Meta Pool',
   kinds: ['stake'],
+  quote: quoteMetapool,
   prepare: prepareMetapool,
   assertSafe: assertMetapoolSafe,
 }
