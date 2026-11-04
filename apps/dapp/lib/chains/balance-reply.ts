@@ -27,12 +27,7 @@ export interface BalanceAsk {
 
 /** A late answer is shown only if the person is still on the chain, wallet and message it was for. */
 export function balanceReplyIsCurrent(asked: BalanceAsk, now: BalanceAsk): boolean {
-  return (
-    asked.account !== undefined &&
-    asked.account === now.account &&
-    asked.chain === now.chain &&
-    asked.turn === now.turn
-  )
+  return asked.account === now.account && asked.chain === now.chain && asked.turn === now.turn
 }
 
 export const WALLET_CHANGED_NOTICE = 'Your wallet changed, so ask again for its balance.'

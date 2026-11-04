@@ -458,6 +458,22 @@ describe('balanceReplyIsCurrent', () => {
 })
 
 describe('balanceReplyDecision', () => {
+  it('shows the reply for a person who was never connected and still is not', () => {
+    const none = { chain: 'stellar', account: undefined, turn: 2 }
+    expect(balanceReplyDecision(none, { ...none })).toEqual({ kind: 'show' })
+    expect(balanceReplyIsCurrent(none, { ...none })).toBe(true)
+  })
+
+  it('gives the notice when connected then disconnected, or the reverse', () => {
+    const connected = { chain: 'solana', account: 'A', turn: 2 }
+    expect(balanceReplyDecision(connected, { ...connected, account: undefined }).kind).toBe(
+      'notice'
+    )
+    expect(balanceReplyDecision({ ...connected, account: undefined }, connected).kind).toBe(
+      'notice'
+    )
+  })
+
   const asked = { chain: 'solana', account: 'A', turn: 3 }
 
   it('shows the reply when nothing changed', () => {
