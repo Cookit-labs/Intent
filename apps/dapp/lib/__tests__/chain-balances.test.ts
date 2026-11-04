@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { chainBalanceReply } from '../chains/balance-reply'
+import { balanceReplyIsCurrent, chainBalanceReply } from '../chains/balance-reply'
 import { readEvmBalances } from '../chains/evm/balances'
 import type { EvmClient } from '../chains/evm/client'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from '../chains/evm/tokens'
@@ -26,6 +26,7 @@ function stubFetch(handler: Handler): void {
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined
+      if (init?.signal?.aborted === true) throw new Error('aborted')
       calls.push({ url: String(url), body })
       const out = handler(String(url), body)
       if (out instanceof Response) return out
@@ -94,18 +95,61 @@ describe('Solana balances', () => {
     expect(calls.every((c) => c.url === 'https://rpc.example.test')).toBe(true)
   })
 
-  it('falls back to the token table when listing is refused', async () => {
-    stubFetch((_url, body) => {
-      if (method(body) === 'getBalance') return { result: { value: 5_000_000_000 } }
-      if (method(body) === 'getTokenAccountsByOwner') {
-        return new Response('forbidden', { status: 403 })
-      }
-      return { result: { value: tokenAccount(USDC_MINT, '250000', 6).account } }
-    })
+  const listingRefused = (byMint: Record<string, unknown[]>) => (_url: string, body: unknown) => {
+    if (method(body) === 'getBalance') return { result: { value: 5_000_000_000 } }
+    const filter = params(body)[1] as { programId?: string; mint?: string }
+    if (filter.programId !== undefined) return new Response('forbidden', { status: 403 })
+    return { result: { value: byMint[filter.mint ?? ''] ?? [] } }
+  }
+
+  it('falls back to each table token by mint, finding a non-associated account', async () => {
+    stubFetch(listingRefused({ [USDC_MINT]: [tokenAccount(USDC_MINT, '250000', 6)] }))
     const result = await readSolanaBalances(SOL_OWNER)
     expect(result.complete).toBe(false)
     expect(result.tokens.find((t) => t.native)?.amount).toBe('5')
     expect(result.tokens.find((t) => t.symbol === 'USDC')?.amount).toBe('0.25')
+    expect(result.tokens.find((t) => t.symbol === 'USDT')?.amount).toBe('0')
+    expect(result.unread ?? []).toEqual([])
+  })
+
+  it('leaves out a table token it cannot read instead of reporting zero', async () => {
+    stubFetch((_url, body) => {
+      if (method(body) === 'getBalance') return { result: { value: 5_000_000_000 } }
+      const filter = params(body)[1] as { mint?: string }
+      if (filter.mint === USDC_MINT) return new Response('forbidden', { status: 403 })
+      if (filter.mint === undefined) return new Response('forbidden', { status: 403 })
+      return { result: { value: [] } }
+    })
+    const result = await readSolanaBalances(SOL_OWNER)
+    expect(result.complete).toBe(false)
+    expect(result.unread).toEqual(['USDC'])
+    expect(result.tokens.find((t) => t.symbol === 'USDC')).toBeUndefined()
+    expect(result.tokens.find((t) => t.symbol === 'USDT')?.amount).toBe('0')
+  })
+
+  it('discards the half list when one token program refuses', async () => {
+    stubFetch((_url, body) => {
+      if (method(body) === 'getBalance') return { result: { value: 5_000_000_000 } }
+      const filter = params(body)[1] as { programId?: string; mint?: string }
+      if (filter.programId === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') {
+        return { result: { value: [tokenAccount(ODD_MINT, '7', 0)] } }
+      }
+      if (filter.programId !== undefined) return new Response('forbidden', { status: 403 })
+      return { result: { value: [] } }
+    })
+    const result = await readSolanaBalances(SOL_OWNER)
+    expect(result.complete).toBe(false)
+    expect(result.tokens.find((t) => t.id === ODD_MINT)).toBeUndefined()
+  })
+
+  it('refuses an address that does not decode to 32 bytes', async () => {
+    stubFetch(() => ({}))
+    await expect(readSolanaBalances('a'.repeat(32))).rejects.toBeInstanceOf(ChainActionRefused)
+  })
+
+  it('does not answer once its deadline has passed', async () => {
+    stubFetch(() => ({ result: { value: 1 } }))
+    await expect(readSolanaBalances(SOL_OWNER, AbortSignal.abort())).rejects.toThrow()
   })
 
   it('throws rather than answer when the SOL balance cannot be read', async () => {
@@ -181,6 +225,28 @@ describe('Sui balances', () => {
     expect((calls[1]?.body as { variables: { c?: string } }).variables.c).toBe('cursor1')
   })
 
+  it('says the list is incomplete when the page bound is hit', async () => {
+    stubFetch((_url, body) => {
+      const q = (body as { query: string }).query
+      if (q.includes('coinMetadata')) return { data: {} }
+      return page([node(SUI_USDC, '2000000')], 'more')
+    })
+    const result = await readSuiBalances(SUI_OWNER)
+    expect(result.complete).toBe(false)
+    const reads = calls.filter((c) => !(c.body as { query: string }).query.includes('coinMetadata'))
+    expect(reads).toHaveLength(5)
+  })
+
+  it('does not call the list incomplete over a zero coin with unknown decimals', async () => {
+    stubFetch((_url, body) => {
+      const q = (body as { query: string }).query
+      if (q.includes('coinMetadata')) return { data: { a0: null } }
+      return page([node(WAL, '0')])
+    })
+    const result = await readSuiBalances(SUI_OWNER)
+    expect(result.complete).toBe(true)
+  })
+
   it('throws when GraphQL fails', async () => {
     stubFetch(() => new Response('down', { status: 502 }))
     await expect(readSuiBalances(SUI_OWNER)).rejects.toThrow()
@@ -197,23 +263,40 @@ describe('NEAR balances', () => {
   const callResult = (value: unknown) => ({
     result: { result: Array.from(Buffer.from(JSON.stringify(value))) },
   })
+  interface Rpc {
+    params: { request_type: string; account_id: string; method_name: string; finality: string }
+  }
+  const list = (tokens: unknown[]) => ({ account_id: 'alice.near', tokens })
 
-  it('reads the FastNEAR list and native NEAR, with metadata for unlisted tokens', async () => {
-    stubFetch((url, body) => {
-      if (url.startsWith('https://api.fastnear.com/v1/account/alice.near/ft')) {
-        return {
-          account_id: 'alice.near',
-          tokens: [
-            { contract_id: USDC_NEAR, last_update_block_height: 1, balance: '3000000' },
+  function chain(
+    fast: () => unknown,
+    held: Record<string, string> = {},
+    onCall?: (b: Rpc) => unknown
+  ) {
+    return (url: string, body: unknown) => {
+      if (url.includes('fastnear.com/v1')) return fast()
+      const b = body as Rpc
+      if (b.params.request_type === 'view_account') return viewAccount
+      const custom = onCall?.(b)
+      if (custom !== undefined) return custom
+      if (b.params.method_name === 'ft_balance_of') {
+        return callResult(held[b.params.account_id] ?? '0')
+      }
+      return callResult({ symbol: 'EXA', decimals: 3 })
+    }
+  }
+
+  it('reads table tokens on chain, and unlisted ones from FastNEAR with metadata', async () => {
+    stubFetch(
+      chain(
+        () =>
+          list([
             { contract_id: 'token.example.near', last_update_block_height: 1, balance: '42000' },
             { contract_id: 'empty.near', last_update_block_height: 1, balance: '0' },
-          ],
-        }
-      }
-      const b = body as { params: { request_type: string; account_id: string } }
-      if (b.params.request_type === 'view_account') return viewAccount
-      return callResult({ symbol: 'EXA', decimals: 3 })
-    })
+          ]),
+        { [USDC_NEAR]: '3000000' }
+      )
+    )
     const result = await readNearBalances('alice.near')
     expect(result.complete).toBe(true)
     expect(result.tokens).toContainEqual(
@@ -230,19 +313,57 @@ describe('NEAR balances', () => {
         listed: false,
       })
     )
+    expect(result.tokens.find((t) => t.id === 'empty.near')).toBeUndefined()
   })
 
-  it('falls back to the registry with complete false when FastNEAR fails', async () => {
-    stubFetch((url, body) => {
-      if (url.includes('fastnear.com/v1')) return new Response('x', { status: 500 })
-      const b = body as { params: { request_type: string; account_id: string } }
-      if (b.params.request_type === 'view_account') return viewAccount
-      return callResult('1000000')
-    })
+  it('shows a token FastNEAR has not indexed yet, read at finality final', async () => {
+    const finalities: string[] = []
+    stubFetch(
+      chain(
+        () => list([]),
+        { [USDC_NEAR]: '5000000' },
+        (b) => {
+          finalities.push(b.params.finality)
+          return undefined
+        }
+      )
+    )
+    const result = await readNearBalances('alice.near')
+    expect(result.complete).toBe(true)
+    expect(result.tokens.find((t) => t.symbol === 'USDC')?.amount).toBe('5')
+    expect(finalities.length).toBeGreaterThan(0)
+    expect(finalities.every((f) => f === 'final')).toBe(true)
+  })
+
+  it('throws when a table token cannot be read, rather than reading zero', async () => {
+    stubFetch(
+      chain(
+        () => list([]),
+        {},
+        (b) => (b.params.account_id === USDC_NEAR ? { error: { name: 'UNKNOWN' } } : undefined)
+      )
+    )
+    await expect(readNearBalances('alice.near')).rejects.toThrow()
+  })
+
+  it('gives the table tokens with complete false when FastNEAR fails', async () => {
+    stubFetch(chain(() => new Response('x', { status: 500 }), { [USDC_NEAR]: '1000000' }))
     const result = await readNearBalances('alice.near')
     expect(result.complete).toBe(false)
     expect(result.tokens.find((t) => t.symbol === 'USDC')?.amount).toBe('1')
     expect(result.tokens.find((t) => t.native)?.amount).toBe('2.5')
+  })
+
+  it('caps metadata reads at 20 and says the list is incomplete', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      contract_id: `t${i}.near`,
+      last_update_block_height: 1,
+      balance: '1000',
+    }))
+    stubFetch(chain(() => list(many)))
+    const result = await readNearBalances('alice.near')
+    expect(result.complete).toBe(false)
+    expect(result.tokens.filter((t) => !t.listed && !t.native)).toHaveLength(20)
   })
 
   it('refuses a malformed account', async () => {
@@ -273,6 +394,7 @@ describe('EVM balances', () => {
     const c = client()
     const result = await readEvmBalances('avalanche', EVM_OWNER, c)
     expect(result.complete).toBe(false)
+    expect(result.knownOnly).toBe(true)
     expect(result.tokens).toContainEqual(
       expect.objectContaining({ symbol: 'AVAX', amount: '1.5', native: true })
     )
@@ -303,6 +425,37 @@ describe('EVM balances', () => {
     await expect(readEvmBalances('monad', '0x12', client())).rejects.toBeInstanceOf(
       ChainActionRefused
     )
+  })
+})
+
+describe('balanceReplyIsCurrent', () => {
+  const asked = { chain: 'solana', account: 'A', turn: 3 }
+
+  it('keeps a reply when nothing changed', () => {
+    expect(balanceReplyIsCurrent(asked, { ...asked })).toBe(true)
+  })
+
+  it('drops it when another wallet connected', () => {
+    expect(balanceReplyIsCurrent(asked, { ...asked, account: 'B' })).toBe(false)
+  })
+
+  it('drops it when the chain changed', () => {
+    expect(balanceReplyIsCurrent(asked, { ...asked, chain: 'sui' })).toBe(false)
+  })
+
+  it('drops it when a newer message was sent', () => {
+    expect(balanceReplyIsCurrent(asked, { ...asked, turn: 4 })).toBe(false)
+  })
+
+  it('drops it when the wallet disconnected', () => {
+    expect(balanceReplyIsCurrent(asked, { ...asked, account: undefined })).toBe(false)
+  })
+})
+
+describe('chain balances route', () => {
+  it('is bounded to 20 seconds', async () => {
+    const route = await import('../../app/api/chain/[chain]/balances/route')
+    expect(route.maxDuration).toBe(20)
   })
 })
 
@@ -358,12 +511,18 @@ describe('chainBalanceReply', () => {
     expect(reply).toContain('and 5 more')
   })
 
-  it('says only known tokens are shown when incomplete', () => {
+  it('says only known tokens are shown when an EVM chain is incomplete', () => {
     const reply = chainBalanceReply(
-      wallet([t({ symbol: 'AVAX', native: true })], false),
+      { ...wallet([t({ symbol: 'AVAX', native: true })], false), knownOnly: true },
       'Avalanche'
     )
     expect(reply).toContain('Only tokens Intent knows on Avalanche are shown.')
+  })
+
+  it('says some tokens could not be read, not that only known ones are shown, elsewhere', () => {
+    const reply = chainBalanceReply(wallet([t({ symbol: 'SUI', native: true })], false), 'Sui')
+    expect(reply).toContain('Some tokens could not be read.')
+    expect(reply).not.toContain('Only tokens')
   })
 
   it('never gives a number when nothing was read', () => {

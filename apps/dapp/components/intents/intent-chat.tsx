@@ -62,7 +62,7 @@ import { StandingInboxPanel } from './standing-inbox-panel'
 import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
-import { chainBalanceReply } from '../../lib/chains/balance-reply'
+import { balanceReplyIsCurrent, chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
@@ -263,6 +263,8 @@ export function IntentChat(): JSX.Element {
   // Messages that were answered rather than run, with the replies given. Sent
   // with the next message so the model answers in the flow of the conversation.
   const dialogue = useRef<ClarifyTurn[]>([])
+  // Where the chat is now, read after a slow answer to tell whether it is still wanted.
+  const latest = useRef({ chain: '', account: undefined as string | undefined, turn: 0 })
 
   function openInbox(): void {
     const items = inbox.items
@@ -325,6 +327,8 @@ export function IntentChat(): JSX.Element {
 
   const { slug, descriptor } = useChain()
   const { address, isConnected } = useWallet()
+  latest.current.chain = slug
+  latest.current.account = address
 
   // Checked once the wallet that owns it is known — historyOwner, which
   // pendingCashOut reads, is set from this same address elsewhere — so a
@@ -1533,6 +1537,7 @@ export function IntentChat(): JSX.Element {
    * own words run, so asking never makes the chat less capable than before.
    */
   function handleSubmit(typed: string): void {
+    latest.current.turn += 1
     // A misspelled verb is corrected before anything reads the sentence.
     const text = fixVerbTypo(typed)
 
@@ -1655,9 +1660,12 @@ export function IntentChat(): JSX.Element {
     try {
       const response = await fetch(
         `/api/chain/${slug}/balances?account=${encodeURIComponent(address)}`,
-        { cache: 'no-store' }
+        { cache: 'no-store', signal: AbortSignal.timeout(20_000) }
       )
-      if (response.ok) held = (await response.json()) as WalletBalances
+      if (response.ok) {
+        const body = (await response.json()) as Partial<WalletBalances>
+        if (Array.isArray(body.tokens)) held = body as WalletBalances
+      }
     } catch {
       held = undefined
     }
@@ -1680,6 +1688,8 @@ export function IntentChat(): JSX.Element {
       setMessage(text)
       setTurnId(crypto.randomUUID())
     }
+    latest.current.turn += 1
+    const asked = { ...latest.current }
     setClarifying({ turns })
     setClarifyBusy(true)
 
@@ -1688,6 +1698,17 @@ export function IntentChat(): JSX.Element {
     // The conversation so far, replies included. Without it every message is
     // read cold, and "explain that better" has nothing to improve on.
     const answer = await fetchOrchestrate(turns, earlier, slug, fetch, dialogue.current)
+    // The busy indicator stays up until the holdings are read. A reply that arrives after the
+    // person moved to another wallet, chain or message is not theirs any more, so it is dropped.
+    const balanceText = answer.outcome === 'balance' ? await walletBalanceReply() : undefined
+    if (balanceText !== undefined && !balanceReplyIsCurrent(asked, latest.current)) {
+      // A newer message owns the screen; with none, only the wait is cleared.
+      if (latest.current.turn === asked.turn) {
+        setClarifyBusy(false)
+        setClarifying(null)
+      }
+      return
+    }
     setClarifyBusy(false)
 
     if (answer.outcome === 'ask') {
@@ -1708,7 +1729,7 @@ export function IntentChat(): JSX.Element {
         answer.outcome === 'help'
           ? (answer.reply ?? helpMessage(slug))
           : answer.outcome === 'balance'
-            ? await walletBalanceReply()
+            ? (balanceText as string)
             : answer.outcome === 'out_of_scope'
               ? outOfScopeMessage(slug, answer.reply)
               : answer.outcome === 'unclear'

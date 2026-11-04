@@ -138,6 +138,11 @@ export interface ChainVenue {
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
 }
 
+/**
+ * One token a wallet holds. Anything that measures a change in a holding must match on `id`, never
+ * on `symbol`: an unlisted token's symbol comes from its coin type or its contract, which anyone
+ * can name to copy a real one.
+ */
 export interface TokenBalance {
   symbol: string
   id: string
@@ -150,9 +155,16 @@ export interface TokenBalance {
 
 export interface WalletBalances {
   tokens: TokenBalance[]
-  /** False when only known tokens could be read. */
+  /** False when some token the wallet may hold is missing from `tokens`. */
   complete: boolean
+  /** Only known tokens can be read on this chain, so an unlisted one is never shown. */
+  knownOnly?: boolean | undefined
+  /** Symbols of listed tokens that could not be read, and so are left out rather than shown as zero. */
+  unread?: string[] | undefined
 }
+
+/** Longest a balance read may take, all calls together. */
+export const BALANCE_DEADLINE_MS = 15_000
 
 export interface ChainModule {
   chain: ChainWithActions
@@ -164,7 +176,7 @@ export interface ChainModule {
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
   /** Every token the account holds, read now. Throws on a malformed account (a refusal) or an unreadable chain. */
-  balances: (account: string) => Promise<WalletBalances>
+  balances: (account: string, signal?: AbortSignal) => Promise<WalletBalances>
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
 }

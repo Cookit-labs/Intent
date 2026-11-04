@@ -38,7 +38,7 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
       error:
         "This app can't follow that from here. Check your wallet's activity before trying again.",
     }),
-    balances: (account) => readEvmBalances(chain, account),
+    balances: (account, signal) => readEvmBalances(chain, account, undefined, signal),
     ...(tokenHints !== undefined ? { tokenHints } : {}),
   }
 }

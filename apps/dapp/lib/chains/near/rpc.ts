@@ -10,12 +10,20 @@ function rpcUrl(): string {
   return configured === undefined || configured === '' ? DEFAULT_RPC_URL : configured
 }
 
-async function rpcCall(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+async function rpcCall(
+  method: string,
+  params: unknown,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<unknown> {
   const response = await fetch(rpcUrl(), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 'intent', method, params }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal:
+      signal === undefined
+        ? AbortSignal.timeout(timeoutMs)
+        : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
   })
   if (!response.ok) throw new NearRpcError(`rpc responded ${response.status}`)
   const body = (await response.json()) as {
@@ -32,7 +40,8 @@ async function rpcCall(method: string, params: unknown, timeoutMs: number): Prom
 export async function viewCall<T>(
   contract: string,
   method: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  signal?: AbortSignal
 ): Promise<T> {
   const result = (await rpcCall(
     'query',
@@ -43,7 +52,8 @@ export async function viewCall<T>(
       method_name: method,
       args_base64: Buffer.from(JSON.stringify(args)).toString('base64'),
     },
-    VIEW_TIMEOUT_MS
+    VIEW_TIMEOUT_MS,
+    signal
   )) as { result?: number[]; error?: string }
   if (!Array.isArray(result.result)) {
     throw new NearRpcError(result.error ?? 'view call returned nothing')
@@ -159,11 +169,12 @@ export async function waitForTransaction(
 }
 
 /** Yocto of NEAR an account holds in total, storage included, read at final. */
-export async function accountBalance(account: string): Promise<string> {
+export async function accountBalance(account: string, signal?: AbortSignal): Promise<string> {
   const result = (await rpcCall(
     'query',
     { request_type: 'view_account', finality: 'final', account_id: account },
-    VIEW_TIMEOUT_MS
+    VIEW_TIMEOUT_MS,
+    signal
   )) as { amount?: unknown }
   if (typeof result.amount !== 'string') throw new NearRpcError('account balance unreadable')
   return result.amount

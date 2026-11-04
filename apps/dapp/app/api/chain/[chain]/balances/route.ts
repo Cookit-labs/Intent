@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 
 import { chainModule } from '../../../../../lib/chains/registry'
-import { ChainActionRefused } from '../../../../../lib/chains/types'
+import { BALANCE_DEADLINE_MS, ChainActionRefused } from '../../../../../lib/chains/types'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
 import { reportError } from '../../../../../lib/server/report'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 20
 
 /** Every token the account holds on this chain, read when asked and never kept. */
 export async function GET(
@@ -21,7 +22,7 @@ export async function GET(
 
   const account = new URL(request.url).searchParams.get('account') ?? ''
   try {
-    const balances = await chainApi.balances(account)
+    const balances = await chainApi.balances(account, AbortSignal.timeout(BALANCE_DEADLINE_MS))
     return NextResponse.json(balances, { headers: { 'cache-control': 'no-store' } })
   } catch (e) {
     if (e instanceof ChainActionRefused) {

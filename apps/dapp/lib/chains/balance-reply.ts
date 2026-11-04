@@ -18,6 +18,23 @@ function isZero(amount: string): boolean {
   return /^0(\.0*)?$/.test(amount)
 }
 
+export interface BalanceAsk {
+  chain: string
+  account: string | undefined
+  /** Counts messages sent, so a reply to an older one can be told from the latest. */
+  turn: number
+}
+
+/** A late answer is shown only if the person is still on the chain, wallet and message it was for. */
+export function balanceReplyIsCurrent(asked: BalanceAsk, now: BalanceAsk): boolean {
+  return (
+    asked.account !== undefined &&
+    asked.account === now.account &&
+    asked.chain === now.chain &&
+    asked.turn === now.turn
+  )
+}
+
 export function chainBalanceReply(balances: WalletBalances | undefined, chainName: string): string {
   if (balances === undefined) return NOT_READ
   const held = balances.tokens.filter((t) => t.native || !isZero(t.amount))
@@ -30,6 +47,12 @@ export function chainBalanceReply(balances: WalletBalances | undefined, chainNam
   const rest = ordered.length - shown.length
   const parts = ['Your wallet holds:', ...shown]
   if (rest > 0) parts.push(`and ${rest} more`)
-  if (!balances.complete) parts.push(`Only tokens Intent knows on ${chainName} are shown.`)
+  if (!balances.complete) {
+    parts.push(
+      balances.knownOnly === true
+        ? `Only tokens Intent knows on ${chainName} are shown.`
+        : 'Some tokens could not be read.'
+    )
+  }
   return parts.join(String.fromCharCode(10))
 }

@@ -1,9 +1,13 @@
 import { fromBaseUnits } from '../solana/tokens'
-import { ChainActionRefused, type TokenBalance, type WalletBalances } from '../types'
+import {
+  BALANCE_DEADLINE_MS,
+  ChainActionRefused,
+  type TokenBalance,
+  type WalletBalances,
+} from '../types'
 import { SUI_TOKENS } from './tokens'
 
 const GRAPHQL_URL = 'https://graphql.mainnet.sui.io/graphql'
-const TIMEOUT_MS = 10_000
 const MAX_PAGES = 5
 const OWNER = /^0x[0-9a-fA-F]{64}$/
 const COIN_TYPE = /^0x[0-9a-fA-F]+::\w+::\w+$/
@@ -11,12 +15,16 @@ const COIN_TYPE = /^0x[0-9a-fA-F]+::\w+::\w+$/
 const BALANCES =
   'query($a:SuiAddress!,$c:String){address(address:$a){balances(first:50,after:$c){pageInfo{hasNextPage endCursor} nodes{coinType{repr} totalBalance}}}}'
 
-async function graphql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+async function graphql(
+  query: string,
+  variables: Record<string, unknown>,
+  signal: AbortSignal
+): Promise<unknown> {
   const response = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal,
   })
   if (!response.ok) throw new Error(`Sui GraphQL answered ${response.status}`)
   const body = (await response.json()) as { data?: unknown; errors?: unknown }
@@ -29,6 +37,10 @@ async function graphql(query: string, variables: Record<string, unknown>): Promi
 /** The padded `0x000...02::sui::SUI` is `0x2::sui::SUI` in the token table. */
 function normalise(coinType: string): string {
   return coinType.replace(/^0x0+(?=[0-9a-fA-F])/, '0x')
+}
+
+function isZero(base: string): boolean {
+  return /^0+$/.test(base)
 }
 
 interface Held {
@@ -45,11 +57,14 @@ interface BalancePage {
   } | null
 }
 
-async function readAll(account: string): Promise<{ held: Held[]; more: boolean }> {
+async function readAll(
+  account: string,
+  signal: AbortSignal
+): Promise<{ held: Held[]; more: boolean }> {
   const held: Held[] = []
   let cursor: string | null = null
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const data = (await graphql(BALANCES, { a: account, c: cursor })) as BalancePage
+    const data = (await graphql(BALANCES, { a: account, c: cursor }, signal)) as BalancePage
     const balances = data.address?.balances
     if (balances?.nodes === undefined) throw new Error('Sui balances unreadable')
     for (const node of balances.nodes) {
@@ -66,13 +81,13 @@ async function readAll(account: string): Promise<{ held: Held[]; more: boolean }
 }
 
 /** Decimals from the chain's own metadata. A coin with none is left out, not guessed. */
-async function decimalsOf(types: string[]): Promise<Map<string, number>> {
+async function decimalsOf(types: string[], signal: AbortSignal): Promise<Map<string, number>> {
   const wanted = types.filter((t) => COIN_TYPE.test(t))
   if (wanted.length === 0) return new Map()
   const query = `query{${wanted
     .map((t, i) => `a${i}:coinMetadata(coinType:${JSON.stringify(t)}){decimals}`)
     .join(' ')}}`
-  const data = (await graphql(query, {})) as Record<string, { decimals?: number } | null>
+  const data = (await graphql(query, {}, signal)) as Record<string, { decimals?: number } | null>
   const out = new Map<string, number>()
   wanted.forEach((type, i) => {
     const decimals = data[`a${i}`]?.decimals
@@ -81,14 +96,19 @@ async function decimalsOf(types: string[]): Promise<Map<string, number>> {
   return out
 }
 
-export async function readSuiBalances(account: string): Promise<WalletBalances> {
+export async function readSuiBalances(
+  account: string,
+  signal: AbortSignal = AbortSignal.timeout(BALANCE_DEADLINE_MS)
+): Promise<WalletBalances> {
   if (!OWNER.test(account)) {
     throw new ChainActionRefused('That is not a Sui address. Connect a Sui wallet and try again.')
   }
-  const { held, more } = await readAll(account)
+  const { held, more } = await readAll(account, signal)
   let complete = !more
-  const unlisted = held.filter((h) => !SUI_TOKENS.some((t) => t.id === h.type)).map((h) => h.type)
-  const decimals = await decimalsOf(unlisted)
+  const unlisted = held
+    .filter((h) => !SUI_TOKENS.some((t) => t.id === h.type) && !isZero(h.base))
+    .map((h) => h.type)
+  const decimals = await decimalsOf(unlisted, signal)
   const tokens: TokenBalance[] = []
   for (const { type, base } of held) {
     const listed = SUI_TOKENS.find((t) => t.id === type)
@@ -103,6 +123,7 @@ export async function readSuiBalances(account: string): Promise<WalletBalances> 
       })
       continue
     }
+    if (isZero(base)) continue
     const places = decimals.get(type)
     if (places === undefined) {
       complete = false
