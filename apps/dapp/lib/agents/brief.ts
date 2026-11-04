@@ -88,7 +88,7 @@ How to decide:
 
 Return your answer by calling the submit_proposal tool. Do not reply with prose. Fill the remaining fields like this:
 - routeId: the id of the route you chose.
-- projectedAvgPriceUsd: for a swap, the units paid per one unit received, read off the route you chose. For a deposit or a stake, the dollar price of the token being put in, from the market context.
+- projectedAvgPriceUsd: the dollar price of the token being paid in, from the market context. The server replaces it with the measured figure.
 - projectedSlippagePct: 0. The server measures the real figure from the quote.
 - executionMode "fill", thenAction "none", sliceCount 1, and 0 for every other price or percentage field.
 

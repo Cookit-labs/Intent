@@ -11,7 +11,7 @@ import {
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
-import { measureChainRoute, measureRoute } from '../../../../lib/agents/measure'
+import { measureRoute } from '../../../../lib/agents/measure'
 import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents/lineup'
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
@@ -33,7 +33,11 @@ import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
 import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
-import { settleChainPlan } from '../../../../lib/agents/settle-chain-plan'
+import {
+  applyChainMeasure,
+  isUnmeasuredSwap,
+  settleChainPlan,
+} from '../../../../lib/agents/settle-chain-plan'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
 import { logRace, type RaceInput } from '../../../../lib/server/analytics'
@@ -215,14 +219,7 @@ function measured(
   prices: Record<string, number>
 ): AgentProposalResult {
   if (quote === undefined) return proposal
-  if ('kind' in quote && quote.kind === 'chain') {
-    // Slippage against an oracle is what a trade costs; a supply or a stake
-    // has none, and measureChainRoute reports it as zero. The agent's own
-    // price stays: it is a rate, and the quote has no single price to replace it.
-    const m = measureChainRoute(quote)
-    if (m === undefined) return proposal
-    return { ...proposal, projectedSlippagePct: Number(m.vsInPct.toFixed(2)) }
-  }
+  if ('kind' in quote && quote.kind === 'chain') return applyChainMeasure(proposal, quote)
   const m = measureRoute(quote, prices)
   if (m === undefined) return proposal
   return {
@@ -568,6 +565,13 @@ export async function POST(request: Request): Promise<Response> {
       })
       const apyByRoute = apyEntries.length > 0 ? Object.fromEntries(apyEntries) : undefined
 
+      const unmeasuredRoutes = (market.routes ?? [])
+        .filter((r) => {
+          const q = r.quote as Partial<ChainRouteQuote> | undefined
+          return q?.kind === 'chain' && isUnmeasuredSwap(q as ChainRouteQuote)
+        })
+        .map((r) => r.id)
+
       const plan: PlanContext = {
         escrowUsd: intent.escrowUsd,
         referencePriceUsd: intent.referencePriceUsd,
@@ -584,6 +588,7 @@ export async function POST(request: Request): Promise<Response> {
         ...(anchorLimits?.maxAmount !== undefined ? { offrampMaxUsd: anchorLimits.maxAmount } : {}),
         ...(anchorLimits?.minAmount !== undefined ? { offrampMinUsd: anchorLimits.minAmount } : {}),
         ...(apyByRoute !== undefined ? { apyByRoute } : {}),
+        ...(unmeasuredRoutes.length > 0 ? { unmeasuredRoutes } : {}),
       }
 
       const scored = scoreProposals(proposals, { competitionId, plan })

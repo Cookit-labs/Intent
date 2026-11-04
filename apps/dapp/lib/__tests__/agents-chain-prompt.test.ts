@@ -7,7 +7,8 @@ import { quoteChainRoutes, type ChainRouteQuote } from '../agents/chain-routes'
 import { buildMarketContext } from '../agents/market-context'
 import { measureChainRoute } from '../agents/measure'
 import { planPenalties, planScore } from '../agents/plan-scoring'
-import { settleChainPlan } from '../agents/settle-chain-plan'
+import { pickWinner, scoreProposals } from '../agents/scoring'
+import { applyChainMeasure, isUnmeasuredSwap, settleChainPlan } from '../agents/settle-chain-plan'
 import type { ChainActionRequest, ChainModule, ChainToken } from '../chains/types'
 
 const swap: ChainActionRequest = { kind: 'swap', amount: '100', tokenIn: 'AAA', tokenOut: 'OUT' }
@@ -249,5 +250,88 @@ describe('ranking deposits and stakes by rate', () => {
   it('leaves a swap race, which has no rates, untouched', () => {
     const { apyByRoute: _ignored, ...swapPlan } = plan
     expect(planPenalties({ ...base, routeId: 'b-1' }, swapPlan)).toEqual([])
+  })
+})
+
+describe('what the panel is shown for a chain route', () => {
+  const claim = {
+    agent: 'halcyon',
+    routeId: 'v-1',
+    reasoning: 'x',
+    projectedAvgPriceUsd: 20.1,
+    projectedSlippagePct: 0,
+    venues: [],
+    sliceCount: 1,
+    confidence: 0.5,
+    horizonMinutes: 5,
+    executionMode: 'fill',
+  } as unknown as AgentProposalResult
+
+  it('replaces a token ratio with the dollars paid per unit received', () => {
+    const q = quoteOf({ valueOutUsd: 4.97, receive: { amount: '4.97', symbol: 'USDC' } })
+    const shown = applyChainMeasure(claim, q)
+    expect(shown.projectedAvgPriceUsd).toBeCloseTo(5 / 4.97, 6)
+    expect(shown.projectedSlippagePct).toBeCloseTo(0.6, 2)
+  })
+
+  it('shows the price of the token paid in for a stake', () => {
+    const q = quoteOf({ request: { kind: 'stake', amount: '100', tokenIn: 'AAA' }, apyPercent: 5 })
+    const shown = applyChainMeasure(claim, q)
+    expect(shown.projectedAvgPriceUsd).toBeCloseTo(0.05, 6)
+    expect(shown.projectedSlippagePct).toBe(0)
+  })
+
+  it('claims nothing for a swap it cannot price', () => {
+    const q = quoteOf({ receive: { amount: '4.97', symbol: 'USDC' } })
+    const shown = applyChainMeasure({ ...claim, projectedSlippagePct: 4 }, q)
+    expect(shown.projectedAvgPriceUsd).toBe(0)
+    expect(shown.projectedSlippagePct).toBe(0)
+  })
+})
+
+describe('a swap route that could not be priced', () => {
+  const agent = (key: string, routeId: string, slippage: number): AgentProposalResult =>
+    ({
+      agent: key,
+      routeId,
+      reasoning: 'x',
+      projectedAvgPriceUsd: 1,
+      projectedSlippagePct: slippage,
+      venues: [],
+      sliceCount: 1,
+      confidence: 0.5,
+      horizonMinutes: 5,
+      executionMode: 'fill',
+    }) as unknown as AgentProposalResult
+  const plan = {
+    escrowUsd: 5,
+    referencePriceUsd: 0.05,
+    askedToLend: false,
+    askedToOfframp: false,
+    unmeasuredRoutes: ['unpriced-1'],
+  }
+
+  it('is a swap with no dollar value out', () => {
+    expect(isUnmeasuredSwap(quoteOf({ receive: { amount: '4', symbol: 'X' } }))).toBe(true)
+    expect(isUnmeasuredSwap(quoteOf({ valueOutUsd: 4 }))).toBe(false)
+  })
+
+  it('loses to a priced route that really lost value', () => {
+    const scored = scoreProposals(
+      [agent('halcyon', 'unpriced-1', 0), agent('meridian', 'priced-1', 3)],
+      { competitionId: 'c', plan }
+    )
+    expect(scored[0]?.agent).toBe('meridian')
+    expect(scored[1]?.penalties[0]?.reason).toBe('unpriced_route')
+  })
+
+  it('still picks a winner when every route is unpriced', () => {
+    const all = { ...plan, unmeasuredRoutes: ['unpriced-1', 'unpriced-2'] }
+    const scored = scoreProposals(
+      [agent('halcyon', 'unpriced-1', 0), agent('meridian', 'unpriced-2', 0)],
+      { competitionId: 'c', plan: all }
+    )
+    expect(scored).toHaveLength(2)
+    expect(pickWinner(scored)).not.toBeNull()
   })
 })

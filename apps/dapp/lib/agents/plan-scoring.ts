@@ -52,6 +52,8 @@ export interface PlanContext {
    * on a swap race.
    */
   apyByRoute?: Record<string, number>
+  /** Swap routes the server could not price. Their value is unknown, so they cannot win on it. */
+  unmeasuredRoutes?: string[]
 }
 
 export interface PlanPenalty {
@@ -64,6 +66,7 @@ export interface PlanPenalty {
     | 'offramp_outside_limits'
     | 'slices_without_split'
     | 'lower_rate'
+    | 'unpriced_route'
   /** Points subtracted from the route score. */
   points: number
   /** One line a person can read, naming the figures it was judged on. */
@@ -186,6 +189,20 @@ function ratePenalty(proposal: AgentProposalResult, context: PlanContext): PlanP
   }
 }
 
+/** Enough to put a route nobody could price below every route that was measured. */
+function unpricedPenalty(
+  proposal: AgentProposalResult,
+  context: PlanContext
+): PlanPenalty | undefined {
+  if (proposal.routeId === undefined) return undefined
+  if (!context.unmeasuredRoutes?.includes(proposal.routeId)) return undefined
+  return {
+    reason: 'unpriced_route',
+    points: 100,
+    detail: 'This route could not be priced, so what it delivers is unknown.',
+  }
+}
+
 function slicePenalty(proposal: AgentProposalResult): PlanPenalty | undefined {
   if (proposal.sliceCount <= 1) return undefined
   if (proposal.executionMode === 'split') return undefined
@@ -207,6 +224,9 @@ export function planPenalties(proposal: AgentProposalResult, context: PlanContex
 
   const rate = ratePenalty(proposal, context)
   if (rate !== undefined) out.push(rate)
+
+  const unpriced = unpricedPenalty(proposal, context)
+  if (unpriced !== undefined) out.push(unpriced)
 
   const slices = slicePenalty(proposal)
   if (slices !== undefined) out.push(slices)
