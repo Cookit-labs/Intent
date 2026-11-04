@@ -95,6 +95,8 @@ export const ANALYTICS_DDL: readonly string[] = [
   // free text from every model on every race rather than the one plan a
   // user's funds actually moved on.
   `ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS reasoning TEXT`,
+  // Races from before other chains ran are all Stellar's, which the default says.
+  `ALTER TABLE agent_races ADD COLUMN IF NOT EXISTS chain TEXT NOT NULL DEFAULT 'stellar'`,
 ]
 
 export type ExecutionKind =
@@ -139,6 +141,13 @@ export interface SubmitLike {
   hash?: string
   reason?: string
   code?: string
+}
+
+const OTHER_CHAINS: readonly ExecutionKind[] = ['solana', 'sui', 'near', 'avalanche', 'monad']
+
+/** The chain an execution happened on, which is what a race it follows must have run on. */
+function raceChainOf(kind: ExecutionKind): string {
+  return OTHER_CHAINS.includes(kind) ? kind : 'stellar'
 }
 
 const CODE = /^[a-z][a-z0-9_]{0,39}$/
@@ -199,6 +208,8 @@ export interface RaceAttemptFailed {
 export interface RaceInput {
   id: string
   network: StellarNetworkName
+  /** The chain the race ran on; Stellar when omitted. */
+  chain?: string
   startedAt: Date
   durationMs: number
   intent: { type: string; tokenIn: string; tokenOut: string; sizeUsd: number | undefined }
@@ -211,6 +222,7 @@ export interface RaceInput {
 export interface RaceRecord {
   id: string
   network: StellarNetworkName
+  chain: string
   startedAt: Date
   intentType: string
   tokenIn: string
@@ -247,6 +259,7 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
   return {
     id: input.id,
     network: input.network,
+    chain: input.chain ?? 'stellar',
     startedAt: input.startedAt,
     intentType: input.intent.type,
     tokenIn: input.intent.tokenIn,
@@ -354,6 +367,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
            (SELECT id FROM agent_races
              WHERE id = $14::uuid AND network = $2 AND winner IS NOT NULL
+               AND chain = $15
                AND started_at <= $9::timestamptz
                AND started_at > $9::timestamptz - interval '30 minutes'))
          ON CONFLICT DO NOTHING`,
@@ -372,6 +386,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.amountIn ?? null,
           r.flow?.volumeUsd ?? null,
           r.raceId ?? null,
+          raceChainOf(r.kind),
         ]
       )
     },
@@ -399,8 +414,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       await query(
         `INSERT INTO agent_races
            (id, network, started_at, intent_type, token_in, token_out, size_usd,
-            agents, answered, winner, unanimous, outcome, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            agents, answered, winner, unanimous, outcome, duration_ms, chain)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT DO NOTHING`,
         [
           r.id,
@@ -416,6 +431,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.unanimous,
           r.outcome,
           r.durationMs,
+          r.chain,
         ]
       )
       for (const p of r.proposals) {

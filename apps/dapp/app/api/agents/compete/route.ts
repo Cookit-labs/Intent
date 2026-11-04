@@ -441,7 +441,9 @@ export async function POST(request: Request): Promise<Response> {
       ): Promise<void> =>
         logRace({
           id: competitionId,
-          network,
+          // Other chains only run on mainnet, and their submits are logged there too.
+          network: chain === 'stellar' ? network : 'mainnet',
+          chain,
           startedAt,
           durationMs: Date.now() - startedAt.getTime(),
           intent: {
