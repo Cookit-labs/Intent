@@ -259,8 +259,10 @@ export function routeCashout(
   }
   if ('unsupportedToken' in read) {
     if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
+    // A leading zero may be a decimal comma, "0,500" read as 0500, and a swap would take it as 500.
     if (
       read.amount !== undefined &&
+      !/^0\d/.test(read.amount) &&
       (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain)
     ) {
       return {

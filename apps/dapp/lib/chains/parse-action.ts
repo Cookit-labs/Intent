@@ -1,10 +1,11 @@
 import type { ChainActionRequest } from './types'
 
 /**
- * Commas only as thousands, 1,000 or 1,000.5. In "1,5" a comma is a decimal point, and dropping it
- * would read ten times the amount, so that is no amount at all and the person is told what works.
+ * Commas only as thousands, 1,000 or 1,000.5. In "1,5" or "0,500" a comma is a decimal point, and
+ * dropping it would read many times the amount, so that is no amount at all and the person is told
+ * what works. Thousands never start with a zero.
  */
-export const AMOUNT = String.raw`\$?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)`
+export const AMOUNT = String.raw`\$?((?:[1-9]\d{0,2}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)`
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
 const VENUE = String.raw`(?:\s+(?:on|via|with|using|in|into|at|to)\s+([a-z0-9][a-z0-9 .-]{1,30}?))?`
 const END = String.raw`\s*[.!]?\s*$`

@@ -252,8 +252,8 @@ export function stepErrorMessage(
   if (message === undefined || !sequenceSettled) return message
   if (!/nothing was signed or sent/i.test(message)) return message
   const rest = message
-    .replace(/,\s*so nothing was signed or sent\.?/gi, '.')
-    .replace(/\s*Nothing was signed or sent(?:, so try again in a moment)?\.?/g, '')
+    .replace(/,\s*so nothing was signed or sent(?:,\s*so try again[^.]*)?\.?/gi, '.')
+    .replace(/\s*Nothing was signed or sent(?:,\s*so try again[^.]*)?\.?/g, '')
     .trim()
   return `${rest} ${STEP_NOT_STARTED}`
 }

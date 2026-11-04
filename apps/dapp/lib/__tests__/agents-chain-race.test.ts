@@ -314,6 +314,21 @@ describe('stepErrorMessage', () => {
     ).toBe(`Not answering. ${STEP}`)
   })
 
+  it('reads correctly whatever "so try again" follows the claim', () => {
+    expect(
+      stepErrorMessage(
+        'Kamino is busy right now. Nothing was signed or sent, so try again in a few seconds.',
+        true
+      )
+    ).toBe(`Kamino is busy right now. ${STEP}`)
+    expect(stepErrorMessage('Busy, so nothing was signed or sent, so try again soon.', true)).toBe(
+      `Busy. ${STEP}`
+    )
+    expect(stepErrorMessage('Not ready. Nothing was signed or sent, so try again', true)).toBe(
+      `Not ready. ${STEP}`
+    )
+  })
+
   it('leaves a message that makes no such claim', () => {
     expect(stepErrorMessage('Could not reach the network.', true)).toBe(
       'Could not reach the network.'

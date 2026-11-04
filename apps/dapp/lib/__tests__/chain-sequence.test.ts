@@ -86,7 +86,7 @@ describe('a token read beside a currency we do not pay', () => {
 
 describe('parseChainSequence strictness', () => {
   it('reads no amount from a decimal comma, and keeps real groups', () => {
-    for (const amount of ['1,5', '0,5', '1,50', '10,00']) {
+    for (const amount of ['1,5', '0,5', '1,50', '10,00', '0,500', '00,500', '01,000']) {
       expect(parseChainSequence(`swap ${amount} SOL to USDC then cash out`)).toBeNull()
     }
     const read = (typed: string): unknown => {
@@ -121,6 +121,35 @@ describe('parseChainSequence strictness', () => {
 })
 
 describe('routeCashout with an amount', () => {
+  it('starts no swap on an amount with a leading zero, which may be a decimal comma', () => {
+    for (const typed of ['cash out 0,500 sol', 'cash out 05 sol', 'cash out 0,500 sol to kes']) {
+      expect(routeCashout(parseCashout(typed), 'solana')).toEqual({ kind: 'token', token: 'SOL' })
+    }
+    expect(routeCashout(parseCashout('cash out 0,500 sol'), 'avalanche')).toMatchObject({
+      kind: 'token',
+    })
+  })
+
+  it('still starts one on an ordinary amount', () => {
+    expect(routeCashout(parseCashout('cash out 0.5 sol'), 'solana')).toMatchObject({
+      kind: 'sequence',
+      amount: '0.5',
+    })
+    expect(routeCashout(parseCashout('cash out 1,500 sol'), 'solana')).toMatchObject({
+      kind: 'sequence',
+      amount: '1500',
+    })
+  })
+
+  it('leaves Stellar and what the parser reads exactly as they were', () => {
+    expect(parseCashout('cash out 0,500 sol')).toEqual({ unsupportedToken: 'SOL', amount: '0500' })
+    expect(routeCashout(parseCashout('cash out 0,500 sol'), 'stellar')).toEqual({ kind: 'pass' })
+    expect(routeCashout(parseCashout('cash out 0,500 sol to kes'), 'stellar')).toEqual({
+      kind: 'token',
+      token: 'SOL',
+    })
+  })
+
   it('becomes a sequence on chains that can finish it', () => {
     expect(routeCashout({ unsupportedToken: 'SOL', amount: '0.5' }, 'solana')).toEqual({
       kind: 'sequence',
