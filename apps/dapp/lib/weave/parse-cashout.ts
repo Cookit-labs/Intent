@@ -197,6 +197,10 @@ export function parseCashout(text: string): CashoutRead | null {
   if (token !== undefined && token !== 'usdc' && !dollarAmount) {
     if (isFiatWord(token)) return null
     if (amount === undefined && !KNOWN_TOKENS.has(token)) return null
+    // A fiat we don't pay is said, not dropped: the token case would lose it.
+    if (target !== undefined && currency === undefined && !namesNoCurrency) {
+      return { unsupportedCurrency: OTHER_FIAT[target] as string }
+    }
     // A dollar figure is not an amount of this token.
     const ofToken = amount !== undefined && !dollar ? { amount } : {}
     return { unsupportedToken: token.toUpperCase(), ...ofToken, ...withCurrency }

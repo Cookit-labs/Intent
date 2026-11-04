@@ -57,6 +57,40 @@ describe('parseChainSequence', () => {
   })
 })
 
+describe('a token read beside a currency we do not pay', () => {
+  it('names the currency instead of dropping it', () => {
+    for (const text of ['cash out 5 sol to brl', 'sell 5 sol for euros']) {
+      const read = parseCashout(text)
+      expect(read).toHaveProperty('unsupportedCurrency')
+      expect(routeCashout(read, 'solana')).toMatchObject({ kind: 'currency' })
+      expect(routeCashout(read, 'stellar')).toEqual({ kind: 'pass' })
+    }
+  })
+})
+
+describe('parseChainSequence strictness', () => {
+  it.each([
+    'swap 5 SOL to USDC then send 2 to X',
+    'swap 5 SOL to USDC and swap 2 to BONK',
+    'swap 5 SOL to USDC then cash out half',
+    'swap 5 SOL to USDC then cash out 3',
+    `swap 5 SOL to USDC then send to ${ADDRESS}?`,
+    `swap 5 SOL to USDC then send to ${ADDRESS},`,
+    `swap 5 SOL to USDC then send to ${ADDRESS})`,
+  ])('returns null for %s', (text) => {
+    expect(parseChainSequence(text)).toBeNull()
+  })
+
+  it('reads a NEAR account and drops one trailing stop', () => {
+    expect(parseChainSequence('swap 5 SOL to USDC then send to alice.near.')).toMatchObject({
+      followOn: { kind: 'send', recipient: 'alice.near' },
+    })
+    expect(parseChainSequence('swap 5 SOL to USDC then send to a_b-c.near!')).toMatchObject({
+      followOn: { kind: 'send', recipient: 'a_b-c.near' },
+    })
+  })
+})
+
 describe('routeCashout with an amount', () => {
   it('becomes a sequence on chains that can finish it', () => {
     expect(routeCashout({ unsupportedToken: 'SOL', amount: '0.5' }, 'solana')).toEqual({
@@ -114,6 +148,13 @@ describe('deliveredAmount', () => {
     expect(deliveredAmount('0.1', '0.3', 6)).toBe('0.2')
   })
 
+  it('measures at 18 and 24 decimals, and ignores trailing zeros', () => {
+    expect(deliveredAmount('1', '1.000000000000000001', 18)).toBe('0.000000000000000001')
+    expect(deliveredAmount('0.1', '0.3', 18)).toBe('0.2')
+    expect(deliveredAmount('1', '2.5', 24)).toBe('1.5')
+    expect(deliveredAmount('1.5', '6.50', 6)).toBe('5')
+  })
+
   it('gives nothing when a side is missing or nothing arrived', () => {
     expect(deliveredAmount(undefined, '6.5', 6)).toBeUndefined()
     expect(deliveredAmount('1', undefined, 6)).toBeUndefined()
@@ -126,6 +167,14 @@ describe('cashoutAmountFrom', () => {
   it('leaves room for the fee, rounding down to 2 places', () => {
     expect(cashoutAmountFrom('5')).toBe('4.9')
     expect(cashoutAmountFrom('5.05')).toBe('4.95')
+    expect(cashoutAmountFrom('0.02')).toBe('0.01')
+    expect(cashoutAmountFrom('1.234567')).toBe('1.21')
+  })
+
+  it('gives nothing for zero or what is not an amount', () => {
+    expect(cashoutAmountFrom('0.01')).toBeUndefined()
+    expect(cashoutAmountFrom('abc')).toBeUndefined()
+    expect(cashoutAmountFrom('0')).toBeUndefined()
   })
 })
 
@@ -171,15 +220,27 @@ describe('followOnRefusal', () => {
 })
 
 describe('strandedReply', () => {
-  it('says what is held and that nothing was paid out', () => {
-    const reply = strandedReply('USDC', '5')
-    expect(reply).toMatch(/you are holding/)
-    expect(reply).toMatch(/nothing was paid out/)
-    expect(reply).toMatch(/5/)
+  it('says what reached the wallet and that the next step did not run', () => {
+    const reply = strandedReply('USDC', '5', { kind: 'supply' })
+    expect(reply).toBe(
+      'The swap went through and about 5 USDC reached your wallet, but the next step did not run.'
+    )
   })
 
   it('names no number when the amount is unknown', () => {
-    expect(strandedReply('USDC', undefined)).not.toMatch(/\d/)
+    const reply = strandedReply('USDC', undefined, { kind: 'stake' })
+    expect(reply).not.toMatch(/\d/)
+    expect(reply).toBe(
+      'The swap went through, but I could not confirm what reached your wallet, so the next step did not run. Check your wallet before doing anything else.'
+    )
+  })
+
+  it('adds that nothing was paid out only for a cash-out', () => {
+    expect(strandedReply('USDC', '5', { kind: 'cashout' })).toMatch(/ Nothing was paid out\.$/)
+    expect(strandedReply('USDC', undefined, { kind: 'cashout' })).toMatch(
+      / Nothing was paid out\.$/
+    )
+    expect(strandedReply('USDC', '5', { kind: 'send', recipient: 'x' })).not.toMatch(/paid out/)
   })
 })
 
@@ -247,6 +308,29 @@ describe('assertNativeReserve', () => {
     ).resolves.toBeUndefined()
     expect(Date.now() - started).toBeLessThan(5000)
   }, 8000)
+
+  it('makes no balance-based refusal for wNEAR', async () => {
+    const calls = { n: 0 }
+    const near = {
+      chain: 'near',
+      tokens: [
+        { symbol: 'NEAR', id: 'wrap.near', decimals: 24 },
+        { symbol: 'wNEAR', id: 'wrap.near', decimals: 24 },
+      ],
+      balances: async () => {
+        calls.n += 1
+        return { complete: true, tokens: [] }
+      },
+    } as unknown as ChainModule
+    await expect(
+      assertNativeReserve(
+        near,
+        { kind: 'swap', amount: '99', tokenIn: 'wNEAR', tokenOut: 'USDC' },
+        'a'
+      )
+    ).resolves.toBeUndefined()
+    expect(calls.n).toBe(0)
+  })
 
   it('matches NEAR, held natively, to the wrapped token the table names', async () => {
     const near = {

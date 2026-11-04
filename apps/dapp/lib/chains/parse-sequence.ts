@@ -14,6 +14,8 @@ const CASHOUT = /^(?:cash[ -]?out|off[ -]?ramp|withdraw to bank)(?:\s+(.+))?$/i
 const EARN =
   /^(deposit|supply|lend|save|earn)(?:\s+it)?(?:\s+(?:on|via|with|using|in|into|at|to)\s+(\S.*?))?$/i
 const STAKE = /^stake(?:\s+it)?(?:\s+(?:on|via|with|using|in|into|at|to)\s+(\S.*?))?$/i
+/** An address and nothing else: NEAR accounts add `.`, `_`, `-` and `:` inside. */
+const ADDRESS_CHARS = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 const SEND = /^(?:send|transfer)(?:\s+it)?\s+to\s+(\S+)$/i
 
 function followOnOf(text: string): FollowOn | { refusal: string } | null {
@@ -39,7 +41,9 @@ function followOnOf(text: string): FollowOn | { refusal: string } | null {
   if (stake !== null)
     return stake[1] === undefined ? { kind: 'stake' } : { kind: 'stake', venue: stake[1].trim() }
   const send = SEND.exec(text)
-  if (send !== null) return { kind: 'send', recipient: send[1] as string }
+  if (send !== null && ADDRESS_CHARS.test(send[1] as string)) {
+    return { kind: 'send', recipient: send[1] as string }
+  }
   return null
 }
 

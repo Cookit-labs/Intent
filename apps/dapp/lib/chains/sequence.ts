@@ -45,13 +45,16 @@ export function deliveredAmount(
   return fromBase(b - a, decimals)
 }
 
-/** What to ask Weave for, leaving room for the 2% it may take over the order: floor(delivered / 1.02) to 2 places. */
-export function cashoutAmountFrom(delivered: string): string {
+/**
+ * What to ask Weave for, leaving room for the 2% it may take over the order:
+ * floor(delivered / 1.02) to 2 places. Nothing for zero or for text that is not an amount.
+ */
+export function cashoutAmountFrom(delivered: string): string | undefined {
   const places = delivered.includes('.') ? (delivered.split('.')[1] ?? '').length : 0
   const base = toBase(delivered, places)
-  if (base === undefined) return '0'
+  if (base === undefined) return undefined
   const hundredths = (base * BigInt(10000)) / (BigInt(102) * BigInt(10) ** BigInt(places))
-  return fromBase(hundredths, 2)
+  return hundredths === BigInt(0) ? undefined : fromBase(hundredths, 2)
 }
 
 /** The sentence for a follow-on that cannot run on this chain, or nothing if it can. */
@@ -77,8 +80,15 @@ export function followOnRefusal(
   return undefined
 }
 
-/** After the swap went through and the follow-on cannot go on: what the person holds now. */
-export function strandedReply(symbol: string, amount: string | undefined): string {
-  const held = amount === undefined ? symbol : `about ${amount} ${symbol}`
-  return `The swap went through and you are holding ${held}, but nothing was paid out. Check your wallet before doing anything else.`
+/** After the swap went through and the next step cannot go on: what reached the wallet, never a guess. */
+export function strandedReply(
+  symbol: string,
+  delivered: string | undefined,
+  followOn: FollowOn
+): string {
+  const paidOut = followOn.kind === 'cashout' ? ' Nothing was paid out.' : ''
+  if (delivered === undefined) {
+    return `The swap went through, but I could not confirm what reached your wallet, so the next step did not run. Check your wallet before doing anything else.${paidOut}`
+  }
+  return `The swap went through and about ${delivered} ${symbol} reached your wallet, but the next step did not run.${paidOut}`
 }
