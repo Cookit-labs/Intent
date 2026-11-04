@@ -336,7 +336,10 @@ export function cashoutChoices(
   return chain === 'stellar' ? [NAIRA, ...weave.filter((c) => c.code !== 'NGN')] : [...weave]
 }
 
-export function unsupportedTokenReply(token: string): string {
+export function unsupportedTokenReply(token: string, chain?: string): string {
+  if (chain === 'near') {
+    return `Cash-outs take USDC, not ${token}, and they can't run from NEAR right now because Weave's NEAR deposits are unavailable.`
+  }
   return `Cash-outs take USDC, not ${token}. Swap your ${token} to USDC first, then cash out.`
 }
 

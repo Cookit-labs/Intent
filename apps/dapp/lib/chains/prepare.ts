@@ -1,12 +1,15 @@
 import { CHAIN_DESCRIPTORS } from '@intent/config'
 
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
+import { WRAP_NEAR } from './near/tokens'
+import { fromBase, toBase } from './sequence'
 import {
   ChainActionRefused,
   tokenBySymbol,
   type ChainActionRequest,
   type ChainModule,
   type ChainToken,
+  type ChainWithActions,
   type ChainVenue,
   type PreparedAction,
 } from './types'
@@ -142,9 +145,87 @@ export async function prepareChainAction(
   const tokenIn = assertKnownTokens(chainApi, request)
 
   await assertAmountWithinCap(chainApi, request, tokenIn, env)
+  await assertNativeReserve(chainApi, request, account)
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
   venue.assertSafe(prepared.signing, account, prepared.context)
   return prepared
+}
+
+/** Native coin kept back for network fees, in display units: a trade may not spend into it. */
+export const NATIVE_FEE_RESERVE: Record<ChainWithActions, string> = {
+  solana: '0.005',
+  sui: '0.05',
+  near: '0.05',
+  avalanche: '0.01',
+  monad: '0.05',
+}
+
+const NATIVE_SYMBOL: Record<ChainWithActions, string> = {
+  solana: 'SOL',
+  sui: 'SUI',
+  near: 'NEAR',
+  avalanche: 'AVAX',
+  monad: 'MON',
+}
+
+/** The balance read may wait on the chain's own deadline, which is far longer than a trade should. */
+const RESERVE_READ_MS = 3000
+
+/**
+ * Refuses spending a wallet's whole native balance, which would leave nothing for the fee.
+ * Reads the balance once and compares in base units. A read that fails or runs late passes:
+ * this guards a doomed trade, and must never be what blocks a good one.
+ *
+ * The native token is the one the reading marks native; the request counts as spending it when
+ * the module's own table entry for the symbol has that id. NEAR is held natively as "near" but its
+ * table names the wrapped form `wrap.near`, so there that table entry stands for the native coin.
+ */
+export async function assertNativeReserve(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string
+): Promise<void> {
+  const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
+  if (tokenIn === undefined) return
+  if (tokenIn.symbol.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return
+
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let reading
+  try {
+    reading = await Promise.race([
+      chainApi.balances(account, controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error('balance read timed out'))
+        }, RESERVE_READ_MS)
+      }),
+    ])
+  } catch {
+    return
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+
+  const native = reading.tokens.find((t) => t.native)
+  if (native === undefined) return
+  const isNative =
+    tokenIn.id === native.id || (chainApi.chain === 'near' && tokenIn.id === WRAP_NEAR)
+  if (!isNative) return
+
+  const held = toBase(native.amount, native.decimals)
+  const reserve = toBase(NATIVE_FEE_RESERVE[chainApi.chain], native.decimals)
+  const asked = toBase(request.amount, native.decimals)
+  if (held === undefined || reserve === undefined || asked === undefined) return
+  if (asked <= held - reserve) return
+
+  const spendable = held > reserve ? held - reserve : BigInt(0)
+  throw new ChainActionRefused(
+    `Keep about ${NATIVE_FEE_RESERVE[chainApi.chain]} ${native.symbol} for network fees. ` +
+      `You can spend up to ${fromBase(spendable, native.decimals)} ${native.symbol} here. ` +
+      'Nothing was signed or sent.'
+  )
 }

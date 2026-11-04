@@ -16,7 +16,11 @@ import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
-import { assertAmountWithinCap, assertKnownTokens } from '../../../../lib/chains/prepare'
+import {
+  assertAmountWithinCap,
+  assertKnownTokens,
+  assertNativeReserve,
+} from '../../../../lib/chains/prepare'
 import { chainModule } from '../../../../lib/chains/registry'
 import {
   ChainActionRefused,
@@ -143,6 +147,13 @@ async function chainRaceFacts(
   }
   if (account === undefined) {
     return 'No wallet account came with this request, so nothing could be priced. Nothing was signed or sent.'
+  }
+  try {
+    await assertNativeReserve(chainApi, action, account)
+  } catch (e) {
+    // Worded in full already, ending as every refusal here does.
+    if (e instanceof ChainActionRefused) return { refusal: e.message }
+    throw e
   }
 
   const routes = await quoteChainRoutes(chainApi, action, account)

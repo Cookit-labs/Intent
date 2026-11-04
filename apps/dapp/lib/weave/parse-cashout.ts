@@ -1,3 +1,4 @@
+import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
 import { isCashoutChain } from './types'
 
 export type CashoutCurrencyCode = 'NGN' | 'KES' | 'UGX' | 'TZS'
@@ -10,7 +11,7 @@ export interface CashoutRequest {
 
 export type CashoutRead =
   | CashoutRequest
-  | { unsupportedToken: string; currency?: CashoutCurrencyCode }
+  | { unsupportedToken: string; amount?: string; currency?: CashoutCurrencyCode }
   | { unsupportedCurrency: string }
 
 export type CashoutRoute =
@@ -19,6 +20,8 @@ export type CashoutRoute =
   /** No currency was named, and a person's country is not something to assume. */
   | { kind: 'ask'; amount?: string }
   | { kind: 'token'; token: string }
+  /** A swap to USDC then a cash-out, on a chain that can finish it. */
+  | { kind: 'sequence'; token: string; amount: string; currency?: CashoutCurrencyCode }
   | { kind: 'currency'; currency: string }
 
 const CURRENCY_WORDS: Record<string, CashoutCurrencyCode> = {
@@ -194,7 +197,9 @@ export function parseCashout(text: string): CashoutRead | null {
   if (token !== undefined && token !== 'usdc' && !dollarAmount) {
     if (isFiatWord(token)) return null
     if (amount === undefined && !KNOWN_TOKENS.has(token)) return null
-    return { unsupportedToken: token.toUpperCase(), ...withCurrency }
+    // A dollar figure is not an amount of this token.
+    const ofToken = amount !== undefined && !dollar ? { amount } : {}
+    return { unsupportedToken: token.toUpperCase(), ...ofToken, ...withCurrency }
   }
   if (token === undefined && amount !== undefined && !dollar) return null
 
@@ -248,9 +253,19 @@ export function routeCashout(
       : { kind: 'currency', currency: read.unsupportedCurrency }
   }
   if ('unsupportedToken' in read) {
-    return chain === 'stellar' && !weaveOnly(read.currency)
-      ? { kind: 'pass' }
-      : { kind: 'token', token: read.unsupportedToken }
+    if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
+    if (
+      read.amount !== undefined &&
+      (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain)
+    ) {
+      return {
+        kind: 'sequence',
+        token: read.unsupportedToken,
+        amount: read.amount,
+        ...(read.currency !== undefined ? { currency: read.currency } : {}),
+      }
+    }
+    return { kind: 'token', token: read.unsupportedToken }
   }
   if (read.currency === undefined) {
     if (chain === 'stellar' && !stellarMainnet) return { kind: 'pass' }

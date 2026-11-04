@@ -106,9 +106,11 @@ describe('parseCashout', () => {
   it('keeps the currency beside an unsupported token', () => {
     expect(parseCashout('cash out 5 xlm to kes')).toEqual({
       unsupportedToken: 'XLM',
+      amount: '5',
       currency: 'KES',
     })
-    expect(parseCashout('cash out 5 sol')).toEqual({ unsupportedToken: 'SOL' })
+    expect(parseCashout('cash out 5 sol')).toEqual({ unsupportedToken: 'SOL', amount: '5' })
+    expect(parseCashout('cash out sol')).toEqual({ unsupportedToken: 'SOL' })
   })
 
   it.each([
@@ -199,7 +201,7 @@ describe('routeCashout', () => {
   })
 
   it.each(['near', 'solana', 'sui', 'avalanche'])('answers refusals on %s', (chain) => {
-    expect(routeCashout(read('cash out 5 sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
+    expect(routeCashout(read('cash out sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
     expect(routeCashout(read('cash out 5 usdc to brl'), chain)).toEqual({
       kind: 'currency',
       currency: 'BRL',
