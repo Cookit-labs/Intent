@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import type { ChainActionRequest, PreparedAction, SubmitResult } from '../lib/chains/types'
 import { useChain } from '../providers/chain-provider'
@@ -24,6 +24,8 @@ export interface ChainActionState {
   hash?: string
   explorerUrl?: string
   error?: string
+  /** A signature was given for this action, so it must not be signed again. */
+  signed?: boolean
 }
 
 export interface ChainAction extends ChainActionState {
@@ -41,10 +43,18 @@ export function useChainAction(): ChainAction {
   const { slug, adapter } = useChain()
   const { address } = useWallet()
   const [state, setState] = useState<ChainActionState>(EMPTY)
+  // Each prepare, refuse and reset starts a new generation. A response from an
+  // older one is dropped, so a build that was superseded cannot become a
+  // signable card under a newer request.
+  const generation = useRef(0)
 
-  const reset = useCallback(() => setState(EMPTY), [])
+  const reset = useCallback(() => {
+    generation.current += 1
+    setState(EMPTY)
+  }, [])
 
   const refuse = useCallback((message: string, asked: string) => {
+    generation.current += 1
     setState({ phase: 'failed', asked, error: message })
   }, [])
 
@@ -55,6 +65,8 @@ export function useChainAction(): ChainAction {
         return
       }
       const account = address
+      generation.current += 1
+      const mine = generation.current
 
       async function run(): Promise<void> {
         setState({ phase: 'building', asked })
@@ -64,6 +76,7 @@ export function useChainAction(): ChainAction {
           body: JSON.stringify({ account, request }),
         })
         const body = (await res.json()) as { prepared?: PreparedAction; error?: string }
+        if (generation.current !== mine) return
         if (body.prepared === undefined) {
           setState({
             phase: 'failed',
@@ -76,6 +89,7 @@ export function useChainAction(): ChainAction {
       }
 
       void run().catch(() => {
+        if (generation.current !== mine) return
         setState({ phase: 'failed', asked, error: 'Could not reach the network.' })
       })
     },
@@ -86,11 +100,14 @@ export function useChainAction(): ChainAction {
     const prepared = state.prepared
     if (prepared === undefined || address === undefined) return
     const account = address
+    const mine = generation.current
+    const current = (): boolean => generation.current === mine
 
     async function run(prepared: PreparedAction): Promise<void> {
       setState((s) => ({ ...s, phase: 'signing' }))
 
       const outcome = await adapter.signPrepared?.(prepared.signing)
+      if (!current()) return
       if (outcome === undefined) {
         setState((s) => ({ ...s, phase: 'failed', error: 'This wallet cannot sign here yet.' }))
         return
@@ -109,7 +126,7 @@ export function useChainAction(): ChainAction {
         return
       }
 
-      setState((s) => ({ ...s, phase: 'submitting' }))
+      setState((s) => ({ ...s, phase: 'submitting', signed: true }))
       const res = await fetch(`/api/chain/${slug}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -121,6 +138,7 @@ export function useChainAction(): ChainAction {
         }),
       })
       const result = (await res.json()) as SubmitResult
+      if (!current()) return
       if (!result.ok) {
         setState((s) => ({
           ...s,
@@ -138,6 +156,7 @@ export function useChainAction(): ChainAction {
     }
 
     void run(prepared).catch(() => {
+      if (!current()) return
       setState((s) => ({
         ...s,
         phase: 'failed',

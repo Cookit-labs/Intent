@@ -16,6 +16,26 @@ function asChainRoute(route: unknown): ChainRouteQuote | undefined {
 }
 
 /**
+ * Whether a route belongs to a chain action. Loose on purpose: anything that
+ * says it is a chain route must be kept away from the Stellar swap hook, even
+ * if it is malformed in another way.
+ */
+export function isChainRoute(route: unknown): boolean {
+  return (
+    typeof route === 'object' && route !== null && (route as { kind?: unknown }).kind === 'chain'
+  )
+}
+
+/**
+ * The route the Stellar swap hook may be given. A chain route has no
+ * `sendAmount`, and the hook would read it as a Stellar quote, throw, and
+ * otherwise build a signable Stellar swap beside the chain's own card.
+ */
+export function routeForSwap(route: unknown): unknown {
+  return isChainRoute(route) ? undefined : route
+}
+
+/**
  * What to prepare when the user presses Review on a route.
  *
  * Agents only ever choose a route; the amount and tokens are what the user
@@ -60,6 +80,31 @@ type ChainActionPhaseName =
   | 'pending'
   | 'failed'
 
+/** A signature is with the wallet or the network. */
+export function chainSigning(phase: ChainActionPhaseName): boolean {
+  return phase === 'signing' || phase === 'submitting'
+}
+
+/**
+ * Review stays closed once a signature is with the wallet, was given, or the
+ * outcome is unknown. After a failure that followed a signature the money may
+ * have moved ("check your wallet's activity"), so a second signature is never
+ * one press away; a new message starts a new race.
+ */
+export function chainReviewClosed(phase: ChainActionPhaseName, signed: boolean): boolean {
+  return signed || chainSigning(phase) || phase === 'settled' || phase === 'pending'
+}
+
+/** The direct-route note is true only while nothing has been signed. */
+export function showDirectNote(direct: boolean, phase: ChainActionPhaseName): boolean {
+  return direct && (phase === 'building' || phase === 'review')
+}
+
+/** The agent that is shown as selected holds only while a build or its aftermath is live. */
+export function selectionHolds(phase: ChainActionPhaseName): boolean {
+  return phase !== 'idle' && phase !== 'failed'
+}
+
 export type ReviewOutcome = 'prepared' | 'refused' | 'ignored'
 
 /**
@@ -75,19 +120,23 @@ export function reviewChainRoute(args: {
   asked: ChainActionRequest
   text: string
   phase: ChainActionPhaseName
+  /** A signature was given for this race. */
+  signed?: boolean
   prepare: (request: ChainActionRequest, asked: string) => void
   refuse: (message: string, asked: string) => void
 }): ReviewOutcome {
   const { phase } = args
   if (phase === 'building') return 'ignored'
-  if (phase === 'signing' || phase === 'submitting' || phase === 'settled' || phase === 'pending') {
-    return 'ignored'
-  }
+  if (chainReviewClosed(phase, args.signed === true)) return 'ignored'
 
   const request = chainRequestFor(args.route, args.asked)
   if (request === undefined) {
+    // A good card already built is not wiped by a click that cannot be used.
+    if (phase === 'review') return 'ignored'
     args.refuse(
-      "That route doesn't match what you asked for, so it can't be used. Nothing was signed or sent.",
+      isChainRoute(args.route)
+        ? "That route doesn't match what you asked for, so it can't be used. Nothing was signed or sent."
+        : "This agent didn't choose a route, so there is nothing to review from it. Nothing was signed or sent.",
       args.text
     )
     return 'refused'
@@ -127,6 +176,19 @@ export function chainFigures(route: unknown): { headline: string } | undefined {
   }
   const apy = chain.apyPercent
   return apy !== undefined && Number.isFinite(apy)
-    ? { headline: `${apy}% APY` }
+    ? { headline: `${apy.toFixed(2)}% APY` }
     : { headline: 'Rate not available' }
+}
+
+/**
+ * The figures for a proposal on a chain race. A proposal with no route has no
+ * measured price or rate, and the usual zero would read as a perfect fill.
+ */
+export function routeFigures(
+  route: unknown,
+  asked: ChainActionRequest | undefined
+): { headline: string } | undefined {
+  if (route !== undefined) return chainFigures(route)
+  if (asked === undefined) return undefined
+  return { headline: asked.kind === 'swap' ? 'Price unknown' : 'Rate not available' }
 }

@@ -24,7 +24,16 @@ import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
 import { ACKNOWLEDGED } from '../../lib/chat/clarify-flow'
 import type { ClarifyTurn } from '../../lib/clarify/clarify'
-import { needsDirectRoute, reviewChainRoute } from '../../lib/agents/chain-race'
+import {
+  chainReviewClosed,
+  chainSigning,
+  isChainRoute,
+  needsDirectRoute,
+  reviewChainRoute,
+  routeForSwap,
+  selectionHolds,
+  showDirectNote,
+} from '../../lib/agents/chain-race'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
 
@@ -451,7 +460,9 @@ export function IntentChat(): JSX.Element {
   const winnerRoute = restored !== null ? undefined : live.route
   const chosenRoute = useMemo(() => {
     if (executingKey === null) return undefined
-    return routesByAgent[executingKey] ?? winnerRoute
+    // A chain route never reaches the Stellar swap hook: it has no sendAmount,
+    // and would be read as a Stellar quote.
+    return routeForSwap(routesByAgent[executingKey] ?? winnerRoute)
   }, [executingKey, routesByAgent, winnerRoute])
 
   const swap = useSwapExecution(chosenRoute, strategy.slippageBps)
@@ -469,8 +480,21 @@ export function IntentChat(): JSX.Element {
   const chainAction = useChainAction()
   // A new race gets a clean slate when the chain changes.
   useEffect(() => {
-    setChainRace(null)
+    clearChainRace()
+    chainAction.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
+  // Selected is shown only while a build or its aftermath is live; a failed
+  // build must not leave an agent looking chosen.
+  useEffect(() => {
+    if (chainRace !== null && !selectionHolds(chainAction.phase)) setExecutingKey(null)
+  }, [chainRace, chainAction.phase])
+  const chainConfirmRef = useRef<HTMLDivElement | null>(null)
+  const chainAwaiting = chainAction.phase === 'review'
+  useEffect(() => {
+    if (!chainAwaiting) return
+    chainConfirmRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [chainAwaiting])
   // The race ended with nothing to review: build the direct route once, so the
   // chain keeps working when the agents are offline. A refusal of the action
   // is shown as written by the card and is not retried.
@@ -770,7 +794,8 @@ export function IntentChat(): JSX.Element {
     swap.phase === 'signing' ||
     swap.phase === 'submitting' ||
     sequence.phase === 'signing' ||
-    sequence.phase === 'submitting'
+    sequence.phase === 'submitting' ||
+    chainSigning(chainAction.phase)
   /** Something came of the open intent: a trade settled, or an order was placed. */
   const turnExecuted = swap.phase === 'settled' || sequence.phase === 'settled' || placedId !== null
 
@@ -807,9 +832,15 @@ export function IntentChat(): JSX.Element {
     setNotes([])
   }
 
+  /** Ends a chain race and what hangs off it; the direct-route note belongs to the race. */
+  function clearChainRace(): void {
+    setChainRace(null)
+    setDirectFallback(false)
+  }
+
   /** What a previous attempt left on screen, which a new turn must not inherit. */
   function resetTurnState(): void {
-    setChainRace(null)
+    clearChainRace()
     sequence.reset()
     swap.reset()
     supply.reset()
@@ -1372,6 +1403,13 @@ export function IntentChat(): JSX.Element {
       return
     }
     setMessage(text)
+    // A chain race in progress ends here; resetting the card also drops any
+    // build still in flight, so it cannot land over the cash-out.
+    if (chainRace !== null) {
+      clearChainRace()
+      chainAction.reset()
+      setExecutingKey(null)
+    }
     setRestored(null)
     setHistoryOpen(false)
     setTurnId(null)
@@ -1496,6 +1534,12 @@ export function IntentChat(): JSX.Element {
     // A misspelled verb is corrected before anything reads the sentence.
     const text = fixVerbTypo(typed)
 
+    // A chain signature is with the wallet: a new message must not close its card.
+    if (chainSigning(chainAction.phase)) {
+      setAffordError('Finish or cancel the signature first, then continue the chat.')
+      return
+    }
+
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
     if (cashoutRoute.kind !== 'pass') {
       startCashout(cashoutRoute, text)
@@ -1535,21 +1579,25 @@ export function IntentChat(): JSX.Element {
         // The thread only renders once there is a message, so without this the
         // card below would be built and never seen.
         setMessage(text)
+        // A reopened turn, an open Stellar intent and its saved id all end here,
+        // so the race is the only thing on screen and is not saved over them.
+        resetTurnState()
+        setParsed(null)
+        setTurnId(null)
+        setAffordError(null)
         // The agents race first; Review on a route is what builds it.
         chainAction.reset()
-        setExecutingKey(null)
-        setDirectFallback(false)
         setChainRace({ request: action, text })
         return
       }
       if (looksLikeChainAction(text)) {
         setMessage(text)
-        setChainRace(null)
+        clearChainRace()
         chainAction.refuse(chainHelp(descriptor.name, capabilities), text)
         return
       }
       chainAction.reset()
-      setChainRace(null)
+      clearChainRace()
     }
 
     // An answer to a question already asked.
@@ -1751,12 +1799,15 @@ export function IntentChat(): JSX.Element {
   }
 
   function handleReset(): void {
+    // The card holds a signature in flight; closing it would orphan the transaction.
+    if (chainSigning(chainAction.phase)) return
+    if (slug !== 'stellar') chainAction.reset()
     // The thread stays while a cash-out is under way: it carries the warning not to resend.
     setMessage(cashout.locked ? message : null)
     cashout.dismiss()
     setCashoutQuestion(null)
     setParsed(null)
-    setChainRace(null)
+    clearChainRace()
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
@@ -1814,6 +1865,7 @@ export function IntentChat(): JSX.Element {
         asked: chainRace.request,
         text: chainRace.text,
         phase: chainAction.phase,
+        signed: chainAction.signed === true,
         prepare: chainAction.prepare,
         refuse: chainAction.refuse,
       })
@@ -1823,6 +1875,8 @@ export function IntentChat(): JSX.Element {
       }
       return
     }
+    // A chain route with no race open (a reopened turn) is not for the Stellar path.
+    if (isChainRoute(routesByAgent[key] ?? winnerRoute)) return
 
     const inFlight =
       swap.phase === 'signing' || swap.phase === 'submitting' || swap.phase === 'settled'
@@ -2218,6 +2272,12 @@ export function IntentChat(): JSX.Element {
           <ChatHistoryPanel
             turns={listedTurns}
             onSelect={(turn) => {
+              if (chainSigning(chainAction.phase)) return
+              // A race on screen ends when another turn is opened.
+              if (chainRace !== null) {
+                clearChainRace()
+                chainAction.reset()
+              }
               // Reopen exactly what was recorded. This used to resubmit the
               // text, which started a fresh competition and produced different
               // answers — the conversation was not being restored at all.
@@ -2458,11 +2518,9 @@ export function IntentChat(): JSX.Element {
                   swap.phase === 'signing' ||
                   swap.phase === 'submitting' ||
                   swap.phase === 'settled' ||
-                  chainAction.phase === 'signing' ||
-                  chainAction.phase === 'submitting' ||
-                  chainAction.phase === 'settled' ||
-                  chainAction.phase === 'pending'
+                  chainReviewClosed(chainAction.phase, chainAction.signed === true)
                 }
+                directRoute={directFallback}
                 {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />
               {/* Changes to how the recommendation is carried out, offered once
@@ -2638,12 +2696,16 @@ export function IntentChat(): JSX.Element {
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
 
-              {directFallback && chainAction.phase !== 'idle' ? (
+              {showDirectNote(directFallback, chainAction.phase) ? (
                 <p className={systemPill}>
                   The agents were unavailable, so this is the direct route. Nothing has been signed.
                 </p>
               ) : null}
-              {chainAction.phase !== 'idle' ? <ChainActionConfirm action={chainAction} /> : null}
+              {chainAction.phase !== 'idle' ? (
+                <div ref={chainConfirmRef}>
+                  <ChainActionConfirm action={chainAction} />
+                </div>
+              ) : null}
 
               {cashout.session !== null ? (
                 <CashoutCard key={cashout.session.key} cashout={cashout} />

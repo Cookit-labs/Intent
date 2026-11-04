@@ -86,6 +86,7 @@ export function CompetitionPanel({
   executingKey,
   locked = false,
   chainName,
+  directRoute = false,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
@@ -99,6 +100,8 @@ export function CompetitionPanel({
   locked?: boolean
   /** The chain's name, set off Stellar so a single route can be explained. */
   chainName?: string
+  /** The direct route is being offered instead, so the error must not say agents can't act here. */
+  directRoute?: boolean
 }): JSX.Element | null {
   const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
@@ -121,7 +124,9 @@ export function CompetitionPanel({
         <div>
           <p className="font-medium">
             {error.code === 'chain_unsupported'
-              ? 'Agents cannot execute here'
+              ? directRoute
+                ? 'The agents did not race'
+                : 'Agents cannot execute here'
               : error.code === 'no_agent_answered'
                 ? 'No agent answered'
                 : 'Agents are not online'}

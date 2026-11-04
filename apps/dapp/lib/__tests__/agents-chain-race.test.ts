@@ -3,8 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   chainFigures,
   chainRequestFor,
+  chainReviewClosed,
+  chainSigning,
+  isChainRoute,
   needsDirectRoute,
   reviewChainRoute,
+  routeForSwap,
+  routeFigures,
+  selectionHolds,
+  showDirectNote,
   singleRouteNote,
 } from '../agents/chain-race'
 import type { ChainRouteQuote } from '../agents/chain-routes'
@@ -167,5 +174,108 @@ describe('chainFigures', () => {
   it('does not touch a Stellar route', () => {
     expect(chainFigures({ id: 'x', source: 'SDEX' })).toBeUndefined()
     expect(chainFigures(undefined)).toBeUndefined()
+  })
+})
+
+describe('routeForSwap', () => {
+  it('keeps every chain route away from the Stellar swap hook', () => {
+    expect(routeForSwap(route())).toBeUndefined()
+    expect(routeForSwap({ kind: 'chain' })).toBeUndefined()
+    expect(isChainRoute({ kind: 'chain', venueId: 5 })).toBe(true)
+  })
+
+  it('passes a Stellar quote and nothing through unchanged', () => {
+    const stellar = { id: 'x', sendAmount: '5000000' }
+    expect(routeForSwap(stellar)).toBe(stellar)
+    expect(routeForSwap(undefined)).toBeUndefined()
+  })
+})
+
+describe('chain card phases', () => {
+  it('closes Review once a signature is out, given, or the outcome is unknown', () => {
+    expect(chainReviewClosed('signing', false)).toBe(true)
+    expect(chainReviewClosed('submitting', false)).toBe(true)
+    expect(chainReviewClosed('settled', false)).toBe(true)
+    expect(chainReviewClosed('pending', false)).toBe(true)
+    expect(chainReviewClosed('failed', true)).toBe(true)
+    expect(chainReviewClosed('review', false)).toBe(false)
+    expect(chainReviewClosed('failed', false)).toBe(false)
+    expect(chainReviewClosed('idle', false)).toBe(false)
+  })
+
+  it('knows when a signature is in flight', () => {
+    expect(chainSigning('signing')).toBe(true)
+    expect(chainSigning('submitting')).toBe(true)
+    expect(chainSigning('review')).toBe(false)
+  })
+
+  it('shows the direct-route note only while nothing is signed', () => {
+    expect(showDirectNote(true, 'building')).toBe(true)
+    expect(showDirectNote(true, 'review')).toBe(true)
+    for (const p of ['idle', 'signing', 'submitting', 'settled', 'pending', 'failed'] as const) {
+      expect(showDirectNote(true, p)).toBe(false)
+    }
+    expect(showDirectNote(false, 'review')).toBe(false)
+  })
+
+  it('drops the selected look after a failed or empty card', () => {
+    expect(selectionHolds('failed')).toBe(false)
+    expect(selectionHolds('idle')).toBe(false)
+    expect(selectionHolds('building')).toBe(true)
+    expect(selectionHolds('review')).toBe(true)
+    expect(selectionHolds('settled')).toBe(true)
+  })
+})
+
+describe('reviewChainRoute after a signature', () => {
+  const args = (over: object) => ({
+    route: route(),
+    asked,
+    text: 't',
+    phase: 'failed' as const,
+    prepare: vi.fn(),
+    refuse: vi.fn(),
+    ...over,
+  })
+
+  it('stays closed after a failure that followed a signature', () => {
+    const a = args({ signed: true })
+    expect(reviewChainRoute(a)).toBe('ignored')
+    expect(a.prepare).not.toHaveBeenCalled()
+  })
+
+  it('reopens after a failure before any signature', () => {
+    expect(reviewChainRoute(args({ signed: false }))).toBe('prepared')
+  })
+
+  it('does not wipe a built card for an agent that chose no route', () => {
+    const a = args({ route: undefined, phase: 'review' })
+    expect(reviewChainRoute(a)).toBe('ignored')
+    expect(a.refuse).not.toHaveBeenCalled()
+  })
+
+  it('says the agent chose no route when there is no card to protect', () => {
+    const a = args({ route: undefined, phase: 'idle' })
+    expect(reviewChainRoute(a)).toBe('refused')
+    expect(a.refuse).toHaveBeenCalledWith(expect.stringContaining("didn't choose a route"), 't')
+  })
+})
+
+describe('routeFigures', () => {
+  it('shows an unknown price or rate for a chain proposal with no route', () => {
+    expect(routeFigures(undefined, asked)).toEqual({ headline: 'Price unknown' })
+    expect(routeFigures(undefined, { kind: 'supply', amount: '1', tokenIn: 'USDC' })).toEqual({
+      headline: 'Rate not available',
+    })
+  })
+
+  it('changes nothing for Stellar, which asks for no chain request', () => {
+    expect(routeFigures(undefined, undefined)).toBeUndefined()
+    expect(routeFigures({ id: 'x' }, undefined)).toBeUndefined()
+  })
+
+  it('formats the rate to two places', () => {
+    const supply: ChainActionRequest = { kind: 'supply', amount: '5', tokenIn: 'USDC' }
+    expect(chainFigures(route({ apyPercent: 4.2 }, supply))).toEqual({ headline: '4.20% APY' })
   })
 })

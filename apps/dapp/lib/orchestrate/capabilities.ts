@@ -1,3 +1,7 @@
+import type { ChainSlug } from '@intent/types'
+
+import { chainCapabilities } from '../chains/capabilities'
+
 /**
  * What Intent does, written down once.
  *
@@ -12,7 +16,7 @@
  * once its venues can be quoted, so the sheet never promises a race that does
  * not run.
  */
-const AGENT_RACE_CHAINS = ['stellar', 'solana', 'sui', 'near']
+const AGENT_RACE_CHAINS = ['stellar', 'near']
 
 const SWAP_RACED =
   'Swap: trade one asset for another at the market price, or place a limit order at a price you name. Agents compete to propose the best route; you review it and sign in your wallet.'
@@ -44,7 +48,23 @@ export function capabilitySheet(chain: string): string {
       : AGENT_RACE_CHAINS.includes(chain)
         ? SWAP_RACED_OFF_STELLAR
         : SWAP_DIRECT
-  const common = [swap, ...COMMON]
-  const lines = chain === 'stellar' ? [...common, ...STELLAR_ONLY] : common
+  if (chain === 'stellar') {
+    return [swap, ...COMMON, ...STELLAR_ONLY].map((l) => `- ${l}`).join('\n')
+  }
+  // Off Stellar only what the chain's own venues can do is claimed: accumulate,
+  // hedge and send are Stellar's, and the chat reads only swap, supply and stake.
+  const kinds = new Set((chainCapabilities(chain as ChainSlug) ?? []).map((c) => c.kind))
+  const raced = AGENT_RACE_CHAINS.includes(chain)
+  const lines = [swap]
+  if (kinds.has('supply')) {
+    lines.push(
+      `Supply: put an asset you hold into a lending or earn venue to earn yield. ${raced ? 'Agents compete to propose the best venue; you' : 'You'} review it and sign in your wallet.`
+    )
+  }
+  if (kinds.has('stake')) {
+    lines.push(
+      `Stake: stake an asset for a staking token. ${raced ? 'Agents compete to propose the best venue; you' : 'You'} review it and sign in your wallet.`
+    )
+  }
   return lines.map((l) => `- ${l}`).join('\n')
 }
