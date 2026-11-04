@@ -35,6 +35,8 @@ export interface ChainActionState {
   error?: string
   /** The account the payload was built and checked for. */
   account?: string
+  /** The race this action was chosen from; absent for the direct route built when no race gave one. */
+  raceId?: string
 }
 
 export interface ChainAction extends ChainActionState {
@@ -51,7 +53,7 @@ export interface ChainAction extends ChainActionState {
    */
   requested: boolean
   release: () => void
-  prepare: (request: ChainActionRequest, asked: string) => void
+  prepare: (request: ChainActionRequest, asked: string, raceId?: string) => void
   /** Shows a message in the card without building anything, for what can't be read. */
   refuse: (message: string, asked: string) => void
   confirm: () => void
@@ -90,7 +92,7 @@ export function useChainAction(): ChainAction {
   }, [])
 
   const prepare = useCallback(
-    (request: ChainActionRequest, asked: string) => {
+    (request: ChainActionRequest, asked: string, raceId?: string) => {
       if (address === undefined) {
         setState({ phase: 'failed', asked, error: 'Connect a wallet first.' })
         return
@@ -116,7 +118,13 @@ export function useChainAction(): ChainAction {
           })
           return
         }
-        setState({ phase: 'review', asked, prepared: body.prepared, account })
+        setState({
+          phase: 'review',
+          asked,
+          prepared: body.prepared,
+          account,
+          ...(raceId !== undefined ? { raceId } : {}),
+        })
       }
 
       void run().catch(() => {
@@ -132,6 +140,7 @@ export function useChainAction(): ChainAction {
     const builtFor = state.account
     if (prepared === undefined || builtFor === undefined) return
     const account = builtFor
+    const raceId = state.raceId
     const mine = generation.current
     const current = (): boolean => generation.current === mine
 
@@ -184,12 +193,16 @@ export function useChainAction(): ChainAction {
 
       setSigned(true)
       setState((s) => ({ ...s, phase: 'submitting' }))
-      const result = await submitSigned(`/api/chain/${slug}/submit`, {
-        account,
-        venueId: prepared.venueId,
-        signed: step.signed,
-        ...(prepared.context !== undefined ? { context: prepared.context } : {}),
-      })
+      const result = await submitSigned(
+        `/api/chain/${slug}/submit`,
+        {
+          account,
+          venueId: prepared.venueId,
+          signed: step.signed,
+          ...(prepared.context !== undefined ? { context: prepared.context } : {}),
+        },
+        raceId
+      )
       if (!current()) return
       const done = afterSubmitting(result, family)
       if (!done.latched) setSigned(false)
@@ -214,7 +227,7 @@ export function useChainAction(): ChainAction {
           "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
       }))
     })
-  }, [state.prepared, state.account, adapter, slug])
+  }, [state.prepared, state.account, state.raceId, adapter, slug])
 
   return { ...state, signed, requested, release, prepare, refuse, confirm, reset }
 }

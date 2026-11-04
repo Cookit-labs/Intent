@@ -1869,6 +1869,7 @@ export function IntentChat(): JSX.Element {
         text: chainRace.text,
         phase: chainAction.phase,
         signed: chainAction.signed === true,
+        ...(live.competitionId !== undefined ? { raceId: live.competitionId } : {}),
         prepare: chainAction.prepare,
         refuse: chainAction.refuse,
       })

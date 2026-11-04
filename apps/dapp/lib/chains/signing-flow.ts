@@ -1,3 +1,4 @@
+import { RACE_HEADER } from '../api/network-fetch'
 import type { PreparedAction, SignedOutcome, SignedPayload, SigningPayload } from './types'
 import {
   CHECK_WALLET,
@@ -62,12 +63,16 @@ export function afterSigning(outcome: SignedOutcome, family: Family): AfterSigni
  * Hands signed bytes to the server. A dropped connection or an answer that can't be read, such
  * as the platform's own page when it stops the function, says nothing about whether they went
  * out, so it comes back as no answer, which `afterSubmitting` reads as pending.
+ * The race the action came from, when it came from one, rides along so the log can credit it.
  */
-export async function submitSigned(url: string, body: unknown): Promise<unknown> {
+export async function submitSigned(url: string, body: unknown, raceId?: string): Promise<unknown> {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(raceId !== undefined ? { [RACE_HEADER]: raceId } : {}),
+      },
       body: JSON.stringify(body),
     })
     return (await res.json()) as unknown

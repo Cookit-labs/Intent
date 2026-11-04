@@ -303,7 +303,14 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
       if (sql.startsWith('SELECT r.id AS race_id')) {
         const [network, account, limit, offset] = p as [string, string, number, number]
         const rows = executions
-          .filter((e) => e.network === network && e.account === account && e.race_id !== null)
+          .filter(
+            (e) =>
+              e.network === network &&
+              (e.account === account ||
+                (/^0x[0-9a-fA-F]{40}$/.test(account) &&
+                  e.account.toLowerCase() === account.toLowerCase())) &&
+              e.race_id !== null
+          )
           .map((e) => {
             const race = races.find((r) => r.id === e.race_id)
             if (race === undefined) return undefined

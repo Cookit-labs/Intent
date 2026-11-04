@@ -2,7 +2,7 @@ import { NETWORK_HEADER, type StellarNetworkName } from '@intent/config'
 
 import { WALLET_HEADER } from '../wallet-header'
 
-const RACE_HEADER = 'x-intent-race'
+export const RACE_HEADER = 'x-intent-race'
 
 /**
  * Tells the server which Stellar network a page is on.
@@ -49,7 +49,9 @@ export function networkFetch(
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
     headers.set(NETWORK_HEADER, network)
     if (connectedWallet !== undefined) headers.set(WALLET_HEADER, connectedWallet)
-    if (raceInFlight !== undefined && path.endsWith('/submit')) {
+    // A chain submit names its own race (see submitSigned), so a race left over from earlier
+    // can never be put on an action that did not come from it.
+    if (raceInFlight !== undefined && path.endsWith('/submit') && !path.startsWith('/api/chain/')) {
       headers.set(RACE_HEADER, raceInFlight)
     }
     return base(input, { ...init, headers })

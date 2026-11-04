@@ -122,7 +122,9 @@ export function reviewChainRoute(args: {
   phase: ChainActionPhaseName
   /** A signature was given for this race. */
   signed?: boolean
-  prepare: (request: ChainActionRequest, asked: string) => void
+  /** The race this route was proposed in, so the signed action can be credited to it. */
+  raceId?: string
+  prepare: (request: ChainActionRequest, asked: string, raceId?: string) => void
   refuse: (message: string, asked: string) => void
 }): ReviewOutcome {
   const { phase } = args
@@ -141,7 +143,8 @@ export function reviewChainRoute(args: {
     )
     return 'refused'
   }
-  args.prepare(request, args.text)
+  if (args.raceId === undefined) args.prepare(request, args.text)
+  else args.prepare(request, args.text, args.raceId)
   return 'prepared'
 }
 

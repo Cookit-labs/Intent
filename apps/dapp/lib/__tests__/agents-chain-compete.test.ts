@@ -1,6 +1,9 @@
 import { StrKey } from '@stellar/stellar-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { networkFetch, setAttributedRace } from '../api/network-fetch'
+import { reviewChainRoute } from '../agents/chain-race'
+import { submitSigned } from '../chains/signing-flow'
 import { fakeAnalyticsDb, type FakeAnalyticsDb } from './fakes/analytics-db'
 
 /**
@@ -280,6 +283,23 @@ describe('GET /api/agents/history', () => {
     expect(body.entries.map((e) => e.executedHash)).toEqual(['HASH'])
   })
 
+  it.each([
+    ['a mixed-case read of a lower-case row', `0x${'ab'.repeat(20)}`, `0x${'Ab'.repeat(20)}`],
+    ['a lower-case read of a mixed-case row', `0x${'Ab'.repeat(20)}`, `0x${'ab'.repeat(20)}`],
+  ])('finds an evm account by %s', async (_name, logged, asked) => {
+    await seedExecution(logged, 'mainnet')
+    const { GET } = await import('../../app/api/agents/history/route')
+    const body = (await (await GET(get(asked))).json()) as { entries: unknown[] }
+    expect(body.entries).toHaveLength(1)
+  })
+
+  it('keeps a case-sensitive account exact', async () => {
+    await seedExecution('Alice.near', 'mainnet')
+    const { GET } = await import('../../app/api/agents/history/route')
+    const body = (await (await GET(get('alice.near'))).json()) as { entries: unknown[] }
+    expect(body.entries).toEqual([])
+  })
+
   it('never answers another account the races of this one', async () => {
     await seedExecution('alice.near', 'mainnet')
     const { GET } = await import('../../app/api/agents/history/route')
@@ -365,5 +385,70 @@ describe('POST /api/chain/near/submit and the race it came from', () => {
     const res = await send()
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, hash: 'H1' })
+  })
+})
+
+describe('the race id on a chain submit, with one network served', () => {
+  const RACE = raceInput().id
+  const seen: Headers[] = []
+  beforeEach(() => {
+    seen.length = 0
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers))
+      return new Response(JSON.stringify({ ok: true }))
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setAttributedRace(undefined)
+  })
+
+  it('is sent by the chain submit itself', async () => {
+    await submitSigned('/api/chain/near/submit', {}, RACE)
+    expect(seen[0]?.get('x-intent-race')).toBe(RACE)
+  })
+
+  it('is absent for an action that came from no race', async () => {
+    await submitSigned('/api/chain/near/submit', {})
+    expect(seen[0]?.get('x-intent-race')).toBeNull()
+  })
+
+  it('is credited from the route Review was pressed on', () => {
+    const prepare = vi.fn()
+    const route = { kind: 'chain', request: action, venueId: 'ref', venueName: 'Ref' }
+    const review = (raceId?: string) =>
+      reviewChainRoute({
+        route,
+        asked: action as never,
+        text: 't',
+        phase: 'idle',
+        ...(raceId !== undefined ? { raceId } : {}),
+        prepare,
+        refuse: vi.fn(),
+      })
+    review(RACE)
+    review()
+    expect(prepare.mock.calls.map((c) => c.length)).toEqual([3, 2])
+    expect(prepare.mock.calls[0]?.[2]).toBe(RACE)
+  })
+
+  it('is not added by the patched fetch, so an earlier race is never put on a later chain action', async () => {
+    const sent: Headers[] = []
+    const patched = networkFetch(
+      (async (_u: unknown, init?: RequestInit) => {
+        sent.push(new Headers(init?.headers))
+        return new Response('{}')
+      }) as typeof fetch,
+      'mainnet',
+      'https://app.test'
+    )
+    setAttributedRace('earlier-race')
+    await patched('https://app.test/api/chain/near/submit', { method: 'POST' })
+    await patched('https://app.test/api/chain/near/submit', {
+      method: 'POST',
+      headers: { 'x-intent-race': RACE },
+    })
+    await patched('https://app.test/api/swap/submit', { method: 'POST' })
+    expect(sent.map((h) => h.get('x-intent-race'))).toEqual([null, RACE, 'earlier-race'])
   })
 })

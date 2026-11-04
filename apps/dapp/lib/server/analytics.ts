@@ -471,6 +471,10 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
      * there is nothing to explain to this wallet about a plan it never
      * acted on, winning or not.
      *
+     * An EVM address matches whatever its casing, since a wallet may report it checksummed
+     * on one call and lower-case on another; every other chain's address is exact, as
+     * Solana and Sui addresses are case-sensitive.
+     *
      * `address` scopes by equality on an indexed column — the same trust
      * model every other wallet-scoped read in this app uses (naira orders,
      * swap history): whoever knows the address can read what it did. That
@@ -485,7 +489,9 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
            FROM usage_executions e
            JOIN agent_races r ON r.id = e.race_id
            LEFT JOIN agent_proposals p ON p.race_id = r.id AND p.won
-          WHERE e.network = $1 AND e.account = $2
+          WHERE e.network = $1
+            AND (e.account = $2
+                 OR ($2 ~ '^0x[0-9a-fA-F]{40}$' AND lower(e.account) = lower($2)))
           ORDER BY r.started_at DESC
           LIMIT $3 OFFSET $4`,
         [network, account, limit + 1, offset]

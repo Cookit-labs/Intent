@@ -46,6 +46,8 @@ export interface CompetitionWithRoute extends CompetitionState {
    * these, choosing any other agent silently signed the winner's trade.
    */
   routesByAgent: Record<string, unknown>
+  /** The id the server gave this race once it began. */
+  competitionId?: string
 }
 
 export function useCompetition(
@@ -94,12 +96,14 @@ export function useCompetition(
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
   const [agents, setAgents] = useState<CompetingAgent[]>([])
   const [routeCount, setRouteCount] = useState<number | undefined>(undefined)
+  const [competitionId, setCompetitionId] = useState<string | undefined>(undefined)
   // The same list, readable inside the stream loop's closures without a
   // stale render's copy.
   const agentsRef = useRef<CompetingAgent[]>([])
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
+    setCompetitionId(undefined)
     if (parsed === null && chainRace === undefined) {
       setRouteCount(undefined)
       setProposals({})
@@ -265,6 +269,7 @@ export function useCompetition(
               // visible before any of it has answered.
               agentsRef.current = frame.agents
               setAttributedRace(frame.competitionId)
+              setCompetitionId(frame.competitionId)
               setAgents(frame.agents)
               setRouteCount(frame.routeCount)
               continue
@@ -389,6 +394,7 @@ export function useCompetition(
     winner,
     unanimous,
     routesByAgent,
+    ...(competitionId !== undefined ? { competitionId } : {}),
     ...(routeCount !== undefined ? { routeCount } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(route !== undefined ? { route } : {}),
