@@ -1,7 +1,7 @@
 import { parseCashout } from '../weave/parse-cashout'
 import { AMOUNT, amountOf, chainTokenWord, parseChainAction } from './parse-action'
 import type { ChainSequenceRequest, FollowOn } from './sequence'
-import { sequenceWordsMatch } from './sequence-flow'
+import { sequenceWordsMatch, tokenSaid } from './sequence-flow'
 import type { ChainActionRequest } from './types'
 
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
@@ -110,7 +110,7 @@ const EXAMPLE_AFTER: Record<string, string> = {
 function refuseUnsaid(read: ReadSwap, what: string): { refusal: string } {
   const after = read.followOn === null ? '' : (EXAMPLE_AFTER[read.followOn.kind] ?? '')
   return {
-    refusal: `I could not find ${what} in what you typed, and only your own words decide what is signed. Say it in full, for example "swap 5 ${chainTokenWord(read.tokenIn)} to ${chainTokenWord(read.tokenOut)}${after}". Nothing was signed or sent.`,
+    refusal: `I could not find ${what} in what you typed, and only your own words decide what is signed. Say it in full, for example "swap 5 ${chainTokenWord(read.tokenIn)} to USDC${after}". Nothing was signed or sent.`,
   }
 }
 
@@ -134,6 +134,12 @@ function swapOf(read: ReadSwap): ChainActionRequest | { refusal: string } {
   }
 }
 
+/** A venue's id, such as jupiter-lend, against "Jupiter Lend" or "jupiterlend" as typed. */
+function venueSaid(venue: string, said: readonly string[]): boolean {
+  const plain = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return said.some((turn) => plain(turn).includes(plain(venue)))
+}
+
 /** An address or name exactly as typed: whole, with the same letters, not inside a longer word. */
 function typedExactly(recipient: string, said: readonly string[]): boolean {
   if (recipient === '') return false
@@ -148,8 +154,19 @@ function typedExactly(recipient: string, said: readonly string[]): boolean {
  * Whether the amount, the token and any recipient of a request were in what the person typed. A
  * model writes none of these into a signature: it can only restate words that are there.
  */
-export function requestSaid(request: ChainActionRequest, said: readonly string[]): boolean {
+export function requestSaid(
+  request: ChainActionRequest,
+  said: readonly string[],
+  /** A cash-out follows, which takes USDC, so a swap that names no output is to USDC. */
+  usdcImplied = false
+): boolean {
   if (!sequenceWordsMatch({ amount: request.amount, token: request.tokenIn }, said)) return false
+  const out = request.tokenOut
+  const outSaid =
+    out === undefined ||
+    tokenSaid(out, said, true) ||
+    (usdcImplied && chainTokenWord(out).toUpperCase() === 'USDC')
+  if (!outSaid) return false
   return request.recipient === undefined || typedExactly(request.recipient, said)
 }
 
@@ -166,13 +183,15 @@ export function sequenceFromReading(
   if (model === null) return null
   const swap = swapOf(read)
   if ('refusal' in swap) return swap
-  if (!requestSaid(swap, said)) return refuseUnsaid(read, 'that amount and token')
+  if (!requestSaid(swap, said, model.kind === 'offramp')) {
+    return refuseUnsaid(read, 'that amount, token and token to receive')
+  }
 
   let followOn: FollowOn
   if (model.kind === 'offramp') {
     followOn = { kind: 'cashout' }
   } else if (model.kind === 'lend') {
-    if (model.venueNamed === true && !said.some((t) => t.toLowerCase().includes(model.venue))) {
+    if (model.venueNamed === true && !venueSaid(model.venue, said)) {
       return refuseUnsaid(read, 'that venue')
     }
     followOn =
@@ -196,7 +215,7 @@ export function swapFromReading(
   if ('refusal' in swap) return swap
   return requestSaid(swap, said)
     ? swap
-    : refuseUnsaid({ ...read, followOn: null }, 'that amount and token')
+    : refuseUnsaid({ ...read, followOn: null }, 'that amount, token and token to receive')
 }
 
 /** What the chat does with an act the orchestrator read off Stellar. */
@@ -227,7 +246,7 @@ export function chainRouteFromReading(
     if ('refusal' in sequence) return sequence
     const { followOn } = sequence
     const recipientSaid = followOn.kind !== 'send' || typedExactly(followOn.recipient, said)
-    return requestSaid(sequence.swap, said) && recipientSaid
+    return requestSaid(sequence.swap, said, followOn.kind === 'cashout') && recipientSaid
       ? { sequence }
       : refuseUnsaid(
           {

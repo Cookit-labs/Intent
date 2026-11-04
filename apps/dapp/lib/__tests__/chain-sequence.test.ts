@@ -606,7 +606,7 @@ describe('chainRouteFromReading', () => {
       action: { kind: 'send', recipient: ADDRESS },
     })
     expect(
-      chainRouteFromReading(read(), 'Flip 5 SOL into USDC', ['flip 5 sol into dollars'])
+      chainRouteFromReading(read(), 'Flip 5 SOL into USDC', ['flip 5 sol into usdc'])
     ).toMatchObject({ action: { kind: 'swap', amount: '5', tokenIn: 'SOL', tokenOut: 'USDC' } })
     expect(
       chainRouteFromReading(read({ amountUsd: 9 }), 'Flip 9 SOL into USDC', [
@@ -617,5 +617,53 @@ describe('chainRouteFromReading', () => {
 
   it('reads nothing from a model that is not swapping and wrote no action', () => {
     expect(chainRouteFromReading(read({ action: 'borrow' }), 'borrow some', ['borrow'])).toBeNull()
+  })
+})
+
+describe('the output token of a model reading', () => {
+  const send = { kind: 'send', venue: '', recipient: ADDRESS }
+
+  it('refuses a token out the person never named, where a send follows', () => {
+    const out = sequenceFromReading(reading({ tokenOut: 'BONK', followOn: send }), [
+      `swap 5 SOL then send to ${ADDRESS}`,
+    ])
+    expect(out).toHaveProperty('refusal')
+    expect(JSON.stringify(out)).not.toContain('BONK')
+  })
+
+  it('passes the token out when the person typed it', () => {
+    expect(
+      sequenceFromReading(reading({ followOn: send }), [
+        `swap 5 SOL to USDC then send to ${ADDRESS}`,
+      ])
+    ).toMatchObject({ swap: { tokenOut: 'USDC' } })
+  })
+
+  it('implies USDC for a cash-out with no output named, and only then', () => {
+    const cash = { kind: 'offramp', venue: 'weave' }
+    expect(sequenceFromReading(reading({ followOn: cash }), ['cash out 5 SOL'])).toMatchObject({
+      followOn: { kind: 'cashout' },
+    })
+    expect(
+      sequenceFromReading(reading({ tokenOut: 'BONK', followOn: cash }), ['cash out 5 SOL'])
+    ).toHaveProperty('refusal')
+  })
+
+  it('refuses a deposit and a plain swap with an output the person did not name', () => {
+    expect(
+      sequenceFromReading(reading({ followOn: { kind: 'lend', venue: 'x' } }), [
+        'swap 5 SOL then deposit',
+      ])
+    ).toHaveProperty('refusal')
+    expect(swapFromReading(reading(), ['swap 5 SOL'])).toHaveProperty('refusal')
+  })
+
+  it('reads a chain name as its token out', () => {
+    expect(
+      swapFromReading(reading({ tokenIn: 'USDC', tokenOut: 'SOL' }), ['swap 5 USDC to solana'])
+    ).toMatchObject({ tokenOut: 'SOL' })
+    expect(
+      swapFromReading(reading({ tokenIn: 'USDC', tokenOut: 'SOL' }), ['swap 5 USDC on solana'])
+    ).toHaveProperty('refusal')
   })
 })

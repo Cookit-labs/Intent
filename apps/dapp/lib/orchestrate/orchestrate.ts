@@ -1,3 +1,4 @@
+import { chainModule } from '../chains/registry'
 import { cashOutPrompt } from '../weave/corridors'
 import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
@@ -224,7 +225,13 @@ const OFF_STELLAR_PROMPT = [
 function systemPrompt(chain: string): string {
   const cashOut = cashOutPrompt(chain)
   const base = cashOut === '' ? BASE_PROMPT : `${BASE_PROMPT} ${cashOut}`
-  return chain === 'stellar' ? base : `${base} ${OFF_STELLAR_PROMPT}`
+  if (chain === 'stellar') return base
+  const symbols = chainModule(chain)?.tokens.map((token) => token.symbol)
+  const tokens =
+    symbols === undefined
+      ? ''
+      : ` The tokens on this chain are ${symbols.join(', ')}; name only these in tokenIn and tokenOut, and write a chain's name such as "solana" as its coin.`
+  return `${base} ${OFF_STELLAR_PROMPT}${tokens}`
 }
 
 /** Long enough for any sentence a person types here, short enough to bound what is passed on. */

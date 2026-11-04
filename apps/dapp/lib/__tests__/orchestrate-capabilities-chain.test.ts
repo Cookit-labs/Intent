@@ -187,6 +187,8 @@ describe('the orchestrator prompt', () => {
   it('says off Stellar what is true there about follow-ons', async () => {
     const system = await systemFor('solana')
     expect(system).toMatch(/not on Stellar/)
+    expect(system).toContain('The tokens on this chain are SOL, USDC')
+    expect((await systemFor('sui')).includes('JitoSOL')).toBe(false)
     expect(system).toMatch(/character for character/)
     expect(system).toMatch(/Swap 5 SOL to USDC, then send to/)
   })

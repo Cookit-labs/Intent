@@ -685,18 +685,6 @@ export function sequenceWordsMatch(
   turns: readonly string[]
 ): boolean {
   const symbol = chainTokenWord(instruction.token)
-  const names = chainNamesOf(symbol)
-  const token = [symbol, ...names].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-  const wordEnd = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
-  const glued = new RegExp(String.raw`(\d)(${token})${wordEnd}`, 'gi')
-  const word = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})${wordEnd}`, 'i')
-  const place =
-    names.length === 0
-      ? undefined
-      : new RegExp(
-          String.raw`\b(?:on|in|from|to|into|at|via|using|through)\s+(?:my\s+|the\s+)?(?:${names.join('|')})\b|\b(?:${names.join('|')})\s+(?:wallet|account|address|chain|network|blockchain)\b`,
-          'gi'
-        )
   // "5 USDC" is 5 of a token when the token is USDC, and a sum of money when it is another's.
   const notAmount = NOT_THE_AMOUNT.split('|')
     .filter((unit) => unit !== symbol.toLowerCase())
@@ -706,12 +694,49 @@ export function sequenceWordsMatch(
     'gi'
   )
   const wanted = canonicalNumber(instruction.amount)
-  const spaced = turns.map((turn) => turn.replace(glued, '$1 $2').replace(/([$₦£€])\s+/g, '$1'))
   return (
-    spaced.some((turn) => word.test(place === undefined ? turn : turn.replace(place, ' '))) &&
-    spaced.some((turn) =>
+    tokenSaid(instruction.token, turns) &&
+    spacedTurns(symbol, turns).some((turn) =>
       [...turn.matchAll(number)].some((match) => canonicalNumber(match[1] as string) === wanted)
     )
+  )
+}
+
+function tokenPattern(symbol: string): { token: string; names: string[] } {
+  const names = chainNamesOf(symbol)
+  const token = [symbol, ...names].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  return { token, names }
+}
+
+/** "5sol" read as "5 sol", and "$ 5" as "$5". */
+function spacedTurns(symbol: string, turns: readonly string[]): string[] {
+  const glued = new RegExp(String.raw`(\d)(${tokenPattern(symbol).token})${WORD_END}`, 'gi')
+  return turns.map((turn) => turn.replace(glued, '$1 $2').replace(/([$₦£€])\s+/g, '$1'))
+}
+
+const WORD_END = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
+
+/**
+ * Whether the person themselves named this token, alone as a word. A chain's name counts as its
+ * token only where it names the coin: not after "on", "in", "from" and the like. A token received,
+ * `destination`, may also be named "to solana" or "into solana".
+ */
+export function tokenSaid(token: string, turns: readonly string[], destination = false): boolean {
+  const symbol = chainTokenWord(token)
+  const { token: pattern, names } = tokenPattern(symbol)
+  const word = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])(?:${pattern})${WORD_END}`, 'i')
+  const prepositions = destination
+    ? 'on|in|from|at|via|using|through'
+    : 'on|in|from|to|into|at|via|using|through'
+  const place =
+    names.length === 0
+      ? undefined
+      : new RegExp(
+          String.raw`\b(?:${prepositions})\s+(?:my\s+|the\s+)?(?:${names.join('|')})\b|\b(?:${names.join('|')})\s+(?:wallet|account|address|chain|network|blockchain)\b`,
+          'gi'
+        )
+  return spacedTurns(symbol, turns).some((turn) =>
+    word.test(place === undefined ? turn : turn.replace(place, ' '))
   )
 }
 
