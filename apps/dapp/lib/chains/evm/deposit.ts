@@ -1,12 +1,4 @@
-import {
-  decodeFunctionData,
-  encodeFunctionData,
-  isAddress,
-  parseAbi,
-  zeroAddress,
-  type Address,
-  type Hex,
-} from 'viem'
+import { decodeFunctionData, isAddress, zeroAddress, type Address, type Hex } from 'viem'
 
 import type { DepositChain, DepositExpectation } from '../../weave/types'
 import { formatUnits } from '../near/tokens'
@@ -18,17 +10,24 @@ import {
   type SigningPayload,
 } from '../types'
 import { evmClient, type EvmClient } from './client'
-import { confirmEvmTransfer, sameAddress } from './submit'
+import {
+  confirmEvmTransfer,
+  sameAddress,
+  sameCalldata,
+  TRANSFER_ABI,
+  transferCalldata,
+} from './submit'
 import { EVM_CHAINS, EVM_NATIVE_ID, type EvmChain } from './tokens'
-
-const TRANSFER_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)'])
 
 export interface EvmDeposit extends Pick<
   DepositChain,
   'isAccount' | 'isDepositAddress' | 'build' | 'assertSafe' | 'submit'
 > {
-  /** Refuses a swap this account can't pay for, with its gas. Fails closed if it can't be read. */
-  assertFunds: (account: string, token: ChainToken, amount: string) => Promise<void>
+  /**
+   * Refuses a swap this account can't pay for, with its gas. Fails closed if it can't be read.
+   * Answers with any notes the card should carry about what it read.
+   */
+  assertFunds: (account: string, token: ChainToken, amount: string) => Promise<string[]>
 }
 
 function refuse(reason: string): never {
@@ -49,7 +48,14 @@ function unitsOf(amount: string, token: ChainToken): bigint {
  * naming USDT must not be able to build or pass as USDC.
  */
 export function createEvmDeposit(chain: EvmChain, client: () => EvmClient): EvmDeposit {
-  const { name, chain: viemChain, tokens, nativeSymbol, gasReserve } = EVM_CHAINS[chain]
+  const {
+    name,
+    chain: viemChain,
+    tokens,
+    nativeSymbol,
+    gasReserve,
+    spendReserve,
+  } = EVM_CHAINS[chain]
 
   function isAccount(address: string): boolean {
     return isAddress(address, { strict: false }) && !sameAddress(address, zeroAddress)
@@ -109,12 +115,7 @@ export function createEvmDeposit(chain: EvmChain, client: () => EvmClient): EvmD
     }
     if (sent !== units) refuse('That transfer’s amount is not this order’s amount.')
     // The decoder ignores what comes after the arguments and above an address's 20 bytes.
-    const canonical = encodeFunctionData({
-      abi: TRANSFER_ABI,
-      functionName: 'transfer',
-      args: [recipient, sent],
-    })
-    if (!sameAddress(canonical, payload.data)) {
+    if (!sameCalldata(transferCalldata(recipient, sent), payload.data)) {
       refuse('That transaction carries extra data, and must be exactly one transfer.')
     }
   }
@@ -146,7 +147,9 @@ export function createEvmDeposit(chain: EvmChain, client: () => EvmClient): EvmD
             `This account needs ${amount} ${nativeSymbol} for the swap and about ${kept} more for the network fee, and holds less than that.`
           )
         }
-        return
+        return spendReserve !== undefined && coin - units < BigInt(spendReserve.units)
+          ? [spendReserve.note]
+          : []
       }
       if (held === undefined || held < units) {
         refuse(`This account holds less ${token.symbol} than this swap needs.`)
@@ -156,6 +159,7 @@ export function createEvmDeposit(chain: EvmChain, client: () => EvmClient): EvmD
           `This account has too little ${nativeSymbol} for the network fee. Keep about ${kept}.`
         )
       }
+      return []
     },
 
     build: async (expectation) => {
@@ -175,11 +179,7 @@ export function createEvmDeposit(chain: EvmChain, client: () => EvmClient): EvmD
               family: 'evm',
               chainId: viemChain.id,
               to: token.id,
-              data: encodeFunctionData({
-                abi: TRANSFER_ABI,
-                functionName: 'transfer',
-                args: [expectation.depositAddress as Address, units],
-              }),
+              data: transferCalldata(expectation.depositAddress, units),
               value: '0',
             }
       assertSafe(payload, expectation)

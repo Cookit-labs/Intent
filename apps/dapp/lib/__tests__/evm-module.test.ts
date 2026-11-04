@@ -13,12 +13,14 @@ import { oneClickAssetId, oneClickOriginVenue } from '../chains/oneclick-origin'
 import { parseChainAction } from '../chains/parse-action'
 import { assertKnownTokens, prepareChainAction } from '../chains/prepare'
 import { chainModule } from '../chains/registry'
-import { afterSubmitting, quoteExpiredBeforeSigning } from '../chains/signing-flow'
+import { afterSubmitting, QUOTE_EXPIRED, quoteExpiredBeforeSigning } from '../chains/signing-flow'
 import {
   ChainActionRefused,
   tokenBySymbol,
   type ChainActionRequest,
+  type ChainModule,
   type ChainToken,
+  type ChainVenue,
   type PreparedAction,
   type SigningPayload,
   type SubmitResult,
@@ -45,7 +47,9 @@ const rpc = vi.hoisted(() => ({
   waitForReceipt: (async () => {
     throw new Error('no receipt')
   }) as (hash: string) => Promise<unknown>,
-  transactionValue: (async () => BigInt(0)) as (hash: string) => Promise<bigint>,
+  transaction: (async () => ({ value: BigInt(0), input: '0x' })) as (
+    hash: string
+  ) => Promise<{ value: bigint; input: string }>,
   reads: [] as string[],
 }))
 
@@ -60,7 +64,7 @@ vi.mock('../chains/evm/client', async (original) => {
       rpc.reads.push(hash)
       return rpc.waitForReceipt(hash)
     },
-    transactionValue: (hash: string) => rpc.transactionValue(hash),
+    transaction: (hash: string) => rpc.transaction(hash),
   }
   return {
     ...actual,
@@ -298,7 +302,7 @@ beforeEach(() => {
   rpc.waitForReceipt = async () => {
     throw new Error('no receipt was arranged for this test')
   }
-  rpc.transactionValue = async () => {
+  rpc.transaction = async () => {
     throw new Error('no transaction was arranged for this test')
   }
   rpc.reads = []
@@ -467,6 +471,127 @@ describe('the race on these chains', () => {
   it('leaves Arc’s market as it was', () => {
     const market = buildMarketContext('arc', {}, 'testnet')
     expect(Object.keys(market.prices).length).toBeGreaterThan(0)
+  })
+})
+
+describe('naming the chain you are on', () => {
+  const moduleFor = (slug: 'avalanche' | 'monad'): ChainModule => {
+    const found = chainModule(slug)
+    if (found === undefined) throw new Error('no module')
+    return found
+  }
+  const toNative = { avalanche: 'AVAX', monad: 'MON' } as const
+
+  /** A chain with two venues, so a default and a named venue can be told apart. */
+  function twoVenues(chain: 'solana' | 'sui' | 'near'): ChainModule {
+    const venue = (id: string, name: string): ChainVenue => ({
+      id,
+      name,
+      kinds: ['swap'],
+      quote: async () => ({ receive: { amount: '1', symbol: 'B' } }),
+      prepare: async () => ({ venueId: id }) as PreparedAction,
+      assertSafe: () => undefined,
+    })
+    return {
+      chain,
+      tokens: [
+        { symbol: 'A', id: 'a', decimals: 6 },
+        { symbol: 'B', id: 'b', decimals: 6 },
+      ],
+      venues: [venue('alpha', 'Alpha Swap'), venue('beta', 'Beta Swap')],
+      defaultVenue: { swap: 'beta' },
+      priceUsd: async () => 1,
+      submit: async () => ({ ok: false, error: 'unused here' }),
+    }
+  }
+  const ab = (venue: string): ChainActionRequest => ({
+    kind: 'swap',
+    amount: '1',
+    tokenIn: 'A',
+    tokenOut: 'B',
+    venue,
+  })
+
+  it('reads as it was typed', () => {
+    expect(parseChainAction('swap 10 USDC to MON on monad')).toMatchObject({ venue: 'monad' })
+  })
+
+  it.each<['avalanche' | 'monad', string]>([
+    ['avalanche', 'avalanche'],
+    ['avalanche', 'Avalanche'],
+    ['avalanche', ' AVALANCHE '],
+    ['monad', 'monad'],
+    ['monad', 'Monad'],
+  ])('races on %s when told "on %s"', async (slug, venue) => {
+    const request = swap({ tokenOut: toNative[slug], venue })
+    const routes = await quoteChainRoutes(moduleFor(slug), request, ACCOUNT)
+    expect(routes.map((r) => r.id)).toEqual([`1click-${slug}-1`])
+  })
+
+  it.each<['avalanche' | 'monad', string]>([
+    ['avalanche', 'avalanche'],
+    ['monad', 'Monad'],
+  ])('builds on %s when told "on %s"', async (slug, venue) => {
+    const request = swap({ tokenOut: toNative[slug], venue })
+    const prepared = await prepareChainAction(moduleFor(slug), request, ACCOUNT, {})
+    expect(prepared.venueId).toBe(`1click-${slug}`)
+  })
+
+  it.each(['solana', 'Solana', 'sui', 'near', 'NEAR', 'stellar', 'avalanche', 'arc'])(
+    'does not quietly run on Monad when told "on %s"',
+    async (venue) => {
+      const request = swap({ tokenOut: 'MON', venue })
+      await expect(quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)).resolves.toEqual([])
+      await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})).rejects.toThrow(
+        /can't swap here/
+      )
+      expect(sim.quotes.filter((q) => q['dry'] === false)).toEqual([])
+    }
+  )
+
+  it.each(['1click', 'NEAR Intents', '1click-monad'])(
+    'still takes a real venue name on Monad: %s',
+    async (venue) => {
+      const request = swap({ tokenOut: 'MON', venue })
+      const routes = await quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)
+      expect(routes.map((r) => r.id)).toEqual(['1click-monad-1'])
+      const prepared = await prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})
+      expect(prepared.venueId).toBe('1click-monad')
+    }
+  )
+
+  it('refuses a venue that isn’t here', async () => {
+    const request = swap({ tokenOut: 'MON', venue: 'jupiter' })
+    await expect(quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)).resolves.toEqual([])
+    await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})).rejects.toThrow(
+      /"jupiter" can't swap here/
+    )
+  })
+
+  it.each<['solana' | 'sui' | 'near', string]>([
+    ['solana', 'solana'],
+    ['sui', 'Sui'],
+    ['near', 'NEAR'],
+  ])('counts as no venue named on %s too: "%s"', async (chain, venue) => {
+    const api = twoVenues(chain)
+    const routes = await quoteChainRoutes(api, ab(venue), ACCOUNT)
+    expect(routes.map((r) => r.id)).toEqual(['alpha-1', 'beta-1'])
+    await expect(prepareChainAction(api, ab(venue), ACCOUNT, {})).resolves.toMatchObject({
+      venueId: 'beta',
+    })
+  })
+
+  it('still filters by a real venue, and refuses another chain, on those chains', async () => {
+    const api = twoVenues('solana')
+    const routes = await quoteChainRoutes(api, ab('alpha'), ACCOUNT)
+    expect(routes.map((r) => r.id)).toEqual(['alpha-1'])
+    await expect(prepareChainAction(api, ab('alpha'), ACCOUNT, {})).resolves.toMatchObject({
+      venueId: 'alpha',
+    })
+    await expect(quoteChainRoutes(api, ab('monad'), ACCOUNT)).resolves.toEqual([])
+    await expect(prepareChainAction(api, ab('monad'), ACCOUNT, {})).rejects.toThrow(
+      /"monad" can't swap here/
+    )
   })
 })
 
@@ -795,6 +920,41 @@ describe('prepare', () => {
       expectNoAddressAsked()
     })
 
+    describe('Monad’s 10 MON reserve', () => {
+      const TEN_MON = BigInt(10) * BigInt(10) ** BigInt(18)
+      const HUNDRED_MON = BigInt(100) * BigInt(10) ** BigInt(18)
+      const monSwap = swap({ tokenIn: 'MON', tokenOut: 'USDC', amount: '100' })
+      const hasNote = (prepared: PreparedAction): boolean =>
+        prepared.notes.some((note) => /10 MON reserve/.test(note))
+
+      it('says so on the card, and still builds, when a spend leaves under 10 MON', async () => {
+        rpc.nativeBalance = async () => HUNDRED_MON + TEN_MON - BigInt(1)
+        const prepared = await venueMonad.prepare(monSwap, ACCOUNT)
+        expect(hasNote(prepared)).toBe(true)
+        expect(prepared.notes.join(' ')).toMatch(/gas/)
+        expect(prepared.signing).toMatchObject({ family: 'evm', chainId: 143 })
+      })
+
+      it('says nothing when a spend leaves exactly 10 MON, or more', async () => {
+        rpc.nativeBalance = async () => HUNDRED_MON + TEN_MON
+        expect(hasNote(await venueMonad.prepare(monSwap, ACCOUNT))).toBe(false)
+        rpc.nativeBalance = async () => HUNDRED_MON * BigInt(2)
+        expect(hasNote(await venueMonad.prepare(monSwap, ACCOUNT))).toBe(false)
+      })
+
+      it('says nothing for a token, which leaves the coin alone', async () => {
+        rpc.nativeBalance = async () => BigInt(EVM_CHAINS.monad.gasReserve)
+        expect(hasNote(await venueMonad.prepare(swap({ tokenOut: 'MON' }), ACCOUNT))).toBe(false)
+      })
+
+      it('says nothing on Avalanche, which has no such rule', async () => {
+        rpc.nativeBalance = async () =>
+          BigInt(ONE_AND_A_HALF_AVAX) + BigInt(EVM_CHAINS.avalanche.gasReserve)
+        const prepared = await venueAvalanche.prepare(avaxSwap(), ACCOUNT)
+        expect(prepared.notes.join(' ')).not.toMatch(/reserve/i)
+      })
+    })
+
     it('does not read balances for a race quote', async () => {
       rpc.tokenBalance = async () => {
         throw new Error('a quote must not read this')
@@ -848,7 +1008,7 @@ describe('submit: what the chain says the wallet sent', () => {
 
     beforeEach(async () => {
       prepared = await venueAvalanche.prepare(avaxSwap(), ACCOUNT)
-      rpc.transactionValue = async () => BigInt(ONE_AND_A_HALF_AVAX)
+      rpc.transaction = async () => ({ value: BigInt(ONE_AND_A_HALF_AVAX), input: '0x' })
     })
 
     it('accepts the transfer, tells 1Click, and is done when 1Click says so', async () => {
@@ -875,7 +1035,10 @@ describe('submit: what the chain says the wallet sent', () => {
 
     it('reads the value, since a receipt has none, and refuses any other value', async () => {
       rpc.waitForReceipt = async () => receipt()
-      rpc.transactionValue = async () => BigInt(ONE_AND_A_HALF_AVAX) - BigInt(1)
+      rpc.transaction = async () => ({
+        value: BigInt(ONE_AND_A_HALF_AVAX) - BigInt(1),
+        input: '0x',
+      })
       const result = await submitTo(prepared)
       isPending(result)
       expect(sim.notified).toEqual([])
@@ -883,7 +1046,7 @@ describe('submit: what the chain says the wallet sent', () => {
 
     it('stays pending when a landed transfer’s value cannot be read', async () => {
       rpc.waitForReceipt = async () => receipt()
-      rpc.transactionValue = async () => {
+      rpc.transaction = async () => {
         throw new Error('rpc down')
       }
       isPending(await submitTo(prepared))
@@ -902,15 +1065,118 @@ describe('submit: what the chain says the wallet sent', () => {
         isPending(await submitTo(prepared))
       }
     })
+
+    it('does not call a revert clean when the transaction carried data, or can’t be read', async () => {
+      rpc.waitForReceipt = async () => receipt({ status: 'reverted' })
+      rpc.transaction = async () => ({ value: BigInt(ONE_AND_A_HALF_AVAX), input: '0xdeadbeef' })
+      isPending(await submitTo(prepared))
+      rpc.transaction = async () => ({ value: BigInt(1), input: '0x' })
+      isPending(await submitTo(prepared))
+      rpc.transaction = async () => {
+        throw new Error('rpc down')
+      }
+      isPending(await submitTo(prepared))
+    })
+
+    it('names no reserve on Avalanche, which has none', async () => {
+      rpc.waitForReceipt = async () => receipt({ status: 'reverted' })
+      expect(await submitTo(prepared)).not.toMatchObject({
+        error: expect.stringMatching(/reserve/i),
+      })
+    })
+  })
+
+  describe('a native transfer on Monad that reverts', () => {
+    it('names the 10 MON reserve as the likely cause', async () => {
+      const prepared = await venueMonad.prepare(
+        swap({ tokenIn: 'MON', tokenOut: 'USDC', amount: '100' }),
+        ACCOUNT
+      )
+      rpc.waitForReceipt = async () => receipt({ status: 'reverted' })
+      rpc.transaction = async () => ({ value: BigInt('100000000000000000000'), input: '0x' })
+      const clean = await submitTo(prepared, venueMonad)
+      withoutPending(clean)
+      expect(clean).toMatchObject({ error: expect.stringMatching(/10 MON reserve/) })
+      expect(clean).toMatchObject({ error: expect.stringMatching(/MON did not move/) })
+    })
+
+    it('does not blame the reserve for a token transfer that reverts on Monad', async () => {
+      const prepared = await venueMonad.prepare(swap({ tokenOut: 'MON' }), ACCOUNT)
+      rpc.waitForReceipt = async () => receipt({ status: 'reverted', to: MONAD_USDC.id })
+      rpc.transaction = async () => ({
+        value: BigInt(0),
+        input: encodeFunctionData({
+          abi: TRANSFER_ABI,
+          functionName: 'transfer',
+          args: [DEPOSIT, USD_UNITS],
+        }),
+      })
+      const clean = await submitTo(prepared, venueMonad)
+      withoutPending(clean)
+      expect(clean).not.toMatchObject({ error: expect.stringMatching(/reserve/i) })
+    })
   })
 
   describe('an ERC-20 transfer', () => {
     let prepared: PreparedAction
     const paying = (logs: unknown[], change: Json = {}): Json =>
       receipt({ to: AVAX_USDC.id, logs, ...change })
+    const thisTransfer = encodeFunctionData({
+      abi: TRANSFER_ABI,
+      functionName: 'transfer',
+      args: [DEPOSIT, USD_UNITS],
+    })
 
     beforeEach(async () => {
       prepared = await venueAvalanche.prepare(swap(), ACCOUNT)
+      rpc.transaction = async () => ({ value: BigInt(0), input: thisTransfer })
+    })
+
+    it.each<[string, string]>([
+      [
+        'a transfer to someone else',
+        encodeFunctionData({
+          abi: TRANSFER_ABI,
+          functionName: 'transfer',
+          args: [OTHER, USD_UNITS],
+        }),
+      ],
+      [
+        'a transfer of another amount',
+        encodeFunctionData({
+          abi: TRANSFER_ABI,
+          functionName: 'transfer',
+          args: [DEPOSIT, USD_UNITS + BigInt(1)],
+        }),
+      ],
+      ['an approve', `0x095ea7b3${addressWord(DEPOSIT)}${word('17d7840')}`],
+      ['this transfer with bytes after it', `${thisTransfer}00`],
+      ['nothing', '0x'],
+    ])(
+      'does not read an earlier failed call on this token, %s, as this transfer failing',
+      async (_name, input) => {
+        rpc.waitForReceipt = async () => paying([], { status: 'reverted' })
+        rpc.transaction = async () => ({ value: BigInt(0), input })
+        const result = await submitTo(prepared)
+        isPending(result)
+        expect(result).not.toMatchObject({ error: expect.stringMatching(/did not move/) })
+      }
+    )
+
+    it('does not call a revert this transfer when it also carried value', async () => {
+      rpc.waitForReceipt = async () => paying([], { status: 'reverted' })
+      rpc.transaction = async () => ({ value: BigInt(1), input: thisTransfer })
+      isPending(await submitTo(prepared))
+    })
+
+    it('stays pending on a revert when the transaction can’t be read', async () => {
+      rpc.waitForReceipt = async () => paying([], { status: 'reverted' })
+      rpc.transaction = async () => {
+        throw new Error('rpc down')
+      }
+      const result = await submitTo(prepared)
+      isPending(result)
+      expect(result).not.toMatchObject({ error: expect.stringMatching(/did not move/) })
     })
 
     it('accepts a Transfer log of exactly this amount, from the account to the deposit', async () => {
@@ -1193,6 +1459,23 @@ describe('submit: what the chain says the wallet sent', () => {
       })
     })
 
+    it('reads the input of a real reverted transaction before calling it clean', async () => {
+      const reverted = { ...rpcReceipt, status: '0x0' }
+      const clean = await deposit({
+        eth_blockNumber: '0x2',
+        eth_getTransactionReceipt: reverted,
+        eth_getTransactionByHash: rpcTransaction(ONE_HUNDRED_MON_HEX),
+      })
+      withoutPending(await clean.submit({ family: 'evm', hash: HASH }, order))
+
+      const other = await deposit({
+        eth_blockNumber: '0x2',
+        eth_getTransactionReceipt: reverted,
+        eth_getTransactionByHash: { ...rpcTransaction(ONE_HUNDRED_MON_HEX), input: '0xdeadbeef' },
+      })
+      isPending(await other.submit({ family: 'evm', hash: HASH }, order))
+    })
+
     it('refuses a real transaction of another value', async () => {
       const chain = await deposit({
         eth_blockNumber: '0x2',
@@ -1304,8 +1587,10 @@ describe('the submit route', () => {
   ])('accepts { family: evm, hash } on %s and follows it', async (chain, venue, request) => {
     const prepared = await venue.prepare(request(), ACCOUNT)
     rpc.waitForReceipt = async () => receipt()
-    rpc.transactionValue = async () =>
-      BigInt((prepared.signing as Extract<SigningPayload, { family: 'evm' }>).value)
+    rpc.transaction = async () => ({
+      value: BigInt((prepared.signing as Extract<SigningPayload, { family: 'evm' }>).value),
+      input: '0x',
+    })
     const res = await post(chain, {
       account: ACCOUNT,
       venueId: venue.id,
@@ -1372,6 +1657,11 @@ describe('a stale card, before the wallet opens', () => {
     expect(quoteExpiredBeforeSigning(card('evm', '2026-11-04T12:00:01.000Z'), NOW)).toBe(false)
     expect(quoteExpiredBeforeSigning(card('evm', 'not a date'), NOW)).toBe(true)
     expect(quoteExpiredBeforeSigning(card('evm'), NOW)).toBe(false)
+  })
+
+  it('says what to do in words true on both cards, since the direct one has no Review', () => {
+    expect(QUOTE_EXPIRED).toMatch(/nothing was sent/)
+    expect(QUOTE_EXPIRED).not.toMatch(/Review/)
   })
 
   it('is left to the server on chains whose bytes it sends, and to NEAR as it was', () => {

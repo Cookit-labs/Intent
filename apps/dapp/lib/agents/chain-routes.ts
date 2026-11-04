@@ -1,3 +1,4 @@
+import { namedVenue, venueAnswersTo } from '../chains/prepare'
 import { tokenBySymbol, type ChainActionRequest, type ChainModule } from '../chains/types'
 import type { ParsedIntent } from '../parse-intent'
 import type { QuotedRoute } from './brain'
@@ -28,12 +29,12 @@ export async function quoteChainRoutes(
   request: ChainActionRequest,
   account: string
 ): Promise<QuotedRoute[]> {
-  const named = request.venue?.trim().toLowerCase()
+  const named = namedVenue(chainApi, request)
   const usable = chainApi.venues.filter(
     (v) =>
       v.kinds.includes(request.kind) &&
       v.quote !== undefined &&
-      (named === undefined || v.id.toLowerCase() === named || v.name.toLowerCase().includes(named))
+      (named === undefined || venueAnswersTo(v, named))
   )
 
   // Dollars per display unit, from the chain's own price source. Display

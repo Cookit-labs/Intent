@@ -1,14 +1,37 @@
-import { erc20Abi, parseEventLogs, type Hash } from 'viem'
+import {
+  encodeFunctionData,
+  erc20Abi,
+  parseAbi,
+  parseEventLogs,
+  type Address,
+  type Hash,
+} from 'viem'
 
 import type { DepositExpectation } from '../../weave/types'
 import { toBaseUnits, type SignedPayload, type SubmitResult } from '../types'
-import type { EvmClient, EvmReceipt } from './client'
+import type { EvmClient, EvmReceipt, EvmTransaction } from './client'
 import { EVM_CHAINS, EVM_NATIVE_ID, evmExplorerUrl, type EvmChain } from './tokens'
 
 export const EVM_HASH = /^0x[0-9a-fA-F]{64}$/
 
+export const TRANSFER_ABI = parseAbi([
+  'function transfer(address to, uint256 amount) returns (bool)',
+])
+
 export function sameAddress(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase()
+}
+
+export function sameCalldata(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+export function transferCalldata(to: string, units: bigint): string {
+  return encodeFunctionData({
+    abi: TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [to as Address, units],
+  })
 }
 
 /** Whether this receipt shows this account paying exactly this token transfer to this address. */
@@ -34,8 +57,9 @@ function pending(error: string): SubmitResult {
 /**
  * Asks the chain what the wallet sent. The wallet broadcast this for itself, so nothing here can
  * stop it, and an answer may lack `pending` only if it proves the funds did not move. Only a
- * revert does, and only from this account to the address this transfer was meant for: a browser
- * could hand in any failed transaction while the real transfer went out.
+ * revert does, and only of this very transfer: from this account, to that address, carrying
+ * exactly this calldata and value. For a token `to` is the contract, so from and to alone would
+ * pass the account's earlier failed call on that token while the real transfer went out.
  *
  * A receipt that is someone else's or for something else says nothing about the real transfer,
  * so it is pending too, and it is never reported to 1Click.
@@ -46,7 +70,7 @@ export async function confirmEvmTransfer(
   signed: SignedPayload,
   expectation: DepositExpectation
 ): Promise<SubmitResult> {
-  const { name } = EVM_CHAINS[chain]
+  const { name, spendReserve } = EVM_CHAINS[chain]
   const { account, depositAddress, amount, token } = expectation
   if (signed.family !== 'evm' || !EVM_HASH.test(signed.hash) || token === undefined) {
     return pending(
@@ -75,18 +99,32 @@ export async function confirmEvmTransfer(
     sameAddress(receipt.from, account) && receipt.to !== null && sameAddress(receipt.to, expectedTo)
   if (!fromThisAccountToThatAddress) return notThisSwap
 
+  const units = BigInt(toBaseUnits(amount, token.decimals))
+
   if (receipt.status === 'reverted') {
+    let sent: EvmTransaction
+    try {
+      sent = await client().transaction(hash as Hash)
+    } catch {
+      return pending(
+        `Transaction ${hash} failed on ${name}, but it couldn't be read to tell whether it was this swap's transfer. Check your wallet's activity before trying again, in case the real one went out.`
+      )
+    }
+    const isThisTransfer =
+      sent.value === (native ? units : BigInt(0)) &&
+      sameCalldata(sent.input, native ? '0x' : transferCalldata(depositAddress, units))
+    if (!isThisTransfer) return notThisSwap
+    const likelyCause = native && spendReserve !== undefined ? ` ${spendReserve.reverted}` : ''
     return {
       ok: false,
-      error: `This transfer failed on ${name}. The ${token.symbol} did not move, and only the gas was spent.`,
+      error: `This transfer failed on ${name}. The ${token.symbol} did not move, and only the gas was spent.${likelyCause}`,
     }
   }
 
-  const units = BigInt(toBaseUnits(amount, token.decimals))
   if (native) {
     let value: bigint
     try {
-      value = await client().transactionValue(hash as Hash)
+      ;({ value } = await client().transaction(hash as Hash))
     } catch {
       return notConfirmed
     }

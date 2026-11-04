@@ -16,12 +16,17 @@ const RECEIPT_TIMEOUT_MS = 20_000
 
 export type EvmReceipt = Pick<TransactionReceipt, 'status' | 'from' | 'to' | 'logs'>
 
+export interface EvmTransaction {
+  value: bigint
+  input: string
+}
+
 export interface EvmClient {
   tokenBalance: (token: Address, account: Address) => Promise<bigint>
   nativeBalance: (account: Address) => Promise<bigint>
   waitForReceipt: (hash: Hash) => Promise<EvmReceipt>
-  /** A receipt doesn't carry what a transaction paid, so this is read apart from it. */
-  transactionValue: (hash: Hash) => Promise<bigint>
+  /** A receipt doesn't carry what a transaction paid or called, so these are read apart from it. */
+  transaction: (hash: Hash) => Promise<EvmTransaction>
 }
 
 /** Reads this chain only, so a hash from another chain isn't found here. */
@@ -44,6 +49,9 @@ export function evmClient(chain: EvmChain, transport?: Transport): EvmClient {
     nativeBalance: (address) => client.getBalance({ address }),
     waitForReceipt: (hash) =>
       client.waitForTransactionReceipt({ hash, timeout: RECEIPT_TIMEOUT_MS }),
-    transactionValue: async (hash) => (await client.getTransaction({ hash })).value,
+    transaction: async (hash) => {
+      const { value, input } = await client.getTransaction({ hash })
+      return { value, input }
+    },
   }
 }

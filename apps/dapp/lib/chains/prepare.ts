@@ -1,3 +1,5 @@
+import { CHAIN_DESCRIPTORS } from '@intent/config'
+
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
 import {
   ChainActionRefused,
@@ -9,13 +11,38 @@ import {
   type PreparedAction,
 } from './types'
 
+const CHAIN_NAMES = new Set(
+  Object.values(CHAIN_DESCRIPTORS).flatMap((chain) => [chain.slug, chain.name.toLowerCase()])
+)
+
+/**
+ * The venue a request names, in lower case. "swap 10 USDC to MON on monad" reads "monad" as one,
+ * but it only says where the person already is, so the chain they are on counts as none named.
+ */
+export function namedVenue(
+  chainApi: Pick<ChainModule, 'chain'>,
+  request: Pick<ChainActionRequest, 'venue'>
+): string | undefined {
+  const wanted = request.venue?.trim().toLowerCase()
+  if (wanted === undefined) return undefined
+  const { slug, name } = CHAIN_DESCRIPTORS[chainApi.chain]
+  return wanted === slug || wanted === name.toLowerCase() ? undefined : wanted
+}
+
+/**
+ * Whether a venue answers to that name. Another chain's name answers to nothing, so nothing runs
+ * here that was asked for there, even where it is part of a venue's name, as NEAR is of 1Click's.
+ */
+export function venueAnswersTo(venue: Pick<ChainVenue, 'id' | 'name'>, wanted: string): boolean {
+  if (CHAIN_NAMES.has(wanted)) return false
+  return venue.id.toLowerCase() === wanted || venue.name.toLowerCase().includes(wanted)
+}
+
 function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVenue {
   const usable = chainApi.venues.filter((v) => v.kinds.includes(request.kind))
-  if (request.venue !== undefined) {
-    const wanted = request.venue.trim().toLowerCase()
-    const named = usable.find(
-      (v) => v.id.toLowerCase() === wanted || v.name.toLowerCase().includes(wanted)
-    )
+  const wanted = namedVenue(chainApi, request)
+  if (wanted !== undefined) {
+    const named = usable.find((v) => venueAnswersTo(v, wanted))
     if (named === undefined) {
       const names = usable.map((v) => v.name).join(', ')
       throw new ChainActionRefused(

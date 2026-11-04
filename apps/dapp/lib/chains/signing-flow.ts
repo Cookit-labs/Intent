@@ -21,7 +21,7 @@ export function latchBeforeSign(family: Family): boolean {
 }
 
 export const QUOTE_EXPIRED =
-  'This quote expired before you signed, so your wallet was not asked and nothing was sent. Press Review again for a fresh one.'
+  'This quote expired before you signed, so your wallet was not asked and nothing was sent. Send your request again for a fresh one.'
 
 /**
  * Whether a card has outlived its quote, on a chain where this is the last chance to say so. The

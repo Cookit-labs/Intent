@@ -106,8 +106,11 @@ interface Origin {
   /** The chain's own swap, which takes what 1Click doesn't here. Absent where 1Click is the only one. */
   ownSwap?: string
   deposit: Pick<DepositChain, 'isAccount' | 'isDepositAddress' | 'build' | 'assertSafe' | 'submit'>
-  /** Reads what the wallet holds before a deposit address is asked for, where the build won't. */
-  assertFunds?: (account: string, token: ChainToken, amount: string) => Promise<void>
+  /**
+   * Reads what the wallet holds before a deposit address is asked for, where the build won't.
+   * Answers with any notes the card should carry about what it read.
+   */
+  assertFunds?: (account: string, token: ChainToken, amount: string) => Promise<string[]>
   /** The chain's identifier for signed bytes, known before the network has answered. */
   hashOf: (signed: SignedPayload) => string | undefined
   explorerUrl: (hash: string) => string
@@ -429,7 +432,7 @@ async function send(
   }
 }
 
-/** The venue behind a 1Click swap from `chain`. Refuses plainly on a chain with no deposit built. */
+/** The venue behind a 1Click swap from `chain`. */
 export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
   const venueId = `1click-${chain}`
 
@@ -466,7 +469,7 @@ export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
     } = await routeFor(origin, chain, request, account)
     const key = signingKey()
     // Before the real quote, so someone who can't pay never gets a deposit address made.
-    await origin.assertFunds?.(account, tokenIn, request.amount)
+    const fundsNotes = (await origin.assertFunds?.(account, tokenIn, request.amount)) ?? []
     const { shared } = await previewOneClick(request.amount, spending, destination, account)
     const { live, loss, deadline } = await liveOneClick(shared, spending, destination)
 
@@ -501,6 +504,7 @@ export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
       notes: [
         costNote(live, loss, destination.symbol, destination.decimals, COST_WORDING),
         ...(origin.walletCost !== undefined ? [origin.walletCost.note] : []),
+        ...fundsNotes,
         depositNote(live, tokenIn, account),
         ONECLICK_RISK_NOTE,
       ],

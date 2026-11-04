@@ -59,6 +59,11 @@ export interface EvmChainConfig {
    * because the wallet sets the real fee.
    */
   gasReserve: string
+  /**
+   * A balance the chain itself protects, where it has one. A spend that dips under it can revert
+   * after it is signed, but not always, so this warns and doesn't refuse.
+   */
+  spendReserve?: { units: string; note: string; reverted: string }
   rpcEnv: string
   explorer: string
 }
@@ -79,6 +84,14 @@ export const EVM_CHAINS: Record<EvmChain, EvmChainConfig> = {
     tokens: MONAD_TOKENS,
     nativeSymbol: 'MON',
     gasReserve: '50000000000000000',
+    // https://docs.monad.xyz/developer-essentials/reserve-balance. It reverts always for an
+    // EIP-7702-delegated account, and for others that sent within the last 3 blocks.
+    spendReserve: {
+      units: '10000000000000000000',
+      note: 'This would leave under 10 MON in your wallet. Monad holds a 10 MON reserve on each account, so this swap may fail because of it, and the gas would still be spent.',
+      reverted:
+        'The likely cause is Monad’s 10 MON reserve, which can stop a spend that leaves an account under 10 MON.',
+    },
     rpcEnv: 'MONAD_RPC_URL',
     explorer: 'https://monadvision.com',
   },
