@@ -19,6 +19,15 @@ import {
   unclearMessage,
 } from '../../lib/chat/orchestrate-copy'
 import { rememberExchange } from '../../lib/chat/dialogue'
+import {
+  appendLiveTurn,
+  chainOutcomeSentence,
+  clearLiveSession,
+  liveSessionStorage,
+  loadLiveSession,
+  ownedTurns,
+  type LiveTurn,
+} from '../../lib/chat/live-session'
 import { fixVerbTypo } from '../../lib/chat/typos'
 import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
@@ -74,6 +83,7 @@ import { CashoutCard } from './cashout-card'
 import { CashoutCurrencyQuestion, type CashoutQuestionState } from './cashout-currency-question'
 import {
   cashoutChoices,
+  CURRENCY_QUESTION,
   NO_CASHOUTS,
   unsupportedCurrencyReply,
   unsupportedTokenReply,
@@ -192,7 +202,35 @@ function ChatIdentity(): JSX.Element {
   )
 }
 
-export function IntentChat(): JSX.Element {
+/** What was said before this page was opened: words and a link, nothing to press or sign. */
+function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
+  return (
+    <>
+      {turns.map((turn, i) => (
+        <div
+          key={`${turn.at}-${i}`}
+          className={cn('flex', turn.role === 'user' ? 'justify-end' : 'justify-start')}
+        >
+          <div className={turn.role === 'user' ? userBubble : agentBubble}>
+            {turn.text}
+            {turn.explorerUrl !== undefined ? (
+              <a
+                href={turn.explorerUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block text-xs underline underline-offset-2 opacity-70"
+              >
+                View transaction
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </>
+  )
+}
+
+export function IntentChat({ linkedRule }: { linkedRule?: string }): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
   const settleIntent = useSettleIntent()
@@ -279,10 +317,12 @@ export function IntentChat(): JSX.Element {
     inbox.markSeen(items.map((i) => i.id))
   }
 
+  // From the address, and read again when it changes: the chat stays mounted
+  // across pages, so a link can arrive long after it first rendered.
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('rule')
-    if (id !== null && id !== '') setLinkedRuleId(id)
-  }, [])
+    openedFromLink.current = false
+    setLinkedRuleId(linkedRule !== undefined && linkedRule !== '' ? linkedRule : null)
+  }, [linkedRule])
 
   // Opens on the linked rule once the inbox has answered, and only once: a
   // user who closes it should not have it reopen on the next poll.
@@ -327,10 +367,58 @@ export function IntentChat(): JSX.Element {
   const slippageEdit =
     strategy.slippageBps !== undefined ? { slippageBps: strategy.slippageBps } : {}
 
-  const { slug, descriptor } = useChain()
+  const { slug, segment, descriptor } = useChain()
   const { address, isConnected } = useWallet()
   latest.current.chain = slug
   latest.current.account = address
+
+  // What was said here before a reload. Read while no thread is open, which is
+  // also what keeps a wallet's own words from showing twice, and shown under the
+  // account it was read for only. Writing it never touches saveTurn.
+  const [savedTurns, setSavedTurns] = useState<{ account: string; turns: LiveTurn[] } | null>(null)
+  const transcriptOwner = isConnected ? address : undefined
+  const transcriptOwnerRef = useRef(transcriptOwner)
+  transcriptOwnerRef.current = transcriptOwner
+  const transcript = restored === null ? ownedTurns(savedTurns, transcriptOwner) : []
+  useEffect(() => {
+    setSavedTurns(
+      transcriptOwner !== undefined && message === null && thread.length === 0
+        ? {
+            account: transcriptOwner,
+            turns: loadLiveSession(liveSessionStorage(), segment, transcriptOwner),
+          }
+        : null
+    )
+    // Only a new wallet or chain reads again; a thread opening must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment, transcriptOwner])
+
+  function recordLive(
+    role: LiveTurn['role'],
+    text: string,
+    explorerUrl?: string,
+    account: string | undefined = transcriptOwnerRef.current
+  ): void {
+    if (account === undefined) return
+    appendLiveTurn(liveSessionStorage(), segment, account, {
+      role,
+      text,
+      at: Date.now(),
+      ...(explorerUrl !== undefined ? { explorerUrl } : {}),
+    })
+  }
+
+  // One line per transaction, however many times its state is rendered or reported.
+  const recordedHashes = useRef(new Set<string>())
+  function recordSettled(
+    text: string,
+    hash: string | undefined,
+    explorerUrl: string | undefined
+  ): void {
+    if (hash === undefined || recordedHashes.current.has(hash)) return
+    recordedHashes.current.add(hash)
+    recordLive('agent', text, explorerUrl)
+  }
 
   // Checked once the wallet that owns it is known — historyOwner, which
   // pendingCashOut reads, is set from this same address elsewhere — so a
@@ -755,6 +843,82 @@ export function IntentChat(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decided, turnId, message, slug])
 
+  // The transcript, as things are said and settle. Words and links only: a label
+  // or a card's figures come from what is signed, so none of them are kept.
+  useEffect(() => {
+    if (affordError !== null && message !== null && restored === null) {
+      recordLive('agent', affordError)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [affordError])
+
+  // A chain race leaves one sentence, below, and none of its agents' reasoning.
+  const raceWinner = liveCompetition.winner
+  const raceReply =
+    restored !== null || chainRace !== null
+      ? undefined
+      : decided && raceWinner !== null
+        ? liveCompetition.proposals[raceWinner]?.reasoning
+        : live.error?.message
+  useEffect(() => {
+    if (raceReply !== undefined && raceReply !== '' && message !== null) {
+      recordLive('agent', raceReply)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raceReply])
+
+  const chainOutcome = chainOutcomeSentence({
+    phase: chainAction.phase,
+    venueName: chainAction.prepared?.venueName,
+    error: chainAction.error,
+  })
+  useEffect(() => {
+    if (chainOutcome === undefined || message === null) return
+    // To the wallet that signed it, should another have connected since.
+    recordLive(
+      'agent',
+      chainOutcome,
+      chainAction.phase === 'settled' ? chainAction.explorerUrl : undefined,
+      chainAction.account ?? transcriptOwnerRef.current
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainOutcome])
+
+  useEffect(() => {
+    recordSettled('The swap settled.', settledHash, swap.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settledHash])
+  useEffect(() => {
+    const total = sequence.steps.length
+    sequence.steps.forEach((step, i) => {
+      recordSettled(
+        total === 1 ? 'The transaction settled.' : `Step ${i + 1} of ${total} settled.`,
+        step.hash,
+        step.explorerUrl
+      )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sequenceSteps])
+  const supplyHash = supply.phase === 'settled' ? supply.hash : undefined
+  useEffect(() => {
+    recordSettled('The supply settled.', supplyHash, supply.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplyHash])
+  const perpHash = perp.phase === 'settled' ? perp.hash : undefined
+  useEffect(() => {
+    recordSettled('The position opened.', perpHash, perp.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perpHash])
+  useEffect(() => {
+    recordSettled('The cash-out payment was sent.', cashout.hash, cashout.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cashout.hash])
+
+  /** A settled Stellar transaction known only by its hash. */
+  function recordStellarTx(text: string, hash: string | undefined): void {
+    recordSettled(text, hash, `${stellarNetwork.blockExplorerUrl}/tx/${hash}`)
+  }
+
   // The USDC the swap delivered is read from the account, so the balance is
   // refreshed the moment the swap settles.
   const swapSettled = swap.phase === 'settled'
@@ -913,6 +1077,7 @@ export function IntentChat(): JSX.Element {
     setMessage(text)
     setCashOutFrom({ hash: stranded.swapHash, receive: stranded.receiveDisplay })
     setStrandedCashOut(undefined)
+    recordLive('user', text)
     saveTurn({
       id: newTurnId,
       chain: slug,
@@ -1443,6 +1608,7 @@ export function IntentChat(): JSX.Element {
       cashout.dismiss()
       chainAction.reset()
       setClarifyBusy(true)
+      const asked = latest.current.turn
       void fetchCashoutCurrencies(slug).then((weave) => {
         setClarifyBusy(false)
         const choices = cashoutChoices(slug, weave)
@@ -1457,6 +1623,7 @@ export function IntentChat(): JSX.Element {
             choices,
             ...(route.amount !== undefined ? { amount: route.amount } : {}),
           })
+          if (asked === latest.current.turn) recordLive('agent', CURRENCY_QUESTION)
         }
       })
       return
@@ -1550,6 +1717,15 @@ export function IntentChat(): JSX.Element {
     }
 
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
+    const open = message !== null && parsed !== null && restored === null && !turnExecuted
+
+    // Kept as it is shown. Two paths turn it away under a signature and never show it.
+    const refused =
+      executionInFlight &&
+      (cashoutRoute.kind !== 'pass' ||
+        (clarifying === null && open && classifyFollowUp(text) === 'note'))
+    if (!refused) recordLive('user', text)
+
     if (cashoutRoute.kind !== 'pass') {
       startCashout(cashoutRoute, text)
       return
@@ -1565,10 +1741,9 @@ export function IntentChat(): JSX.Element {
         if (offered.some((choice) => choice.code === named)) {
           answerCashoutQuestion(named, text)
         } else {
-          setCashoutQuestion({
-            ...cashoutQuestion,
-            retry: { said: text, reply: unsupportedCurrencyReply(named, offered) },
-          })
+          const reply = unsupportedCurrencyReply(named, offered)
+          setCashoutQuestion({ ...cashoutQuestion, retry: { said: text, reply } })
+          recordLive('agent', reply)
         }
         return
       }
@@ -1618,7 +1793,6 @@ export function IntentChat(): JSX.Element {
     }
 
     // A note on an open intent refines it and needs no question of its own.
-    const open = message !== null && parsed !== null && restored === null && !turnExecuted
     if (open && classifyFollowUp(text) === 'note') {
       void refine(text)
       return
@@ -1719,6 +1893,7 @@ export function IntentChat(): JSX.Element {
 
     if (answer.outcome === 'ask') {
       setClarifying({ turns: [...turns, { role: 'assistant', content: answer.question }] })
+      if (asked.turn === latest.current.turn) recordLive('agent', answer.question)
       return
     }
 
@@ -1830,6 +2005,10 @@ export function IntentChat(): JSX.Element {
   /** A clean slate: the open intent, the turns before it and any notes. */
   function newChat(): void {
     latest.current.turn += 1
+    if (transcriptOwner !== undefined) {
+      clearLiveSession(liveSessionStorage(), segment, transcriptOwner)
+    }
+    setSavedTurns(null)
     handleReset()
     setThread([])
     setNotes([])
@@ -2370,7 +2549,14 @@ export function IntentChat(): JSX.Element {
               Even the error message lived in this dead branch, so a failure
               was as invisible as a success. */}
           {!message ? (
-            <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+            <div
+              className={
+                transcript.length > 0
+                  ? 'flex flex-col gap-4'
+                  : 'flex h-full flex-col items-center justify-center gap-4 text-center'
+              }
+            >
+              <SavedTurns turns={transcript} />
               {/* A swap from an earlier session settled meaning to be cashed
                   out, and the tab closed before that second step started.
                   The swap itself is already safe in history; this is only
@@ -2401,22 +2587,27 @@ export function IntentChat(): JSX.Element {
                 </div>
               ) : null}
 
-              <span className="bg-brand flex h-14 w-14 items-center justify-center rounded-full">
-                <Image
-                  src="/images/intent-logo.png"
-                  alt=""
-                  width={512}
-                  height={361}
-                  className="h-6 w-auto invert"
-                />
-              </span>
-              <p className="text-muted-foreground max-w-sm text-sm">
-                Say what you want to happen. Autonomous agents compete to find the best execution —
-                you pick who executes.
-              </p>
+              {transcript.length === 0 ? (
+                <>
+                  <span className="bg-brand flex h-14 w-14 items-center justify-center rounded-full">
+                    <Image
+                      src="/images/intent-logo.png"
+                      alt=""
+                      width={512}
+                      height={361}
+                      className="h-6 w-auto invert"
+                    />
+                  </span>
+                  <p className="text-muted-foreground max-w-sm text-sm">
+                    Say what you want to happen. Autonomous agents compete to find the best
+                    execution — you pick who executes.
+                  </p>
+                </>
+              ) : null}
             </div>
           ) : (
             <div className="flex flex-col gap-4">
+              <SavedTurns turns={transcript} />
               {/* A reopened conversation shows the prices that were quoted when
                 it ran. Saying so matters: signing against a rate from an hour
                 ago is a different decision from signing a fresh one. */}
@@ -2544,9 +2735,11 @@ export function IntentChat(): JSX.Element {
               {cashoutQuestion !== null ? (
                 <CashoutCurrencyQuestion
                   question={cashoutQuestion}
-                  onChoose={(choice) =>
-                    answerCashoutQuestion(choice.code, `${choice.name} (${choice.code})`)
-                  }
+                  onChoose={(choice) => {
+                    const said = `${choice.name} (${choice.code})`
+                    recordLive('user', said)
+                    answerCashoutQuestion(choice.code, said)
+                  }}
                 />
               ) : null}
               {clarifyBusy ? (
@@ -2633,6 +2826,7 @@ export function IntentChat(): JSX.Element {
                     ? { balanceUsdc: balances.trustlines['USDC'].balance }
                     : {})}
                   onOrder={(order) => {
+                    recordStellarTx('The cash-out payment was sent.', order.paymentHash)
                     if (turnId === null) return
                     updateTurn(
                       turnId,
@@ -2767,6 +2961,7 @@ export function IntentChat(): JSX.Element {
                 <PlanConfirm
                   plan={planExec}
                   onSettled={(hash) => {
+                    recordStellarTx('The plan settled.', hash)
                     if (turnId !== null) {
                       updateTurn(turnId, { txHash: hash })
                       setTurns(loadTurns(slug))
@@ -2781,6 +2976,7 @@ export function IntentChat(): JSX.Element {
                   sellSymbol={parsed.input.tokenIn}
                   buySymbol={parsed.input.tokenOut}
                   onPlaced={(hash) => {
+                    recordStellarTx('The order was placed.', hash)
                     // The placing transaction is a real, verifiable event, but it
                     // is not a fill — the order is only now waiting. Recording it
                     // on the conversation lets history link to it without
@@ -2884,6 +3080,7 @@ export function IntentChat(): JSX.Element {
                       // the reminder below exists to chase is done, whatever
                       // happens to the order from here.
                       clearPendingCashOut()
+                      recordStellarTx('The cash-out payment was sent.', order.paymentHash)
                       if (turnId === null) return
                       updateTurn(
                         turnId,
@@ -2912,7 +3109,7 @@ export function IntentChat(): JSX.Element {
       >
         <ComposerInput
           onSubmit={handleSubmit}
-          showExamples={message === null && thread.length === 0}
+          showExamples={message === null && thread.length === 0 && transcript.length === 0}
           {...(clarifying !== null
             ? { placeholder: 'Type your answer…' }
             : message !== null
