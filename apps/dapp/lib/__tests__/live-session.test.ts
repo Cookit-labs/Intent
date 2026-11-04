@@ -297,6 +297,12 @@ describe('what is said without being a reply', () => {
     expect(recordableReply(WALLET_SWITCHED_NOTICE)).toBe(false)
   })
 
+  it('says what a wallet switch waits on in words true after a cash-out is paid', () => {
+    expect(WALLET_SWITCHED_NOTICE).toBe(
+      'Your wallet changed. The payment under way here has to finish first.'
+    )
+  })
+
   it('keeps a reply', () => {
     expect(recordableReply('You can swap and send.')).toBe(true)
   })

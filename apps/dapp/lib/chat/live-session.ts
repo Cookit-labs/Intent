@@ -121,11 +121,12 @@ export function ownerChange(
   return busy ? 'defer' : 'reset'
 }
 
-export const WALLET_SWITCHED_NOTICE = 'Your wallet changed. Finish the open signature first.'
+export const WALLET_SWITCHED_NOTICE =
+  'Your wallet changed. The payment under way here has to finish first.'
 export const FINISH_SIGNATURE_NOTICE =
   'Finish or cancel the signature first, then continue the chat.'
 
-/** Notices about a signature answer nothing the person said, so a reload would show them alone. */
+/** Notices about a payment answer nothing the person said, so a reload would show them alone. */
 export function recordableReply(text: string): boolean {
   return text !== WALLET_SWITCHED_NOTICE && text !== FINISH_SIGNATURE_NOTICE
 }
