@@ -88,6 +88,7 @@ describe('POST /api/agents/compete on a chain', () => {
       )
     )
     expect(out[0]?.type).toBe('competition:started')
+    expect(out[0]?.routeCount).toBe(1)
     expect(state.propose).toHaveBeenCalledTimes(1)
     const given = (state.propose as any).mock.calls[0][0]
     expect(given.market.routes).toHaveLength(1)
@@ -110,6 +111,7 @@ describe('POST /api/agents/compete on a chain', () => {
     )
     expect(out[0]?.type).toBe('competition:started')
     const given = (state.propose as any).mock.calls[0][0]
+    expect(out[0]?.routeCount).toBeUndefined()
     expect(given.intent.input).toMatchObject({ tokenIn: 'XLM', tokenOut: 'USDC' })
   })
 
@@ -126,7 +128,7 @@ describe('POST /api/agents/compete on a chain', () => {
       )
     )
     expect(out).toHaveLength(1)
-    expect(out[0]?.type).toBe('competition:error')
+    expect(out[0]).toMatchObject({ type: 'competition:error', code: 'action_refused' })
     expect(out[0]?.message).toContain("I can't confirm SCAM as a verified token")
     expect(state.propose).not.toHaveBeenCalled()
   })
@@ -142,7 +144,7 @@ describe('POST /api/agents/compete on a chain', () => {
       )
     )
     expect(out).toHaveLength(1)
-    expect(out[0]).toMatchObject({ type: 'competition:error' })
+    expect(out[0]).toMatchObject({ type: 'competition:error', code: 'chain_unsupported' })
     expect(out[0]?.message).toContain('Nothing was signed or sent')
     expect(state.propose).not.toHaveBeenCalled()
   })
@@ -177,7 +179,7 @@ describe('POST /api/agents/compete on a chain', () => {
         )
       )
       expect(out).toHaveLength(1)
-      expect(out[0]?.type).toBe('competition:error')
+      expect(out[0]).toMatchObject({ type: 'competition:error', code: 'action_refused' })
       expect(out[0]?.message).toContain('Nothing was signed or sent')
       expect(quote).not.toHaveBeenCalled()
       expect(state.propose).not.toHaveBeenCalled()

@@ -116,6 +116,9 @@ function chainActionFromBody(raw: unknown): ChainActionRequest | undefined {
  * What the agents are given for an action on a chain that is not Stellar: the
  * chain's own venues and real quotes, and none of Stellar's prices, assets or
  * order book. Returns the sentence to show instead when there is nothing to race.
+ * A `refusal` is the action itself being refused, which the user must read as
+ * written; a plain string is a race that could not run, where the direct route
+ * is still worth trying.
  */
 async function chainRaceFacts(
   chain: string,
@@ -123,12 +126,13 @@ async function chainRaceFacts(
   action: ChainActionRequest,
   account: string | undefined,
   text: string
-): Promise<{ intent: ParsedIntent; market: MarketContext } | string> {
+): Promise<{ intent: ParsedIntent; market: MarketContext } | string | { refusal: string }> {
   try {
     const known = assertKnownTokens(chainApi, action)
     await assertAmountWithinCap(chainApi, action, known)
   } catch (e) {
-    if (e instanceof ChainActionRefused) return `${e.message} Nothing was signed or sent.`
+    if (e instanceof ChainActionRefused)
+      return { refusal: `${e.message} Nothing was signed or sent.` }
     throw e
   }
   if (account === undefined) {
@@ -230,7 +234,10 @@ function measured(
 }
 
 /** One SSE stream carrying a single error frame, then closing. */
-function errorStream(code: 'agents_offline' | 'chain_unsupported', message: string): Response {
+function errorStream(
+  code: 'agents_offline' | 'chain_unsupported' | 'action_refused',
+  message: string
+): Response {
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -351,6 +358,9 @@ export async function POST(request: Request): Promise<Response> {
       ? await chainRaceFacts(chain, chainApi, chainAction, account, text)
       : undefined
   if (typeof chainFacts === 'string') return errorStream('chain_unsupported', chainFacts)
+  if (chainFacts !== undefined && 'refusal' in chainFacts) {
+    return errorStream('action_refused', chainFacts.refusal)
+  }
 
   const competitionId = randomUUID()
   // Taken here, in the request, so the race is recorded for the network it ran on.
@@ -453,6 +463,7 @@ export async function POST(request: Request): Promise<Response> {
         // "thinking". Each agent is a model, and the user can see which.
         agents: roster.map(({ key, name, gradient, model }) => ({ key, name, gradient, model })),
         windowSeconds: WINDOW_SECONDS,
+        ...(chainFacts !== undefined ? { routeCount: market.routes?.length ?? 0 } : {}),
       })
 
       // Agents run concurrently and are emitted as they finish, so one slow

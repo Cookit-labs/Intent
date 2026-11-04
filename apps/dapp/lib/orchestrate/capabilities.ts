@@ -7,8 +7,21 @@
  * and the prompt forbids the rest.
  */
 
+/**
+ * Chains where agents race to propose the route. A chain joins this list only
+ * once its venues can be quoted, so the sheet never promises a race that does
+ * not run.
+ */
+const AGENT_RACE_CHAINS = ['stellar', 'solana', 'sui', 'near']
+
+const SWAP_RACED =
+  'Swap: trade one asset for another at the market price, or place a limit order at a price you name. Agents compete to propose the best route; you review it and sign in your wallet.'
+const SWAP_RACED_OFF_STELLAR =
+  'Swap: trade one asset for another at the market price. Agents compete to propose the best route; you review it and sign in your wallet.'
+const SWAP_DIRECT =
+  'Swap: trade one asset for another at the market price. You review it and sign in your wallet.'
+
 const COMMON = [
-  'Swap: trade one asset for another at the market price, or place a limit order at a price you name. Agents compete to propose the best route; you review it and sign in your wallet.',
   'Accumulate: spread the buying of an asset over time instead of all at once.',
   'Hedge or rebalance: move exposure from one asset into another.',
   'Send: send an asset such as USDC or XLM to another account or to a name like deon.xlm. You review it and sign in your wallet.',
@@ -24,6 +37,14 @@ const STELLAR_ONLY = [
 
 /** The facts about Intent that apply on a chain, one per line. */
 export function capabilitySheet(chain: string): string {
-  const lines = chain === 'stellar' ? [...COMMON, ...STELLAR_ONLY] : COMMON
+  // Limit orders are Stellar's; elsewhere a swap is at the market price.
+  const swap =
+    chain === 'stellar'
+      ? SWAP_RACED
+      : AGENT_RACE_CHAINS.includes(chain)
+        ? SWAP_RACED_OFF_STELLAR
+        : SWAP_DIRECT
+  const common = [swap, ...COMMON]
+  const lines = chain === 'stellar' ? [...common, ...STELLAR_ONLY] : common
   return lines.map((l) => `- ${l}`).join('\n')
 }

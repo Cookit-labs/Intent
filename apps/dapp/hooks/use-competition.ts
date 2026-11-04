@@ -11,6 +11,8 @@ import type {
 } from '../lib/agents/competition'
 import { DECIDE_AT, RACE_DURATION, WINDOW_SECONDS, revealFloor } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
+import type { ChainActionRequest } from '../lib/chains/types'
+import { chainFigures } from '../lib/agents/chain-race'
 import { setAttributedRace } from '../lib/api/network-fetch'
 import { planDecision, planReveal } from '../lib/agents/pacing'
 import type { ParsedIntent } from '../lib/parse-intent'
@@ -63,7 +65,14 @@ export function useCompetition(
    * sent as `undefined`, so a disconnected caller is counted by IP only, the
    * same as before this existed.
    */
-  account?: string
+  account?: string,
+  /**
+   * An action on a chain other than Stellar, as the user typed it. Runs the
+   * race in place of `parsed`, which stays null there so Stellar's cards do not
+   * appear. The request is sent as structured data: agents pick a route and
+   * never supply the amount or tokens.
+   */
+  chainRace?: { request: ChainActionRequest; text: string }
 ): CompetitionWithRoute {
   // The effect reads the latest context through a ref and restarts on its
   // content, not on the array's identity, which is new every render.
@@ -84,13 +93,15 @@ export function useCompetition(
   const [route, setRoute] = useState<unknown>(undefined)
   const [routesByAgent, setRoutesByAgent] = useState<Record<string, unknown>>({})
   const [agents, setAgents] = useState<CompetingAgent[]>([])
+  const [routeCount, setRouteCount] = useState<number | undefined>(undefined)
   // The same list, readable inside the stream loop's closures without a
   // stale render's copy.
   const agentsRef = useRef<CompetingAgent[]>([])
   const lastRevealRef = useRef(0)
 
   useEffect(() => {
-    if (parsed === null) {
+    if (parsed === null && chainRace === undefined) {
+      setRouteCount(undefined)
       setProposals({})
       setRevealed({})
       setPhase('idle')
@@ -174,6 +185,7 @@ export function useCompetition(
     setRoute(undefined)
     setRoutesByAgent({})
     setAgents([])
+    setRouteCount(undefined)
     agentsRef.current = []
 
     // A stream that stalls without erroring would leave the panel waiting on
@@ -206,7 +218,8 @@ export function useCompetition(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: parsed?.outcome ?? '',
+            text: chainRace?.text ?? parsed?.outcome ?? '',
+            ...(chainRace !== undefined ? { chainAction: chainRace.request } : {}),
             ...(parsed?.reading !== undefined ? { reading: parsed.reading } : {}),
             chain,
             ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
@@ -253,6 +266,7 @@ export function useCompetition(
               agentsRef.current = frame.agents
               setAttributedRace(frame.competitionId)
               setAgents(frame.agents)
+              setRouteCount(frame.routeCount)
               continue
             }
 
@@ -272,6 +286,7 @@ export function useCompetition(
               if (frame.route !== undefined) {
                 setRoutesByAgent((prev) => ({ ...prev, [key]: frame.route }))
               }
+              const figures = chainFigures(frame.route)
               const source = (frame.route as { source?: unknown } | undefined)?.source
 
               setProposals((prev) => ({
@@ -287,6 +302,7 @@ export function useCompetition(
                   score: 0,
                   reasoning: frame.proposal.reasoning,
                   ...(typeof source === 'string' ? { source } : {}),
+                  ...(figures !== undefined ? { figures } : {}),
                   sliceCount: frame.proposal.sliceCount,
                   horizonMinutes: frame.proposal.horizonMinutes,
                   executionMode: frame.proposal.executionMode,
@@ -362,7 +378,7 @@ export function useCompetition(
       for (const t of timeouts) clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, chain, contextKey])
+  }, [parsed, chain, contextKey, chainRace])
 
   return {
     proposals,
@@ -373,6 +389,7 @@ export function useCompetition(
     winner,
     unanimous,
     routesByAgent,
+    ...(routeCount !== undefined ? { routeCount } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(route !== undefined ? { route } : {}),
   }

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
+import { singleRouteNote } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
@@ -84,6 +85,7 @@ export function CompetitionPanel({
   onExecute,
   executingKey,
   locked = false,
+  chainName,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
@@ -95,6 +97,8 @@ export function CompetitionPanel({
    * disabling the buttons on the first pick made it one.
    */
   locked?: boolean
+  /** The chain's name, set off Stellar so a single route can be explained. */
+  chainName?: string
 }): JSX.Element | null {
   const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
@@ -105,6 +109,10 @@ export function CompetitionPanel({
   // thread without a trade (a supply, a borrow, a standing rule) sat above a
   // race that was not happening and never ended.
   if (phase === 'idle') return null
+
+  // A refusal of the action itself is shown by the chat, as written, in the
+  // action card; saying "agents are not online" over it would be wrong.
+  if (error?.code === 'action_refused') return null
 
   if (error !== undefined) {
     return (
@@ -133,8 +141,12 @@ export function CompetitionPanel({
   const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key] && answered(a.key))
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
+  const routeNote =
+    chainName !== undefined ? singleRouteNote(state.routeCount, chainName) : undefined
+
   return (
     <div className="flex flex-col gap-4">
+      {routeNote !== undefined ? <div className={systemPill}>{routeNote}</div> : null}
       {revealedAgents.length === 0 && !decided ? (
         <div className={systemPill}>
           <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
@@ -241,11 +253,12 @@ export function CompetitionPanel({
                           oracle's fair value. */}
                       <div className="flex flex-col text-xs tabular-nums">
                         <span className="font-semibold">
-                          {money(proposal?.avgPriceUsd ?? 0)} avg
+                          {proposal?.figures?.headline ??
+                            `${money(proposal?.avgPriceUsd ?? 0)} avg`}
                         </span>
                         <span className="opacity-60">
                           {[
-                            vsOracle(proposal?.vsOraclePct),
+                            proposal?.figures !== undefined ? '' : vsOracle(proposal?.vsOraclePct),
                             proposal?.executionMode === 'rest' &&
                             proposal.horizonMinutes !== undefined &&
                             proposal.horizonMinutes > 0

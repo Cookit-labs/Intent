@@ -24,6 +24,7 @@ import { StrategyEditor, type StrategyEdits } from './strategy-editor'
 import { DEFAULT_SLIPPAGE_BPS } from '../../lib/swap/build-tx'
 import { ACKNOWLEDGED } from '../../lib/chat/clarify-flow'
 import type { ClarifyTurn } from '../../lib/clarify/clarify'
+import { needsDirectRoute, reviewChainRoute } from '../../lib/agents/chain-race'
 import { agentsFromProposals } from '../../lib/agents/competition'
 import type { CreateIntentInput } from '@intent/types'
 
@@ -55,6 +56,7 @@ import { ensureSession } from '../../lib/api/auth'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
 import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
+import type { ChainActionRequest } from '../../lib/chains/types'
 import { useChainAction } from '../../hooks/use-chain-action'
 import { ChainActionConfirm } from './chain-action-confirm'
 import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
@@ -188,6 +190,14 @@ export function IntentChat(): JSX.Element {
   const [message, setMessage] = useState<string | null>(null)
   const [parsed, setParsed] = useState<ParsedIntent | null>(null)
   const [executingKey, setExecutingKey] = useState<string | null>(null)
+  // A swap, supply or stake typed on a chain other than Stellar, while its race
+  // runs. `parsed` stays null for it so Stellar's cards do not appear.
+  const [chainRace, setChainRace] = useState<{ request: ChainActionRequest; text: string } | null>(
+    null
+  )
+  // Set when the race left nothing to review and the direct route was built, so
+  // the card can say why.
+  const [directFallback, setDirectFallback] = useState(false)
   // The intent placed in this conversation, so an order that is waiting for a
   // price can be watched — and withdrawn — without leaving the chat.
   const [placedId, setPlacedId] = useState<string | null>(null)
@@ -405,8 +415,9 @@ export function IntentChat(): JSX.Element {
   const live = useCompetition(
     restored === null ? parsed : null,
     slug,
-    [...raceContext(thread, notes), ...brief],
-    address
+    chainRace !== null ? [] : [...raceContext(thread, notes), ...brief],
+    address,
+    restored === null && chainRace !== null ? chainRace : undefined
   )
   const liveCompetition = live
 
@@ -456,6 +467,40 @@ export function IntentChat(): JSX.Element {
   // no earlier step whose output has to be carried.
   const supply = useSupply()
   const chainAction = useChainAction()
+  // A new race gets a clean slate when the chain changes.
+  useEffect(() => {
+    setChainRace(null)
+  }, [slug])
+  // The race ended with nothing to review: build the direct route once, so the
+  // chain keeps working when the agents are offline. A refusal of the action
+  // is shown as written by the card and is not retried.
+  const fellBackRef = useRef<typeof chainRace>(null)
+  // The race the hook has actually begun. On the render where a new race is
+  // asked for, the hook still holds the last one's ending, which must not be
+  // mistaken for this race's.
+  const startedRef = useRef<typeof chainRace>(null)
+  const raceEnded = needsDirectRoute({
+    phase: live.phase,
+    winner: live.winner,
+    anyAnswered: Object.values(live.proposals).some((p) => p.failed === undefined),
+    ...(live.error !== undefined ? { error: live.error } : {}),
+  })
+  useEffect(() => {
+    if (chainRace === null || restored !== null || fellBackRef.current === chainRace) return
+    if (live.phase === 'competing') startedRef.current = chainRace
+    if (startedRef.current !== chainRace) return
+    if (live.error?.code === 'action_refused') {
+      fellBackRef.current = chainRace
+      chainAction.refuse(live.error.message, chainRace.text)
+      return
+    }
+    if (!raceEnded) return
+    fellBackRef.current = chainRace
+    setDirectFallback(true)
+    chainAction.prepare(chainRace.request, chainRace.text)
+    // chainAction changes identity with its state; the race ending is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chainRace, raceEnded, live.error, live.phase, restored])
   const cashout = useCashout()
   const [cashoutQuestion, setCashoutQuestion] = useState<CashoutQuestionState | null>(null)
   // A leveraged position on Noether. Its own shape again: no route, no
@@ -764,6 +809,7 @@ export function IntentChat(): JSX.Element {
 
   /** What a previous attempt left on screen, which a new turn must not inherit. */
   function resetTurnState(): void {
+    setChainRace(null)
     sequence.reset()
     swap.reset()
     supply.reset()
@@ -1489,15 +1535,21 @@ export function IntentChat(): JSX.Element {
         // The thread only renders once there is a message, so without this the
         // card below would be built and never seen.
         setMessage(text)
-        chainAction.prepare(action, text)
+        // The agents race first; Review on a route is what builds it.
+        chainAction.reset()
+        setExecutingKey(null)
+        setDirectFallback(false)
+        setChainRace({ request: action, text })
         return
       }
       if (looksLikeChainAction(text)) {
         setMessage(text)
+        setChainRace(null)
         chainAction.refuse(chainHelp(descriptor.name, capabilities), text)
         return
       }
       chainAction.reset()
+      setChainRace(null)
     }
 
     // An answer to a question already asked.
@@ -1704,6 +1756,7 @@ export function IntentChat(): JSX.Element {
     cashout.dismiss()
     setCashoutQuestion(null)
     setParsed(null)
+    setChainRace(null)
     setExecutingKey(null)
     setPlacedId(null)
     setAffordError(null)
@@ -1751,6 +1804,26 @@ export function IntentChat(): JSX.Element {
     // A signature in flight is the real reason to refuse: past that point a
     // transaction is with the wallet or the network, and switching routes
     // would leave the wrong one submitted.
+    // A race on another chain signs through that chain's own card, never the
+    // Stellar swap hook.
+    if (slug !== 'stellar' && chainRace !== null) {
+      const outcome = reviewChainRoute({
+        // Only this agent's own route: falling back to the winner's would sign
+        // a trade the user did not pick.
+        route: routesByAgent[key],
+        asked: chainRace.request,
+        text: chainRace.text,
+        phase: chainAction.phase,
+        prepare: chainAction.prepare,
+        refuse: chainAction.refuse,
+      })
+      if (outcome === 'prepared') {
+        setDirectFallback(false)
+        setExecutingKey(key)
+      }
+      return
+    }
+
     const inFlight =
       swap.phase === 'signing' || swap.phase === 'submitting' || swap.phase === 'settled'
     if (!parsed || inFlight) return
@@ -2384,8 +2457,13 @@ export function IntentChat(): JSX.Element {
                 locked={
                   swap.phase === 'signing' ||
                   swap.phase === 'submitting' ||
-                  swap.phase === 'settled'
+                  swap.phase === 'settled' ||
+                  chainAction.phase === 'signing' ||
+                  chainAction.phase === 'submitting' ||
+                  chainAction.phase === 'settled' ||
+                  chainAction.phase === 'pending'
                 }
+                {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />
               {/* Changes to how the recommendation is carried out, offered once
                   the agents have answered and before anything is signed. */}
@@ -2560,6 +2638,11 @@ export function IntentChat(): JSX.Element {
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
 
+              {directFallback && chainAction.phase !== 'idle' ? (
+                <p className={systemPill}>
+                  The agents were unavailable, so this is the direct route. Nothing has been signed.
+                </p>
+              ) : null}
               {chainAction.phase !== 'idle' ? <ChainActionConfirm action={chainAction} /> : null}
 
               {cashout.session !== null ? (

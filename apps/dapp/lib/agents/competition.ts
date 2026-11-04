@@ -18,7 +18,12 @@ import { agentGradient } from './identity'
 export type CompetitionPhase = 'idle' | 'competing' | 'decided'
 
 /** Why a competition could not run at all, as opposed to one agent failing. */
-export type CompetitionErrorCode = 'agents_offline' | 'chain_unsupported' | 'no_agent_answered'
+export type CompetitionErrorCode =
+  | 'agents_offline'
+  | 'chain_unsupported'
+  | 'no_agent_answered'
+  /** The action itself was refused (unknown token, bad amount, over the cap); shown as written. */
+  | 'action_refused'
 
 export interface CompetitionError {
   code: CompetitionErrorCode
@@ -59,6 +64,11 @@ export interface AgentProposalView {
    * Empty or absent for a plan that did nothing the brief warns against.
    */
   penalties?: { reason: string; points: number; detail: string }[]
+  /**
+   * What to show in place of the dollar price and oracle gap, when those would
+   * mislead: a chain swap that could not be priced, or a rate on a supply.
+   */
+  figures?: { headline: string }
   /** Set when the agent produced no proposal: timed out, refused, or was rejected. */
   failed?: BrainErrorCode
 }
@@ -83,6 +93,8 @@ export interface CompetitionState {
   unanimous?: boolean
   /** Present when the competition could not run, in place of proposals. */
   error?: CompetitionError
+  /** How many routes the agents are choosing between. Sent only for chains other than Stellar. */
+  routeCount?: number
 }
 
 /**

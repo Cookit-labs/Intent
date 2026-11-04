@@ -23,6 +23,8 @@ export interface CompetitionStartedFrame {
    */
   agents: { key: AgentKey; name: string; gradient: string; model: string }[]
   windowSeconds: number
+  /** How many routes the agents choose between. Sent for chains other than Stellar only. */
+  routeCount?: number
 }
 
 export interface CompetitionProposalFrame {
@@ -92,7 +94,7 @@ export interface CompetitionWinnerFrame {
  */
 export interface CompetitionErrorFrame {
   type: 'competition:error'
-  code: 'agents_offline' | 'chain_unsupported' | 'no_agent_answered'
+  code: 'agents_offline' | 'chain_unsupported' | 'no_agent_answered' | 'action_refused'
   message: string
 }
 

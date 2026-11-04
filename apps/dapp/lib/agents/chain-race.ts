@@ -1,0 +1,132 @@
+import type { ChainActionRequest } from '../chains/types'
+import type { CompetitionErrorCode } from './competition'
+import type { ChainRouteQuote } from './chain-routes'
+import { isUnmeasuredSwap } from './settle-chain-plan'
+
+/**
+ * The route as a chain route, or nothing. A Stellar quote has no `kind`, so it
+ * can never be mistaken for one and signed through the chain path.
+ */
+function asChainRoute(route: unknown): ChainRouteQuote | undefined {
+  if (typeof route !== 'object' || route === null) return undefined
+  const r = route as Partial<ChainRouteQuote>
+  if (r.kind !== 'chain' || typeof r.request !== 'object' || r.request === null) return undefined
+  if (typeof r.venueId !== 'string' || r.venueId === '') return undefined
+  return r as ChainRouteQuote
+}
+
+/**
+ * What to prepare when the user presses Review on a route.
+ *
+ * Agents only ever choose a route; the amount and tokens are what the user
+ * typed. So the request that gets signed is the asked one with the venue taken
+ * from the route, and a route that disagrees with the ask in kind, amount or
+ * either token is refused rather than corrected.
+ */
+export function chainRequestFor(
+  route: unknown,
+  asked: ChainActionRequest
+): ChainActionRequest | undefined {
+  const chain = asChainRoute(route)
+  if (chain === undefined) return undefined
+  const r = chain.request
+  if (
+    r.kind !== asked.kind ||
+    r.amount !== asked.amount ||
+    r.tokenIn !== asked.tokenIn ||
+    (r.tokenOut ?? '') !== (asked.tokenOut ?? '')
+  ) {
+    return undefined
+  }
+  return { ...asked, venue: chain.venueId }
+}
+
+/** Said when only one route exists, so the race does not look like it skipped the choosing. */
+export function singleRouteNote(
+  routeCount: number | undefined,
+  chainName: string
+): string | undefined {
+  if (routeCount !== 1) return undefined
+  return `One route available on ${chainName}. The agents are judging whether it's worth taking.`
+}
+
+type ChainActionPhaseName =
+  | 'idle'
+  | 'building'
+  | 'review'
+  | 'signing'
+  | 'submitting'
+  | 'settled'
+  | 'pending'
+  | 'failed'
+
+export type ReviewOutcome = 'prepared' | 'refused' | 'ignored'
+
+/**
+ * Pressing Review on a chain route.
+ *
+ * A press while a build is under way does nothing, so one press makes one
+ * build (and one deposit address). Once a signature is with the wallet or the network
+ * the route can no longer change. A built card that is not yet signed may be
+ * replaced by choosing another route.
+ */
+export function reviewChainRoute(args: {
+  route: unknown
+  asked: ChainActionRequest
+  text: string
+  phase: ChainActionPhaseName
+  prepare: (request: ChainActionRequest, asked: string) => void
+  refuse: (message: string, asked: string) => void
+}): ReviewOutcome {
+  const { phase } = args
+  if (phase === 'building') return 'ignored'
+  if (phase === 'signing' || phase === 'submitting' || phase === 'settled' || phase === 'pending') {
+    return 'ignored'
+  }
+
+  const request = chainRequestFor(args.route, args.asked)
+  if (request === undefined) {
+    args.refuse(
+      "That route doesn't match what you asked for, so it can't be used. Nothing was signed or sent.",
+      args.text
+    )
+    return 'refused'
+  }
+  args.prepare(request, args.text)
+  return 'prepared'
+}
+
+/**
+ * Whether a finished race left the user with nothing to review, so the direct
+ * route should be built instead. A refusal (unknown token, bad amount, over
+ * the cap) is not that: it is shown as written, because building would only
+ * refuse again.
+ */
+export function needsDirectRoute(state: {
+  phase: string
+  winner: string | null
+  anyAnswered: boolean
+  error?: { code: CompetitionErrorCode }
+}): boolean {
+  if (state.phase !== 'decided') return false
+  if (state.error !== undefined) return state.error.code !== 'action_refused'
+  return state.winner === null && !state.anyAnswered
+}
+
+/**
+ * How a chain route's figures read when the usual "$ avg, % vs oracle" would
+ * mislead: a swap nobody could price shows as zero, which reads as perfect,
+ * and a supply or stake has a rate and not a price. Undefined means the usual
+ * display is right, which includes every Stellar route.
+ */
+export function chainFigures(route: unknown): { headline: string } | undefined {
+  const chain = asChainRoute(route)
+  if (chain === undefined) return undefined
+  if (chain.request.kind === 'swap') {
+    return isUnmeasuredSwap(chain) ? { headline: 'Price unknown' } : undefined
+  }
+  const apy = chain.apyPercent
+  return apy !== undefined && Number.isFinite(apy)
+    ? { headline: `${apy}% APY` }
+    : { headline: 'Rate not available' }
+}
