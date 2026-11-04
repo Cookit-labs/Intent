@@ -1,8 +1,7 @@
 import { parseCashout } from '../weave/parse-cashout'
-import { amountOf, chainTokenWord } from './parse-action'
+import { AMOUNT, amountOf, chainTokenWord } from './parse-action'
 import type { ChainSequenceRequest, FollowOn } from './sequence'
 
-const AMOUNT = String.raw`\$?([\d,]*\.?\d+)`
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
 const CONNECTOR = String.raw`(?:\s*,\s*(?:and\s+then\s+|then\s+|and\s+)?|\s+(?:and\s+then|then|and)\s+)`
 

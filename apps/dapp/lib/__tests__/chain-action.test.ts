@@ -39,7 +39,6 @@ describe('parseChainAction', () => {
   it.each([
     ['5', '5'],
     ['0.5', '0.5'],
-    ['05', '05'],
     ['1,000', '1000'],
     ['1,000.5', '1000.5'],
     ['$20', '20'],
@@ -58,6 +57,30 @@ describe('parseChainAction', () => {
       tokenIn: 'NEAR',
       venue: 'rNEAR',
     })
+  })
+
+  it.each(['1,5', '0,5', '1,50', '10,00', '1,0000', ',5', '1,,000', '1000,000'])(
+    'reads no amount from %s, on any kind',
+    (amount) => {
+      expect(parseChainAction(`send ${amount} USDC to bob.near`)).toBeNull()
+      expect(parseChainAction(`swap ${amount} USDC to SOL`)).toBeNull()
+      expect(parseChainAction(`supply ${amount} USDC`)).toBeNull()
+      expect(parseChainAction(`stake ${amount} SUI`)).toBeNull()
+    }
+  )
+
+  it.each([
+    ['1,000', '1000'],
+    ['1,000.5', '1000.5'],
+    ['12,345,678', '12345678'],
+    ['.5', '0.5'],
+    ['05', '5'],
+    ['007.5', '7.5'],
+    ['0.5', '0.5'],
+    ['0', '0'],
+  ])('reads %s as %s', (typed, amount) => {
+    expect(parseChainAction(`send ${typed} USDC to bob.near`)?.amount).toBe(amount)
+    expect(parseChainAction(`stake ${typed} SUI`)?.amount).toBe(amount)
   })
 
   it('does not guess at anything looser', () => {

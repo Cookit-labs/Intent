@@ -205,28 +205,28 @@ describe('step 2 on its own card', () => {
 
   it('does not read step 1’s ending, still on the card, as step 2’s', () => {
     for (const phase of ['settled', 'pending', 'failed', 'idle'] as const) {
-      expect(moveOnSecond(OPENING, phase, true, SEND, '5')).toBe(OPENING)
-      expect(moveOnSecond(OPENING, phase, false, SEND, '5')).toBe(OPENING)
+      expect(moveOnSecond(OPENING, phase, true, SEND, '5', 'send')).toBe(OPENING)
+      expect(moveOnSecond(OPENING, phase, false, SEND, '5', 'send')).toBe(OPENING)
     }
   })
 
   it('opens when its own build starts, and holds while the card is live', () => {
-    expect(moveOnSecond(OPENING, 'building', false, SEND, '5')).toEqual(OPEN)
+    expect(moveOnSecond(OPENING, 'building', false, SEND, '5', 'send')).toEqual(OPEN)
     for (const phase of ['building', 'review', 'signing', 'submitting'] as const) {
-      expect(moveOnSecond(OPEN, phase, true, SEND, '5')).toBe(OPEN)
-      expect(moveOnSecond(OPEN, phase, false, SEND, '5')).toBe(OPEN)
+      expect(moveOnSecond(OPEN, phase, true, SEND, '5', 'send')).toBe(OPEN)
+      expect(moveOnSecond(OPEN, phase, false, SEND, '5', 'send')).toBe(OPEN)
     }
   })
 
   it('finishes on settled, keeping step 1 flagged settled and measuring nothing', () => {
-    const moved = moveOnSecond(OPEN, 'settled', true, SEND, '5')
+    const moved = moveOnSecond(OPEN, 'settled', true, SEND, '5', 'send')
     expect(moved.stage).toBe('followed')
     expect(moved.settled).toBe(true)
     expect(moved.error).toBeUndefined()
   })
 
   it('ends on pending, saying step 1 went through and not to send again', () => {
-    const moved = moveOnSecond(OPEN, 'pending', true, SEND, '5')
+    const moved = moveOnSecond(OPEN, 'pending', true, SEND, '5', 'send')
     expect(moved.stage).toBe('unsettled')
     expect(moved.settled).toBe(true)
     expect(moved.error).toContain('5 USDC')
@@ -235,20 +235,33 @@ describe('step 2 on its own card', () => {
   })
 
   it('ends on a failure that can’t prove nothing moved', () => {
-    expect(moveOnSecond(OPEN, 'failed', true, SEND, '5').stage).toBe('unsettled')
-    expect(moveOnSecond(OPEN, 'idle', true, SEND, '5').stage).toBe('unsettled')
+    expect(moveOnSecond(OPEN, 'failed', true, SEND, '5', 'send').stage).toBe('unsettled')
+    expect(moveOnSecond(OPEN, 'idle', true, SEND, '5', 'send').stage).toBe('unsettled')
   })
 
   it('returns to the button on a failure that proves nothing moved, and on Cancel', () => {
-    expect(moveOnSecond(OPEN, 'failed', false, SEND, '5').stage).toBe('ready')
-    expect(moveOnSecond(OPEN, 'idle', false, SEND, '5').stage).toBe('ready')
+    expect(moveOnSecond(OPEN, 'failed', false, SEND, '5', 'send').stage).toBe('ready')
+    expect(moveOnSecond(OPEN, 'idle', false, SEND, '5', 'send').stage).toBe('ready')
+  })
+
+  it('does not tick step 2 for a card of another kind settling, and ends instead', () => {
+    for (const kind of ['swap', 'supply', 'stake', undefined] as const) {
+      const moved = moveOnSecond(OPEN, 'settled', true, SEND, '5', kind)
+      expect(moved.stage).toBe('unsettled')
+      expect(moved.error).toMatch(/check your wallet/i)
+    }
+    const deposit: ChainSequenceRequest = { ...SEND, followOn: { kind: 'supply' } }
+    expect(moveOnSecond(OPEN, 'settled', true, deposit, '5', 'supply').stage).toBe('followed')
+    expect(moveOnSecond(OPEN, 'settled', true, deposit, '5', 'swap').stage).toBe('unsettled')
+    const stake: ChainSequenceRequest = { ...SEND, followOn: { kind: 'stake' } }
+    expect(moveOnSecond(OPEN, 'settled', true, stake, '5', 'stake').stage).toBe('followed')
   })
 
   it('never brings the button back once step 2 has ended, whatever the card does', () => {
     const ended = [
-      moveOnSecond(OPEN, 'settled', true, SEND, '5'),
-      moveOnSecond(OPEN, 'pending', true, SEND, '5'),
-      moveOnSecond(OPEN, 'failed', true, SEND, '5'),
+      moveOnSecond(OPEN, 'settled', true, SEND, '5', 'send'),
+      moveOnSecond(OPEN, 'pending', true, SEND, '5', 'send'),
+      moveOnSecond(OPEN, 'failed', true, SEND, '5', 'send'),
     ]
     for (const progress of ended) {
       for (const phase of [
@@ -262,7 +275,7 @@ describe('step 2 on its own card', () => {
         'failed',
       ] as const) {
         for (const signed of [true, false]) {
-          expect(moveOnSecond(progress, phase, signed, SEND, '5')).toBe(progress)
+          expect(moveOnSecond(progress, phase, signed, SEND, '5', 'send')).toBe(progress)
           expect(moveOnCard(progress, phase, signed, true, SEND)).toBe(progress)
         }
       }
@@ -283,7 +296,7 @@ describe('step 2 on its own card', () => {
     let progress: Parameters<typeof moveOnSecond>[0] = OPENING
     const seen: string[] = []
     for (const [phase, signed] of phases) {
-      progress = moveOnSecond(progress, phase, signed, SEND, '5')
+      progress = moveOnSecond(progress, phase, signed, SEND, '5', 'send')
       seen.push(progress.stage)
     }
     expect(seen).not.toContain('ready')
@@ -425,6 +438,21 @@ describe('words for what follows a swap', () => {
       'Stake on Meta Pool'
     )
     expect(stepLabels(withKind({ kind: 'send', recipient: ALICE }))[1]).toBe(`Send to ${ALICE}`)
+  })
+
+  it('uses the table’s symbol however the token was typed', () => {
+    const jito: ChainSequenceRequest = {
+      swap: { kind: 'swap', amount: '1', tokenIn: 'usdc', tokenOut: 'jitosol' },
+      followOn: { kind: 'send', recipient: ALICE },
+    }
+    expect(secondStepLabel(jito, '4.98')).toBe('Send 4.98 JitoSOL')
+    expect(deliveredLine('4.98', jito)).toBe('About 4.98 JitoSOL reached your wallet.')
+    expect(stepLabels(jito)[0]).toBe('Swap 1 USDC to JitoSOL')
+    const unknown: ChainSequenceRequest = {
+      swap: { kind: 'swap', amount: '1', tokenIn: 'usdc', tokenOut: 'scam' },
+      followOn: { kind: 'stake' },
+    }
+    expect(secondStepLabel(unknown, '1')).toBe('Stake 1 SCAM')
   })
 
   it('offers the button with what arrived, and none for a cash-out', () => {

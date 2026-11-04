@@ -85,6 +85,19 @@ describe('a token read beside a currency we do not pay', () => {
 })
 
 describe('parseChainSequence strictness', () => {
+  it('reads no amount from a decimal comma, and keeps real groups', () => {
+    for (const amount of ['1,5', '0,5', '1,50', '10,00']) {
+      expect(parseChainSequence(`swap ${amount} SOL to USDC then cash out`)).toBeNull()
+    }
+    const read = (typed: string): unknown => {
+      const parsed = parseChainSequence(`swap ${typed} SOL to USDC then cash out`)
+      return parsed !== null && 'swap' in parsed ? parsed.swap.amount : undefined
+    }
+    expect(read('1,000.5')).toBe('1000.5')
+    expect(read('.5')).toBe('0.5')
+    expect(read('05')).toBe('5')
+  })
+
   it.each([
     'swap 5 SOL to USDC then send 2 to X',
     'swap 5 SOL to USDC and swap 2 to BONK',

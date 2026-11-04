@@ -4,6 +4,7 @@ import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-
 import { WRAP_NEAR } from './near/tokens'
 import { sendRefusal } from './recipient'
 import { fromBase, toBase } from './sequence'
+import { holdingOf } from './sequence-flow'
 import {
   ChainActionRefused,
   tokenBySymbol,
@@ -14,6 +15,7 @@ import {
   type ChainVenue,
   type FollowOnStep,
   type PreparedAction,
+  type WalletBalances,
 } from './types'
 
 /** Keys only: each chain's name is its slug, and reading Stellar's descriptor at load would throw. */
@@ -191,6 +193,7 @@ export async function prepareChainAction(
 
   await assertAmountWithinCap(chainApi, request, tokenIn, env)
   await assertNativeReserve(chainApi, request, account)
+  await assertHeldForSend(chainApi, request, tokenIn, account)
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
@@ -219,6 +222,58 @@ const NATIVE_SYMBOL: Record<ChainWithActions, string> = {
 const RESERVE_READ_MS = 3000
 
 /**
+ * The wallet's balances, or nothing if the read fails or runs late. What this guards is a doomed
+ * transaction, and it must never be what blocks a good one.
+ */
+async function readBalancesBriefly(
+  chainApi: ChainModule,
+  account: string
+): Promise<WalletBalances | undefined> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      chainApi.balances(account, controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error('balance read timed out'))
+        }, RESERVE_READ_MS)
+      }),
+    ])
+  } catch {
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * Refuses a send of more than the wallet is known to hold, matched on the token's id. A send a
+ * wallet signs and the chain then fails costs the fee, and on NEAR reads as maybe having gone out.
+ * The native coin is left to `assertNativeReserve`, which has already read it.
+ */
+async function assertHeldForSend(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  tokenIn: ChainToken,
+  account: string
+): Promise<void> {
+  if (request.kind !== 'send') return
+  if (tokenIn.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]) return
+  const reading = await readBalancesBriefly(chainApi, account)
+  if (reading === undefined) return
+  const amount = holdingOf(reading, tokenIn)
+  if (amount === undefined) return
+  const held = toBase(amount, tokenIn.decimals)
+  const asked = toBase(request.amount, tokenIn.decimals)
+  if (held === undefined || asked === undefined || asked <= held) return
+  throw new ChainActionRefused(
+    `You hold ${amount} ${tokenIn.symbol}, which is less than ${request.amount}. Nothing was signed or sent.`
+  )
+}
+
+/**
  * Refuses spending a wallet's whole native balance, which would leave nothing for the fee.
  * Reads the balance once and compares in base units. A read that fails or runs late passes:
  * this guards a doomed trade, and must never be what blocks a good one.
@@ -236,24 +291,8 @@ export async function assertNativeReserve(
   if (tokenIn === undefined) return
   if (tokenIn.symbol.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return
 
-  const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let reading
-  try {
-    reading = await Promise.race([
-      chainApi.balances(account, controller.signal),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort()
-          reject(new Error('balance read timed out'))
-        }, RESERVE_READ_MS)
-      }),
-    ])
-  } catch {
-    return
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
+  const reading = await readBalancesBriefly(chainApi, account)
+  if (reading === undefined) return
 
   const native = reading.tokens.find((t) => t.native)
   if (native === undefined) return

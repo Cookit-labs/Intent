@@ -4,6 +4,8 @@ import {
   chainFigures,
   chainRequestFor,
   chainReviewClosed,
+  raceClosed,
+  stepErrorMessage,
   chainSigning,
   isChainRoute,
   needsDirectRoute,
@@ -237,12 +239,85 @@ describe('chain card phases', () => {
     expect(showDirectNote(false, 'review')).toBe(false)
   })
 
+  it('never says nothing was signed above step 2, once the swap settled', () => {
+    expect(showDirectNote(true, 'review', false)).toBe(true)
+    expect(showDirectNote(true, 'review', true)).toBe(false)
+    expect(showDirectNote(true, 'building', true)).toBe(false)
+  })
+
   it('drops the selected look after a failed or empty card', () => {
     expect(selectionHolds('failed')).toBe(false)
     expect(selectionHolds('idle')).toBe(false)
     expect(selectionHolds('building')).toBe(true)
     expect(selectionHolds('review')).toBe(true)
     expect(selectionHolds('settled')).toBe(true)
+  })
+})
+
+describe('raceClosed', () => {
+  it('closes on a signature, and on a settled sequence even with the latch lifted', () => {
+    expect(raceClosed(false, false)).toBe(false)
+    expect(raceClosed(true, false)).toBe(true)
+    expect(raceClosed(false, true)).toBe(true)
+    expect(raceClosed(true, true)).toBe(true)
+  })
+
+  it('keeps the panel locked on step 2’s card, whose latch step 2’s press has lifted', () => {
+    expect(chainReviewClosed('review', raceClosed(false, true))).toBe(true)
+    expect(chainReviewClosed('idle', raceClosed(false, true))).toBe(true)
+    expect(chainReviewClosed('failed', raceClosed(false, true))).toBe(true)
+  })
+
+  it('builds no second swap when Review is pressed on the race after step 1 settled', () => {
+    const prepare = vi.fn()
+    const refuse = vi.fn()
+    for (const phase of ['review', 'idle', 'failed'] as const) {
+      expect(
+        reviewChainRoute({
+          route: {
+            kind: 'chain',
+            venueId: 'jupiter',
+            request: { kind: 'swap', amount: '0.5', tokenIn: 'SOL', tokenOut: 'USDC' },
+          },
+          asked: { kind: 'swap', amount: '0.5', tokenIn: 'SOL', tokenOut: 'USDC' },
+          text: 'swap 0.5 SOL to USDC then send to x',
+          phase,
+          signed: raceClosed(false, true),
+          prepare,
+          refuse,
+        })
+      ).toBe('ignored')
+    }
+    expect(prepare).not.toHaveBeenCalled()
+    expect(refuse).not.toHaveBeenCalled()
+  })
+})
+
+describe('stepErrorMessage', () => {
+  const STEP = 'This step did not start. The swap stands, and what arrived stays in your wallet.'
+
+  it('leaves a message alone until the swap has settled', () => {
+    const said = 'Too much. Nothing was signed or sent.'
+    expect(stepErrorMessage(said, false)).toBe(said)
+    expect(stepErrorMessage(undefined, true)).toBeUndefined()
+  })
+
+  it('replaces the claim once the swap has been signed', () => {
+    expect(stepErrorMessage('Too much. Nothing was signed or sent.', true)).toBe(
+      `Too much. ${STEP}`
+    )
+    expect(stepErrorMessage('A venue is busy, so nothing was signed or sent.', true)).toBe(
+      `A venue is busy. ${STEP}`
+    )
+    expect(
+      stepErrorMessage('Not answering. Nothing was signed or sent, so try again in a moment.', true)
+    ).toBe(`Not answering. ${STEP}`)
+  })
+
+  it('leaves a message that makes no such claim', () => {
+    expect(stepErrorMessage('Could not reach the network.', true)).toBe(
+      'Could not reach the network.'
+    )
   })
 })
 

@@ -40,6 +40,8 @@ import { ACKNOWLEDGED } from '../../lib/chat/clarify-flow'
 import type { ClarifyTurn } from '../../lib/clarify/clarify'
 import {
   chainReviewClosed,
+  raceClosed,
+  stepErrorMessage,
   chainSigning,
   isChainRoute,
   needsDirectRoute,
@@ -638,6 +640,8 @@ export function IntentChat({
   })
   useEffect(() => {
     if (chainRace === null || restored !== null || fellBackRef.current === chainRace) return
+    // The swap this race was for has settled, so nothing more is built from it.
+    if (chainSequence.settled) return
     if (live.phase === 'competing') startedRef.current = chainRace
     if (startedRef.current !== chainRace) return
     if (live.error?.code === 'action_refused') {
@@ -917,7 +921,7 @@ export function IntentChat({
   const chainOutcome = chainOutcomeSentence({
     phase: chainAction.phase,
     venueName: chainAction.prepared?.venueName,
-    error: chainAction.error,
+    error: stepErrorMessage(chainAction.error, chainSequence.settled),
   })
   useEffect(() => {
     if (chainOutcome === undefined || message === null) return
@@ -2423,7 +2427,7 @@ export function IntentChat({
         asked: chainRace.request,
         text: chainRace.text,
         phase: chainAction.phase,
-        signed: chainAction.signed === true,
+        signed: raceClosed(chainAction.signed === true, chainSequence.settled),
         preparedVenueId: chainAction.prepared?.venueId,
         ...(live.competitionId !== undefined ? { raceId: live.competitionId } : {}),
         prepare: chainAction.prepare,
@@ -3098,10 +3102,13 @@ export function IntentChat({
                   swap.phase === 'signing' ||
                   swap.phase === 'submitting' ||
                   swap.phase === 'settled' ||
-                  chainReviewClosed(chainAction.phase, chainAction.signed === true)
+                  chainReviewClosed(
+                    chainAction.phase,
+                    raceClosed(chainAction.signed === true, chainSequence.settled)
+                  )
                 }
                 directRoute={directFallback}
-                signed={chainAction.requested}
+                signed={raceClosed(chainAction.requested, chainSequence.settled)}
                 {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />
               {/* Changes to how the recommendation is carried out, offered once
@@ -3280,14 +3287,17 @@ export function IntentChat({
 
               {restored === null ? <ChainSequenceSteps steps={chainSequence} /> : null}
 
-              {showDirectNote(directFallback, chainAction.phase) ? (
+              {showDirectNote(directFallback, chainAction.phase, chainSequence.settled) ? (
                 <p className={systemPill}>
                   The agents were unavailable, so this is the direct route. Nothing has been signed.
                 </p>
               ) : null}
               {chainAction.phase !== 'idle' ? (
                 <div ref={chainConfirmRef}>
-                  <ChainActionConfirm action={chainAction} />
+                  <ChainActionConfirm
+                    action={chainAction}
+                    sequenceSettled={chainSequence.settled}
+                  />
                 </div>
               ) : null}
 

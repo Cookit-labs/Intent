@@ -4,10 +4,19 @@ import { Button, Card } from '@intent/ui'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
+import { stepErrorMessage } from '../../lib/agents/chain-race'
 
 /** Review, sign and result for an action on a chain other than Stellar. */
-export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Element {
-  const { phase, prepared, error, hash, explorerUrl, earlier } = action
+export function ChainActionConfirm({
+  action,
+  sequenceSettled = false,
+}: {
+  action: ChainAction
+  /** This card is step 2, after a swap that was signed and settled. */
+  sequenceSettled?: boolean
+}): JSX.Element {
+  const { phase, prepared, hash, explorerUrl, earlier } = action
+  const error = stepErrorMessage(action.error, sequenceSettled)
   const busy = phase === 'signing' || phase === 'submitting'
 
   return (

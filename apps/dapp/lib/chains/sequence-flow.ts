@@ -25,6 +25,7 @@ import { SOLANA_TOKENS } from './solana/tokens'
 import { SUI_TOKENS } from './sui/tokens'
 import {
   tokenBySymbol,
+  type ChainActionKind,
   type ChainActionRequest,
   type ChainToken,
   type ChainWithActions,
@@ -172,23 +173,29 @@ export function moveOnCard(
  * Until its own build starts, the card may still show how step 1 ended. Once it has, `signed` is
  * the latch, and false on a failure or a closed card means no signature can have moved money. That
  * alone returns to `ready`. Anything else ends here, so no press can ever lift a signed step 2's
- * latch: `ready` is the only stage that offers the button.
+ * latch: `ready` is the only stage that offers the button. Only a card of the follow-on's own kind
+ * settling is step 2 finishing. Anything else that settled is not it, and is not ticked as it.
  */
 export function moveOnSecond(
   progress: SequenceProgress,
   phase: ChainActionPhase,
   signed: boolean,
   request: ChainSequenceRequest,
-  delivered: string | undefined
+  delivered: string | undefined,
+  cardKind: ChainActionKind | undefined
 ): SequenceProgress {
   if (progress.stage !== 'following') return progress
   if (progress.opened !== true) {
     return phase === 'building' ? { ...progress, opened: true } : progress
   }
-  if (phase === 'settled') return { stage: 'followed', settled: true }
-  const ended = phase === 'pending' || phase === 'failed' || phase === 'idle'
-  if (!ended) return progress
-  if (phase !== 'pending' && !signed) return { stage: 'ready', settled: true }
+  if (phase === 'settled' && cardKind === request.followOn.kind) {
+    return { stage: 'followed', settled: true }
+  }
+  const clean = (phase === 'failed' || phase === 'idle') && !signed
+  if (clean) return { stage: 'ready', settled: true }
+  if (phase !== 'settled' && phase !== 'pending' && phase !== 'failed' && phase !== 'idle') {
+    return progress
+  }
   const arrived =
     delivered === undefined
       ? ''
@@ -482,8 +489,14 @@ export function sequenceOutcome(
   return stage === 'stranded' || stage === 'done' || stage === 'unsettled' ? error : undefined
 }
 
+/** A token as the tables spell it, JitoSOL and not JITOSOL, however it was typed. */
+function listedSymbol(word: string): string {
+  const listed = tokenBySymbol(Object.values(TOKEN_TABLES).flat(), word)
+  return listed?.symbol ?? word.toUpperCase()
+}
+
 function outputSymbol(request: ChainSequenceRequest): string {
-  return (request.swap.tokenOut ?? '').toUpperCase()
+  return listedSymbol(request.swap.tokenOut ?? '')
 }
 
 /**
@@ -509,7 +522,7 @@ export function unmeasuredReply(request: ChainSequenceRequest): string {
 
 export function stepLabels(request: ChainSequenceRequest): [string, string] {
   const { amount, tokenIn } = request.swap
-  const first = `Swap ${amount} ${tokenIn.toUpperCase()} to ${outputSymbol(request)}`
+  const first = `Swap ${amount} ${listedSymbol(tokenIn)} to ${outputSymbol(request)}`
   return [first, secondLabel(request.followOn)]
 }
 

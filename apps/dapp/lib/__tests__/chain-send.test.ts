@@ -38,6 +38,7 @@ import { parseChainAction, racesFirst } from '../chains/parse-action'
 import { assertFollowOnCanRun, prepareChainAction } from '../chains/prepare'
 import { isValidRecipient, sendRefusal } from '../chains/recipient'
 import { chainModule } from '../chains/registry'
+import { solanaDeposit } from '../weave/deposit/solana'
 import { SEND_NOTE, SEND_VENUE_ID, createSendVenue } from '../chains/send'
 import { followOnRefusal } from '../chains/sequence'
 import {
@@ -169,7 +170,7 @@ function moduleFor(chain: ChainWithActions, over: Partial<ChainModule> = {}): Ch
     defaultVenue: { send: SEND_VENUE_ID },
     priceUsd: async () => 1,
     submit: async () => ({ ok: false, error: 'unused' }),
-    balances: async () => ({ tokens: [], complete: true }),
+    balances: async () => ({ tokens: [], complete: false }),
     ...over,
   }
 }
@@ -177,6 +178,7 @@ function moduleFor(chain: ChainWithActions, over: Partial<ChainModule> = {}): Ch
 interface Sim {
   rpc: string[]
   accountOwner: string | undefined
+  accountExecutable: boolean
   send: () => unknown
 }
 
@@ -192,7 +194,10 @@ function installFetch(): void {
         getAccountInfo: {
           result: {
             context: { slot: 1 },
-            value: sim.accountOwner === undefined ? null : { owner: sim.accountOwner },
+            value:
+              sim.accountOwner === undefined
+                ? null
+                : { owner: sim.accountOwner, executable: sim.accountExecutable },
           },
         },
         getLatestBlockhash: {
@@ -223,7 +228,12 @@ function coinObject(objectId: string, type = SUI_USDC.id, owner = SUI_ME) {
 }
 
 beforeEach(() => {
-  sim = { rpc: [], accountOwner: undefined, send: () => ({ result: 'sent' }) }
+  sim = {
+    rpc: [],
+    accountOwner: undefined,
+    accountExecutable: false,
+    send: () => ({ result: 'sent' }),
+  }
   installFetch()
   vi.stubEnv('AUTH_SECRET', 'x'.repeat(48))
   for (const mock of Object.values(core)) mock.mockReset()
@@ -579,7 +589,8 @@ describe('a send on Solana', () => {
       { family: 'solana', transaction: solanaBytes({ extra: true }) } as const,
     ]) {
       const said = refusal(() => venue.assertSafe(payload, SOL_ME, prepared.context))
-      expect(said).toMatch(/ Nothing was signed or sent\.$/)
+      expect(said).toMatch(/ Nothing was sent\.$/)
+      expect(said).not.toMatch(/signed/)
       expect(said).not.toMatch(WORDS_FOR_A_DEPOSIT)
     }
   })
@@ -589,6 +600,44 @@ describe('a send on Solana', () => {
     const said = await refusalOf(venue.prepare(request({ recipient: SOL_TO }), SOL_ME))
     expect(said).toMatch(/token account/)
     expect(said).not.toMatch(WORDS_FOR_A_DEPOSIT)
+  })
+
+  describe('a recipient that is a program', () => {
+    beforeEach(() => {
+      sim.accountOwner = 'BPFLoaderUpgradeab1e11111111111111111111111'
+      sim.accountExecutable = true
+    })
+
+    it('is refused at the build and before a swap, since the funds would be stranded', async () => {
+      const said = await refusalOf(venue.prepare(request({ recipient: SOL_TO }), SOL_ME))
+      expect(said).toMatch(/a program/)
+      expect(said).toMatch(/ Nothing was signed or sent\.$/)
+      expect(said).not.toMatch(WORDS_FOR_A_DEPOSIT)
+      await refusalOf(
+        assertFollowOnCanRun(
+          moduleFor('solana'),
+          { kind: 'send', tokenIn: 'USDC', recipient: SOL_TO },
+          SOL_ME
+        )
+      )
+    })
+
+    it('changes nothing on Weave’s deposit path', async () => {
+      const payload = await solanaDeposit.build({
+        account: SOL_ME,
+        depositAddress: SOL_TO,
+        memo: undefined,
+        amount: '5',
+      })
+      expect(payload.family).toBe('solana')
+    })
+  })
+
+  it('takes a wallet with an account that is not a program', async () => {
+    sim.accountOwner = SYSTEM_PROGRAM
+    await expect(venue.prepare(request({ recipient: SOL_TO }), SOL_ME)).resolves.toMatchObject({
+      kind: 'send',
+    })
   })
 
   it('refuses native SOL plainly', async () => {
@@ -679,6 +728,37 @@ describe('a browser that changes what it sends back, on Solana', () => {
     expect(sim.rpc).not.toContain('sendTransaction')
   })
 
+  it('keeps the network’s sentence about the fee, which says what to do', async () => {
+    const prepared = await venue.prepare(request({ recipient: SOL_TO }), SOL_ME)
+    sim.send = () => ({
+      error: { code: -32002, message: 'x', data: { err: 'InsufficientFundsForFee' } },
+    })
+    const result = await submit(solanaBytes(), prepared.context)
+    expect(result).toMatchObject({ ok: false })
+    expect(result).not.toHaveProperty('pending')
+    if (!result.ok) expect(result.error).toMatch(/enough SOL to pay the network fee/)
+  })
+
+  it('keeps the network’s sentence about a low balance', async () => {
+    const prepared = await venue.prepare(request({ recipient: SOL_TO }), SOL_ME)
+    sim.send = () => ({
+      error: { code: -32002, message: 'x', data: { logs: ['Transfer: insufficient funds'] } },
+    })
+    const result = await submit(solanaBytes(), prepared.context)
+    if (!result.ok) expect(result.error).toMatch(/balance is too low/)
+  })
+
+  it('rewrites only what speaks of prices', async () => {
+    const prepared = await venue.prepare(request({ recipient: SOL_TO }), SOL_ME)
+    sim.send = () => ({ error: { code: -32002, message: 'x', data: { logs: ['custom error'] } } })
+    const result = await submit(solanaBytes(), prepared.context)
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) {
+      expect(result.error).not.toMatch(/price/i)
+      expect(result.error).toMatch(/This transfer did not go through/)
+    }
+  })
+
   it('reports a send that may have landed as pending, without a deposit’s words', async () => {
     const prepared = await venue.prepare(request({ recipient: SOL_TO }), SOL_ME)
     sim.send = () => {
@@ -747,6 +827,37 @@ describe('a send on Sui', () => {
 
   it('refuses a Solana address', async () => {
     await refusalOf(venue.prepare(request({ recipient: SOL_TO }), SUI_ME))
+  })
+
+  it('says a failed read after signing sent nothing, and claims nothing about signing', async () => {
+    const prepared = await venue.prepare(request({ recipient: SUI_TO }), SUI_ME)
+    core.getObjects.mockRejectedValue(new Error('rpc blip'))
+    const result = (await venue.submit?.({
+      account: SUI_ME,
+      venueId: venue.id,
+      signed: { family: 'sui', transaction: await suiBytes(), signature: 'sig' },
+      ...(prepared.context !== undefined ? { context: prepared.context } : {}),
+    })) as SubmitResult
+    expect(result).toEqual({
+      ok: false,
+      error: 'This transfer was not sent, so nothing left your wallet. You can try again.',
+    })
+    expect(core.executeTransaction).not.toHaveBeenCalled()
+  })
+
+  it('rewrites a failure on the network, which a trade’s or deposit’s words would misname', async () => {
+    const prepared = await venue.prepare(request({ recipient: SUI_TO }), SUI_ME)
+    core.executeTransaction.mockResolvedValue({
+      FailedTransaction: { digest: 'DIGESTx', effects: { status: { success: false } } },
+    })
+    const result = (await venue.submit?.({
+      account: SUI_ME,
+      venueId: venue.id,
+      signed: { family: 'sui', transaction: await suiBytes(), signature: 'sig' },
+      ...(prepared.context !== undefined ? { context: prepared.context } : {}),
+    })) as SubmitResult
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) expect(result.error).not.toMatch(WORDS_FOR_A_DEPOSIT)
   })
 
   it('refuses a browser’s swapped recipient, in the context or in the bytes', async () => {
@@ -1093,6 +1204,109 @@ describe('prepareChainAction on a send', () => {
       )
     )
     expect(said).toMatch(/Keep about 0\.01 AVAX/)
+  })
+
+  describe('what the wallet holds', () => {
+    const held = (amount: string, id = AVAX_USDC.id, symbol = 'USDC') => ({
+      symbol,
+      id,
+      amount,
+      decimals: 6,
+      native: false,
+      listed: true,
+    })
+    const send = (amount: string, chain: ChainModule): Promise<PreparedAction> =>
+      prepareChainAction(chain, request({ amount, recipient: EVM_TO }), EVM_ME, {})
+
+    it('refuses a known shortfall in a plain sentence', async () => {
+      const chain = moduleFor('avalanche', {
+        balances: async () => ({ tokens: [held('5')], complete: false }),
+      })
+      expect(await refusalOf(send('50', chain))).toBe(
+        'You hold 5 USDC, which is less than 50. Nothing was signed or sent.'
+      )
+    })
+
+    it('reads the token by id, never by a symbol anyone can copy', async () => {
+      const chain = moduleFor('avalanche', {
+        balances: async () => ({
+          tokens: [held('999', `0x${'9'.repeat(40)}`), held('5')],
+          complete: false,
+        }),
+      })
+      expect(await refusalOf(send('50', chain))).toMatch(/You hold 5 USDC/)
+    })
+
+    it('counts a token missing from an answer that lists everything as none held', async () => {
+      const chain = moduleFor('avalanche', {
+        balances: async () => ({ tokens: [], complete: true }),
+      })
+      expect(await refusalOf(send('50', chain))).toMatch(/You hold 0 USDC/)
+    })
+
+    it('passes exactly what is held', async () => {
+      const chain = moduleFor('avalanche', {
+        balances: async () => ({ tokens: [held('50')], complete: false }),
+      })
+      await expect(send('50', chain)).resolves.toMatchObject({ kind: 'send' })
+    })
+
+    it('passes when the read fails or says nothing about the token', async () => {
+      for (const balances of [
+        async () => {
+          throw new Error('rpc down')
+        },
+        async () => ({ tokens: [], complete: false }),
+        async () => ({ tokens: [], complete: true, unread: ['USDC'] }),
+      ]) {
+        await expect(send('50', moduleFor('avalanche', { balances }))).resolves.toMatchObject({
+          kind: 'send',
+        })
+      }
+    })
+
+    it('passes a read that takes too long, without waiting on the chain', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        const working = send(
+          '50',
+          moduleFor('avalanche', { balances: () => new Promise(() => undefined) })
+        )
+        await vi.advanceTimersByTimeAsync(3_000)
+        await expect(working).resolves.toMatchObject({ kind: 'send' })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reads a native send once, leaving it to the reserve check', async () => {
+      const balances = vi.fn(async () => ({ tokens: [], complete: false }))
+      await prepareChainAction(
+        moduleFor('avalanche', { balances }),
+        request({ tokenIn: 'AVAX', recipient: EVM_TO }),
+        EVM_ME,
+        {}
+      )
+      expect(balances).toHaveBeenCalledTimes(1)
+    })
+
+    it('reads nothing for anything but a send', async () => {
+      const balances = vi.fn(async () => ({ tokens: [], complete: true }))
+      const venue = {
+        id: 'lend',
+        name: 'Lend',
+        kinds: ['supply'] as const,
+        prepare: async () => ({ kind: 'supply' }) as PreparedAction,
+        assertSafe: () => undefined,
+      }
+      await prepareChainAction(
+        moduleFor('avalanche', { balances, venues: [venue], defaultVenue: { supply: 'lend' } }),
+        { kind: 'supply', amount: '50', tokenIn: 'USDC' },
+        EVM_ME,
+        {}
+      )
+      expect(balances).not.toHaveBeenCalled()
+    })
   })
 
   it('says native SOL can’t move before it says anything about the reserve', async () => {

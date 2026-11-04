@@ -95,9 +95,25 @@ export function chainReviewClosed(phase: ChainActionPhaseName, signed: boolean):
   return signed || chainSigning(phase) || phase === 'settled' || phase === 'pending'
 }
 
-/** The direct-route note is true only while nothing has been signed. */
-export function showDirectNote(direct: boolean, phase: ChainActionPhaseName): boolean {
-  return direct && (phase === 'building' || phase === 'review')
+/**
+ * Whether the race is over for choosing. A signature closes it, and so does a sequence whose swap
+ * settled: step 2's press lifts the latch for step 2's own card, and the race on screen is still
+ * the swap's, so one more Review there would build that swap a second time.
+ */
+export function raceClosed(signed: boolean, sequenceSettled: boolean): boolean {
+  return signed || sequenceSettled
+}
+
+/**
+ * The direct-route note is true only while nothing has been signed. Step 2's card follows a swap
+ * that has been, whichever route that swap took.
+ */
+export function showDirectNote(
+  direct: boolean,
+  phase: ChainActionPhaseName,
+  sequenceSettled: boolean = false
+): boolean {
+  return direct && !sequenceSettled && (phase === 'building' || phase === 'review')
 }
 
 /** The agent that is shown as selected holds only while a build or its aftermath is live. */
@@ -220,6 +236,26 @@ export function recommendationLine(
       ? 'best measured fill'
       : `${figures.headline.charAt(0).toLowerCase()}${figures.headline.slice(1)}`
   return `Recommended: ${name}, ${why}. You pick who executes.`
+}
+
+export const STEP_NOT_STARTED =
+  'This step did not start. The swap stands, and what arrived stays in your wallet.'
+
+/**
+ * A refusal of step 2, once the swap before it was signed. The server words its refusals as if
+ * nothing had been, which is true of step 2 and false of the sequence.
+ */
+export function stepErrorMessage(
+  message: string | undefined,
+  sequenceSettled: boolean
+): string | undefined {
+  if (message === undefined || !sequenceSettled) return message
+  if (!/nothing was signed or sent/i.test(message)) return message
+  const rest = message
+    .replace(/,\s*so nothing was signed or sent\.?/gi, '.')
+    .replace(/\s*Nothing was signed or sent(?:, so try again in a moment)?\.?/g, '')
+    .trim()
+  return `${rest} ${STEP_NOT_STARTED}`
 }
 
 /**

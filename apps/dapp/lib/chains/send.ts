@@ -51,8 +51,11 @@ export const SEND_NOTE = "Transfers can't be undone. Check the address."
 
 const NOTHING_MOVED = 'Nothing was signed or sent.'
 const UNAVAILABLE = `Sending isn't available here right now. ${NOTHING_MOVED}`
-const NOT_ISSUED = `This transfer's details are not what this app issued. ${NOTHING_MOVED}`
-const NOT_THE_TRANSFER = `This is not the transfer that was asked for, so it was stopped. ${NOTHING_MOVED}`
+/** Both can be said after the wallet has signed, at submit, where only "sent" is still true. */
+const NOT_ISSUED = "This transfer's details are not what this app issued. Nothing was sent."
+const NOT_THE_TRANSFER =
+  'This is not the transfer that was asked for, so it was stopped. Nothing was sent.'
+const NOT_SENT = 'This transfer was not sent, so nothing left your wallet. You can try again.'
 
 const SOLANA_RENT_NOTE =
   "If this address has no account for this token yet, your wallet also pays about 0.00204 SOL in rent to open one, and you don't get it back."
@@ -72,6 +75,9 @@ interface Mover {
   hashOf: (signed: SignedPayload) => string | undefined
   explorerUrl: (hash: string) => string
 }
+
+/** What the network's sentences say that isn't true of a transfer. */
+const OTHER_WORDS = /\b(?:trades?|prices?|swaps?|orders?|deposits?)\b/i
 
 /** The builders speak of orders and swaps. What is on this path is said for a transfer instead. */
 function sendWords(text: string): string {
@@ -154,7 +160,8 @@ const SOLANA_MOVER: Mover = {
   family: 'solana',
   tokens: SOLANA_TOKENS,
   deposit: solanaDeposit,
-  assertReceiver: assertDepositIsNotTokenAccount,
+  assertReceiver: (recipient, token) =>
+    assertDepositIsNotTokenAccount(recipient, token, { refusePrograms: true }),
   notes: [SOLANA_RENT_NOTE],
   hashOf: (signed) =>
     signed.family === 'solana' ? feePayerSignature(signed.signedTransaction) : undefined,
@@ -349,14 +356,18 @@ export function createSendVenue(chain: ChainWithActions): ChainVenue {
       if (result === undefined) return unconfirmed()
       if (result.ok) return result
       if (result.pending === true || sends) return unconfirmed()
+      // A sentence about the fee or the balance says what to do. Only other words are replaced.
       return {
         ok: false,
-        error: `This transfer did not go through, so your ${expectation.token?.symbol ?? 'funds'} did not move. You can try again.`,
+        error: OTHER_WORDS.test(result.error)
+          ? `This transfer did not go through, so your ${expectation.token?.symbol ?? 'funds'} did not move. You can try again.`
+          : result.error,
       }
     } catch (e) {
-      // A refusal from the builder's own check comes before it sends. Anything else may be after.
+      // A refusal here comes before the builder sends, and may be only a read that failed, so it
+      // says what is true of both. Anything else may be after the send.
       return e instanceof ChainActionRefused && !sends
-        ? { ok: false, error: NOT_THE_TRANSFER }
+        ? { ok: false, error: NOT_SENT }
         : unconfirmed()
     } finally {
       clearTimeout(timer)

@@ -168,7 +168,7 @@ export function useChainSequence(
     setRun((r) => {
       if (r === null) return r
       if (r.stage === 'following') {
-        const second = moveOnSecond(r, phase, signed, r.request, r.delivered)
+        const second = moveOnSecond(r, phase, signed, r.request, r.delivered, prepared?.kind)
         if (second === r) return r
         const { error: _said, opened: _opened, ...rest } = r
         return { ...rest, ...second }
@@ -185,7 +185,7 @@ export function useChainSequence(
         ...(settled && known.status === 'known' ? { account: known.account } : {}),
       }
     })
-  }, [phase, signed])
+  }, [phase, signed, prepared?.kind])
 
   // One read at a time, ending on unmount, on `clear` and at the limit.
   const measuring = stage === 'measuring'

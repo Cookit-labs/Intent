@@ -1,6 +1,10 @@
 import type { ChainActionRequest } from './types'
 
-const AMOUNT = String.raw`\$?([\d,]*\.?\d+)`
+/**
+ * Commas only as thousands, 1,000 or 1,000.5. In "1,5" a comma is a decimal point, and dropping it
+ * would read ten times the amount, so that is no amount at all and the person is told what works.
+ */
+export const AMOUNT = String.raw`\$?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)`
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
 const VENUE = String.raw`(?:\s+(?:on|via|with|using|in|into|at|to)\s+([a-z0-9][a-z0-9 .-]{1,30}?))?`
 const END = String.raw`\s*[.!]?\s*$`
@@ -45,10 +49,10 @@ export function chainNamesOf(token: string): string[] {
   return [...TOKEN_OF_CHAIN_NAME].filter(([, symbol]) => symbol === wanted).map(([name]) => name)
 }
 
-/** Plain decimal text: no separators, and a leading zero on ".5", which nothing downstream reads. */
+/** Plain decimal text: no separators, one leading zero on ".5" and none on "05". */
 export function amountOf(text: string): string {
   const plain = text.replace(/,/g, '')
-  return plain.startsWith('.') ? `0${plain}` : plain
+  return (plain.startsWith('.') ? `0${plain}` : plain).replace(/^0+(?=\d)/, '')
 }
 
 /**
