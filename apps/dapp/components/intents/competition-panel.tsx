@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
-import { singleRouteNote } from '../../lib/agents/chain-race'
+import { panelErrorMessage, singleRouteNote } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
@@ -87,6 +87,7 @@ export function CompetitionPanel({
   locked = false,
   chainName,
   directRoute = false,
+  signed = false,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
@@ -102,6 +103,8 @@ export function CompetitionPanel({
   chainName?: string
   /** The direct route is being offered instead, so the error must not say agents can't act here. */
   directRoute?: boolean
+  /** Something may have been signed, so "nothing was signed" must not be said. */
+  signed?: boolean
 }): JSX.Element | null {
   const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
@@ -131,7 +134,7 @@ export function CompetitionPanel({
                 ? 'No agent answered'
                 : 'Agents are not online'}
           </p>
-          <p className="mt-1 opacity-70">{error.message}</p>
+          <p className="mt-1 opacity-70">{panelErrorMessage(error.message, signed)}</p>
         </div>
       </div>
     )

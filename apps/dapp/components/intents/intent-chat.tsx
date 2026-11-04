@@ -481,6 +481,7 @@ export function IntentChat(): JSX.Element {
   // A new race gets a clean slate when the chain changes.
   useEffect(() => {
     clearChainRace()
+    chainAction.release()
     chainAction.reset()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
@@ -1585,7 +1586,9 @@ export function IntentChat(): JSX.Element {
         setParsed(null)
         setTurnId(null)
         setAffordError(null)
-        // The agents race first; Review on a route is what builds it.
+        // The agents race first; Review on a route is what builds it. A new
+        // race is the one thing that lifts the "already signed" latch.
+        chainAction.release()
         chainAction.reset()
         setChainRace({ request: action, text })
         return
@@ -2521,6 +2524,7 @@ export function IntentChat(): JSX.Element {
                   chainReviewClosed(chainAction.phase, chainAction.signed === true)
                 }
                 directRoute={directFallback}
+                signed={chainAction.signed}
                 {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />
               {/* Changes to how the recommendation is carried out, offered once

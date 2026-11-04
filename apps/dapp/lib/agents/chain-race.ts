@@ -192,3 +192,13 @@ export function routeFigures(
   if (asked === undefined) return undefined
   return { headline: asked.kind === 'swap' ? 'Price unknown' : 'Rate not available' }
 }
+
+/**
+ * The panel's error text, without the claim that nothing was signed once
+ * something may have been. The server words its refusals with that sentence,
+ * which is true when they are sent and false after a direct-route signature.
+ */
+export function panelErrorMessage(message: string, signed: boolean): string {
+  if (!signed) return message
+  return message.replace(/s*Nothing was signed or sent.?/g, '').trim()
+}

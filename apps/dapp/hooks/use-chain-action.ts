@@ -2,7 +2,13 @@
 
 import { useCallback, useRef, useState } from 'react'
 
-import type { ChainActionRequest, PreparedAction, SubmitResult } from '../lib/chains/types'
+import type { ChainActionRequest, PreparedAction } from '../lib/chains/types'
+import {
+  accountMismatch,
+  afterSigning,
+  afterSubmitting,
+  latchBeforeSign,
+} from '../lib/chains/signing-flow'
 import { useChain } from '../providers/chain-provider'
 import { useWallet } from './use-wallet'
 
@@ -24,11 +30,18 @@ export interface ChainActionState {
   hash?: string
   explorerUrl?: string
   error?: string
-  /** A signature was given for this action, so it must not be signed again. */
-  signed?: boolean
+  /** The account the payload was built and checked for. */
+  account?: string
 }
 
 export interface ChainAction extends ChainActionState {
+  /**
+   * A signature may have happened in this race, so nothing may be signed again.
+   * It belongs to the race, not the card: Dismiss, Done and reset leave it set,
+   * and only `release`, called when a new race starts, clears it.
+   */
+  signed: boolean
+  release: () => void
   prepare: (request: ChainActionRequest, asked: string) => void
   /** Shows a message in the card without building anything, for what can't be read. */
   refuse: (message: string, asked: string) => void
@@ -42,6 +55,11 @@ const EMPTY: ChainActionState = { phase: 'idle' }
 export function useChainAction(): ChainAction {
   const { slug, adapter } = useChain()
   const { address } = useWallet()
+  // Read at the moment of signing, not the render the click was made in.
+  const addressRef = useRef(address)
+  addressRef.current = address
+  const [signed, setSigned] = useState(false)
+  const release = useCallback(() => setSigned(false), [])
   const [state, setState] = useState<ChainActionState>(EMPTY)
   // Each prepare, refuse and reset starts a new generation. A response from an
   // older one is dropped, so a build that was superseded cannot become a
@@ -85,7 +103,7 @@ export function useChainAction(): ChainAction {
           })
           return
         }
-        setState({ phase: 'review', asked, prepared: body.prepared })
+        setState({ phase: 'review', asked, prepared: body.prepared, account })
       }
 
       void run().catch(() => {
@@ -98,13 +116,33 @@ export function useChainAction(): ChainAction {
 
   const confirm = useCallback(() => {
     const prepared = state.prepared
-    if (prepared === undefined || address === undefined) return
-    const account = address
+    const builtFor = state.account
+    if (prepared === undefined || builtFor === undefined) return
+    const account = builtFor
     const mine = generation.current
     const current = (): boolean => generation.current === mine
 
+    // The payload was checked against this account only. A different wallet
+    // connected since the card was built stays on review with the reason.
+    const wrongWallet = (): boolean => {
+      const message = accountMismatch(addressRef.current, account)
+      if (message === undefined) return false
+      setState((s) => ({ ...s, phase: 'review', error: message }))
+      return true
+    }
+    if (wrongWallet()) return
+
     async function run(prepared: PreparedAction): Promise<void> {
-      setState((s) => ({ ...s, phase: 'signing' }))
+      // Checked again immediately before the wallet opens.
+      if (wrongWallet()) return
+      const family = prepared.signing.family
+      // A wallet that sends for itself may send and then report an error, so
+      // the latch is set before it is called, not after it answers.
+      if (latchBeforeSign(family)) setSigned(true)
+      setState((s) => {
+        const { error: _cleared, ...rest } = s
+        return { ...rest, phase: 'signing' }
+      })
 
       const outcome = await adapter.signPrepared?.(prepared.signing)
       if (!current()) return
@@ -112,47 +150,46 @@ export function useChainAction(): ChainAction {
         setState((s) => ({ ...s, phase: 'failed', error: 'This wallet cannot sign here yet.' }))
         return
       }
-      if (!outcome.ok) {
-        // Declining returns to review: the action is still on offer.
-        if (outcome.reason === 'rejected') {
-          setState((s) => ({ ...s, phase: 'review' }))
-          return
-        }
-        setState((s) => ({
-          ...s,
-          phase: 'failed',
-          error: outcome.detail ?? 'The wallet could not sign this.',
-        }))
+      const step = afterSigning(outcome, family)
+      if (step.next === 'review') {
+        setState((s) => ({ ...s, phase: 'review' }))
+        return
+      }
+      if (step.next === 'unknown') {
+        setState((s) => ({ ...s, phase: 'pending', error: step.error }))
+        return
+      }
+      if (step.next === 'failed') {
+        setState((s) => ({ ...s, phase: 'failed', error: step.error }))
         return
       }
 
-      setState((s) => ({ ...s, phase: 'submitting', signed: true }))
+      setSigned(true)
+      setState((s) => ({ ...s, phase: 'submitting' }))
       const res = await fetch(`/api/chain/${slug}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           account,
           venueId: prepared.venueId,
-          signed: outcome.signed,
+          signed: step.signed,
           ...(prepared.context !== undefined ? { context: prepared.context } : {}),
         }),
       })
-      const result = (await res.json()) as SubmitResult
+      const result = (await res.json()) as unknown
       if (!current()) return
-      if (!result.ok) {
+      const done = afterSubmitting(result, family)
+      if (!done.latched) setSigned(false)
+      if (done.phase === 'settled') {
         setState((s) => ({
           ...s,
-          phase: result.pending === true ? 'pending' : 'failed',
-          error: result.error,
+          phase: 'settled',
+          hash: done.hash,
+          ...(done.explorerUrl !== undefined ? { explorerUrl: done.explorerUrl } : {}),
         }))
         return
       }
-      setState((s) => ({
-        ...s,
-        phase: 'settled',
-        hash: result.hash,
-        explorerUrl: result.explorerUrl,
-      }))
+      setState((s) => ({ ...s, phase: done.phase, error: done.error }))
     }
 
     void run(prepared).catch(() => {
@@ -164,7 +201,7 @@ export function useChainAction(): ChainAction {
           "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
       }))
     })
-  }, [state.prepared, address, adapter, slug])
+  }, [state.prepared, state.account, adapter, slug])
 
-  return { ...state, prepare, refuse, confirm, reset }
+  return { ...state, signed, release, prepare, refuse, confirm, reset }
 }

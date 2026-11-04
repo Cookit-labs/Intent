@@ -74,6 +74,12 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
             </ul>
           ) : null}
 
+          {phase === 'review' && error !== undefined ? (
+            <p role="alert" className="text-sm leading-relaxed">
+              {error}
+            </p>
+          ) : null}
+
           {phase === 'settled' ? (
             <p className="flex items-center gap-2 text-sm font-medium" role="status">
               Sent

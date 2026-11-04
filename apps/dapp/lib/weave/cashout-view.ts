@@ -196,7 +196,7 @@ export function cleanIdentifier(text: string): string {
 type SigningFamily = SigningPayload['family']
 
 /** These wallets broadcast for themselves, so an error back may follow a transfer that went out. */
-function walletSends(family: SigningFamily): boolean {
+export function walletSends(family: SigningFamily): boolean {
   return family === 'near' || family === 'evm'
 }
 
