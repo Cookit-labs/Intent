@@ -1,5 +1,5 @@
 import { parseCashout } from '../weave/parse-cashout'
-import { amountOf } from './parse-action'
+import { amountOf, chainTokenWord } from './parse-action'
 import type { ChainSequenceRequest, FollowOn } from './sequence'
 
 const AMOUNT = String.raw`\$?([\d,]*\.?\d+)`
@@ -60,7 +60,7 @@ export function parseChainSequence(
   const followOn = followOnOf((match[4] as string).trim())
   if (followOn === null) return null
   if ('refusal' in followOn) return followOn
-  const tokenOut = match[3] as string
+  const tokenOut = chainTokenWord(match[3] as string)
   if (followOn.kind === 'cashout' && tokenOut.toUpperCase() !== 'USDC') {
     return {
       refusal: `Cash-outs take USDC, so this swap would have to end in USDC, not ${tokenOut.toUpperCase()}. Nothing was signed or sent.`,
@@ -70,7 +70,7 @@ export function parseChainSequence(
     swap: {
       kind: 'swap',
       amount: amountOf(match[1] as string),
-      tokenIn: match[2] as string,
+      tokenIn: chainTokenWord(match[2] as string),
       tokenOut,
       venue: undefined,
     },

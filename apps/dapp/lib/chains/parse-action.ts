@@ -22,6 +22,24 @@ const STAKE = new RegExp(
 const ACTION_VERB =
   /\b(swap|convert|exchange|trade|buy|sell|supply|lend|deposit|save|earn|stake|borrow|cash out|send|bridge|long|short)\b/i
 
+/** People say the chain for its coin. `sui` and `near` are already their symbols. */
+const TOKEN_OF_CHAIN_NAME: ReadonlyMap<string, string> = new Map([
+  ['solana', 'SOL'],
+  ['avalanche', 'AVAX'],
+  ['monad', 'MON'],
+])
+
+/** A chain's name as its token, whole word and any case. Every other word comes back unchanged. */
+export function chainTokenWord(word: string): string {
+  return TOKEN_OF_CHAIN_NAME.get(word.toLowerCase()) ?? word
+}
+
+/** The chain names that read as this token, for checking what someone said against it. */
+export function chainNamesOf(token: string): string[] {
+  const wanted = token.toUpperCase()
+  return [...TOKEN_OF_CHAIN_NAME].filter(([, symbol]) => symbol === wanted).map(([name]) => name)
+}
+
 /** Plain decimal text: no separators, and a leading zero on ".5", which nothing downstream reads. */
 export function amountOf(text: string): string {
   const plain = text.replace(/,/g, '')
@@ -41,8 +59,8 @@ export function parseChainAction(text: string): ChainActionRequest | null {
     return {
       kind: 'swap',
       amount: amountOf(swap[1] as string),
-      tokenIn: swap[2] as string,
-      tokenOut: swap[3] as string,
+      tokenIn: chainTokenWord(swap[2] as string),
+      tokenOut: chainTokenWord(swap[3] as string),
       venue: swap[4]?.trim(),
     }
   }
@@ -51,7 +69,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
     return {
       kind: 'supply',
       amount: amountOf(supply[1] as string),
-      tokenIn: supply[2] as string,
+      tokenIn: chainTokenWord(supply[2] as string),
       venue: supply[3]?.trim(),
     }
   }
@@ -60,7 +78,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
     return {
       kind: 'stake',
       amount: amountOf(stake[1] as string),
-      tokenIn: stake[2] as string,
+      tokenIn: chainTokenWord(stake[2] as string),
       venue: stake[3]?.trim(),
     }
   }

@@ -659,10 +659,35 @@ describe('sequenceWordsMatch', () => {
     expect(sequenceWordsMatch(asked, [said])).toBe(false)
   })
 
-  it('reads SOLANA as its own word, as the parser does, so it is not SOL', () => {
-    expect(sequenceWordsMatch(asked, ['cash out 5 solana'])).toBe(false)
+  it('reads a chain name as its token, both ways round', () => {
+    expect(sequenceWordsMatch(asked, ['cash out 5 solana'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['cash out 5solana'])).toBe(true)
+    expect(sequenceWordsMatch(asked, ['get my Solana to my bank', '5'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '5', token: 'SOLANA' }, ['cash out 5 sol'])).toBe(true)
     expect(sequenceWordsMatch({ amount: '5', token: 'SOLANA' }, ['cash out 5 solana'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '5', token: 'AVAX' }, ['cash out 5 avalanche'])).toBe(true)
+    expect(sequenceWordsMatch({ amount: '5', token: 'MON' }, ['cash out 5 monad'])).toBe(true)
+  })
+
+  it('does not read one chain name as another token, or a longer word as a chain name', () => {
+    expect(sequenceWordsMatch({ amount: '5', token: 'AVAX' }, ['cash out 5 solana'])).toBe(false)
+    expect(sequenceWordsMatch(asked, ['cash out 5 solanax'])).toBe(false)
     expect(sequenceWordsMatch(asked, ['cash out 5 SOLfoo'])).toBe(false)
+  })
+
+  it.each([
+    'cash out 5 USDT on solana',
+    'cash out 5 USDT on my Solana',
+    'cash out 5 USDT from the solana chain',
+    'cash out 5 USDT in solana',
+    'send 5 USDT from my solana wallet to my bank',
+    'cash out 5 USDT, my solana account',
+  ])('does not take a chain named as a place for the token: %s', (said) => {
+    expect(sequenceWordsMatch(asked, [said])).toBe(false)
+  })
+
+  it('still reads the symbol itself after such a word', () => {
+    expect(sequenceWordsMatch(asked, ['cash out 5 sol on solana'])).toBe(true)
   })
 
   it('refuses a token only the model named, since only the person is passed in', () => {

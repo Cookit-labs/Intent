@@ -200,6 +200,41 @@ describe('routeCashout', () => {
     })
   })
 
+  it("runs the person's own sentence, reading the chain name as its token", () => {
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana'), 'solana')).toEqual({
+      kind: 'sequence',
+      token: 'SOL',
+      amount: '0.01477',
+    })
+    expect(routeCashout(parseCashout('cash out 5 avalanche to kes'), 'avalanche')).toEqual({
+      kind: 'sequence',
+      token: 'AVAX',
+      amount: '5',
+      currency: 'KES',
+    })
+  })
+
+  it('changes nothing on Stellar for a chain name', () => {
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana'), 'stellar')).toEqual({
+      kind: 'pass',
+    })
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana to kes'), 'stellar')).toEqual({
+      kind: 'token',
+      token: 'SOLANA',
+    })
+  })
+
+  it('leaves what the parser reads, and a refusal elsewhere, as they were', () => {
+    expect(parseCashout('Offramp 0.01477 solana')).toEqual({
+      unsupportedToken: 'SOLANA',
+      amount: '0.01477',
+    })
+    expect(routeCashout(parseCashout('cash out 5 solana'), 'near')).toEqual({
+      kind: 'token',
+      token: 'SOLANA',
+    })
+  })
+
   it.each(['near', 'solana', 'sui', 'avalanche'])('answers refusals on %s', (chain) => {
     expect(routeCashout(read('cash out sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
     expect(routeCashout(read('cash out 5 usdc to brl'), chain)).toEqual({

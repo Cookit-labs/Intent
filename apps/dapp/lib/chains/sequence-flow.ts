@@ -11,6 +11,7 @@ import type { CashoutCurrencyCode, CashoutRoute } from '../weave/parse-cashout'
 import { MAX_COST_PERCENT } from '../weave/types'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from './evm/tokens'
 import { nearTokens } from './near/tokens'
+import { chainNamesOf, chainTokenWord } from './parse-action'
 import {
   cashoutAmountFrom,
   deliveredAmount,
@@ -492,17 +493,27 @@ function canonicalNumber(text: string): string {
  * Whether the person themselves said this amount and this token. A model's text never sets what is
  * signed, so a cash-out it wrote out runs only if the person's own words carry the same figures.
  * The amount must stand alone, so 15 is not 5, and "$5", "5 dollars", "5k" and "5%" are not 5 of a
- * token. The token must stand alone too, so SOLANA is not SOL: the parser reads it as its own word.
- * Pass what the person typed, and none of the model's lines.
+ * token. The token must stand alone too, and a chain's name reads as its token either way round,
+ * so "solana" is SOL. Only where it names the coin, though: "5 USDT on solana" did not say SOL, and
+ * a model must not get to read it so. Pass what the person typed, and none of the model's lines.
  */
 export function sequenceWordsMatch(
   instruction: { amount: string; token: string },
   turns: readonly string[]
 ): boolean {
-  const token = instruction.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const symbol = chainTokenWord(instruction.token)
+  const names = chainNamesOf(symbol)
+  const token = [symbol, ...names].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
   const wordEnd = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
   const glued = new RegExp(String.raw`(\d)(${token})${wordEnd}`, 'gi')
-  const word = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])${token}${wordEnd}`, 'i')
+  const word = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})${wordEnd}`, 'i')
+  const place =
+    names.length === 0
+      ? undefined
+      : new RegExp(
+          String.raw`\b(?:on|in|from|to|into|at|via|using|through)\s+(?:my\s+|the\s+)?(?:${names.join('|')})\b|\b(?:${names.join('|')})\s+(?:wallet|account|address|chain|network|blockchain)\b`,
+          'gi'
+        )
   const number = new RegExp(
     String.raw`(?:^|[^\w.,$₦£€])(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${NOT_THE_AMOUNT})(?![\w+]))`,
     'gi'
@@ -510,7 +521,7 @@ export function sequenceWordsMatch(
   const wanted = canonicalNumber(instruction.amount)
   const spaced = turns.map((turn) => turn.replace(glued, '$1 $2').replace(/([$₦£€])\s+/g, '$1'))
   return (
-    spaced.some((turn) => word.test(turn)) &&
+    spaced.some((turn) => word.test(place === undefined ? turn : turn.replace(place, ' '))) &&
     spaced.some((turn) =>
       [...turn.matchAll(number)].some((match) => canonicalNumber(match[1] as string) === wanted)
     )

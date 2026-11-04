@@ -1,3 +1,4 @@
+import { chainTokenWord } from '../chains/parse-action'
 import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
 import { isCashoutChain } from './types'
 
@@ -264,7 +265,7 @@ export function routeCashout(
     ) {
       return {
         kind: 'sequence',
-        token: read.unsupportedToken,
+        token: chainTokenWord(read.unsupportedToken),
         amount: read.amount,
         ...(read.currency !== undefined ? { currency: read.currency } : {}),
       }

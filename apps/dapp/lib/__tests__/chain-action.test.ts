@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { looksLikeChainAction, parseChainAction } from '../chains/parse-action'
+import { chainTokenWord, looksLikeChainAction, parseChainAction } from '../chains/parse-action'
 import { prepareChainAction } from '../chains/prepare'
 import { chainModule } from '../chains/registry'
 import {
@@ -168,5 +168,50 @@ describe('prepareChainAction', () => {
     await expect(prepareChainAction(moduleWith({}, unsafe), swap, 'acct', {})).rejects.toThrow(
       /unexpected program/
     )
+  })
+})
+
+describe('chainTokenWord', () => {
+  it.each([
+    ['solana', 'SOL'],
+    ['Solana', 'SOL'],
+    ['SOLANA', 'SOL'],
+    ['avalanche', 'AVAX'],
+    ['AVALANCHE', 'AVAX'],
+    ['monad', 'MON'],
+    ['Monad', 'MON'],
+  ])('reads %s as %s', (word, token) => {
+    expect(chainTokenWord(word)).toBe(token)
+  })
+
+  it.each(['solanax', 'xsolana', 'solana ', 'sol', 'SOL', 'sui', 'near', 'usdc', 'USDC', ''])(
+    'leaves %j as it is',
+    (word) => {
+      expect(chainTokenWord(word)).toBe(word)
+    }
+  )
+
+  it.each(['constructor', 'toString', '__proto__'])('finds nothing inherited in %s', (word) => {
+    expect(chainTokenWord(word)).toBe(word)
+  })
+})
+
+describe('parseChainAction on a chain name', () => {
+  it('reads it as the token on every kind, in or out', () => {
+    expect(parseChainAction('swap 1 avalanche to usdc')).toMatchObject({
+      tokenIn: 'AVAX',
+      tokenOut: 'usdc',
+    })
+    expect(parseChainAction('swap 1 monad to usdc')).toMatchObject({ tokenIn: 'MON' })
+    expect(parseChainAction('swap 1 usdc to Solana')).toMatchObject({ tokenOut: 'SOL' })
+    expect(parseChainAction('supply 1 solana')).toMatchObject({ kind: 'supply', tokenIn: 'SOL' })
+    expect(parseChainAction('stake 1 solana')).toMatchObject({ kind: 'stake', tokenIn: 'SOL' })
+  })
+
+  it('leaves a venue that names a chain as it is', () => {
+    expect(parseChainAction('swap 1 sol to usdc on solana')).toMatchObject({
+      tokenIn: 'sol',
+      venue: 'solana',
+    })
   })
 })

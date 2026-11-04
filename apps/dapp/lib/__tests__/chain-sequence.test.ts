@@ -17,6 +17,22 @@ const ADDRESS = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
 
 describe('parseChainSequence', () => {
+  it('reads a chain name as its token, in or out', () => {
+    expect(parseChainSequence('swap 1 solana to USDC then cash out')).toMatchObject({
+      swap: { tokenIn: 'SOL', tokenOut: 'USDC' },
+    })
+    expect(parseChainSequence('swap 5 USDC to monad then deposit')).toMatchObject({
+      swap: { tokenIn: 'USDC', tokenOut: 'MON' },
+    })
+  })
+
+  it('names the token, not the chain, when refusing a cash-out that does not end in USDC', () => {
+    expect(parseChainSequence('swap 5 USDC to solana then cash out')).toEqual({
+      refusal:
+        'Cash-outs take USDC, so this swap would have to end in USDC, not SOL. Nothing was signed or sent.',
+    })
+  })
+
   it.each([
     ['swap 5 SOL to USDC then cash out', { kind: 'cashout' }],
     ['swap 5 SOL to USDC and cash out to kes', { kind: 'cashout', currency: 'KES' }],
