@@ -200,5 +200,8 @@ export function routeFigures(
  */
 export function panelErrorMessage(message: string, signed: boolean): string {
   if (!signed) return message
-  return message.replace(/s*Nothing was signed or sent.?/g, '').trim()
+  return message
+    .replace(/\s*Nothing was signed or sent\.?/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }

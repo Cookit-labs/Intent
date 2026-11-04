@@ -253,11 +253,18 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
   const contract = Object.prototype.hasOwnProperty.call(STAKE_CONTRACTS, venueId)
     ? STAKE_CONTRACTS[venueId]
     : undefined
-  if (contract === undefined) return { ok: false, error: 'Nothing to confirm for that venue.' }
+  // The wallet has already sent, so nothing here proves that nothing moved.
+  if (contract === undefined) {
+    return { ok: false, pending: true, error: 'Nothing to confirm for that venue.' }
+  }
 
   const hash = signed.hashes[signed.hashes.length - 1]
   if (hash === undefined || signed.hashes.some((h) => !NEAR_TX_HASH.test(h))) {
-    return { ok: false, error: 'The wallet did not return a transaction hash to follow.' }
+    return {
+      ok: false,
+      pending: true,
+      error: 'The wallet did not return a transaction hash to follow.',
+    }
   }
 
   const giveUpAt = Date.now() + CONFIRM_WAIT_MS
@@ -266,6 +273,7 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
     if (outcome.state === 'unknown') {
       return {
         ok: false,
+        pending: true,
         error: `Your transaction was sent (${each}) but hasn't been confirmed yet. Don't send it again. Check ${explorerUrl(each)} in a minute.`,
       }
     }
@@ -279,6 +287,7 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
     if (outcome.signer !== account || outcome.receiver !== contract || !stakes) {
       return {
         ok: false,
+        pending: true,
         error: `Transaction ${each} is not this account's stake with this venue. Check your wallet's activity.`,
       }
     }

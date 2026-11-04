@@ -412,11 +412,16 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
   const hash = signed.hashes[signed.hashes.length - 1]
   const depositAddress = context?.['depositAddress']
   if (hash === undefined || !NEAR_TX_HASH.test(hash)) {
-    return { ok: false, error: 'The wallet did not return a transaction hash to follow.' }
+    return {
+      ok: false,
+      pending: true,
+      error: 'The wallet did not return a transaction hash to follow.',
+    }
   }
   if (depositAddress === undefined || !DEPOSIT_ADDRESS.test(depositAddress)) {
     return {
       ok: false,
+      pending: true,
       error: `This swap's deposit address was lost, so it can't be followed from here. Your transaction is ${hash}. Check your wallet before trying again.`,
     }
   }
@@ -436,6 +441,7 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
     if (outcome.signer !== account || !paysDeposit) {
       return {
         ok: false,
+        pending: true,
         error: `Transaction ${hash} is not this account's deposit for this swap, so it was not reported to NEAR Intents. Check your wallet's activity.`,
       }
     }
@@ -448,7 +454,11 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
     lastStatus = body?.status ?? lastStatus
     const recipient = body?.quoteResponse?.quoteRequest?.recipient
     if (recipient !== undefined && recipient !== account) {
-      return { ok: false, error: 'That deposit address belongs to a different swap.' }
+      return {
+        ok: false,
+        pending: true,
+        error: 'That deposit address belongs to a different swap.',
+      }
     }
     switch (body?.status) {
       case 'SUCCESS':
@@ -461,11 +471,13 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
       case 'FAILED':
         return {
           ok: false,
+          pending: true,
           error: `The swap failed after your deposit (${hash}). The refund address is ${account}, so that is where your funds should return. ${EXPLORER_NOTE} ${depositAddress}.`,
         }
       case 'INCOMPLETE_DEPOSIT':
         return {
           ok: false,
+          pending: true,
           error: `NEAR Intents received less than the quote needed, so it won't swap. What arrived is due back at ${account}. ${EXPLORER_NOTE} ${depositAddress}.`,
         }
       default:

@@ -41,6 +41,12 @@ export interface ChainAction extends ChainActionState {
    * and only `release`, called when a new race starts, clears it.
    */
   signed: boolean
+  /**
+   * A signature was asked of the wallet in this race. Unlike `signed`, a clean
+   * failure does not clear it: something was signed, so "nothing was signed"
+   * must never be said again. Only a new race clears it.
+   */
+  requested: boolean
   release: () => void
   prepare: (request: ChainActionRequest, asked: string) => void
   /** Shows a message in the card without building anything, for what can't be read. */
@@ -59,7 +65,11 @@ export function useChainAction(): ChainAction {
   const addressRef = useRef(address)
   addressRef.current = address
   const [signed, setSigned] = useState(false)
-  const release = useCallback(() => setSigned(false), [])
+  const [requested, setRequested] = useState(false)
+  const release = useCallback(() => {
+    setSigned(false)
+    setRequested(false)
+  }, [])
   const [state, setState] = useState<ChainActionState>(EMPTY)
   // Each prepare, refuse and reset starts a new generation. A response from an
   // older one is dropped, so a build that was superseded cannot become a
@@ -139,6 +149,7 @@ export function useChainAction(): ChainAction {
       // A wallet that sends for itself may send and then report an error, so
       // the latch is set before it is called, not after it answers.
       if (latchBeforeSign(family)) setSigned(true)
+      setRequested(true)
       setState((s) => {
         const { error: _cleared, ...rest } = s
         return { ...rest, phase: 'signing' }
@@ -203,5 +214,5 @@ export function useChainAction(): ChainAction {
     })
   }, [state.prepared, state.account, adapter, slug])
 
-  return { ...state, signed, release, prepare, refuse, confirm, reset }
+  return { ...state, signed, requested, release, prepare, refuse, confirm, reset }
 }

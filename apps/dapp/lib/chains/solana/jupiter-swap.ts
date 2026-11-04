@@ -76,17 +76,37 @@ function explainOrderError(code: number | undefined, tokenIn: ChainToken): strin
   return 'Jupiter could not build this swap. Nothing was signed or sent. Check that you hold the token and a little SOL for fees, then try again.'
 }
 
-function explainExecuteFailure(code: number | undefined): string {
+/**
+ * A code that proves the swap did not land is a clean failure. Any other code
+ * leaves open that it did, so it is reported as unknown.
+ */
+function explainExecuteFailure(code: number | undefined): { error: string; clean: boolean } {
   if (code === -1 || code === -1004 || code === -1005 || code === -2003) {
-    return 'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.'
+    return {
+      error:
+        'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.',
+      clean: true,
+    }
   }
   if (code === -1000 || code === -2000) {
-    return 'This swap did not land on the network, so nothing moved. Get a fresh quote and try again.'
+    return {
+      error:
+        'This swap did not land on the network, so nothing moved. Get a fresh quote and try again.',
+      clean: true,
+    }
   }
   if (code === -2 || code === -3 || code === -1002 || code === -1003 || code === -2002) {
-    return 'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.'
+    return {
+      error:
+        'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.',
+      clean: true,
+    }
   }
-  return 'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.'
+  return {
+    error:
+      'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.',
+    clean: false,
+  }
 }
 
 function shortAmount(amount: string): string {
@@ -274,6 +294,15 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       throw new Error(`Jupiter /execute answered ${response.status}`)
     }
     const parsed = Executed.safeParse(await response.json().catch(() => undefined))
+    // A 200 whose body cannot be read says nothing about whether the swap landed.
+    if (response.ok && !parsed.success) {
+      return {
+        ok: false,
+        pending: true,
+        error:
+          'Jupiter answered, but the reply could not be read, so this swap may have gone through. Check your wallet’s activity before trying again.',
+      }
+    }
     if (!response.ok || !parsed.success) {
       return {
         ok: false,
@@ -285,7 +314,10 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
     if (status === 'Success' && signature !== undefined) {
       return { ok: true, hash: signature, explorerUrl: explorerUrl(signature) }
     }
-    return { ok: false, error: explainExecuteFailure(code) }
+    const failure = explainExecuteFailure(code)
+    return failure.clean
+      ? { ok: false, error: failure.error }
+      : { ok: false, pending: true, error: failure.error }
   }
 
   return {

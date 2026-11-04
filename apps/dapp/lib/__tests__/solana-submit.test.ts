@@ -183,7 +183,11 @@ describe('solana submit', () => {
       return status(null)
     })
     const result = await submit({}, 2)(input(signed.transaction))
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('solscan.io') })
+    expect(result).toMatchObject({
+      ok: false,
+      pending: true,
+      error: expect.stringContaining('solscan.io'),
+    })
     expect(result).toMatchObject({ error: expect.stringMatching(/before trying again/i) })
   })
 
@@ -282,6 +286,22 @@ describe('jupiter execute', () => {
     const result = await venue.submit?.(executeInput)
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(message) })
     expect(JSON.stringify(result)).not.toContain('upstream text')
+  })
+
+  it('marks only an unknown execute code as pending', async () => {
+    answering({ status: 'Failed', code: -9999 })
+    await expect(venue.submit?.(executeInput)).resolves.toMatchObject({ ok: false, pending: true })
+    answering({ status: 'Failed', code: -1000 })
+    const clean = await venue.submit?.(executeInput)
+    expect(clean).toMatchObject({ ok: false })
+    expect(clean).not.toHaveProperty('pending')
+  })
+
+  it('treats a 200 with an unreadable body as unknown, not as nothing sent', async () => {
+    answering('not an execute reply', 200)
+    const result = await venue.submit?.(executeInput)
+    expect(result).toMatchObject({ ok: false, pending: true })
+    expect(JSON.stringify(result)).not.toContain('nothing was sent')
   })
 
   it('reports a rejected request as nothing sent', async () => {

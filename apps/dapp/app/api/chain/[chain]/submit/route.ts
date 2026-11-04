@@ -89,10 +89,12 @@ export async function POST(
     return NextResponse.json(
       {
         ok: false,
+        // Sent with no outcome known: the same contract as the cash-out route.
+        pending: true,
         error:
           "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
       },
-      { status: 502 }
+      { status: 202 }
     )
   }
 }

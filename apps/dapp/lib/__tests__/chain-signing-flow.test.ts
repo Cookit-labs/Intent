@@ -134,10 +134,53 @@ describe('accountMismatch on the review card', () => {
   })
 })
 
+describe('unknown outcomes keep the latch and Review closed', () => {
+  // The body the chain submit route sends from its catch-all.
+  const route502 = {
+    ok: false,
+    pending: true,
+    error:
+      "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
+  }
+  const notConfirmed = {
+    ok: false,
+    pending: true,
+    error:
+      'This was sent, but not confirmed yet. Check https://solscan.io/tx/x before trying again.',
+  }
+  const unknownJupiterCode = {
+    ok: false,
+    pending: true,
+    error:
+      'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.',
+  }
+
+  it.each([
+    ['the route catch-all', route502],
+    ['a send not confirmed yet', notConfirmed],
+    ['an unknown Jupiter code', unknownJupiterCode],
+  ])('%s', (_name, body) => {
+    for (const family of ['solana', 'sui'] as const) {
+      const done = afterSubmitting(body, family)
+      expect(done).toMatchObject({ phase: 'pending', latched: true })
+      for (const phase of ['pending', 'idle', 'failed'] as const) {
+        const { outcome, prepare } = review(phase, done.latched)
+        expect(outcome).toBe('ignored')
+        expect(prepare).not.toHaveBeenCalled()
+      }
+    }
+  })
+})
+
 describe('panelErrorMessage', () => {
   const said = 'No route could be priced right now. Nothing was signed or sent.'
   it('keeps the sentence while nothing may be signed', () => {
     expect(panelErrorMessage(said, false)).toBe(said)
+  })
+  it('drops it when it is not the last sentence', () => {
+    expect(
+      panelErrorMessage('Not priced. Nothing was signed or sent. Try again later.', true)
+    ).toBe('Not priced. Try again later.')
   })
   it('drops it once something may have been', () => {
     expect(panelErrorMessage(said, true)).toBe('No route could be priced right now.')

@@ -130,6 +130,7 @@ export function createSolanaSubmit(options: SolanaSubmitOptions = {}) {
     if (valid.success && !valid.data.value) return { ok: false, error: EXPIRED }
     return {
       ok: false,
+      pending: true,
       error: `This was sent, but not confirmed yet. Check ${explorerUrl(hash)} before trying again, in case it goes through.`,
     }
   }

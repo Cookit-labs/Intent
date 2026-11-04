@@ -2524,7 +2524,7 @@ export function IntentChat(): JSX.Element {
                   chainReviewClosed(chainAction.phase, chainAction.signed === true)
                 }
                 directRoute={directFallback}
-                signed={chainAction.signed}
+                signed={chainAction.requested}
                 {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />
               {/* Changes to how the recommendation is carried out, offered once

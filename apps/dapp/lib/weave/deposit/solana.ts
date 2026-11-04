@@ -64,12 +64,6 @@ const COMPUTE_UNIT_LIMIT = 100_000
 /** About 0.00001 SOL at the limit above, enough to land without a live fee estimate. */
 const COMPUTE_UNIT_PRICE = BigInt(100_000)
 
-/**
- * `createSolanaSubmit` has no flag for a send it can't confirm yet, only this wording.
- * The tests run the real function, so a change to the wording fails them.
- */
-const UNCONFIRMED_SEND = 'not confirmed yet'
-
 const NOT_ONE_TRANSFER =
   'This transaction asks the Token Program for something other than one USDC transfer.'
 
@@ -417,7 +411,7 @@ async function submit(
     // A connection that broke during the send says nothing about whether it landed.
     return pending(hash)
   }
-  return !result.ok && result.error.includes(UNCONFIRMED_SEND) ? pending(hash) : result
+  return !result.ok && result.pending === true ? pending(hash) : result
 }
 
 export const solanaDeposit: DepositChain = {
