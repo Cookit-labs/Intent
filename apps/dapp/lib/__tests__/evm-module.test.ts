@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { singleRouteNote } from '../agents/chain-race'
 import { quoteChainRoutes } from '../agents/chain-routes'
 import { chainCapabilities } from '../chains/capabilities'
+import type { EvmClient, EvmReceipt } from '../chains/evm/client'
 import { createEvmDeposit } from '../chains/evm/deposit'
 import { buildEvmVenues } from '../chains/evm/module'
 import { AVALANCHE_TOKENS, EVM_CHAINS, EVM_NATIVE_ID, MONAD_TOKENS } from '../chains/evm/tokens'
@@ -1383,6 +1384,69 @@ describe('submit: what the chain says the wallet sent', () => {
       const result = await submitTo(prepared, venueMonad)
       isPending(result)
       expect(result).toMatchObject({ error: expect.stringMatching(/different swap/) })
+    })
+  })
+
+  // At the deposit itself, because the venue would turn a throw into pending and hide it here.
+  describe('an answer that makes no sense still gets an answer', () => {
+    const usdcOrder = {
+      account: ACCOUNT,
+      depositAddress: DEPOSIT,
+      memo: undefined,
+      amount: '25',
+      token: AVAX_USDC,
+    }
+    const avaxOrder = { ...usdcOrder, amount: '1.5', token: AVAX }
+
+    const deposit = (receiptTo: string, status: string, transaction: () => Promise<unknown>) =>
+      createEvmDeposit('avalanche', () => ({
+        tokenBalance: async () => BigInt(0),
+        nativeBalance: async () => BigInt(0),
+        waitForReceipt: async () => receipt({ status, to: receiptTo }) as unknown as EvmReceipt,
+        transaction: transaction as EvmClient['transaction'],
+      }))
+
+    function pendingAndClaimsNothing(result: SubmitResult): void {
+      isPending(result)
+      expect(result).not.toMatchObject({ error: expect.stringMatching(/did not move/) })
+    }
+
+    it.each<[string, () => Promise<unknown>]>([
+      ['no input', async () => ({ value: BigInt(0) })],
+      ['null', async () => null],
+      ['an input that is not text', async () => ({ value: BigInt(0), input: 7 })],
+    ])('a token revert whose read resolves to %s is pending', async (_name, read) => {
+      const chain = deposit(AVAX_USDC.id, 'reverted', read)
+      pendingAndClaimsNothing(await chain.submit({ family: 'evm', hash: HASH }, usdcOrder))
+    })
+
+    it.each<[string, () => Promise<unknown>]>([
+      ['no input', async () => ({ value: BigInt(ONE_AND_A_HALF_AVAX) })],
+      ['null', async () => null],
+    ])('a native revert whose read resolves to %s is pending', async (_name, read) => {
+      const chain = deposit(DEPOSIT, 'reverted', read)
+      pendingAndClaimsNothing(await chain.submit({ family: 'evm', hash: HASH }, avaxOrder))
+    })
+
+    it.each(['not a number', '', '0', '1.1234567'])(
+      'a malformed amount, %j, is pending on a revert and on a landed transfer',
+      async (amount) => {
+        for (const status of ['reverted', 'success']) {
+          const read = async () => ({ value: BigInt(0), input: '0x' })
+          const chain = deposit(AVAX_USDC.id, status, read)
+          pendingAndClaimsNothing(
+            await chain.submit({ family: 'evm', hash: HASH }, { ...usdcOrder, amount })
+          )
+        }
+      }
+    )
+
+    it('a malformed native amount is pending on a revert too', async () => {
+      const read = async () => ({ value: BigInt(0), input: '0x' })
+      const chain = deposit(DEPOSIT, 'reverted', read)
+      pendingAndClaimsNothing(
+        await chain.submit({ family: 'evm', hash: HASH }, { ...avaxOrder, amount: 'not a number' })
+      )
     })
   })
 

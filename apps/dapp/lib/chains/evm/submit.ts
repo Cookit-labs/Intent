@@ -9,7 +9,7 @@ import {
 
 import type { DepositExpectation } from '../../weave/types'
 import { toBaseUnits, type SignedPayload, type SubmitResult } from '../types'
-import type { EvmClient, EvmReceipt, EvmTransaction } from './client'
+import type { EvmClient, EvmReceipt } from './client'
 import { EVM_CHAINS, EVM_NATIVE_ID, evmExplorerUrl, type EvmChain } from './tokens'
 
 export const EVM_HASH = /^0x[0-9a-fA-F]{64}$/
@@ -99,20 +99,30 @@ export async function confirmEvmTransfer(
     sameAddress(receipt.from, account) && receipt.to !== null && sameAddress(receipt.to, expectedTo)
   if (!fromThisAccountToThatAddress) return notThisSwap
 
-  const units = BigInt(toBaseUnits(amount, token.decimals))
+  // With no amount to compare against, this can't be shown to be this transfer, or not to be.
+  let units: bigint
+  try {
+    units = BigInt(toBaseUnits(amount, token.decimals))
+  } catch {
+    return pending(
+      `Transaction ${hash} couldn't be checked against this swap's amount. Check your wallet's activity before trying again, in case it went out.`
+    )
+  }
 
   if (receipt.status === 'reverted') {
-    let sent: EvmTransaction
+    // The comparison sits in here too: an RPC can answer with a shape that makes it throw, and
+    // that says no more about the transfer than a read that failed.
+    let isThisTransfer: boolean
     try {
-      sent = await client().transaction(hash as Hash)
+      const sent = await client().transaction(hash as Hash)
+      isThisTransfer =
+        sent.value === (native ? units : BigInt(0)) &&
+        sameCalldata(sent.input, native ? '0x' : transferCalldata(depositAddress, units))
     } catch {
       return pending(
         `Transaction ${hash} failed on ${name}, but it couldn't be read to tell whether it was this swap's transfer. Check your wallet's activity before trying again, in case the real one went out.`
       )
     }
-    const isThisTransfer =
-      sent.value === (native ? units : BigInt(0)) &&
-      sameCalldata(sent.input, native ? '0x' : transferCalldata(depositAddress, units))
     if (!isThisTransfer) return notThisSwap
     const likelyCause = native && spendReserve !== undefined ? ` ${spendReserve.reverted}` : ''
     return {
