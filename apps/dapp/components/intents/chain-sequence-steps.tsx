@@ -6,7 +6,13 @@ import { useEffect, useRef } from 'react'
 
 import type { ChainSequence } from '../../hooks/use-chain-sequence'
 import { cashoutAmountFrom } from '../../lib/chains/sequence'
-import { deliveredLine, stepLabels, stepMarks, type StepMark } from '../../lib/chains/sequence-flow'
+import {
+  deliveredLine,
+  secondStepLabel,
+  stepLabels,
+  stepMarks,
+  type StepMark,
+} from '../../lib/chains/sequence-flow'
 
 function Mark({ mark, number }: { mark: StepMark; number: number }): JSX.Element {
   return (
@@ -46,7 +52,11 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
   const [firstMark, secondMark] = stepMarks(stage, settled)
   // Too little to cash out offers no button. What can change is asked again at the press.
   const offer =
-    stage === 'ready' && delivered !== undefined ? cashoutAmountFrom(delivered) : undefined
+    stage === 'ready' && delivered !== undefined && sequence.followOn.kind === 'cashout'
+      ? cashoutAmountFrom(delivered)
+      : undefined
+  const ownCard =
+    stage === 'ready' && delivered !== undefined ? secondStepLabel(sequence, delivered) : undefined
 
   return (
     <div ref={ref}>
@@ -59,13 +69,11 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
           <li className="flex items-center gap-2">
             <Mark mark={secondMark} number={2} />
             <span
-              className={
-                secondMark === 'now'
-                  ? 'font-medium'
-                  : secondMark === 'done'
-                    ? undefined
-                    : 'text-muted-foreground'
-              }
+              className={cn(
+                '[overflow-wrap:anywhere]',
+                secondMark === 'now' && 'font-medium',
+                secondMark !== 'now' && secondMark !== 'done' && 'text-muted-foreground'
+              )}
             >
               {second}
             </span>
@@ -85,7 +93,7 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
 
         {stage === 'ready' && delivered !== undefined ? (
           <p role="status" className="text-sm leading-relaxed">
-            {deliveredLine(delivered)}
+            {deliveredLine(delivered, sequence)}
           </p>
         ) : null}
 
@@ -93,6 +101,14 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
           <div>
             <Button size="sm" onClick={steps.runNext}>
               Cash out {offer} USDC
+            </Button>
+          </div>
+        ) : null}
+
+        {ownCard !== undefined ? (
+          <div>
+            <Button size="sm" onClick={steps.runNext}>
+              {ownCard}
             </Button>
           </div>
         ) : null}

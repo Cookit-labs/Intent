@@ -426,11 +426,12 @@ describe('the race on these chains', () => {
     expect(buildSuiVenues(env).map((v) => v.id)).not.toContain('1click-sui')
   })
 
-  it('gives every venue on these chains a quote to race with', () => {
+  it('gives every venue on these chains a quote to race with, but a wallet transfer', () => {
     const lulo = createLuloVenue({ apiKey: 'k' })
     const env = { AUTH_SECRET: 'x'.repeat(48) }
     for (const venue of [...buildSolanaVenues(env), lulo, ...buildSuiVenues(env)]) {
-      expect(venue.quote, venue.id).toBeTypeOf('function')
+      if (venue.kinds.includes('send')) expect(venue.quote, venue.id).toBeUndefined()
+      else expect(venue.quote, venue.id).toBeTypeOf('function')
     }
   })
 

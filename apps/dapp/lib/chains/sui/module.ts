@@ -1,4 +1,5 @@
 import { canIssueOneClick, oneClickOriginVenue } from '../oneclick-origin'
+import { createSendVenue, SEND_VENUE_ID } from '../send'
 import type { ChainModule, ChainVenue } from '../types'
 import { readSuiBalances } from './balances'
 import { cetusVenue } from './cetus'
@@ -16,6 +17,7 @@ export function buildSuiVenues(
     ...(canIssueOneClick(env) ? [oneClickOriginVenue('sui')] : []),
     naviVenue,
     springsuiVenue,
+    ...(canIssueOneClick(env) ? [createSendVenue('sui')] : []),
   ]
 }
 
@@ -23,7 +25,7 @@ export const suiModule: ChainModule = {
   chain: 'sui',
   tokens: SUI_TOKENS,
   venues: buildSuiVenues(),
-  defaultVenue: { swap: 'cetus', supply: 'navi', stake: 'springsui' },
+  defaultVenue: { swap: 'cetus', supply: 'navi', stake: 'springsui', send: SEND_VENUE_ID },
   priceUsd: (token) => priceFromLlama(token),
   submit: (input) => submitSui(input),
   balances: readSuiBalances,

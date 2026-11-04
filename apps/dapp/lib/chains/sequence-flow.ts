@@ -15,7 +15,9 @@ import { chainNamesOf, chainTokenWord } from './parse-action'
 import {
   cashoutAmountFrom,
   deliveredAmount,
+  fromBase,
   strandedReply,
+  toBase,
   type ChainSequenceRequest,
   type FollowOn,
 } from './sequence'
@@ -23,6 +25,7 @@ import { SOLANA_TOKENS } from './solana/tokens'
 import { SUI_TOKENS } from './sui/tokens'
 import {
   tokenBySymbol,
+  type ChainActionRequest,
   type ChainToken,
   type ChainWithActions,
   type SigningPayload,
@@ -33,8 +36,22 @@ import {
 /**
  * A swap, then what comes after it. The swap is an ordinary chain action, signed on its own card,
  * and this reads how it ended. `settled` is the only answer that lets step 2 be offered.
+ *
+ * `next` is a cash-out's form. A deposit, stake or send has a card of its own instead, the same
+ * `chainAction` as step 1: `following` while it is live, `followed` once it settled, and
+ * `unsettled` once it may have moved money without being seen to finish. Only `following` can go
+ * back to `ready`, and only on an answer that proves nothing moved.
  */
-export type SequenceStage = 'swap' | 'measuring' | 'ready' | 'next' | 'stranded' | 'done'
+export type SequenceStage =
+  | 'swap'
+  | 'measuring'
+  | 'ready'
+  | 'next'
+  | 'following'
+  | 'followed'
+  | 'unsettled'
+  | 'stranded'
+  | 'done'
 
 export const MEASURE_INTERVAL_MS = 3_000
 export const MEASURE_ATTEMPTS = 20
@@ -45,6 +62,12 @@ const READ_TIMEOUT_MS = 20_000
 
 export const CASHOUT_UNDER_WAY =
   'A cash-out is already under way. Follow it here, and do not send it again.'
+
+/** What each follow-on is called, in the words a person would use. */
+function nounOf(followOn: FollowOn): string {
+  if (followOn.kind === 'cashout') return 'cash-out'
+  return followOn.kind === 'supply' ? 'deposit' : followOn.kind
+}
 
 /** Step 1 may or may not have moved money, so this says neither. */
 export const UNCONFIRMED_SWAP =
@@ -63,6 +86,18 @@ const LEFT_HOLDING = 'This swap would leave you holding the USDC.'
 
 /** Beside the card's own words for the failure, which may or may not say nothing moved. */
 export const CASHOUT_NOT_STARTED = 'The cash-out did not start.'
+
+function unconfirmedSwap(followOn: FollowOn): string {
+  return followOn.kind === 'cashout'
+    ? UNCONFIRMED_SWAP
+    : `This swap is not confirmed, so the ${nounOf(followOn)} will not start. Check your wallet's activity before doing anything else.`
+}
+
+function notStarted(followOn: FollowOn): string {
+  return followOn.kind === 'cashout'
+    ? CASHOUT_NOT_STARTED
+    : `The ${nounOf(followOn)} did not start.`
+}
 
 /**
  * What step 1's card says about where the sequence stands. Nothing while it is still open.
@@ -99,6 +134,8 @@ export interface SequenceProgress {
   /** Step 1 is known to have settled. A settled swap is what "the swap went through" may be said of. */
   settled: boolean
   error?: string
+  /** Step 2's own build has started, so what the card says from here is about step 2. */
+  opened?: boolean
 }
 
 /**
@@ -121,9 +158,46 @@ export function moveOnCard(
       ? { stage, settled: true }
       : { stage: 'stranded', settled: true, error: unmeasuredReply(request) }
   }
-  if (stage === 'stranded') return { stage, settled: false, error: UNCONFIRMED_SWAP }
-  if (stage === 'done') return { stage, settled: false, error: CASHOUT_NOT_STARTED }
+  if (stage === 'stranded') {
+    return { stage, settled: false, error: unconfirmedSwap(request.followOn) }
+  }
+  if (stage === 'done') return { stage, settled: false, error: notStarted(request.followOn) }
   return { stage, settled: false }
+}
+
+/**
+ * The sequence as step 2's card moves, for a follow-on whose card is `chainAction` itself. Step 1
+ * stays flagged settled, so `moveOnCard` ignores all of this and nothing is measured again.
+ *
+ * Until its own build starts, the card may still show how step 1 ended. Once it has, `signed` is
+ * the latch, and false on a failure or a closed card means no signature can have moved money. That
+ * alone returns to `ready`. Anything else ends here, so no press can ever lift a signed step 2's
+ * latch: `ready` is the only stage that offers the button.
+ */
+export function moveOnSecond(
+  progress: SequenceProgress,
+  phase: ChainActionPhase,
+  signed: boolean,
+  request: ChainSequenceRequest,
+  delivered: string | undefined
+): SequenceProgress {
+  if (progress.stage !== 'following') return progress
+  if (progress.opened !== true) {
+    return phase === 'building' ? { ...progress, opened: true } : progress
+  }
+  if (phase === 'settled') return { stage: 'followed', settled: true }
+  const ended = phase === 'pending' || phase === 'failed' || phase === 'idle'
+  if (!ended) return progress
+  if (phase !== 'pending' && !signed) return { stage: 'ready', settled: true }
+  const arrived =
+    delivered === undefined
+      ? ''
+      : ` and about ${delivered} ${outputSymbol(request)} reached your wallet`
+  return {
+    stage: 'unsettled',
+    settled: true,
+    error: `The swap went through${arrived}. The ${nounOf(request.followOn)} has not been confirmed as finished, so check your wallet's activity before trying it again.`,
+  }
 }
 
 /**
@@ -293,14 +367,24 @@ export async function measureDelivered(args: {
   }
 }
 
-/** What the swap's card says about what follows it, in place of promising what won't happen. */
+/**
+ * What the swap's card says about what follows it, in place of promising what won't happen. Leaving
+ * out the request means a cash-out. `quoted` is Weave's word on a cash-out's size, so nothing else
+ * ever shows it.
+ */
 export function swapLine(
   phase: ChainActionPhase,
   status: BeforeStatus,
-  quoted: string | undefined
+  quoted: string | undefined,
+  request?: ChainSequenceRequest
 ): string {
-  if (status === 'unknown' && (phase === 'review' || phase === 'signing')) return BALANCE_UNREAD
-  return quoted ?? SWAP_NEXT_STEP
+  const unread = status === 'unknown' && (phase === 'review' || phase === 'signing')
+  if (request === undefined || request.followOn.kind === 'cashout') {
+    return unread ? BALANCE_UNREAD : (quoted ?? SWAP_NEXT_STEP)
+  }
+  if (!unread) return SWAP_NEXT_STEP
+  const symbol = outputSymbol(request)
+  return `I could not read your ${symbol} balance, so if you sign this swap the ${nounOf(request.followOn)} will not follow. You would hold the ${symbol}.`
 }
 
 export type QuoteStep =
@@ -355,8 +439,11 @@ export async function readCashoutNote(
   }
 }
 
-/** What reached the wallet, and whether that is enough to cash out. */
-export function deliveredLine(delivered: string): string {
+/** What reached the wallet. For a cash-out, which no request means, also whether it is enough. */
+export function deliveredLine(delivered: string, request?: ChainSequenceRequest): string {
+  if (request !== undefined && request.followOn.kind !== 'cashout') {
+    return `About ${delivered} ${outputSymbol(request)} reached your wallet.`
+  }
   return cashoutAmountFrom(delivered) === undefined
     ? `About ${delivered} USDC reached your wallet, which is too small to cash out. Nothing was paid out.`
     : `About ${delivered} USDC reached your wallet.`
@@ -388,24 +475,30 @@ export function readyAction(
 export function sequenceOutcome(
   stage: SequenceStage | undefined,
   delivered: string | undefined,
-  error: string | undefined
+  error: string | undefined,
+  request?: ChainSequenceRequest
 ): string | undefined {
-  if (stage === 'ready' && delivered !== undefined) return deliveredLine(delivered)
-  return stage === 'stranded' || stage === 'done' ? error : undefined
+  if (stage === 'ready' && delivered !== undefined) return deliveredLine(delivered, request)
+  return stage === 'stranded' || stage === 'done' || stage === 'unsettled' ? error : undefined
 }
 
 function outputSymbol(request: ChainSequenceRequest): string {
   return (request.swap.tokenOut ?? '').toUpperCase()
 }
 
-/** Said when a swap that settled is left before step 2 ran, or nothing where there is no news. */
+/**
+ * Said when a swap that settled is left before step 2 ran, or nothing where there is no news. A
+ * step 2 being signed can't be left: the chat holds new messages until the wallet has answered.
+ */
 export function endedNote(
   stage: SequenceStage | undefined,
   delivered: string | undefined,
   request: ChainSequenceRequest | null
 ): string | undefined {
   if (request === null) return undefined
-  if (stage !== 'measuring' && stage !== 'ready' && stage !== 'next') return undefined
+  if (stage !== 'measuring' && stage !== 'ready' && stage !== 'next' && stage !== 'following') {
+    return undefined
+  }
   return strandedReply(outputSymbol(request), delivered, request.followOn)
 }
 
@@ -417,13 +510,89 @@ export function unmeasuredReply(request: ChainSequenceRequest): string {
 export function stepLabels(request: ChainSequenceRequest): [string, string] {
   const { amount, tokenIn } = request.swap
   const first = `Swap ${amount} ${tokenIn.toUpperCase()} to ${outputSymbol(request)}`
+  return [first, secondLabel(request.followOn)]
+}
+
+function secondLabel(followOn: FollowOn): string {
+  switch (followOn.kind) {
+    case 'cashout':
+      return followOn.currency !== undefined ? `Cash out to ${followOn.currency}` : 'Cash out'
+    case 'supply':
+      return followOn.venue !== undefined ? `Deposit on ${followOn.venue}` : 'Deposit'
+    case 'stake':
+      return followOn.venue !== undefined ? `Stake on ${followOn.venue}` : 'Stake'
+    case 'send':
+      return `Send to ${followOn.recipient}`
+  }
+}
+
+/** What the button says for a follow-on with a card of its own. A cash-out's button is its own. */
+export function secondStepLabel(
+  request: ChainSequenceRequest,
+  delivered: string
+): string | undefined {
   const { followOn } = request
-  return [
-    first,
-    followOn.kind === 'cashout' && followOn.currency !== undefined
-      ? `Cash out to ${followOn.currency}`
-      : 'Cash out',
-  ]
+  if (followOn.kind === 'cashout') return undefined
+  const verb = followOn.kind === 'supply' ? 'Deposit' : followOn.kind === 'stake' ? 'Stake' : 'Send'
+  return `${verb} ${delivered} ${outputSymbol(request)}`
+}
+
+/** An amount cut to a token's places, never rounded up. Nothing if that leaves nothing. */
+function flooredAmount(text: string, decimals: number): string | undefined {
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return undefined
+  const [whole = '0', fraction = ''] = text.split('.')
+  const base = toBase(`${whole}.${fraction.slice(0, decimals) || '0'}`, decimals)
+  return base === undefined || base === BigInt(0) ? undefined : fromBase(base, decimals)
+}
+
+/**
+ * Step 2's request: the measured amount of the token the swap delivered. Nothing for a cash-out,
+ * which has a form instead, or when too little is left to move.
+ */
+export function nextRequest(
+  request: ChainSequenceRequest,
+  delivered: string,
+  decimals: number
+): ChainActionRequest | undefined {
+  const { followOn, swap } = request
+  const amount = flooredAmount(delivered, decimals)
+  if (followOn.kind === 'cashout' || amount === undefined || swap.tokenOut === undefined) {
+    return undefined
+  }
+  const tokenIn = swap.tokenOut
+  if (followOn.kind === 'send') {
+    return { kind: 'send', amount, tokenIn, recipient: followOn.recipient }
+  }
+  return {
+    kind: followOn.kind,
+    amount,
+    tokenIn,
+    ...(followOn.venue !== undefined ? { venue: followOn.venue } : {}),
+  }
+}
+
+export type SecondStepPress =
+  | { kind: 'prepare'; request: ChainActionRequest }
+  /** The button stays, since a wallet can change: this press does nothing. */
+  | { kind: 'refused'; message: string }
+
+/** What pressing step 2's button does. `account` is the wallet step 1 was built for. */
+export function secondStepPress(
+  request: ChainActionRequest | undefined,
+  connected: string | undefined,
+  account: string
+): SecondStepPress {
+  if (request === undefined) {
+    return {
+      kind: 'refused',
+      message:
+        'What arrived is too small to move, so step 2 did not start. It stays in your wallet.',
+    }
+  }
+  const wrongWallet = accountMismatch(connected, account)
+  return wrongWallet !== undefined
+    ? { kind: 'refused', message: wrongWallet }
+    : { kind: 'prepare', request }
 }
 
 export type StepMark = 'now' | 'waiting' | 'done' | 'stopped'
@@ -431,7 +600,8 @@ export type StepMark = 'now' | 'waiting' | 'done' | 'stopped'
 /** How each step stands. `settled` is whether step 1 is known to have settled. */
 export function stepMarks(stage: SequenceStage, settled: boolean): [StepMark, StepMark] {
   if (!settled) return stage === 'swap' ? ['now', 'waiting'] : ['stopped', 'stopped']
-  if (stage === 'stranded') return ['done', 'stopped']
+  if (stage === 'stranded' || stage === 'unsettled') return ['done', 'stopped']
+  if (stage === 'followed') return ['done', 'done']
   return stage === 'measuring' ? ['done', 'waiting'] : ['done', 'now']
 }
 
@@ -547,12 +717,40 @@ export function questionChainRefusal(asked: string, now: string): string | undef
     : 'This was asked on another chain, so it did not start. Nothing was signed or sent.'
 }
 
+export const FOLLOW_ON_UNCHECKED =
+  'I could not check that the next step can finish, so the swap did not start. Nothing was signed or sent.'
+
 /**
- * The follow-ons this build can finish. Refused before step 1, like any follow-on that cannot run.
- * A cash-out is the only one yet: supply, stake and send arrive with `runNext` learning them.
+ * Asks the server whether a deposit, stake or send could run after this swap, while the swap is
+ * unsigned: its venues, what they take, and what only the chain can say about a receiver. Any answer
+ * but a clear yes refuses, so a swap never starts on a follow-on nobody checked.
  */
-export function followOnNotYet(followOn: FollowOn): string | undefined {
-  return followOn.kind === 'cashout'
-    ? undefined
-    : 'A swap followed by a deposit, a stake or a send is not yet available here. Nothing was signed or sent.'
+export async function readFollowOnRefusal(
+  chain: string,
+  request: ChainSequenceRequest,
+  account: string
+): Promise<string | undefined> {
+  const { followOn, swap } = request
+  if (followOn.kind === 'cashout') return undefined
+  const step = {
+    kind: followOn.kind,
+    tokenIn: swap.tokenOut,
+    ...(followOn.kind === 'send' ? { recipient: followOn.recipient } : {}),
+    ...(followOn.kind !== 'send' && followOn.venue !== undefined ? { venue: followOn.venue } : {}),
+  }
+  try {
+    const response = await fetch(`/api/chain/${chain}/follow-on`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account, step }),
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    })
+    const body = (await response.json()) as { ok?: unknown; error?: unknown }
+    if (response.status === 200 && body.ok === true) return undefined
+    return response.status === 422 && typeof body.error === 'string'
+      ? body.error
+      : FOLLOW_ON_UNCHECKED
+  } catch {
+    return FOLLOW_ON_UNCHECKED
+  }
 }

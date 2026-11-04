@@ -1,4 +1,6 @@
-import type { ChainModule } from '../types'
+import { canIssueOneClick } from '../oneclick-origin'
+import { createSendVenue, SEND_VENUE_ID } from '../send'
+import type { ChainModule, ChainVenue } from '../types'
 import { readNearBalances } from './balances'
 import { EARN_VENUE_ID, earnVenue } from './earn'
 import { assetIdOf, oneClickPrice } from './oneclick'
@@ -6,10 +8,22 @@ import { confirmStake, metapoolVenue, METAPOOL_VENUE_ID, rnearVenue } from './st
 import { ONECLICK_VENUE_ID, oneClickVenue } from './swap'
 import { nearTokens } from './tokens'
 
+export function buildNearVenues(
+  env: Record<string, string | undefined> = process.env
+): ChainVenue[] {
+  return [
+    oneClickVenue,
+    metapoolVenue,
+    rnearVenue,
+    earnVenue,
+    ...(canIssueOneClick(env) ? [createSendVenue('near')] : []),
+  ]
+}
+
 export const nearModule: ChainModule = {
   chain: 'near',
   tokens: nearTokens,
-  venues: [oneClickVenue, metapoolVenue, rnearVenue, earnVenue],
+  venues: buildNearVenues(),
   defaultVenue: {
     swap: ONECLICK_VENUE_ID,
     supply: EARN_VENUE_ID,
@@ -19,6 +33,7 @@ export const nearModule: ChainModule = {
      * 404. Its payload is also simpler, and it doesn't lean on Rhea Lend.
      */
     stake: METAPOOL_VENUE_ID,
+    send: SEND_VENUE_ID,
   },
   priceUsd: (token) => oneClickPrice(assetIdOf(token), token.decimals),
   submit: confirmStake,

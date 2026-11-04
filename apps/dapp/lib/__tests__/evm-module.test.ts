@@ -326,13 +326,13 @@ describe('the chain modules', () => {
     expect(EVM_CHAINS.avalanche.chain.id).toBe(43114)
   })
 
-  it('finds a module for both, each with its own venue only', () => {
+  it('finds a module for both, each with its own swap venue and a wallet transfer only', () => {
     const avalancheModule = chainModule('avalanche')
     const monadModule = chainModule('monad')
     expect(avalancheModule?.chain).toBe('avalanche')
     expect(monadModule?.chain).toBe('monad')
-    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche'])
-    expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad'])
+    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche', 'send'])
+    expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad', 'send'])
     expect(avalancheModule?.defaultVenue.swap).toBe('1click-avalanche')
     expect(monadModule?.defaultVenue.swap).toBe('1click-monad')
     expect(chainModule('arc')).toBeUndefined()
@@ -354,6 +354,7 @@ describe('the chain modules', () => {
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'short' })).toEqual([])
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'x'.repeat(32) }).map((v) => v.id)).toEqual([
       '1click-monad',
+      'send',
     ])
   })
 

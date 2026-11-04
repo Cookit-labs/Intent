@@ -2,6 +2,7 @@ import { CHAIN_DESCRIPTORS } from '@intent/config'
 
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
 import { WRAP_NEAR } from './near/tokens'
+import { sendRefusal } from './recipient'
 import { fromBase, toBase } from './sequence'
 import {
   ChainActionRefused,
@@ -11,6 +12,7 @@ import {
   type ChainToken,
   type ChainWithActions,
   type ChainVenue,
+  type FollowOnStep,
   type PreparedAction,
 } from './types'
 
@@ -116,16 +118,58 @@ export async function assertAmountWithinCap(
   }
   // The cap's own wording is for whoever runs the deployment, so a person gets this instead.
   const usd = price === undefined ? Number.NaN : amount * price
+  const noun = request.kind === 'send' ? 'transfer' : 'trade'
   try {
     assertWithinCap(usd, env, 'mainnet')
   } catch (e) {
     if (!(e instanceof TradeCapExceeded)) throw e
     throw new ChainActionRefused(
       Number.isFinite(usd)
-        ? `This app caps each trade at ${tradeCapUsd(env, 'mainnet')}, and this one is about ${usd.toFixed(2)}. Try a smaller amount.`
-        : 'This trade could not be valued in dollars right now, so it was not built. Try again shortly.'
+        ? `This app caps each ${noun} at ${tradeCapUsd(env, 'mainnet')}, and this one is about ${usd.toFixed(2)}. Try a smaller amount.`
+        : `This ${noun} could not be valued in dollars right now, so it was not built. Try again shortly.`
     )
   }
+}
+
+/** A send names who it pays and nothing else does. Refused before anything is priced or read. */
+function assertRecipientRule(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  tokenIn: ChainToken,
+  account: string
+): void {
+  if (request.kind !== 'send') {
+    if (request.recipient !== undefined) {
+      throw new ChainActionRefused(
+        'Only a send takes an address, so this was not built. Nothing was signed or sent.'
+      )
+    }
+    return
+  }
+  if (request.recipient === undefined) {
+    throw new ChainActionRefused('A send needs an address to go to. Nothing was signed or sent.')
+  }
+  const refusal = sendRefusal(chainApi.chain, tokenIn.symbol, request.recipient, account)
+  if (refusal !== undefined) throw new ChainActionRefused(refusal)
+}
+
+/**
+ * Whether a step could run after a swap, asked while the swap is unsigned: what the chat alone
+ * can't know, such as the venues this deployment offers and whether a receiver can take the token.
+ * The amount isn't known yet, so the dollar cap and the reserve are asked again at the step itself.
+ */
+export async function assertFollowOnCanRun(
+  chainApi: ChainModule,
+  step: FollowOnStep,
+  account: string
+): Promise<void> {
+  const request: ChainActionRequest = { ...step, amount: '0' }
+  assertKnownTokens(chainApi, request)
+  const venue = pickVenue(chainApi, request)
+  if (venue.assertCanFollow === undefined) {
+    throw new ChainActionRefused(`${venue.name} can't follow a swap yet.`)
+  }
+  await venue.assertCanFollow(step, account)
 }
 
 /**
@@ -143,6 +187,7 @@ export async function prepareChainAction(
   env: Record<string, string | undefined> = process.env
 ): Promise<PreparedAction> {
   const tokenIn = assertKnownTokens(chainApi, request)
+  assertRecipientRule(chainApi, request, tokenIn, account)
 
   await assertAmountWithinCap(chainApi, request, tokenIn, env)
   await assertNativeReserve(chainApi, request, account)

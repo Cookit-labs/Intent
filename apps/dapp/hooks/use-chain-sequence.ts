@@ -8,13 +8,17 @@ import {
   keepsBefore,
   measureDelivered,
   moveOnCard,
+  moveOnSecond,
+  nextRequest,
   outputToken,
   quoteStep,
   readBeforeSwap,
   readCashoutNote,
   readHolding,
   readyAction,
+  secondStepPress,
   stageOnForm,
+  stepLabels,
   swapLine,
   unmeasuredReply,
   type Before,
@@ -61,6 +65,10 @@ export interface ChainSequence {
  * 1 is the ordinary race and `chainAction` card, a new race is still what lifts that card's latch,
  * and this watches them to learn what arrived. Reloading loses it, by design. Nothing signable is
  * kept, and the transcript and the card's attempt notice cover the person.
+ *
+ * A deposit, stake or send is that same card again. The one other thing that lifts its latch is
+ * step 2's press, once, from `ready`, and `ready` is reached only from a settled step 1 or from a
+ * step 2 that proved nothing moved. See `moveOnSecond`.
  */
 export function useChainSequence(
   chainAction: ChainAction,
@@ -88,6 +96,8 @@ export function useChainSequence(
 
   const request = run?.request
   const stage = run?.stage
+  // Past this, the card is step 2's, and what it shows has no bearing on a balance before the swap.
+  const pastSwap = run?.settled === true
 
   const noteBefore = useCallback((next: Before) => {
     before.current = next
@@ -120,7 +130,7 @@ export function useChainSequence(
   // the card is checked against that when it comes up. A wallet declined comes back to `review`
   // and keeps what was read.
   useEffect(() => {
-    if (request === undefined) return
+    if (request === undefined || pastSwap) return
     const asked = request.swap.tokenOut
     if (phase === 'building') {
       readBefore(address, outputToken(slug, asked, asked))
@@ -130,7 +140,7 @@ export function useChainSequence(
     const token = outputToken(slug, prepared.receive?.symbol, asked)
     if (token !== undefined && keepsBefore(before.current, builtFor, token.id)) return
     readBefore(builtFor, token)
-  }, [request, phase, prepared, builtFor, address, slug, readBefore])
+  }, [request, pastSwap, phase, prepared, builtFor, address, slug, readBefore])
 
   // Whether Weave would take what this card should deliver. Never holds the card back: it only
   // changes what is said, and a failed or slow read says nothing new.
@@ -157,6 +167,12 @@ export function useChainSequence(
   useEffect(() => {
     setRun((r) => {
       if (r === null) return r
+      if (r.stage === 'following') {
+        const second = moveOnSecond(r, phase, signed, r.request, r.delivered)
+        if (second === r) return r
+        const { error: _said, opened: _opened, ...rest } = r
+        return { ...rest, ...second }
+      }
       const known = before.current
       const moved = moveOnCard(r, phase, signed, known.status === 'known', r.request)
       if (moved === r) return r
@@ -232,9 +248,28 @@ export function useChainSequence(
   const runNext = useCallback(() => {
     if (run?.stage !== 'ready' || run.delivered === undefined || run.account === undefined) return
     const { followOn } = run.request
-    // Step 2 by kind. A cash-out is the only one so far: `followOnNotYet` turns the rest away
-    // before step 1, and each goes here when it is built.
-    if (followOn.kind !== 'cashout') return
+    if (followOn.kind !== 'cashout') {
+      if (!run.settled) return
+      const asked = run.request.swap.tokenOut
+      const token = outputToken(slug, asked, asked)
+      const press = secondStepPress(
+        token === undefined ? undefined : nextRequest(run.request, run.delivered, token.decimals),
+        connected.current,
+        run.account
+      )
+      if (press.kind === 'refused') {
+        setRun((r) => (r === null ? r : { ...r, error: press.message }))
+        return
+      }
+      setRun((r) => {
+        if (r === null) return r
+        const { error: _said, ...rest } = r
+        return { ...rest, stage: 'following', opened: false }
+      })
+      chainAction.release()
+      chainAction.prepare(press.request, stepLabels(run.request)[1])
+      return
+    }
     const action = readyAction(run.delivered, cashout.locked, connected.current, run.account)
     if (action.kind !== 'open') {
       setRun((r) => (r === null ? r : { ...r, error: action.message }))
@@ -249,7 +284,7 @@ export function useChainSequence(
       amount: action.amount,
       ...(followOn.currency !== undefined ? { currency: followOn.currency } : {}),
     })
-  }, [run, cashout])
+  }, [run, cashout, chainAction, slug])
 
   return {
     sequence: run?.request ?? null,
@@ -259,7 +294,7 @@ export function useChainSequence(
     settled: run?.settled ?? false,
     account: run?.account,
     readStatus,
-    swapLine: swapLine(phase, readStatus, quoted),
+    swapLine: swapLine(phase, readStatus, quoted, request),
     start,
     runNext,
     clear,

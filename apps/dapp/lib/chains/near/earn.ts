@@ -7,6 +7,7 @@ import {
   type PreparedAction,
   type SigningPayload,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import { assertOneClickSafe } from './safety'
 import { prepareOneClickDeposit, quoteOneClick, submitOneClick } from './swap'
@@ -84,6 +85,7 @@ export const earnVenue: ChainVenue = {
   id: EARN_VENUE_ID,
   name: VENUE_NAME,
   kinds: ['supply'],
+  assertCanFollow: takesOnly(VENUE_NAME, ['USDC', 'USDT']),
   quote: quoteEarn,
   prepare: prepareEarn,
   assertSafe: assertEarnSafe,

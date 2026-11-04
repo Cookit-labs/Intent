@@ -11,6 +11,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import { assertDepositAmount, solanaAssertSafe } from './assert-safe'
 import { venueFetch } from './http'
@@ -194,6 +195,7 @@ export function createKaminoVenue(options: KaminoOptions = {}): ChainVenue {
     id: 'kamino',
     name: 'Kamino Earn',
     kinds: ['supply'],
+    assertCanFollow: takesOnly('Kamino', ['USDC']),
     quote,
     prepare,
     assertSafe: solanaAssertSafe(KAMINO_POLICY),

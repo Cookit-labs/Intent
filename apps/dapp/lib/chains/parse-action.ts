@@ -17,6 +17,11 @@ const STAKE = new RegExp(
   String.raw`^(?:please\s+)?(?:liquid\s+)?stake\s+${AMOUNT}\s*${TOKEN}${VENUE}${END}`,
   'i'
 )
+/** Case stays as typed, since it is part of an address. Ends on a letter or digit, not a full stop. */
+const SEND = new RegExp(
+  String.raw`^(?:please\s+)?(?:send|transfer)\s+${AMOUNT}\s*${TOKEN}\s+to\s+([a-z0-9](?:[a-z0-9._:-]*[a-z0-9])?)${END}`,
+  'i'
+)
 
 /** Sentences that ask to do something, so a miss gets told what works rather than a guess. */
 const ACTION_VERB =
@@ -82,7 +87,21 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       venue: stake[3]?.trim(),
     }
   }
+  const send = SEND.exec(text.trim())
+  if (send !== null) {
+    return {
+      kind: 'send',
+      amount: amountOf(send[1] as string),
+      tokenIn: chainTokenWord(send[2] as string),
+      recipient: send[3] as string,
+    }
+  }
   return null
+}
+
+/** Whether the agents price this first. A send has no price to race on and nothing to choose. */
+export function racesFirst(request: Pick<ChainActionRequest, 'kind'>): boolean {
+  return request.kind !== 'send'
 }
 
 export function looksLikeChainAction(text: string): boolean {

@@ -9,6 +9,7 @@ import {
   type PreparedAction,
   type SigningPayload,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import {
@@ -102,6 +103,7 @@ export const springsuiVenue: ChainVenue = {
   id: 'springsui',
   name: 'SpringSui',
   kinds: ['stake'],
+  assertCanFollow: takesOnly('SpringSui', ['SUI']),
   quote,
   prepare,
   assertSafe: (payload: SigningPayload, account: string) =>

@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
 const Body = z.object({
   account: z.string().min(1).max(128),
   request: z.object({
-    kind: z.enum(['swap', 'supply', 'stake']),
+    kind: z.enum(['swap', 'supply', 'stake', 'send']),
     amount: z
       .string()
       .regex(/^\d+(\.\d+)?$/)
@@ -22,6 +22,7 @@ const Body = z.object({
     tokenIn: z.string().min(1).max(16),
     tokenOut: z.string().min(1).max(16).optional(),
     venue: z.string().min(1).max(40).optional(),
+    recipient: z.string().min(1).max(128).optional(),
   }),
 })
 
@@ -43,7 +44,7 @@ export async function POST(
   }
 
   try {
-    const { kind, amount, tokenIn, tokenOut, venue } = parsed.data.request
+    const { kind, amount, tokenIn, tokenOut, venue, recipient } = parsed.data.request
     const prepared = await prepareChainAction(
       chainApi,
       {
@@ -52,6 +53,7 @@ export async function POST(
         tokenIn,
         ...(tokenOut !== undefined ? { tokenOut } : {}),
         ...(venue !== undefined ? { venue } : {}),
+        ...(recipient !== undefined ? { recipient } : {}),
       },
       parsed.data.account
     )

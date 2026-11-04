@@ -18,6 +18,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import {
   assertDepositAmount,
@@ -212,6 +213,7 @@ export function createJupiterLendVenue(options: JupiterLendOptions = {}): ChainV
     id: 'jupiter-lend',
     name: 'Jupiter Lend Earn',
     kinds: ['supply'],
+    assertCanFollow: takesOnly('Jupiter Lend', [...SUPPORTED]),
     quote,
     prepare,
     assertSafe: solanaAssertSafe(JUPITER_LEND_POLICY),

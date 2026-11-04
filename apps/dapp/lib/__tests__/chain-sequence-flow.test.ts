@@ -15,11 +15,12 @@ import {
   currencyStep,
   deliveredLine,
   endedNote,
-  followOnNotYet,
   holdingOf,
   keepsBefore,
   measureDelivered,
   moveOnCard,
+  moveOnSecond,
+  nextRequest,
   outputToken,
   questionAnswerFrom,
   questionChainRefusal,
@@ -27,8 +28,11 @@ import {
   quoteStep,
   readBeforeSwap,
   readCashoutNote,
+  readFollowOnRefusal,
   readHolding,
   readyAction,
+  secondStepLabel,
+  secondStepPress,
   sequenceOutcome,
   sequenceWordsMatch,
   stageAfterMeasure,
@@ -188,6 +192,338 @@ describe('moveOnCard', () => {
   it('never offers step 2 after a pending step 1, even if the card later says settled', () => {
     const stranded = moveOnCard(START, 'pending', true, true, REQUEST)
     expect(moveOnCard(stranded, 'settled', true, true, REQUEST)).toBe(stranded)
+  })
+})
+
+describe('step 2 on its own card', () => {
+  const SEND: ChainSequenceRequest = {
+    swap: { kind: 'swap', amount: '0.5', tokenIn: 'SOL', tokenOut: 'USDC', venue: undefined },
+    followOn: { kind: 'send', recipient: ALICE },
+  }
+  const OPENING = { stage: 'following', settled: true, opened: false } as const
+  const OPEN = { stage: 'following', settled: true, opened: true } as const
+
+  it('does not read step 1’s ending, still on the card, as step 2’s', () => {
+    for (const phase of ['settled', 'pending', 'failed', 'idle'] as const) {
+      expect(moveOnSecond(OPENING, phase, true, SEND, '5')).toBe(OPENING)
+      expect(moveOnSecond(OPENING, phase, false, SEND, '5')).toBe(OPENING)
+    }
+  })
+
+  it('opens when its own build starts, and holds while the card is live', () => {
+    expect(moveOnSecond(OPENING, 'building', false, SEND, '5')).toEqual(OPEN)
+    for (const phase of ['building', 'review', 'signing', 'submitting'] as const) {
+      expect(moveOnSecond(OPEN, phase, true, SEND, '5')).toBe(OPEN)
+      expect(moveOnSecond(OPEN, phase, false, SEND, '5')).toBe(OPEN)
+    }
+  })
+
+  it('finishes on settled, keeping step 1 flagged settled and measuring nothing', () => {
+    const moved = moveOnSecond(OPEN, 'settled', true, SEND, '5')
+    expect(moved.stage).toBe('followed')
+    expect(moved.settled).toBe(true)
+    expect(moved.error).toBeUndefined()
+  })
+
+  it('ends on pending, saying step 1 went through and not to send again', () => {
+    const moved = moveOnSecond(OPEN, 'pending', true, SEND, '5')
+    expect(moved.stage).toBe('unsettled')
+    expect(moved.settled).toBe(true)
+    expect(moved.error).toContain('5 USDC')
+    expect(moved.error).toMatch(/check your wallet/i)
+    expect(moved.error).not.toMatch(/cash|paid out/i)
+  })
+
+  it('ends on a failure that can’t prove nothing moved', () => {
+    expect(moveOnSecond(OPEN, 'failed', true, SEND, '5').stage).toBe('unsettled')
+    expect(moveOnSecond(OPEN, 'idle', true, SEND, '5').stage).toBe('unsettled')
+  })
+
+  it('returns to the button on a failure that proves nothing moved, and on Cancel', () => {
+    expect(moveOnSecond(OPEN, 'failed', false, SEND, '5').stage).toBe('ready')
+    expect(moveOnSecond(OPEN, 'idle', false, SEND, '5').stage).toBe('ready')
+  })
+
+  it('never brings the button back once step 2 has ended, whatever the card does', () => {
+    const ended = [
+      moveOnSecond(OPEN, 'settled', true, SEND, '5'),
+      moveOnSecond(OPEN, 'pending', true, SEND, '5'),
+      moveOnSecond(OPEN, 'failed', true, SEND, '5'),
+    ]
+    for (const progress of ended) {
+      for (const phase of [
+        'idle',
+        'building',
+        'review',
+        'signing',
+        'submitting',
+        'settled',
+        'pending',
+        'failed',
+      ] as const) {
+        for (const signed of [true, false]) {
+          expect(moveOnSecond(progress, phase, signed, SEND, '5')).toBe(progress)
+          expect(moveOnCard(progress, phase, signed, true, SEND)).toBe(progress)
+        }
+      }
+    }
+  })
+
+  it('walks a signed send through to its end without ever offering the button again', () => {
+    const phases = [
+      ['building', false],
+      ['review', false],
+      ['signing', true],
+      ['submitting', true],
+      ['pending', true],
+      ['idle', true],
+      ['failed', false],
+      ['settled', false],
+    ] as const
+    let progress: Parameters<typeof moveOnSecond>[0] = OPENING
+    const seen: string[] = []
+    for (const [phase, signed] of phases) {
+      progress = moveOnSecond(progress, phase, signed, SEND, '5')
+      seen.push(progress.stage)
+    }
+    expect(seen).not.toContain('ready')
+    expect(seen.at(-1)).toBe('unsettled')
+  })
+
+  it('a step 2 outcome starts no measure and no third step through moveOnCard', () => {
+    for (const phase of ['settled', 'pending', 'failed'] as const) {
+      expect(moveOnCard(OPEN, phase, true, true, SEND)).toBe(OPEN)
+    }
+  })
+
+  it('the cash-out form can’t move it', () => {
+    for (const stage of ['following', 'followed', 'unsettled'] as const) {
+      expect(stageOnForm(stage, { open: false, locked: false, paid: false })).toBe(stage)
+    }
+  })
+})
+
+describe('nextRequest', () => {
+  const swap = { kind: 'swap', amount: '1', tokenIn: 'SOL', tokenOut: 'usdc' } as const
+
+  it('prepares a send with the measured amount, the swap’s output and the recipient', () => {
+    expect(nextRequest({ swap, followOn: { kind: 'send', recipient: ALICE } }, '4.98', 6)).toEqual({
+      kind: 'send',
+      amount: '4.98',
+      tokenIn: 'usdc',
+      recipient: ALICE,
+    })
+  })
+
+  it('prepares a supply or stake at the venue named, or the default', () => {
+    expect(nextRequest({ swap, followOn: { kind: 'supply' } }, '4.98', 6)).toEqual({
+      kind: 'supply',
+      amount: '4.98',
+      tokenIn: 'usdc',
+    })
+    expect(nextRequest({ swap, followOn: { kind: 'supply', venue: 'Kamino' } }, '4.98', 6)).toEqual(
+      { kind: 'supply', amount: '4.98', tokenIn: 'usdc', venue: 'Kamino' }
+    )
+    expect(nextRequest({ swap, followOn: { kind: 'stake' } }, '1', 9)).toEqual({
+      kind: 'stake',
+      amount: '1',
+      tokenIn: 'usdc',
+    })
+  })
+
+  it('floors what is past the token’s decimals, and never rounds up', () => {
+    expect(
+      nextRequest({ swap, followOn: { kind: 'send', recipient: ALICE } }, '1.1234569', 6)?.amount
+    ).toBe('1.123456')
+    expect(nextRequest({ swap, followOn: { kind: 'stake' } }, '2.50', 6)?.amount).toBe('2.5')
+  })
+
+  it('gives nothing to prepare when flooring leaves nothing, or for a cash-out', () => {
+    expect(nextRequest({ swap, followOn: { kind: 'stake' } }, '0.0000001', 6)).toBeUndefined()
+    expect(nextRequest({ swap, followOn: { kind: 'cashout' } }, '5', 6)).toBeUndefined()
+    expect(nextRequest({ swap, followOn: { kind: 'stake' } }, 'lots', 6)).toBeUndefined()
+  })
+})
+
+describe('words for what follows a swap', () => {
+  const withKind = (followOn: ChainSequenceRequest['followOn']): ChainSequenceRequest => ({
+    swap: { kind: 'swap', amount: '0.5', tokenIn: 'SOL', tokenOut: 'USDC' },
+    followOn,
+  })
+  const OTHERS = [
+    withKind({ kind: 'supply' }),
+    withKind({ kind: 'stake' }),
+    withKind({ kind: 'send', recipient: ALICE }),
+  ]
+
+  it('keeps every cash-out sentence as it was', () => {
+    expect(
+      moveOnCard({ stage: 'swap', settled: false }, 'pending', true, true, REQUEST).error
+    ).toBe(
+      "This swap is not confirmed, so the cash-out will not start. Check your wallet's activity before doing anything else. Nothing was paid out."
+    )
+    expect(
+      moveOnCard({ stage: 'swap', settled: false }, 'failed', false, true, REQUEST).error
+    ).toBe('The cash-out did not start.')
+    expect(swapLine('review', 'unknown', undefined, REQUEST)).toBe(
+      'I could not read your USDC balance, so if you sign this swap the cash-out will not follow. You would hold the USDC and can cash it out yourself.'
+    )
+    expect(swapLine('review', 'known', TOO_SMALL_FOR_WEAVE, REQUEST)).toBe(TOO_SMALL_FOR_WEAVE)
+    expect(deliveredLine('5', REQUEST)).toBe('About 5 USDC reached your wallet.')
+    expect(deliveredLine('0.001', REQUEST)).toBe(
+      'About 0.001 USDC reached your wallet, which is too small to cash out. Nothing was paid out.'
+    )
+  })
+
+  it('never speaks of a cash-out or a payout for anything else', () => {
+    for (const request of OTHERS) {
+      const said = [
+        moveOnCard({ stage: 'swap', settled: false }, 'pending', true, true, request).error,
+        moveOnCard({ stage: 'swap', settled: false }, 'failed', false, true, request).error,
+        swapLine('review', 'unknown', undefined, request),
+        swapLine('review', 'known', undefined, request),
+        deliveredLine('0.001', request),
+        sequenceOutcome('ready', '0.001', undefined, request),
+        unmeasuredReply(request),
+        ...stepLabels(request),
+      ].join(' ')
+      expect(said).not.toMatch(/cash|paid out|weave/i)
+      expect(said).not.toContain('—')
+    }
+  })
+
+  it('leaves out Weave’s size note, which is about cash-outs only', () => {
+    for (const request of OTHERS) {
+      expect(swapLine('review', 'known', TOO_SMALL_FOR_WEAVE, request)).toBe(SWAP_NEXT_STEP)
+    }
+  })
+
+  it('says what a pending swap means for each, without saying it went through', () => {
+    const moved = moveOnCard(
+      { stage: 'swap', settled: false },
+      'pending',
+      true,
+      true,
+      OTHERS[2] as ChainSequenceRequest
+    )
+    expect(moved.error).toMatch(/send will not start/)
+    expect(moved.error).toMatch(/check your wallet/i)
+    expect(moved.error).not.toMatch(/went through/i)
+  })
+
+  it('names the token and the follow-on when the balance can’t be read', () => {
+    const said = swapLine('signing', 'unknown', undefined, withKind({ kind: 'stake' }))
+    expect(said).toMatch(/USDC/)
+    expect(said).toMatch(/the stake will not follow/)
+  })
+
+  it('labels step 2 by what it does, with the full address on a send', () => {
+    expect(stepLabels(withKind({ kind: 'supply' }))[1]).toBe('Deposit')
+    expect(stepLabels(withKind({ kind: 'supply', venue: 'Kamino' }))[1]).toBe('Deposit on Kamino')
+    expect(stepLabels(withKind({ kind: 'stake' }))[1]).toBe('Stake')
+    expect(stepLabels(withKind({ kind: 'stake', venue: 'Meta Pool' }))[1]).toBe(
+      'Stake on Meta Pool'
+    )
+    expect(stepLabels(withKind({ kind: 'send', recipient: ALICE }))[1]).toBe(`Send to ${ALICE}`)
+  })
+
+  it('offers the button with what arrived, and none for a cash-out', () => {
+    expect(secondStepLabel(withKind({ kind: 'supply' }), '4.98')).toBe('Deposit 4.98 USDC')
+    expect(secondStepLabel(withKind({ kind: 'stake' }), '4.98')).toBe('Stake 4.98 USDC')
+    expect(secondStepLabel(withKind({ kind: 'send', recipient: ALICE }), '4.98')).toBe(
+      'Send 4.98 USDC'
+    )
+    expect(secondStepLabel(REQUEST, '4.98')).toBeUndefined()
+  })
+
+  it('records the end of step 2 once, and says step 2 did not run only before it was signed', () => {
+    const send = OTHERS[2] as ChainSequenceRequest
+    expect(sequenceOutcome('following', '5', undefined, send)).toBeUndefined()
+    expect(sequenceOutcome('followed', '5', undefined, send)).toBeUndefined()
+    expect(sequenceOutcome('unsettled', '5', 'Check.', send)).toBe('Check.')
+    expect(endedNote('following', '5', send)).toBe(strandedReply('USDC', '5', send.followOn))
+    expect(endedNote('followed', '5', send)).toBeUndefined()
+    expect(endedNote('unsettled', '5', send)).toBeUndefined()
+  })
+
+  it('marks both steps as step 2 runs and ends', () => {
+    expect(stepMarks('following', true)).toEqual(['done', 'now'])
+    expect(stepMarks('followed', true)).toEqual(['done', 'done'])
+    expect(stepMarks('unsettled', true)).toEqual(['done', 'stopped'])
+  })
+})
+
+describe('secondStepPress', () => {
+  it('prepares from a settled step 1 for the wallet it was built for', () => {
+    const request = { kind: 'send', amount: '5', tokenIn: 'USDC', recipient: BOB } as const
+    expect(secondStepPress(request, ALICE, ALICE)).toEqual({ kind: 'prepare', request })
+  })
+
+  it('refuses another wallet in the existing sentence, and no wallet at all', () => {
+    const request = { kind: 'stake', amount: '5', tokenIn: 'SUI' } as const
+    expect(secondStepPress(request, BOB, ALICE)).toEqual({
+      kind: 'refused',
+      message: accountMismatch(BOB, ALICE),
+    })
+    expect(secondStepPress(request, undefined, ALICE)).toEqual({
+      kind: 'refused',
+      message: accountMismatch(undefined, ALICE),
+    })
+  })
+
+  it('says nothing can be sent when there is no amount to prepare', () => {
+    const said = secondStepPress(undefined, ALICE, ALICE)
+    expect(said.kind).toBe('refused')
+    if (said.kind === 'refused') expect(said.message).toMatch(/too small/)
+  })
+})
+
+describe('readFollowOnRefusal', () => {
+  const SEND: ChainSequenceRequest = {
+    swap: { kind: 'swap', amount: '1', tokenIn: 'SOL', tokenOut: 'usdc' },
+    followOn: { kind: 'send', recipient: BOB },
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  function answering(status: number, body: unknown) {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('asks about what follows the swap, with the swap’s output', async () => {
+    const fetchMock = answering(200, { ok: true })
+    await expect(readFollowOnRefusal('solana', SEND, ALICE)).resolves.toBeUndefined()
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/chain/solana/follow-on')
+    expect(JSON.parse(init.body as string)).toEqual({
+      account: ALICE,
+      step: { kind: 'send', tokenIn: 'usdc', recipient: BOB },
+    })
+  })
+
+  it('passes on the sentence for a step that can’t run', async () => {
+    answering(422, { error: 'Bob is not registered. Nothing was signed or sent.' })
+    await expect(readFollowOnRefusal('solana', SEND, ALICE)).resolves.toBe(
+      'Bob is not registered. Nothing was signed or sent.'
+    )
+  })
+
+  it('fails closed on any other answer, so no swap starts unchecked', async () => {
+    answering(502, { error: 'x' })
+    await expect(readFollowOnRefusal('solana', SEND, ALICE)).resolves.toMatch(
+      /could not check.*Nothing was signed or sent\.$/
+    )
+    answering(200, { ok: false })
+    await expect(readFollowOnRefusal('solana', SEND, ALICE)).resolves.toMatch(/could not check/)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline')
+      })
+    )
+    await expect(readFollowOnRefusal('solana', SEND, ALICE)).resolves.toMatch(/could not check/)
   })
 })
 
@@ -598,21 +934,6 @@ describe('currencyStep', () => {
   it('runs the only currency there is, and asks otherwise', () => {
     expect(currencyStep(undefined, [KES])).toEqual({ kind: 'run', currency: 'KES' })
     expect(currencyStep(undefined, [KES, NGN])).toEqual({ kind: 'ask', choices: [KES, NGN] })
-  })
-})
-
-describe('followOnNotYet', () => {
-  it('lets a cash-out through', () => {
-    expect(followOnNotYet({ kind: 'cashout' })).toBeUndefined()
-  })
-
-  it.each([
-    [{ kind: 'supply' as const }],
-    [{ kind: 'stake' as const }],
-    [{ kind: 'send' as const, recipient: ALICE }],
-  ])('says not yet for %j, with nothing signed', (followOn) => {
-    expect(followOnNotYet(followOn)).toMatch(/not yet/i)
-    expect(followOnNotYet(followOn)).toContain('Nothing was signed or sent.')
   })
 })
 

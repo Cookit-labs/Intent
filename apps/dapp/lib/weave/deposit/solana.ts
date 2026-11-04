@@ -290,7 +290,7 @@ async function usdcBalance(account: string): Promise<bigint> {
  * Funds sent to a token account's own token account can't be moved by anyone, since a
  * token account has no key to sign with. A missing account is fine: it is a fresh wallet.
  */
-async function assertDepositIsNotTokenAccount(
+export async function assertDepositIsNotTokenAccount(
   depositAddress: string,
   token: ChainToken
 ): Promise<void> {

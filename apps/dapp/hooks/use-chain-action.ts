@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 
-import type { ChainActionRequest, PreparedAction } from '../lib/chains/types'
+import type { ChainActionKind, ChainActionRequest, PreparedAction } from '../lib/chains/types'
 import {
   accountMismatch,
   afterSigning,
@@ -37,6 +37,8 @@ export type ChainActionPhase =
 export interface ChainActionState {
   phase: ChainActionPhase
   asked?: string
+  /** What is being built, before there is a card to read it from. */
+  building?: ChainActionKind
   prepared?: PreparedAction
   hash?: string
   explorerUrl?: string
@@ -112,7 +114,7 @@ export function useChainAction(): ChainAction {
       const mine = generation.current
 
       async function run(): Promise<void> {
-        setState({ phase: 'building', asked })
+        setState({ phase: 'building', asked, building: request.kind })
         const res = await fetch(`/api/chain/${slug}/prepare`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

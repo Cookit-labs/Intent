@@ -15,7 +15,7 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {phase === 'building' ? (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
-          Getting a live price
+          {action.building === 'send' ? 'Building this transfer' : 'Getting a live price'}
         </p>
       ) : null}
 
@@ -48,9 +48,11 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {prepared !== undefined && phase !== 'failed' && phase !== 'pending' ? (
         <>
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{prepared.summary}</span>
+            <span className="text-sm font-medium [overflow-wrap:anywhere]">{prepared.summary}</span>
             <span className="text-muted-foreground text-xs">
-              You pay {prepared.pay.amount} {prepared.pay.symbol} on {prepared.venueName}
+              {prepared.kind === 'send'
+                ? `This moves ${prepared.pay.amount} ${prepared.pay.symbol} from your wallet`
+                : `You pay ${prepared.pay.amount} ${prepared.pay.symbol} on ${prepared.venueName}`}
               {prepared.receive !== undefined
                 ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
                 : ''}

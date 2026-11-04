@@ -125,6 +125,23 @@ describe('POST /api/agents/compete on a chain', () => {
     expect(state.propose).not.toHaveBeenCalled()
   })
 
+  it('refuses a crafted race for a send, which never races', async () => {
+    const { POST } = await import('../../app/api/agents/compete/route')
+    const out = await frames(
+      await POST(
+        post({
+          text: 'send 5 USDC to bob.near',
+          chain: 'near',
+          account: 'a.near',
+          chainAction: { kind: 'send', amount: '5', tokenIn: 'USDC', recipient: 'bob.near' },
+        })
+      )
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ type: 'competition:error', code: 'chain_unsupported' })
+    expect(state.propose).not.toHaveBeenCalled()
+  })
+
   it('keeps the old path for stellar', async () => {
     const { POST } = await import('../../app/api/agents/compete/route')
     const out = await frames(

@@ -1,3 +1,4 @@
+import { SEND_VENUE_NAME } from '../chains/recipient'
 import { accountMismatch } from '../weave/cashout-view'
 
 /**
@@ -169,6 +170,13 @@ export function chainOutcomeSentence(outcome: {
 }): string | undefined {
   const { phase, venueName, error } = outcome
   if (venueName === undefined) return phase === 'failed' ? error : undefined
+  if (venueName === SEND_VENUE_NAME) {
+    if (phase === 'settled') return 'Sent from your wallet.'
+    if (phase === 'pending') {
+      return "This transfer may have gone through, so check your wallet's activity before trying again."
+    }
+    return phase === 'failed' ? (error ?? 'This could not be finished.') : undefined
+  }
   if (phase === 'settled') return `Sent on ${venueName}.`
   if (phase === 'pending') {
     return `The transaction on ${venueName} may have gone through, so check your wallet's activity before trying again.`

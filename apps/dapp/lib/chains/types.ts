@@ -8,7 +8,7 @@ import type { ChainSlug } from '@intent/types'
 
 export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake'
+export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
@@ -19,6 +19,8 @@ export interface ChainActionRequest {
   tokenOut?: string | undefined
   /** A venue the user named. Absent means the chain's default for this kind. */
   venue?: string | undefined
+  /** Sends only, exactly as typed. Where the money goes, so it is checked and never changed. */
+  recipient?: string | undefined
 }
 
 export interface NearTransaction {
@@ -136,6 +138,33 @@ export interface ChainVenue {
   ) => void
   /** Overrides the module's submit where a venue lands its own transactions. */
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
+  /**
+   * Refuses a step this venue could not run after a swap, while the swap is still unsigned. Reads
+   * only: nothing is built. A venue without this can't follow a swap.
+   */
+  assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
+}
+
+/** A step that would follow a swap. The amount isn't known until the swap has delivered it. */
+export interface FollowOnStep {
+  kind: ChainActionKind
+  tokenIn: string
+  venue?: string | undefined
+  recipient?: string | undefined
+}
+
+/** `assertCanFollow` for a venue that takes only these tokens. */
+export function takesOnly(
+  venueName: string,
+  symbols: readonly string[]
+): NonNullable<ChainVenue['assertCanFollow']> {
+  return async ({ tokenIn }) => {
+    const wanted = tokenIn.trim().toUpperCase()
+    if (symbols.some((symbol) => symbol.toUpperCase() === wanted)) return
+    throw new ChainActionRefused(
+      `${venueName} takes ${symbols.join(' or ')} here, not ${tokenIn}. Nothing was signed or sent.`
+    )
+  }
 }
 
 /**

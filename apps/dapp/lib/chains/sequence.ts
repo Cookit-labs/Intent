@@ -1,4 +1,5 @@
 import type { CashoutCurrencyCode } from '../weave/parse-cashout'
+import { sendRefusal } from './recipient'
 import type { ChainActionRequest, ChainVenue, ChainWithActions } from './types'
 
 export type FollowOn =
@@ -57,12 +58,16 @@ export function cashoutAmountFrom(delivered: string): string | undefined {
   return hundredths === BigInt(0) ? undefined : fromBase(hundredths, 2)
 }
 
-/** The sentence for a follow-on that cannot run on this chain, or nothing if it can. */
+/**
+ * The sentence for a follow-on that cannot run on this chain, or nothing if it can. `tokenOut` is
+ * what the swap delivers, for a send, whose chain may not move that token.
+ */
 export function followOnRefusal(
   chain: ChainWithActions,
   chainName: string,
   followOn: FollowOn,
-  venues: readonly Pick<ChainVenue, 'kinds'>[]
+  venues: readonly Pick<ChainVenue, 'kinds'>[],
+  tokenOut?: string
 ): string | undefined {
   if (followOn.kind === 'cashout') {
     if (chain === 'near') {
@@ -73,7 +78,7 @@ export function followOnRefusal(
     }
     return undefined
   }
-  if (followOn.kind === 'send') return undefined
+  if (followOn.kind === 'send') return sendRefusal(chain, tokenOut, followOn.recipient)
   if (!venues.some((v) => v.kinds.includes(followOn.kind))) {
     return `Nothing on ${chainName} can ${followOn.kind} yet. ${NOTHING_MOVED}`
   }

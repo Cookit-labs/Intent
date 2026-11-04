@@ -79,7 +79,7 @@ import { ensureSession } from '../../lib/api/auth'
 import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { chainHelp } from '../../lib/chains/explain'
-import { looksLikeChainAction, parseChainAction } from '../../lib/chains/parse-action'
+import { looksLikeChainAction, parseChainAction, racesFirst } from '../../lib/chains/parse-action'
 import { parseChainSequence } from '../../lib/chains/parse-sequence'
 import { followOnRefusal, type ChainSequenceRequest } from '../../lib/chains/sequence'
 import {
@@ -87,10 +87,10 @@ import {
   cashoutSequence,
   currencyStep,
   endedNote,
-  followOnNotYet,
   questionAnswerFrom,
   questionChainRefusal,
   sequenceOutcome,
+  readFollowOnRefusal,
   sequenceWordsMatch,
 } from '../../lib/chains/sequence-flow'
 import type { ChainActionRequest, ChainWithActions, WalletBalances } from '../../lib/chains/types'
@@ -934,7 +934,8 @@ export function IntentChat({
   const sequenceLine = sequenceOutcome(
     chainSequence.stage,
     chainSequence.delivered,
-    chainSequence.error
+    chainSequence.error,
+    chainSequence.sequence ?? undefined
   )
   // Leaving the form brings `ready` back, and what arrived was said the first time.
   const deliveredRecordedFor = useRef<ChainSequenceRequest | null>(null)
@@ -1766,15 +1767,30 @@ export function IntentChat({
         slug as ChainWithActions,
         descriptor.name,
         followOn,
-        capabilities.map((c) => ({ kinds: [c.kind] }))
-      ) ??
-      followOnNotYet(followOn)
+        capabilities.map((c) => ({ kinds: [c.kind] })),
+        request.swap.tokenOut
+      )
     if (refusal !== undefined) {
       chainAction.refuse(refusal, text)
       return
     }
     if (followOn.kind !== 'cashout') {
-      runSequenceSwap(request, text)
+      if (address === undefined) {
+        chainAction.refuse('Connect a wallet first.', text)
+        return
+      }
+      // Asked of the server before step 1, since a step that can't run is no use after it.
+      chainAction.reset()
+      setClarifyBusy(true)
+      const { turn, account, chain } = latest.current
+      void readFollowOnRefusal(slug, request, address).then((refused) => {
+        if (clarifyRuns.current === 0) setClarifyBusy(false)
+        // The person has moved on, and a swap must not start under what they did next.
+        const now = latest.current
+        if (turn !== now.turn || account !== now.account || chain !== now.chain) return
+        if (refused !== undefined) chainAction.refuse(refused, text)
+        else runSequenceSwap(request, text)
+      })
       return
     }
     // Asked of Weave before step 1, since a currency it can't pay is no use after it.
@@ -2057,7 +2073,13 @@ export function IntentChat({
         // race is the one thing that lifts the "already signed" latch.
         chainAction.release()
         chainAction.reset()
-        setChainRace({ request: action, text })
+        if (racesFirst(action)) {
+          setChainRace({ request: action, text })
+        } else {
+          // Nothing to price or choose, so a stale race is cleared and the card comes straight up.
+          clearChainRace()
+          chainAction.prepare(action, text)
+        }
         return
       }
       if (looksLikeChainAction(text)) {

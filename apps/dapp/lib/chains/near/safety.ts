@@ -146,6 +146,18 @@ function assertStorageDeposit(call: Call, allowedAccounts: readonly string[]): v
  * and any storage payment are reverted and refunded too.
  */
 export function assertOneClickSafe(payload: SigningPayload, account: string): void {
+  assertTokenTransferSafe(payload, account, DEPOSIT_ADDRESS)
+}
+
+/**
+ * The same check, with the shape the transfer's receiver must have. Only for a caller that binds
+ * the exact receiver itself afterwards, as a send does.
+ */
+export function assertTokenTransferSafe(
+  payload: SigningPayload,
+  account: string,
+  receiver: RegExp
+): void {
   const transaction = readSingleTransaction(payload, account)
   if (!SWAP_CONTRACTS.has(transaction.receiverId)) {
     refuse(`${transaction.receiverId} is not a token this app trades`)
@@ -162,7 +174,7 @@ export function assertOneClickSafe(payload: SigningPayload, account: string): vo
   }
   const depositAddress = transfer.args['receiver_id']
   const amountText = transfer.args['amount']
-  if (typeof depositAddress !== 'string' || !DEPOSIT_ADDRESS.test(depositAddress)) {
+  if (typeof depositAddress !== 'string' || !receiver.test(depositAddress)) {
     refuse('the token transfer does not go to a deposit address')
   }
   if (depositAddress === account) refuse('the token transfer pays your own account')

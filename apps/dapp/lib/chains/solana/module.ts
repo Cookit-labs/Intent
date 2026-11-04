@@ -1,4 +1,5 @@
 import { canIssueOneClick, oneClickOriginVenue } from '../oneclick-origin'
+import { createSendVenue, SEND_VENUE_ID } from '../send'
 import type { ChainModule, ChainVenue } from '../types'
 import { readSolanaBalances } from './balances'
 import { createJupiterLendVenue } from './jupiter-lend'
@@ -24,6 +25,7 @@ export function buildSolanaVenues(
     createJupiterLendVenue({ env }),
     createKaminoVenue(),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),
+    ...(canIssueOneClick(env) ? [createSendVenue('solana')] : []),
   ]
 }
 
@@ -31,7 +33,7 @@ export const solanaModule: ChainModule = {
   chain: 'solana',
   tokens: SOLANA_TOKENS,
   venues: buildSolanaVenues(),
-  defaultVenue: { swap: 'jupiter', supply: 'jupiter-lend' },
+  defaultVenue: { swap: 'jupiter', supply: 'jupiter-lend', send: SEND_VENUE_ID },
   priceUsd,
   submit: createSolanaSubmit({ deadlineMs: SUBMIT_DEADLINE_MS }),
   balances: readSolanaBalances,
