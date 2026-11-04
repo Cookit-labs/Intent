@@ -40,10 +40,14 @@ function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVen
  * a refused token reads the same in each and no agent is ever consulted about it.
  */
 export function assertKnownTokens(chainApi: ChainModule, request: ChainActionRequest): ChainToken {
+  const hintFor = (symbol: string | undefined): string => {
+    const hint = chainApi.tokenHints?.[(symbol ?? '').trim().toUpperCase()]
+    return hint === undefined ? '' : ` ${hint}`
+  }
   const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
   if (tokenIn === undefined) {
     throw new ChainActionRefused(
-      `I can't confirm ${request.tokenIn} as a verified token on this chain, so I won't touch it.`
+      `I can't confirm ${request.tokenIn} as a verified token on this chain, so I won't touch it.${hintFor(request.tokenIn)}`
     )
   }
   if (request.kind === 'swap') {
@@ -52,7 +56,7 @@ export function assertKnownTokens(chainApi: ChainModule, request: ChainActionReq
       tokenBySymbol(chainApi.tokens, request.tokenOut) === undefined
     ) {
       throw new ChainActionRefused(
-        `I can't confirm ${request.tokenOut ?? 'that token'} as a verified token on this chain, so I won't trade it.`
+        `I can't confirm ${request.tokenOut ?? 'that token'} as a verified token on this chain, so I won't trade it.${hintFor(request.tokenOut)}`
       )
     }
     if (request.tokenOut.toUpperCase() === request.tokenIn.toUpperCase()) {

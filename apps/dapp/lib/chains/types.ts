@@ -6,7 +6,7 @@ import type { ChainSlug } from '@intent/types'
  * routes, the hook and the chat card know nothing about any chain in particular.
  */
 
-export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near'>
+export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
 export type ChainActionKind = 'swap' | 'supply' | 'stake'
 
@@ -29,12 +29,12 @@ export interface NearTransaction {
   }[]
 }
 
-/** What the wallet is asked to sign. Base64 for Solana and Sui. */
+/** What the wallet is asked to sign. Base64 for Solana and Sui. An EVM `value` is decimal base units. */
 export type SigningPayload =
   | { family: 'solana'; transaction: string }
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
-  | { family: 'evm'; chainId: number; to: string; data: string; value: '0' }
+  | { family: 'evm'; chainId: number; to: string; data: string; value: string }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
@@ -147,6 +147,13 @@ export interface ChainModule {
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+  /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
+  tokenHints?: Record<string, string> | undefined
+}
+
+/** "an Avalanche", "a Monad". */
+export function withArticle(name: string): string {
+  return `${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`
 }
 
 /**

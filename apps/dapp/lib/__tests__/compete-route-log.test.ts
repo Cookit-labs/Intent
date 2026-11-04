@@ -123,7 +123,8 @@ describe('POST /api/agents/compete', () => {
       error: 'aborted: timeout',
     })
     for (const a of attempts) expect(a.latencyMs).toBeGreaterThanOrEqual(0)
-  })
+    // The first import of the route pulls in every chain's SDK, which sits right at the default.
+  }, 30_000)
 
   it('records a race that nobody answered, with no winner', async () => {
     state.roster = [

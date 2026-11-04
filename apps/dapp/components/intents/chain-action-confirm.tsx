@@ -5,7 +5,7 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
 
-/** Review, sign and result for an action on Solana, Sui or NEAR. */
+/** Review, sign and result for an action on a chain other than Stellar. */
 export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Element {
   const { phase, prepared, error, hash, explorerUrl } = action
   const busy = phase === 'signing' || phase === 'submitting'

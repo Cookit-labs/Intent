@@ -1570,7 +1570,7 @@ export function IntentChat(): JSX.Element {
     cashout.dismiss()
     if (chainCapabilities(slug) === undefined) chainAction.reset()
 
-    // Solana, Sui and NEAR have their own path: the race and the swap routes
+    // Chains with their own module have their own path: the race and the swap routes
     // below are Stellar's. Anything that isn't an instruction, such as a
     // question, still goes to the orchestrator.
     const capabilities = chainCapabilities(slug)

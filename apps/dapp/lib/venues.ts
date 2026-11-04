@@ -1,6 +1,7 @@
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
-import type { Venue } from '@intent/types'
+import type { ChainDescriptor, Venue } from '@intent/types'
 
+import { evmVenues } from './chains/evm/venues'
 import { nearVenues } from './chains/near/venues'
 import { solanaVenues } from './chains/solana/venues'
 import { suiVenues } from './chains/sui/venues'
@@ -10,6 +11,7 @@ export const venues: Venue[] = [
   ...solanaVenues,
   ...suiVenues,
   ...nearVenues,
+  ...evmVenues,
   {
     id: 'cow-swap',
     family: 'evm' as const,
@@ -322,6 +324,24 @@ export const venues: Venue[] = [
     },
   },
 ]
+
+const EVM_CHAINS_WITH_VENUES = ['Avalanche', 'Monad']
+
+/**
+ * Whether a venue belongs on this chain's lists. Family decides, except that EVM chains share one:
+ * Avalanche and Monad list only the venues that name them, and a venue naming either one belongs
+ * to that chain alone. Arc has no venues of its own, so it keeps the rest of the family's list.
+ */
+export function venueOnChain(
+  venue: Pick<Venue, 'family' | 'chains'>,
+  chain: Pick<ChainDescriptor, 'family' | 'name'>
+): boolean {
+  if (venue.family !== chain.family) return false
+  if (chain.family !== 'evm') return true
+  return EVM_CHAINS_WITH_VENUES.includes(chain.name)
+    ? venue.chains.includes(chain.name)
+    : !venue.chains.some((name) => EVM_CHAINS_WITH_VENUES.includes(name))
+}
 
 /**
  * Which venues exist on which network.

@@ -322,7 +322,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!canExecuteOn(chain)) {
     return errorStream(
       'chain_unsupported',
-      'Agents can execute only on Stellar, Solana, Sui and NEAR right now. ' +
+      'Agents can execute only on Stellar, Solana, Sui, NEAR, Avalanche and Monad right now. ' +
         'Switch the chain to run a competition.'
     )
   }

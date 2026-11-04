@@ -43,15 +43,18 @@ export interface DepositExpectation {
   memo: string | undefined
   /** The token in display units. */
   amount: string
-  /** What to transfer. Absent means USDC, which is all a Weave order ever sends. */
+  /**
+   * What to transfer. Absent means USDC, which is all a Weave order ever sends. Solana and Sui
+   * move the token named, Avalanche refuses any but USDC, and Stellar and NEAR are never given one.
+   */
   token?: ChainToken | undefined
 }
 
 /**
  * What each chain supplies for a deposit. `assertSafe` is the check that matters:
- * it reads the payload back and admits only one USDC transfer from `account` to the
- * order's deposit address for exactly the order's amount, and it throws
- * `ChainActionRefused` on anything else.
+ * it reads the payload back and admits only one transfer of the expectation's token, USDC when
+ * none is named, from `account` to the order's deposit address for exactly the order's amount,
+ * and it throws `ChainActionRefused` on anything else.
  */
 export interface DepositChain {
   chain: CashoutChain

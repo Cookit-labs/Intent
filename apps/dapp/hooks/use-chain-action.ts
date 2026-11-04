@@ -8,6 +8,8 @@ import {
   afterSigning,
   afterSubmitting,
   latchBeforeSign,
+  QUOTE_EXPIRED,
+  quoteExpiredBeforeSigning,
   submitSigned,
 } from '../lib/chains/signing-flow'
 import { useChain } from '../providers/chain-provider'
@@ -146,6 +148,10 @@ export function useChainAction(): ChainAction {
     async function run(prepared: PreparedAction): Promise<void> {
       // Checked again immediately before the wallet opens.
       if (wrongWallet()) return
+      if (quoteExpiredBeforeSigning(prepared)) {
+        setState((s) => ({ ...s, phase: 'failed', error: QUOTE_EXPIRED }))
+        return
+      }
       const family = prepared.signing.family
       // A wallet that sends for itself may send and then report an error, so
       // the latch is set before it is called, not after it answers.

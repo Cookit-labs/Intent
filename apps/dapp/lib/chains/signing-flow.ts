@@ -1,4 +1,4 @@
-import type { SignedOutcome, SignedPayload, SigningPayload } from './types'
+import type { PreparedAction, SignedOutcome, SignedPayload, SigningPayload } from './types'
 import {
   CHECK_WALLET,
   accountMismatch,
@@ -18,6 +18,24 @@ export { accountMismatch }
  */
 export function latchBeforeSign(family: Family): boolean {
   return walletSends(family)
+}
+
+export const QUOTE_EXPIRED =
+  'This quote expired before you signed, so your wallet was not asked and nothing was sent. Press Review again for a fresh one.'
+
+/**
+ * Whether a card has outlived its quote, on a chain where this is the last chance to say so. The
+ * server checks the deadline before it sends signed bytes, but an EVM wallet sends for itself, and
+ * a late deposit may be refunded instead of swapped. NEAR's wallet sends too, and is left as it was.
+ */
+export function quoteExpiredBeforeSigning(
+  prepared: Pick<PreparedAction, 'signing' | 'context'>,
+  now: number = Date.now()
+): boolean {
+  const deadline = prepared.context?.['deadline']
+  return (
+    prepared.signing.family === 'evm' && deadline !== undefined && !(Date.parse(deadline) > now)
+  )
 }
 
 export type AfterSigning =

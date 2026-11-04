@@ -530,16 +530,6 @@ describe('quote', () => {
     await expect(solana.quote?.(swap(), ME)).rejects.toBeInstanceOf(ChainActionRefused)
     expect(sim.quotes).toHaveLength(0)
   })
-
-  it('refuses plainly on a chain whose deposits are not built yet', async () => {
-    const avalanche = oneClickOriginVenue('avalanche')
-    expect(avalanche.id).toBe('1click-avalanche')
-    await expect(avalanche.quote?.(swap(), ME)).rejects.toBeInstanceOf(ChainActionRefused)
-    await expect(avalanche.prepare(swap(), ME)).rejects.toBeInstanceOf(ChainActionRefused)
-    expect(() => avalanche.assertSafe({ family: 'solana', transaction: 'AAAA' }, ME)).toThrow(
-      ChainActionRefused
-    )
-  })
 })
 
 describe('prepare', () => {
@@ -820,6 +810,21 @@ describe('a browser that changes what it sends back', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(Date.now() + 6 * 60_000)
     expect(() => solana.assertSafe(payload(), ME, prepared.context)).toThrow(/expired/)
+  })
+
+  it.each([
+    ['solana', { family: 'solana' as const, signedTransaction: '!!!' }],
+    ['sui', { family: 'sui' as const, transaction: '!!!', signature: 'x' }],
+  ])('stays a clean refusal on %s for bytes too broken to read', async (chain, signed) => {
+    const venue = chain === 'solana' ? solana : sui
+    const result = await venue.submit?.({
+      account: chain === 'solana' ? ME : SUI_ME,
+      venueId: venue.id,
+      signed,
+      context: {},
+    })
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/not what this app/) })
+    expect(result).not.toHaveProperty('pending')
   })
 
   it('is refused when the server no longer holds the secret', () => {

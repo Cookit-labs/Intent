@@ -110,6 +110,8 @@ export type ExecutionKind =
   | 'solana'
   | 'sui'
   | 'near'
+  | 'avalanche'
+  | 'monad'
 
 export interface ExecutionRecord {
   network: StellarNetworkName
