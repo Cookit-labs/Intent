@@ -12,7 +12,7 @@ export interface CashoutRequest {
 
 export type CashoutRead =
   | CashoutRequest
-  | { unsupportedToken: string; amount?: string; currency?: CashoutCurrencyCode }
+  | { unsupportedToken: string; amount?: string; dollars?: string; currency?: CashoutCurrencyCode }
   | { unsupportedCurrency: string }
 
 export type CashoutRoute =
@@ -22,7 +22,14 @@ export type CashoutRoute =
   | { kind: 'ask'; amount?: string }
   | { kind: 'token'; token: string }
   /** A swap to USDC then a cash-out, on a chain that can finish it. */
-  | { kind: 'sequence'; token: string; amount: string; currency?: CashoutCurrencyCode }
+  | {
+      kind: 'sequence'
+      token: string
+      amount: string
+      /** `amount` is dollars of the token, to be sized at a live price before anything runs. */
+      amountIsUsd?: true
+      currency?: CashoutCurrencyCode
+    }
   | { kind: 'currency'; currency: string }
 
 const CURRENCY_WORDS: Record<string, CashoutCurrencyCode> = {
@@ -218,7 +225,7 @@ export function parseCashout(text: string): CashoutRead | null {
       return { unsupportedCurrency: OTHER_FIAT[target] as string }
     }
     // A dollar figure is not an amount of this token.
-    const ofToken = amount !== undefined && !dollar ? { amount } : {}
+    const ofToken = amount === undefined ? {} : dollar ? { dollars: amount } : { amount }
     return { unsupportedToken: token.toUpperCase(), ...ofToken, ...withCurrency }
   }
   if (token === undefined && amount !== undefined && !dollar) return null
@@ -274,16 +281,18 @@ export function routeCashout(
   }
   if ('unsupportedToken' in read) {
     if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
+    const figure = read.amount ?? read.dollars
     // A leading zero may be a decimal comma, "0,500" read as 0500, and a swap would take it as 500.
     if (
-      read.amount !== undefined &&
-      !/^0\d/.test(read.amount) &&
+      figure !== undefined &&
+      !/^0\d/.test(figure) &&
       (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain)
     ) {
       return {
         kind: 'sequence',
         token: chainTokenWord(read.unsupportedToken),
-        amount: read.amount,
+        amount: figure,
+        ...(read.dollars !== undefined ? { amountIsUsd: true as const } : {}),
         ...(read.currency !== undefined ? { currency: read.currency } : {}),
       }
     }

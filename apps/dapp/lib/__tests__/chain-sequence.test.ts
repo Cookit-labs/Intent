@@ -197,7 +197,7 @@ describe('routeCashout with an amount', () => {
 
   it('keeps the amount read, but not a dollar figure as a token amount', () => {
     expect(parseCashout('cash out 5 sol')).toEqual({ unsupportedToken: 'SOL', amount: '5' })
-    expect(parseCashout('cash out $5 sol')).toEqual({ unsupportedToken: 'SOL' })
+    expect(parseCashout('cash out $5 sol')).toEqual({ unsupportedToken: 'SOL', dollars: '5' })
   })
 
   it('says on NEAR only what is true there', () => {
@@ -494,7 +494,7 @@ describe('sequenceFromReading', () => {
     expect(out).toHaveProperty('refusal')
   })
 
-  it('refuses a dollar amount, a received amount and a cash-out not ending in USDC', () => {
+  it('refuses dollars not typed as dollars, a received amount and a cash-out not ending in USDC', () => {
     const f = { followOn: { kind: 'offramp', venue: 'weave' } }
     expect(sequenceFromReading(reading({ ...f, amountIsUsd: true }), said)).toHaveProperty(
       'refusal'

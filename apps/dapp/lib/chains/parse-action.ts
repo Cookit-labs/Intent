@@ -57,6 +57,16 @@ export function amountOf(text: string): string {
 }
 
 /**
+ * "$5 SOL" is five dollars of SOL, not five SOL, which differ by the price of SOL. A dollar of USDC
+ * is one USDC, so that stays a count. The `$` must come before the first figure: it is the amount's.
+ */
+export function dollarsOn(text: string, token: string): { amountIsUsd?: true } {
+  return /^[^\d$]*\$/.test(text.trim()) && token.toUpperCase() !== 'USDC'
+    ? { amountIsUsd: true }
+    : {}
+}
+
+/**
  * Reads a plain instruction into an action, or nothing.
  *
  * Deliberately a strict shape and not a guess. An instruction that moves money
@@ -66,38 +76,46 @@ export function amountOf(text: string): string {
 export function parseChainAction(text: string): ChainActionRequest | null {
   const swap = SWAP.exec(text.trim())
   if (swap !== null) {
+    const tokenIn = chainTokenWord(swap[2] as string)
     return {
       kind: 'swap',
       amount: amountOf(swap[1] as string),
-      tokenIn: chainTokenWord(swap[2] as string),
+      ...dollarsOn(text, tokenIn),
+      tokenIn,
       tokenOut: chainTokenWord(swap[3] as string),
       venue: swap[4]?.trim(),
     }
   }
   const supply = SUPPLY.exec(text.trim())
   if (supply !== null) {
+    const tokenIn = chainTokenWord(supply[2] as string)
     return {
       kind: 'supply',
       amount: amountOf(supply[1] as string),
-      tokenIn: chainTokenWord(supply[2] as string),
+      ...dollarsOn(text, tokenIn),
+      tokenIn,
       venue: supply[3]?.trim(),
     }
   }
   const stake = STAKE.exec(text.trim())
   if (stake !== null) {
+    const tokenIn = chainTokenWord(stake[2] as string)
     return {
       kind: 'stake',
       amount: amountOf(stake[1] as string),
-      tokenIn: chainTokenWord(stake[2] as string),
+      ...dollarsOn(text, tokenIn),
+      tokenIn,
       venue: stake[3]?.trim(),
     }
   }
   const send = SEND.exec(text.trim())
   if (send !== null) {
+    const tokenIn = chainTokenWord(send[2] as string)
     return {
       kind: 'send',
       amount: amountOf(send[1] as string),
-      tokenIn: chainTokenWord(send[2] as string),
+      ...dollarsOn(text, tokenIn),
+      tokenIn,
       recipient: send[3] as string,
     }
   }

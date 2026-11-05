@@ -5,14 +5,14 @@ import {
   routeCashout,
   type CashoutRoute,
 } from '../weave/parse-cashout'
-import { AMOUNT, amountOf, chainTokenWord, parseChainAction } from './parse-action'
+import { AMOUNT, amountOf, chainTokenWord, dollarsOn, parseChainAction } from './parse-action'
 import {
   SEQUENCE_CASHOUT_CHAINS,
   followOnRefusal,
   type ChainSequenceRequest,
   type FollowOn,
 } from './sequence'
-import { sequenceWordsMatch, swapOrderSaid } from './sequence-flow'
+import { dollarsSaid, sequenceWordsMatch, swapOrderSaid } from './sequence-flow'
 import type { ChainActionKind, ChainActionRequest, ChainWithActions } from './types'
 
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
@@ -72,11 +72,13 @@ export function parseChainSequence(
   const followOn = followOnOf((match[4] as string).trim())
   if (followOn === null) return null
   if ('refusal' in followOn) return followOn
+  const tokenIn = chainTokenWord(match[2] as string)
   return withSwap(
     {
       kind: 'swap',
       amount: amountOf(match[1] as string),
-      tokenIn: chainTokenWord(match[2] as string),
+      ...dollarsOn(text, tokenIn),
+      tokenIn,
       tokenOut: chainTokenWord(match[3] as string),
       venue: undefined,
     },
@@ -230,17 +232,13 @@ function refuseUnsaid(
 /** The amount and token a model read, or why it cannot be used. Nothing is checked against words. */
 function swapOf(read: ReadSwap): ChainActionRequest | { refusal: string } {
   const amount = String(read.amountUsd)
-  if (
-    !read.amountStated ||
-    read.amountIsUsd === true ||
-    read.amountOf === 'received' ||
-    !/^\d+(?:\.\d+)?$/.test(amount)
-  ) {
+  if (!read.amountStated || read.amountOf === 'received' || !/^\d+(?:\.\d+)?$/.test(amount)) {
     return refuseUnsaid(read, 'an amount of the token you are swapping')
   }
   return {
     kind: 'swap',
     amount,
+    ...(read.amountIsUsd === true ? { amountIsUsd: true as const } : {}),
     tokenIn: chainTokenWord(read.tokenIn),
     tokenOut: chainTokenWord(read.tokenOut),
     venue: undefined,
@@ -273,8 +271,18 @@ export function requestSaid(
   /** A cash-out follows, which takes USDC, so a swap that names no output is to USDC. */
   usdcImplied = false
 ): boolean {
-  if (!sequenceWordsMatch({ amount: request.amount, token: request.tokenIn }, said)) return false
   const out = request.tokenOut
+  if (request.amountIsUsd === true) {
+    const asNamed = dollarsSaid(request.amount, request.tokenIn, out, said)
+    const toUsdc =
+      usdcImplied &&
+      out !== undefined &&
+      chainTokenWord(out).toUpperCase() === 'USDC' &&
+      dollarsSaid(request.amount, request.tokenIn, undefined, said)
+    if (!asNamed && !toUsdc) return false
+    return request.recipient === undefined || typedExactly(request.recipient, said)
+  }
+  if (!sequenceWordsMatch({ amount: request.amount, token: request.tokenIn }, said)) return false
   // Named in order: the amount by the token given up, and the token received after it. A cash-out
   // takes USDC, so with one following, a swap that names no output is to USDC.
   const named = out !== undefined && swapOrderSaid(request.amount, request.tokenIn, out, said)

@@ -679,6 +679,7 @@ export function cashoutSequence(
     swap: {
       kind: 'swap',
       amount: route.amount,
+      ...(route.amountIsUsd === true ? { amountIsUsd: true as const } : {}),
       tokenIn: route.token,
       tokenOut: 'USDC',
       venue: undefined,
@@ -791,6 +792,66 @@ export function sequenceWordsMatch(
   const symbol = chainTokenWord(instruction.token)
   const last = figuresSaid(symbol, turns).at(-1)
   return tokenSaid(instruction.token, turns) && last?.value === canonicalNumber(instruction.amount)
+}
+
+/**
+ * Whether the person themselves said this many dollars of this token: "$5 of SOL", "5 dollars worth
+ * of my SOL", "SOL worth $5". The same rules as a count of tokens, for the same reason. It must be
+ * the last figure stated, so a correction wins, and it must sit by the token given up, or be a bare
+ * correction after it, so "$5 of USDC to SOL" is not $5 of SOL. A token received is named after it.
+ */
+export function dollarsSaid(
+  amount: string,
+  tokenIn: string,
+  tokenOut: string | undefined,
+  turns: readonly string[]
+): boolean {
+  const symbol = chainTokenWord(tokenIn)
+  const { token } = tokenPattern(symbol)
+  const joined = spacedTurns(symbol, turns).join(' ')
+  const number = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)`
+  const dollars = new RegExp(
+    String.raw`\$${number}|(?:^|[^\w.,$₦£€])${number}\s*(?:usd|dollars?|bucks?)(?![\w+])`,
+    'gi'
+  )
+  const last = [...joined.matchAll(dollars)].at(-1)
+  if (last === undefined) return false
+  if (figureValue((last[1] ?? last[2]) as string) !== canonicalNumber(amount)) return false
+
+  const start = last.index ?? 0
+  const end = start + last[0].length
+  const after = joined.slice(end)
+  const plain = figuresSaid(symbol, [joined]).at(-1)
+  if (plain !== undefined && joined.length - plain.after.length > end) return false
+
+  const follows = new RegExp(
+    String.raw`^\s*(?:(?:usd|dollars?)\s+)?(?:worth\s+)?(?:of\s+)?(?:my\s+|the\s+)?(?:${token})${WORD_END}`,
+    'i'
+  ).exec(after)
+  const precedes = new RegExp(
+    String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})\s+worth\s+(?:of\s+)?\s*$`,
+    'i'
+  ).test(joined.slice(0, start))
+  if (follows !== null || precedes) {
+    const rest = follows === null ? after : after.slice(follows[0].length)
+    return tokenOut === undefined || tokenSaid(tokenOut, [rest], true)
+  }
+  const bare =
+    BARE_FIGURE.test(after) &&
+    tokenSaid(tokenIn, [joined.slice(0, start)]) &&
+    !tokenSaid(tokenIn, [after], true)
+  if (!bare) return false
+  return tokenOut === undefined || tokenOutFollows(token, tokenOut, joined)
+}
+
+/** Whether the person said the figure of a cash-out the model wrote out, in whichever unit it is. */
+export function cashoutSaid(
+  route: Extract<CashoutRoute, { kind: 'sequence' }>,
+  turns: readonly string[]
+): boolean {
+  return route.amountIsUsd === true
+    ? dollarsSaid(route.amount, route.token, undefined, turns)
+    : sequenceWordsMatch(route, turns)
 }
 
 function tokenPattern(symbol: string): { token: string; names: string[] } {

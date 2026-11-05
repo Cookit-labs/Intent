@@ -80,6 +80,7 @@ import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
 import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
+import { sizeInUnits } from '../../lib/chains/dollar-amount'
 import { chainHelp, helpForUnread } from '../../lib/chains/explain'
 import { racesFirst } from '../../lib/chains/parse-action'
 import {
@@ -100,7 +101,7 @@ import {
   sequenceOutcome,
   stepOnItsOwn,
   readFollowOnRefusal,
-  sequenceWordsMatch,
+  cashoutSaid,
 } from '../../lib/chains/sequence-flow'
 import type { ChainActionRequest, ChainWithActions, WalletBalances } from '../../lib/chains/types'
 import { QUOTE_EXPIRED } from '../../lib/chains/signing-flow'
@@ -1776,8 +1777,45 @@ export function IntentChat({
     setChainRace({ request: request.swap, text })
   }
 
+  /**
+   * "$5 of SOL" as a count of SOL at a price read now, and says so. Both ways an action starts come
+   * through here first, so a figure in dollars can't reach a race or a card as that many tokens.
+   */
+  function sizeThen(
+    request: ChainActionRequest,
+    text: string,
+    go: (sized: ChainActionRequest) => void
+  ): void {
+    setMessage(text)
+    setClarifying(null)
+    setAffordError(null)
+    clearChainRace()
+    chainAction.reset()
+    setClarifyBusy(true)
+    const { turn, account, chain } = latest.current
+    void sizeInUnits(slug, request).then((out) => {
+      if (clarifyRuns.current === 0) setClarifyBusy(false)
+      // The person has moved on, and nothing must start under what they did next.
+      const now = latest.current
+      if (turn !== now.turn || account !== now.account || chain !== now.chain) return
+      if ('refusal' in out) {
+        chainAction.refuse(out.refusal, text)
+        return
+      }
+      go(out.request)
+      if (out.line !== undefined) {
+        setSequenceNote(out.line)
+        recordLive('agent', out.line)
+      }
+    })
+  }
+
   /** A plain chain action, typed or read by the orchestrator: the race, or the card for a send. */
   function startChainAction(action: ChainActionRequest, text: string): void {
+    if (action.amountIsUsd === true) {
+      sizeThen(action, text, (sized) => startChainAction(sized, text))
+      return
+    }
     // The thread only renders once there is a message, so without this the
     // card below would be built and never seen.
     setMessage(text)
@@ -1803,6 +1841,10 @@ export function IntentChat({
 
   /** A swap and what follows it. Whatever could not finish is refused here, before step 1. */
   function startChainSequence(request: ChainSequenceRequest, text: string): void {
+    if (request.swap.amountIsUsd === true) {
+      sizeThen(request.swap, text, (swap) => startChainSequence({ ...request, swap }, text))
+      return
+    }
     const capabilities = chainCapabilities(slug)
     if (capabilities === undefined) return
     const { followOn } = request
@@ -2318,7 +2360,7 @@ export function IntentChat({
     if (writtenOut.kind !== 'pass') {
       const shown = turns[0]?.content ?? text
       // What gets signed comes from the person's own words, never from the model's.
-      if (writtenOut.kind === 'sequence' && !sequenceWordsMatch(writtenOut, said)) {
+      if (writtenOut.kind === 'sequence' && !cashoutSaid(writtenOut, said)) {
         startCashout({ kind: 'token', token: writtenOut.token }, shown)
         return
       }

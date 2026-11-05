@@ -14,6 +14,11 @@ export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
 export interface ChainActionRequest {
   kind: ChainActionKind
   amount: string
+  /**
+   * `amount` is dollars, not tokens: "$5 of SOL". Only the chat's start of an action reads this,
+   * and it is swapped for a count of tokens there, so nothing past that point ever sees it.
+   */
+  amountIsUsd?: true | undefined
   tokenIn: string
   /** Swaps only. */
   tokenOut?: string | undefined
