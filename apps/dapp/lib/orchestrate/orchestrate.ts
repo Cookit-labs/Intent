@@ -239,7 +239,7 @@ function limitPrompt(chain: string): string {
   if (chain === 'monad') {
     return "There are no limit orders on this chain. If the person names a price to sell or buy at, set orderStyle to 'limit' and say so in reply; do not turn it into a swap."
   }
-  return "A price the person names, or 'when it hits' or 'once it reaches' a price, is a limit order. Set orderStyle to 'limit' and write instruction as \"sell <amount> <token> at $<price>\" or \"buy <token> with <amount> <stable> at $<price>\", copying the amount, token and price character for character from what they typed, and never choosing a price yourself."
+  return 'A price the person names, or \'when it hits\' or \'once it reaches\' a price, is a limit order. Set orderStyle to \'limit\' and write instruction as "sell <amount> <token> at $<price>" or "buy <token> with <amount> <stable> at $<price>", copying the amount, token and price character for character from what they typed, and never choosing a price yourself. A purchase sized in the token received, such as "get me 1 SOL at 110", cannot run here: do not write it as a sale. Ask what they will spend instead.'
 }
 
 /**

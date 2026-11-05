@@ -62,6 +62,7 @@ const chain = vi.hoisted(() => ({
   transaction: (async () => ({ value: BigInt(0), input: '0x' })) as (
     hash: string
   ) => Promise<{ value: bigint; input: string }>,
+  code: (async () => '0x') as (account: string) => Promise<string | undefined>,
   reads: [] as string[],
 }))
 
@@ -79,6 +80,7 @@ vi.mock('../chains/evm/client', async (original) => {
         return chain.allowance(token, owner, spender)
       },
       nativeBalance: async () => BigInt(0),
+      code: async (account: string) => chain.code(account),
       waitForReceipt: (hash: string) => chain.waitForReceipt(hash),
       transaction: (hash: string) => chain.transaction(hash),
     }),
@@ -453,6 +455,7 @@ beforeEach(() => {
   chain.reads = []
   chain.tokenBalance = async () => BigInt(0)
   chain.allowance = async () => BigInt(0)
+  chain.code = async () => '0x'
   chain.waitForReceipt = async () => {
     throw new Error('no receipt')
   }
@@ -529,6 +532,21 @@ describe('prepare', () => {
     expect(prepared.pay).toEqual({ amount: '1', symbol: 'AVAX' })
     expect(prepared.context).toEqual({ step: 'wrap', sellToken: WAVAX, amount: ONE_AVAX })
     safe(prepared)
+  })
+
+  it('refuses a smart-contract wallet before anything is wrapped or approved', async () => {
+    chain.code = async () => '0x6080604052'
+    const refusal = await prepareRefusal(sale())
+    expect(refusal).toBe(
+      'This wallet is a smart contract, and CoW orders here need an ordinary wallet’s signature. Nothing was signed or sent.'
+    )
+    expect(chain.reads).toEqual([])
+  })
+
+  it('does not take a delegated ordinary wallet for a smart contract', async () => {
+    chain.code = async () => '0xef0100' + '11'.repeat(20)
+    const prepared = await cowVenue.prepare(sale(), ME)
+    expect(prepared.kind).toBe('limit')
   })
 
   it('wraps only what the WAVAX already held falls short by', async () => {

@@ -199,6 +199,13 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
   await assertNoOpenSale(owner, sellToken, input.symbol)
 
   const client = evmClient('avalanche')
+  const code = await mustRead(() => client.code(owner))
+  // A delegated ordinary wallet (EIP-7702) still signs with its own key.
+  if (code !== undefined && code !== '0x' && !code.toLowerCase().startsWith('0xef0100')) {
+    refused(
+      'This wallet is a smart contract, and CoW orders here need an ordinary wallet’s signature.'
+    )
+  }
   const sold = BigInt(sellAmount)
   const wraps = sellToken === WAVAX
   const notes = wraps ? [...NOTES, WRAP_NOTE] : NOTES

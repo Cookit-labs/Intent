@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { chainRouteFromReading, type ReadSwap } from '../chains/parse-sequence'
+import { limitSaid } from '../chains/parse-limit'
 import { LIMIT_NOT_HERE } from '../chains/prepare'
 
 const read = (
@@ -76,5 +77,30 @@ describe('the model reading a limit order', () => {
       'swap 1 SOL to USDC',
     ])
     expect(route).toMatchObject({ action: { kind: 'swap' } })
+  })
+})
+
+describe('a sale the person did not word as one', () => {
+  const sale = {
+    kind: 'limit' as const,
+    amount: '1',
+    tokenIn: 'SOL',
+    tokenOut: 'USDC',
+    limitPrice: '110',
+  }
+  it.each([
+    'get me 1 sol once it reaches 110',
+    'I want 1 SOL when it hits 110',
+    'pick up 1 sol at 110',
+    'grab 1 sol at $110',
+  ])('is not taken for "%s"', (words) => {
+    expect(limitSaid(sale, [words])).toBe(false)
+  })
+  it.each([
+    'get rid of 1 sol once it reaches 110',
+    'I want to sell 1 SOL at 110',
+    'dump 1 sol at 110',
+  ])('is taken for "%s"', (words) => {
+    expect(limitSaid(sale, [words])).toBe(true)
   })
 })

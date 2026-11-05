@@ -153,6 +153,8 @@ export function limitSaid(request: ChainActionRequest, turns: readonly string[])
  * the amount, except that USDC may go unnamed after "sell", the parser's own default. A purchase
  * names it anywhere. "buy" is never a sale, and "sell" is never a purchase unless it is a swap.
  */
+const SELLING_WORDS = /\b(?:sell|get\s+rid\s+of|dump|unload|offload|cash\s+in)\b/i
+
 function sideAndTokenOutSaid(
   request: ChainActionRequest,
   joined: string,
@@ -171,11 +173,12 @@ function sideAndTokenOutSaid(
   const named = pair.selling
     ? tokenSaid(tokenOut, [after], true)
     : tokenSaid(tokenOut, [joined], true)
-  // Selling without naming a stablecoin is for USDC, unless the person named the other one.
+  // Selling without naming a stablecoin is for USDC, unless the person named the other one. It takes
+  // a word that means selling: "get me 1 SOL at 110" or "grab 1 SOL" are purchases.
   const implied =
     pair.selling &&
     !buy &&
-    (sell || !swap) &&
+    SELLING_WORDS.test(joined) &&
     chainTokenWord(tokenOut).toUpperCase() === 'USDC' &&
     !tokenSaid('USDT', [joined], true)
   return named || implied

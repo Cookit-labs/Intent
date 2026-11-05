@@ -1409,6 +1409,7 @@ describe('submit: what the chain says the wallet sent', () => {
         tokenBalance: async () => BigInt(0),
         allowance: async () => BigInt(0),
         nativeBalance: async () => BigInt(0),
+        code: async () => '0x',
         waitForReceipt: async () => receipt({ status, to: receiptTo }) as unknown as EvmReceipt,
         transaction: transaction as EvmClient['transaction'],
       }))

@@ -760,6 +760,19 @@ describe('the order key’s signature', () => {
     )
   })
 
+  it('says nothing was sent, not nothing was signed, once the wallet has signed', () => {
+    const decoded = getTransactionDecoder().decode(Buffer.from(base.transaction, 'base64'))
+    const withWallet = getTransactionEncoder().encode({
+      ...decoded,
+      signatures: {
+        ...decoded.signatures,
+        [ACCOUNT as Address]: new Uint8Array(64).fill(1) as SignatureBytes,
+      },
+    })
+    const payload = sealed(Buffer.from(withWallet))
+    expect(refusal(() => limoAssertSafe(payload, ACCOUNT))).toMatch(/Nothing was sent\.$/)
+  })
+
   it('refuses one bit changed in it', () => {
     const bytes = Buffer.from(base.transaction, 'base64')
     bytes[100] = (bytes[100] as number) ^ 1

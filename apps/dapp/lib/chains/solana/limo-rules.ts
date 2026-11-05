@@ -436,6 +436,34 @@ export function limoAssertSafe(
   account: string,
   context?: Record<string, string> | undefined
 ): void {
+  try {
+    assertLimoSafe(payload, account, context)
+  } catch (e) {
+    // Once the wallet has signed, as at submit, "nothing was signed" would be false.
+    if (e instanceof ChainActionRefused && walletSigned(payload, account)) {
+      throw new ChainActionRefused(
+        e.message.replace(/Nothing was signed or sent\.$/, 'Nothing was sent.')
+      )
+    }
+    throw e
+  }
+}
+
+function walletSigned(payload: SigningPayload, account: string): boolean {
+  if (payload.family !== 'solana') return false
+  try {
+    const { signatures } = getTransactionDecoder().decode(bytesFromBase64(payload.transaction))
+    return (signatures[account as Address] ?? null) !== null
+  } catch {
+    return false
+  }
+}
+
+function assertLimoSafe(
+  payload: SigningPayload,
+  account: string,
+  context?: Record<string, string> | undefined
+): void {
   generic(payload, account)
   if (payload.family !== 'solana') return
   const transaction = decodeSolanaTransaction(payload.transaction)
