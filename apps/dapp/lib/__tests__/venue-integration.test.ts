@@ -133,13 +133,20 @@ describe('DeFindex is claimed as far as it has been proven', () => {
 describe('the integrated venues are on the right chain', () => {
   it('keeps every executing venue on a chain that can execute', () => {
     // An EVM venue marked executable would send a user to a confirm screen that
-    // cannot build anything: EVM chains connect but have no signing path yet.
+    // cannot build anything, except on Avalanche and Monad, which sign through
+    // their chain modules. Arc and the other EVM chains have no signing path yet.
     for (const v of venues) {
       if (v.integration === 'executes') {
         expect(
-          ['stellar', 'solana', 'sui', 'near'],
+          ['stellar', 'solana', 'sui', 'near', 'evm'],
           `${v.id} claims execution but is ${v.family}`
         ).toContain(v.family)
+        if (v.family === 'evm') {
+          expect(
+            v.chains.every((c) => c === 'Avalanche' || c === 'Monad'),
+            `${v.id} claims execution on ${v.chains.join(', ')}`
+          ).toBe(true)
+        }
       }
     }
   })
