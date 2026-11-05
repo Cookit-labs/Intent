@@ -2391,7 +2391,12 @@ export function IntentChat({
     // sentence goes, and only what the person typed themselves can be signed.
     if (chainCaps !== undefined) {
       const shown = turns[0]?.content ?? text
-      const route = chainRouteFromReading(answer.read, answer.instruction, said)
+      const route = chainRouteFromReading(
+        answer.read,
+        answer.instruction,
+        said,
+        slug as ChainWithActions
+      )
       if (route !== null && 'sequence' in route) {
         leaveSequence()
         startChainSequence(route.sequence, shown)

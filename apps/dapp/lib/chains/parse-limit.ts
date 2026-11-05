@@ -171,5 +171,12 @@ function sideAndTokenOutSaid(
   const named = pair.selling
     ? tokenSaid(tokenOut, [after], true)
     : tokenSaid(tokenOut, [joined], true)
-  return named || (pair.selling && sell && chainTokenWord(tokenOut).toUpperCase() === 'USDC')
+  // Selling without naming a stablecoin is for USDC, unless the person named the other one.
+  const implied =
+    pair.selling &&
+    !buy &&
+    (sell || !swap) &&
+    chainTokenWord(tokenOut).toUpperCase() === 'USDC' &&
+    !tokenSaid('USDT', [joined], true)
+  return named || implied
 }

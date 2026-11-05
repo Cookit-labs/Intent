@@ -234,6 +234,14 @@ function basePrompt(chain: string): string {
   ].join(' ')
 }
 
+/** Limit orders off Stellar: written out in the person's own figures, or said to be unavailable. */
+function limitPrompt(chain: string): string {
+  if (chain === 'monad') {
+    return "There are no limit orders on this chain. If the person names a price to sell or buy at, set orderStyle to 'limit' and say so in reply; do not turn it into a swap."
+  }
+  return "A price the person names, or 'when it hits' or 'once it reaches' a price, is a limit order. Set orderStyle to 'limit' and write instruction as \"sell <amount> <token> at $<price>\" or \"buy <token> with <amount> <stable> at $<price>\", copying the amount, token and price character for character from what they typed, and never choosing a price yourself."
+}
+
 /**
  * What differs off Stellar, where the opening line and the follow-ons above are written for
  * Stellar. The facts below list what this chain can run, and the app checks everything signed
@@ -244,6 +252,7 @@ function offStellarPrompt(chain: string): string {
   return [
     'The person is on the chain named in the facts below, not on Stellar.',
     "followOn is 'lend' only for a deposit that the facts list under Swap then deposit, and 'offramp' only for a cash-out that the facts list under Swap then cash out. Anything else that follows a swap, such as a send or a stake, is not a followOn: write the whole request in instruction.",
+    limitPrompt(chain),
     `When a swap is followed by something, write the instruction as one sentence like "Swap 5 ${own} to USDC, then send to ADDRESS", with every amount, token and address copied character for character from what the person typed. Never invent, shorten or correct an address, and never add an amount they did not give.`,
   ].join(' ')
 }
