@@ -43,7 +43,7 @@ Pools are shared objects, keyed by (Base,Quote). Mainnet ids [SRC constants.ts m
 - USDSUI_USDC `0xa374264d43e6baa5aa8b35ff18ff24fdba7443b4bcb884cb4c2f568d32cdac36`
   Discover all via indexer `GET /get_pools` [LIVE]. Quote is USDC or SUI, so only pairs that exist are tradable; a SUI->USDC sell is the `isBid=false` order on SUI_USDC; a USDC->SUI buy is `isBid=true`.
 
-Validation (order_info.move validate_inputs) [SRC]: quantity >= min_size (EOrderBelowMinimumSize), quantity % lot_size == 0 (EOrderInvalidLotSize), price % tick_size == 0 and within range (EOrderInvalidPrice). Quantity is in base raw units. On-chain price = human price _ 1e9 _ quoteScalar / baseScalar (SDK convertPrice [SRC conversion.ts]); for SUI/USDC that is price \* 1e6.
+Validation (order*info.move validate_inputs) [SRC]: quantity >= min_size (EOrderBelowMinimumSize), quantity % lot_size == 0 (EOrderInvalidLotSize), price % tick_size == 0 and within range (EOrderInvalidPrice). Quantity is in base raw units. On-chain price = human price * 1e9 \_ quoteScalar / baseScalar (SDK convertPrice [SRC conversion.ts]); for SUI/USDC that is price \* 1e6.
 
 Live on-chain values for SUI_USDC via read-only simulate of `pool::pool_book_params` / `pool_trade_params` / `mid_price` / `whitelisted` [LIVE, my script scratchpad/di.mjs]:
 
