@@ -43,6 +43,17 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 }
 
+/** The per-minute limit, or the daily cap, whose wait is hours. The server says how long. */
+async function rateLimited(res: Response): Promise<OrchestrateAnswer> {
+  const body = (await res.json().catch(() => null)) as { retryAfter?: unknown } | null
+  const wait = typeof body?.retryAfter === 'number' ? body.retryAfter : 0
+  return {
+    outcome: 'unavailable',
+    reason: wait > 120 ? 'rate_limited_today' : 'rate_limited',
+    tokens: [],
+  }
+}
+
 function refusedOf(value: unknown): Pick<ActReading, 'followOnRefused'> {
   const refused = value as { kind?: unknown; venue?: unknown } | null | undefined
   if (refused?.kind !== 'lend' && refused?.kind !== 'offramp') return {}
@@ -75,6 +86,7 @@ export async function fetchOrchestrate(
         ...(context.length > 0 ? { context } : {}),
       }),
     })
+    if (res.status === 429) return await rateLimited(res)
     if (!res.ok) return UNREACHABLE
     const a = (await res.json()) as Record<string, unknown>
 

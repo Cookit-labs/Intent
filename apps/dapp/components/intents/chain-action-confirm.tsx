@@ -10,13 +10,16 @@ import { stepErrorMessage } from '../../lib/agents/chain-race'
 export function ChainActionConfirm({
   action,
   sequenceSettled = false,
+  typedStep,
 }: {
   action: ChainAction
   /** This card is step 2, after a swap that was signed and settled. */
   sequenceSettled?: boolean
+  /** That step as a request of its own, for when it can't go on from here. */
+  typedStep?: string | undefined
 }): JSX.Element {
   const { phase, prepared, hash, explorerUrl, earlier } = action
-  const error = stepErrorMessage(action.error, sequenceSettled)
+  const error = stepErrorMessage(action.error, sequenceSettled, typedStep)
   const busy = phase === 'signing' || phase === 'submitting'
 
   return (

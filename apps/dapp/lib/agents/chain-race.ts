@@ -250,19 +250,27 @@ export const STEP_CARD_EXPIRED =
 const STEP_UNCONFIRMED =
   "The swap stands, so don't send your request again. If this step did not go out, what arrived stays in your wallet."
 
+function stepUnconfirmed(typedStep: string | undefined): string {
+  return typedStep === undefined
+    ? STEP_UNCONFIRMED
+    : `The swap stands, so don't send your request again. Check your wallet. If nothing went out, you can type the step on its own, for example "${typedStep}".`
+}
+
 /**
  * A refusal of step 2, once the swap before it was signed. The server words its refusals as if
  * nothing had been, which is true of step 2 and false of the sequence. Sending the request again
- * would offer the swap a second time, so nothing here tells the person to.
+ * would offer the swap a second time, so nothing here tells the person to. `typedStep` is step 2 as
+ * a request of its own, which is what they can type instead.
  */
 export function stepErrorMessage(
   message: string | undefined,
-  sequenceSettled: boolean
+  sequenceSettled: boolean,
+  typedStep?: string | undefined
 ): string | undefined {
   if (message === undefined || !sequenceSettled) return message
   if (message === QUOTE_EXPIRED) return STEP_CARD_EXPIRED
   if (message.endsWith(START_AGAIN)) {
-    return `${message.slice(0, -START_AGAIN.length)}${STEP_UNCONFIRMED}`
+    return `${message.slice(0, -START_AGAIN.length)}${stepUnconfirmed(typedStep)}`
   }
   if (!/nothing was signed or sent/i.test(message)) return message
   const rest = message

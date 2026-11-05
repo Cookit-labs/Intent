@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { STEP_CARD_EXPIRED, stepErrorMessage } from '../agents/chain-race'
 import { chainCapabilities } from '../chains/capabilities'
-import { chainHelp, helpForUnread } from '../chains/explain'
+import { chainHelp, helpForUnread, RATE_LIMITED } from '../chains/explain'
 import { looksLikeChainAction } from '../chains/parse-action'
 import {
   chainRouteFromReading,
@@ -20,6 +20,7 @@ import { followOnRefusal, type ChainSequenceRequest } from '../chains/sequence'
 import {
   keepsRun,
   moveOnSecond,
+  stepOnItsOwn,
   secondStepLabel,
   stepAmount,
   type SequenceStage,
@@ -27,6 +28,7 @@ import {
 import { afterSigning, QUOTE_EXPIRED, quoteExpiredBeforeSigning } from '../chains/signing-flow'
 import type { ChainWithActions, PreparedAction, SigningPayload } from '../chains/types'
 import { fetchOrchestrate } from '../chat/orchestrate-client'
+import { unavailableMessage } from '../chat/orchestrate-copy'
 import { readingFromArguments } from '../parse-intent-llm'
 import { currencyNamedIn, routeCashout } from '../weave/parse-cashout'
 
@@ -116,8 +118,8 @@ describe('2. ordinary words reach the model', () => {
   it('answers with what works when the model could not read a sentence with a verb', () => {
     const capabilities = chainCapabilities('solana') ?? []
     const help = chainHelp('Solana', capabilities)
-    expect(helpForUnread(['swap some sol'], 'Solana', capabilities)).toBe(help)
-    expect(helpForUnread(['how are you'], 'Solana', capabilities)).toBeUndefined()
+    expect(helpForUnread('unreadable', ['swap some sol'], 'Solana', capabilities)).toBe(help)
+    expect(helpForUnread('unreadable', ['how are you'], 'Solana', capabilities)).toBeUndefined()
     expect(looksLikeChainAction('swap some sol')).toBe(true)
   })
 })
@@ -568,7 +570,7 @@ describe('11. sentences that say what is true', () => {
       ['supply it']
     ) as { refusal: string }
     expect(plain.refusal).not.toMatch(/USDC to USDC/)
-    expect(plain.refusal).toContain('"5 USDC"')
+    expect(plain.refusal).toContain('"deposit 5 USDC"')
     const other = sequenceFromReading(
       read({
         tokenIn: 'USDC',
@@ -644,5 +646,139 @@ describe('13. a wallet switch that waits', () => {
 describe('the parsers a sentence goes through first', () => {
   it('keeps a typed follow-on the strict shape cannot read out of a sequence', () => {
     expect(parseChainSequence('swap 5 sol to usdc then send to my friend')).toBeNull()
+  })
+})
+
+describe('a comma that is not a thousands comma', () => {
+  const swap = (amount: string) =>
+    ({ kind: 'swap', amount, tokenIn: 'SOL', tokenOut: 'USDC', venue: undefined }) as const
+
+  it.each([
+    ['1,5', ['15', '1.5']],
+    ['0,5', ['5', '0.5']],
+    ['0,500', ['500', '0.5']],
+  ])('passes nothing on "%s", and refuses in words', (figure, amounts) => {
+    const said = [`swap ${figure} sol to usdc`]
+    for (const amount of amounts) {
+      expect(requestSaid(swap(amount), said)).toBe(false)
+      const out = chainRouteFromReading(read({ amountUsd: Number(amount) }), 'x', said)
+      expect(out).toHaveProperty('refusal')
+    }
+  })
+
+  it('reads a thousands comma', () => {
+    expect(requestSaid(swap('1000'), ['swap 1,000 sol to usdc'])).toBe(true)
+    expect(requestSaid(swap('1000.5'), ['swap 1,000.5 sol to usdc'])).toBe(true)
+  })
+
+  it('does not fall back to the figure before a correction it cannot read', () => {
+    expect(requestSaid(swap('5'), ['swap 5 sol to usdc', 'make it 1,5'])).toBe(false)
+  })
+
+  it('still reads a figure with a comma after it', () => {
+    expect(requestSaid(swap('5'), ['swap 5 sol, to usdc'])).toBe(true)
+    expect(requestSaid(swap('3'), ['I have 5, sol, flip 3 of it to USDC'])).toBe(true)
+  })
+})
+
+describe('sent too many messages', () => {
+  const capabilities = chainCapabilities('solana') ?? []
+  const answer = (retryAfter: number): typeof fetch =>
+    (async () =>
+      new Response(JSON.stringify({ error: 'rate_limited', retryAfter }), {
+        status: 429,
+      })) as unknown as typeof fetch
+  const turns = [{ role: 'user' as const, content: 'x' }]
+
+  it('is told apart from a model that could not be reached', async () => {
+    expect(await fetchOrchestrate(turns, [], 'solana', answer(30))).toEqual({
+      outcome: 'unavailable',
+      reason: 'rate_limited',
+      tokens: [],
+    })
+  })
+
+  it('does not blame their words, on any message', () => {
+    expect(RATE_LIMITED).toBe("You're sending messages quickly. Wait a minute and try again.")
+    for (const said of ['swap some sol', 'how are you']) {
+      expect(helpForUnread('rate_limited', [said], 'Solana', capabilities)).toBe(RATE_LIMITED)
+    }
+  })
+
+  it('does not say a minute when the wait is the daily cap', async () => {
+    const reply = await fetchOrchestrate(turns, [], 'solana', answer(80_000))
+    if (reply.outcome !== 'unavailable') throw new Error('expected unavailable')
+    const said = helpForUnread(reply.reason, ['swap some sol'], 'Solana', capabilities)
+    expect(said).not.toMatch(/minute/)
+    expect(said).toMatch(/today/)
+  })
+
+  it('reads the same on Stellar as any other failed read', async () => {
+    const reply = await fetchOrchestrate(turns, [], 'stellar', answer(30))
+    if (reply.outcome !== 'unavailable') throw new Error('expected unavailable')
+    expect(unavailableMessage(reply.reason, reply.tokens)).toBe(
+      "I can't read that right now. Please try again in a moment."
+    )
+  })
+})
+
+describe('a step 2 wallet that gave no answer', () => {
+  const wallet = (): string => {
+    const step = afterSigning({ ok: false, reason: 'rejected' }, 'near')
+    if (step.next !== 'unknown') throw new Error('expected unknown')
+    return step.error
+  }
+
+  it('gives a next step, in the words of the step', () => {
+    const said = stepErrorMessage(wallet(), true, stepOnItsOwn(SEND))
+    expect(said).toContain(
+      'Check your wallet. If nothing went out, you can type the step on its own, for example "send 5 USDC to an address".'
+    )
+    expect(said).toContain("The swap stands, so don't send your request again.")
+  })
+
+  it('chooses the example by the follow-on and the token that arrived', () => {
+    expect(stepOnItsOwn({ ...SEND, followOn: { kind: 'supply' } })).toBe('deposit 5 USDC')
+    const toSol = { ...SEND.swap, tokenIn: 'USDC', tokenOut: 'SOL' }
+    expect(stepOnItsOwn({ swap: toSol, followOn: { kind: 'stake' } })).toBe('stake 5 SOL')
+    expect(stepOnItsOwn(CASHOUT)).toBeUndefined()
+  })
+
+  it('offers no example where there is none', () => {
+    expect(stepErrorMessage(wallet(), true)).not.toContain('for example')
+  })
+
+  it('leaves the other answers alone', () => {
+    expect(stepErrorMessage(QUOTE_EXPIRED, true, stepOnItsOwn(SEND))).toBe(STEP_CARD_EXPIRED)
+    expect(stepErrorMessage(wallet(), false, stepOnItsOwn(SEND))).toBe(wallet())
+  })
+})
+
+describe('the examples in a refusal', () => {
+  const example = (sentence: string, said: string): string =>
+    (chainRouteFromReading(read(), 'Swap 5 SOL to USDC', [sentence, said]) as { refusal: string })
+      .refusal
+
+  it.each([
+    ['swap 5 sol to usdc then cash out', 'then cash out"'],
+    ['swap 5 sol to usdc then off-ramp please', 'then cash out"'],
+    ['swap 5 sol to usdc then deposit it somewhere', 'then deposit"'],
+    ['swap 5 sol to usdc then stake it somewhere', 'then stake"'],
+    ['swap 5 sol to usdc then send it to my friend', 'then send to an address"'],
+  ])('keeps to the follow-on said in "%s"', (sentence, words) => {
+    expect(example(sentence, '')).toContain(words)
+  })
+
+  it('adds no follow-on it could not name', () => {
+    expect(example('swap 5 sol to usdc then dance', '')).toContain('"swap 5 SOL to USDC"')
+  })
+
+  it('gives a whole sentence on a USDC refusal, by what was asked', () => {
+    const usdc = read({ action: 'supply', tokenIn: 'USDC' })
+    const refused = (instruction: string): string =>
+      (chainRouteFromReading(usdc, instruction, ['do it']) as { refusal: string }).refusal
+    expect(refused('Supply 5 USDC')).toContain('"deposit 5 USDC"')
+    expect(refused('Stake 5 USDC')).toContain('"stake 5 USDC"')
+    expect(refused(`Send 5 USDC to ${ADDRESS}`)).toContain('"send 5 USDC to an address"')
   })
 })

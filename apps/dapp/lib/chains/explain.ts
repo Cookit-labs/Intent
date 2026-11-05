@@ -44,14 +44,22 @@ export function chainHelp(chainName: string, capabilities: readonly ChainCapabil
   return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.`
 }
 
+export const RATE_LIMITED = "You're sending messages quickly. Wait a minute and try again."
+
+const RATE_LIMITED_TODAY = "You've sent a lot of messages today. Try again later."
+
 /**
- * What to say when the model could not read a message that asks to do something. Nothing for one
- * that doesn't, which gets the ordinary answer about the model being out of reach.
+ * What to say when the model did not read a message. Being held back by the rate limit says nothing
+ * about the words. A message that asks to do something is told what works. Nothing for any other,
+ * which gets the ordinary answer about the model being out of reach.
  */
 export function helpForUnread(
+  reason: string,
   said: readonly string[],
   chainName: string,
   capabilities: readonly ChainCapability[]
 ): string | undefined {
+  if (reason === 'rate_limited') return RATE_LIMITED
+  if (reason === 'rate_limited_today') return RATE_LIMITED_TODAY
   return said.some(looksLikeChainAction) ? chainHelp(chainName, capabilities) : undefined
 }

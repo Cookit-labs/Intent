@@ -98,6 +98,7 @@ import {
   questionAnswerFrom,
   questionChainRefusal,
   sequenceOutcome,
+  stepOnItsOwn,
   readFollowOnRefusal,
   sequenceWordsMatch,
 } from '../../lib/chains/sequence-flow'
@@ -927,10 +928,12 @@ export function IntentChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raceReply])
 
+  const typedStep =
+    chainSequence.sequence === null ? undefined : stepOnItsOwn(chainSequence.sequence)
   const chainOutcome = chainOutcomeSentence({
     phase: chainAction.phase,
     venueName: chainAction.prepared?.venueName,
-    error: stepErrorMessage(chainAction.error, chainSequence.settled),
+    error: stepErrorMessage(chainAction.error, chainSequence.settled, typedStep),
   })
   useEffect(() => {
     if (chainOutcome === undefined || message === null) return
@@ -2244,13 +2247,13 @@ export function IntentChat({
     const chainCaps = chainCapabilities(slug)
     const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
 
-    // No model could read this, and it asks for something, so what works here is said.
+    // No model read this. Why, or what works here if it asks for something, is said in its place.
     if (
       answer.outcome === 'unavailable' &&
       chainCaps !== undefined &&
       asked.turn === latest.current.turn
     ) {
-      const help = helpForUnread(said, descriptor.name, chainCaps)
+      const help = helpForUnread(answer.reason, said, descriptor.name, chainCaps)
       if (help !== undefined) {
         setParsed(null)
         setFollowOn(null)
@@ -3374,6 +3377,7 @@ export function IntentChat({
                   <ChainActionConfirm
                     action={chainAction}
                     sequenceSettled={chainSequence.settled}
+                    typedStep={typedStep}
                   />
                 </div>
               ) : null}

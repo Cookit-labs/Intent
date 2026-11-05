@@ -619,6 +619,24 @@ export function stepAmount(
   }
 }
 
+/**
+ * Step 2 as a request of its own, as an example with a made-up amount: the token is what the swap
+ * delivered. Nothing for a cash-out, whose form is its own way back.
+ */
+export function stepOnItsOwn(request: ChainSequenceRequest): string | undefined {
+  const symbol = outputSymbol(request)
+  switch (request.followOn.kind) {
+    case 'cashout':
+      return undefined
+    case 'supply':
+      return `deposit 5 ${symbol}`
+    case 'stake':
+      return `stake 5 ${symbol}`
+    case 'send':
+      return `send 5 ${symbol} to an address`
+  }
+}
+
 export type SecondStepPress =
   | { kind: 'prepare'; request: ChainActionRequest }
   /** The button stays, since a wallet can change: this press does nothing. */
@@ -702,7 +720,8 @@ const NOT_THE_AMOUNT =
 
 /** A figure, what follows it in its turn, and everything said after it. */
 interface Figure {
-  value: string
+  /** Nothing for a figure that can't be read as one amount, which then matches no amount at all. */
+  value: string | undefined
   after: string
   rest: string
 }
@@ -726,7 +745,7 @@ function figuresSaid(symbol: string, turns: readonly string[]): Figure[] {
     [...turn.matchAll(number)].map((match) => {
       const after = turn.slice((match.index ?? 0) + match[0].length)
       return {
-        value: canonicalNumber(match[1] as string),
+        value: figureValue(match[1] as string),
         after,
         rest: [after, ...spaced.slice(index + 1)].join(' '),
       }
@@ -736,6 +755,17 @@ function figuresSaid(symbol: string, turns: readonly string[]): Figure[] {
 
 /** A figure with no token of its own: "no make it 2", "flip 3 of it". */
 const BARE_FIGURE = /^\s*(?:$|[,.!?;:)]|of\s+(?:it|that|this|them)\b|please\b)/i
+
+/**
+ * A figure as typed, or nothing if its comma is not a thousands comma. In "1,5" or "0,500" a comma
+ * is a decimal point, and dropping it would read many times the amount, while reading it as a point
+ * is a guess, so neither is the amount. See `AMOUNT`.
+ */
+function figureValue(text: string): string | undefined {
+  const plain = text.replace(/,+$/, '')
+  if (plain.includes(',') && !/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(plain)) return undefined
+  return canonicalNumber(plain)
+}
 
 function canonicalNumber(text: string): string {
   const [whole = '', fraction = ''] = text.replace(/,/g, '').split('.')
@@ -830,12 +860,10 @@ export function swapOrderSaid(
   const wanted = canonicalNumber(amount)
   const ends: number[] = []
   for (const match of joined.matchAll(before)) {
-    if (canonicalNumber(match[1] as string) === wanted)
-      ends.push((match.index ?? 0) + match[0].length)
+    if (figureValue(match[1] as string) === wanted) ends.push((match.index ?? 0) + match[0].length)
   }
   for (const match of joined.matchAll(after)) {
-    if (canonicalNumber(match[1] as string) === wanted)
-      ends.push((match.index ?? 0) + match[0].length)
+    if (figureValue(match[1] as string) === wanted) ends.push((match.index ?? 0) + match[0].length)
   }
   const last = figuresSaid(symbol, turns).at(-1)
   const isLast = last?.value === wanted

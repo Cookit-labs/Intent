@@ -13,7 +13,7 @@ import {
   type FollowOn,
 } from './sequence'
 import { sequenceWordsMatch, swapOrderSaid } from './sequence-flow'
-import type { ChainActionRequest, ChainWithActions } from './types'
+import type { ChainActionKind, ChainActionRequest, ChainWithActions } from './types'
 
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
 const CONNECTOR = String.raw`(?:\s*,\s*(?:and\s+then\s+|then\s+|and\s+)?|\s+(?:and\s+then|then|and)\s+)`
@@ -203,19 +203,27 @@ const EXAMPLE_AFTER: Record<string, string> = {
 }
 
 /** An example that could run: USDC can't be swapped to itself, and goes to a bank with no swap. */
-function exampleOf(read: ReadSwap): string {
+function exampleOf(read: ReadSwap, asked: ChainActionKind | undefined): string {
   const kind = read.followOn?.kind
   const after = kind === undefined ? '' : (EXAMPLE_AFTER[kind] ?? '')
   const tokenIn = chainTokenWord(read.tokenIn)
   if (tokenIn.toUpperCase() !== 'USDC') return `swap 5 ${tokenIn} to USDC${after}`
   if (kind === 'offramp') return 'cash out 5 USDC'
   const tokenOut = chainTokenWord(read.tokenOut)
-  return tokenOut.toUpperCase() === 'USDC' ? '5 USDC' : `swap 5 USDC to ${tokenOut}${after}`
+  if (tokenOut.toUpperCase() !== 'USDC') return `swap 5 USDC to ${tokenOut}${after}`
+  if (kind === 'send' || asked === 'send') return 'send 5 USDC to an address'
+  if (kind === 'stake' || asked === 'stake') return 'stake 5 USDC'
+  return 'deposit 5 USDC'
 }
 
-function refuseUnsaid(read: ReadSwap, what: string): { refusal: string } {
+function refuseUnsaid(
+  read: ReadSwap,
+  what: string,
+  /** What was asked, where the reading alone doesn't say. */
+  asked?: ChainActionKind
+): { refusal: string } {
   return {
-    refusal: `I could not find ${what} in what you typed, and only your own words decide what is signed. Say it in full, for example "${exampleOf(read)}". Nothing was signed or sent.`,
+    refusal: `I could not find ${what} in what you typed, and only your own words decide what is signed. Say it in full, for example "${exampleOf(read, asked)}". Nothing was signed or sent.`,
   }
 }
 
@@ -353,6 +361,19 @@ function ownFollowOn(followOn: FollowOn, said: readonly string[]): FollowOn {
   return venueSaid(followOn.venue, said) ? followOn : { kind: followOn.kind }
 }
 
+const FOLLOW_ON_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/\b(?:cash[ -]?out|off[ -]?ramp|withdraw)\b/i, 'offramp'],
+  [/\b(?:deposit|supply|lend|save|earn)\b/i, 'lend'],
+  [/\bstake\b/i, 'stake'],
+  [/\b(?:send|transfer)\b/i, 'send'],
+]
+
+/** The follow-on these words ask for, in a reading's name for it, or nothing if they name none. */
+function followOnKindSaid(instruction: string, said: readonly string[]): string | undefined {
+  const text = [...said, instruction].join(' ')
+  return FOLLOW_ON_WORDS.find(([words]) => words.test(text))?.[1]
+}
+
 /** Something was asked after the swap that no reading here holds, so a plain swap would lose it. */
 function moreAfterSwap(instruction: string, said: readonly string[]): boolean {
   return SEQUENCE.test(instruction.trim()) || said.some((turn) => /\bthen\s+\S/i.test(turn))
@@ -418,8 +439,9 @@ export function chainRouteFromReading(
   const action = parseChainAction(instruction)
   if (action === null && read.action !== 'swap') return null
   if (moreAfterSwap(instruction, said)) {
+    const kind = followOnKindSaid(instruction, said)
     return refuseUnsaid(
-      { ...read, followOn: { kind: 'send', venue: '' } },
+      { ...read, followOn: kind === undefined ? null : { kind, venue: '' } },
       'what to do after the swap'
     )
   }
@@ -438,7 +460,8 @@ export function chainRouteFromReading(
             tokenOut: action.tokenOut ?? action.tokenIn,
             followOn: null,
           },
-          'that request'
+          'that request',
+          action.kind
         )
   }
   const swap = swapFromReading(read, said)
