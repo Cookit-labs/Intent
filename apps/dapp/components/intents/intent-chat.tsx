@@ -80,15 +80,21 @@ import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
 import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
-import { chainHelp } from '../../lib/chains/explain'
-import { looksLikeChainAction, parseChainAction, racesFirst } from '../../lib/chains/parse-action'
-import { chainRouteFromReading, parseChainSequence } from '../../lib/chains/parse-sequence'
+import { chainHelp, helpForUnread } from '../../lib/chains/explain'
+import { racesFirst } from '../../lib/chains/parse-action'
+import {
+  cashoutStarts,
+  chainRouteFromReading,
+  messageStartsAction,
+  readChainMessage,
+} from '../../lib/chains/parse-sequence'
 import { followOnRefusal, type ChainSequenceRequest } from '../../lib/chains/sequence'
 import {
   CASHOUT_UNDER_WAY,
   cashoutSequence,
   currencyStep,
   endedNote,
+  keepsRun,
   questionAnswerFrom,
   questionChainRefusal,
   sequenceOutcome,
@@ -660,6 +666,9 @@ export function IntentChat({
   const [cashoutQuestion, setCashoutQuestion] = useState<CashoutQuestionState | null>(null)
   // A swap and what follows it, on a chain with its own module. Step 1 is the race above.
   const chainSequence = useChainSequence(chainAction, cashout)
+  // Read when a model's answer comes back, which may be after the run has moved on.
+  const chainSequenceNow = useRef(chainSequence)
+  chainSequenceNow.current = chainSequence
   // What a new message left behind by ending a swap that had settled.
   const [sequenceNote, setSequenceNote] = useState<string | null>(null)
   useEffect(() => {
@@ -1046,8 +1055,10 @@ export function IntentChat({
   // Declared after the effects that record, so a transaction settling in the same
   // render as a switch is written to the wallet that signed it, before the reset.
   // A sequence with a step settled and the next unsigned counts as open: resetting
-  // would lose the only way to finish it. So does a chain swap still being measured:
-  // it ends by itself, and `ready` after it is only a button the new wallet can't use.
+  // would lose the only way to finish it. So does a chain swap still being measured.
+  // Off Stellar the wait ends when the signature does, or the measure: the reset below
+  // then ends the run, whether the swap just settled or reached `ready`. The new wallet
+  // is offered no step 2, and the outcome goes to the transcript of the wallet that signed.
   const signatureOpen =
     executionInFlight ||
     cashout.locked ||
@@ -1737,12 +1748,19 @@ export function IntentChat({
 
   /** Ends a chain sequence where it stands. Its USDC stays the person's, and they are told so. */
   function leaveSequence(): void {
-    const note = endedNote(chainSequence.stage, chainSequence.delivered, chainSequence.sequence)
+    const run = chainSequenceNow.current
+    const note = endedNote(run.stage, run.delivered, run.sequence)
     setSequenceNote(note ?? null)
     if (note !== undefined) {
-      recordLive('agent', note, undefined, chainSequence.account ?? chatOwner.current)
+      recordLive('agent', note, undefined, run.account ?? chatOwner.current)
     }
-    chainSequence.clear()
+    run.clear()
+  }
+
+  /** Step 2's press. A model's answer still on its way must not start anything under it. */
+  function pressNextStep(): void {
+    latest.current.turn += 1
+    chainSequence.runNext()
   }
 
   /** Step 1: the same race as a plain swap, with the sequence watching its card. */
@@ -1765,6 +1783,7 @@ export function IntentChat({
     resetTurnState()
     setParsed(null)
     setTurnId(null)
+    setClarifying(null)
     setAffordError(null)
     // The agents race first; Review on a route is what builds it. A new
     // race is the one thing that lifts the "already signed" latch.
@@ -1936,7 +1955,7 @@ export function IntentChat({
 
     cashout.dismiss()
     if (route.kind === 'token') {
-      chainAction.refuse(unsupportedTokenReply(route.token), text)
+      chainAction.refuse(unsupportedTokenReply(route.token, slug), text)
       return
     }
     const refusedFor = latest.current.account
@@ -2031,6 +2050,11 @@ export function IntentChat({
     }
 
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
+    const capabilities = chainCapabilities(slug)
+    const chainRead =
+      capabilities === undefined
+        ? null
+        : readChainMessage(text, slug as ChainWithActions, descriptor.name)
     const open = message !== null && parsed !== null && restored === null && !turnExecuted
 
     // Kept as it is shown. Two paths turn it away under a signature and never show it.
@@ -2040,7 +2064,11 @@ export function IntentChat({
         (clarifying === null && open && classifyFollowUp(text) === 'note'))
     if (!refused) {
       recordLive('user', text)
-      leaveSequence()
+      if (keepsRun(chainSequence.stage, messageStartsAction(cashoutRoute, chainRead))) {
+        setSequenceNote(null)
+      } else {
+        leaveSequence()
+      }
     }
 
     // "cash out to KES" at the question of a swap waiting on it answers that question,
@@ -2071,32 +2099,29 @@ export function IntentChat({
     if (chainCapabilities(slug) === undefined) chainAction.reset()
 
     // Chains with their own module have their own path: the race and the swap routes
-    // below are Stellar's. Anything that isn't an instruction, such as a
-    // question, still goes to the orchestrator.
-    const capabilities = chainCapabilities(slug)
-    if (capabilities !== undefined) {
-      const sequenceRead = parseChainSequence(text)
-      if (sequenceRead !== null) {
-        if ('refusal' in sequenceRead) {
-          setMessage(text)
-          clearChainRace()
-          chainAction.refuse(sequenceRead.refusal, text)
-        } else {
-          startChainSequence(sequenceRead, text)
-        }
-        return
-      }
-      const action = parseChainAction(text)
-      if (action !== null) {
-        startChainAction(action, text)
-        return
-      }
-      if (looksLikeChainAction(text)) {
+    // below are Stellar's. What the strict parsers can't read in full goes to the
+    // orchestrator, verbs or not, and `readChainMessage` is what decides that.
+    if (chainRead !== null) {
+      if (chainRead.kind === 'refusal') {
+        setClarifying(null)
         setMessage(text)
         clearChainRace()
-        chainAction.refuse(chainHelp(descriptor.name, capabilities), text)
+        chainAction.refuse(chainRead.refusal, text)
         return
       }
+      if (chainRead.kind === 'sequence') {
+        startChainSequence(chainRead.request, text)
+        return
+      }
+      if (chainRead.kind === 'cashout') {
+        startCashout(chainRead.route, text)
+        return
+      }
+      if (chainRead.kind === 'action') {
+        startChainAction(chainRead.action, text)
+        return
+      }
+      // A step 2 card still unsigned goes too, and the run's button is what brings it back.
       chainAction.reset()
       clearChainRace()
     }
@@ -2216,6 +2241,25 @@ export function IntentChat({
 
     setClarifying(null)
 
+    const chainCaps = chainCapabilities(slug)
+    const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
+
+    // No model could read this, and it asks for something, so what works here is said.
+    if (
+      answer.outcome === 'unavailable' &&
+      chainCaps !== undefined &&
+      asked.turn === latest.current.turn
+    ) {
+      const help = helpForUnread(said, descriptor.name, chainCaps)
+      if (help !== undefined) {
+        setParsed(null)
+        setFollowOn(null)
+        clearChainRace()
+        chainAction.refuse(help, turns[0]?.content ?? text)
+        return
+      }
+    }
+
     // Nothing runs: the message is not an instruction, or could not be read.
     // The reply is the model's own, written for this message in this
     // conversation. Fixed text is only what is shown when there was no model to
@@ -2258,36 +2302,38 @@ export function IntentChat({
     // conversation the next message belongs to.
     dialogue.current = []
 
+    // Off Stellar nothing may start under whatever was said or pressed while this was being read.
+    if (
+      chainCaps !== undefined &&
+      (asked.turn !== latest.current.turn || asked.chain !== latest.current.chain)
+    ) {
+      return
+    }
+
     // The model wrote out a cash-out, perhaps from words no parser here would read.
     const writtenOut = routeCashout(parseCashout(answer.instruction), slug, isMainnet())
     if (writtenOut.kind !== 'pass') {
       const shown = turns[0]?.content ?? text
-      if (writtenOut.kind === 'sequence') {
-        // A swap must not start under whatever was said while this was being read.
-        if (asked.turn !== latest.current.turn || asked.chain !== latest.current.chain) return
-        // What gets signed comes from the person's own words, never from the model's.
-        const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
-        if (!sequenceWordsMatch(writtenOut, said)) {
-          startCashout({ kind: 'token', token: writtenOut.token }, shown)
-          return
-        }
+      // What gets signed comes from the person's own words, never from the model's.
+      if (writtenOut.kind === 'sequence' && !sequenceWordsMatch(writtenOut, said)) {
+        startCashout({ kind: 'token', token: writtenOut.token }, shown)
+        return
       }
+      if (chainCaps !== undefined && cashoutStarts(writtenOut)) leaveSequence()
       startCashout(writtenOut, shown)
       return
     }
 
     // Off Stellar a reading never reaches Stellar's swap and lend flows below. It goes where a typed
     // sentence goes, and only what the person typed themselves can be signed.
-    const chainCaps = chainCapabilities(slug)
     if (chainCaps !== undefined) {
-      // A swap must not start under whatever was said while this was being read.
-      if (asked.turn !== latest.current.turn || asked.chain !== latest.current.chain) return
       const shown = turns[0]?.content ?? text
-      const said = turns.filter((turn) => turn.role === 'user').map((turn) => turn.content)
       const route = chainRouteFromReading(answer.read, answer.instruction, said)
       if (route !== null && 'sequence' in route) {
+        leaveSequence()
         startChainSequence(route.sequence, shown)
       } else if (route !== null && 'action' in route) {
+        leaveSequence()
         startChainAction(route.action, shown)
       } else {
         setMessage(shown)
@@ -3314,7 +3360,9 @@ export function IntentChat({
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
 
-              {restored === null ? <ChainSequenceSteps steps={chainSequence} /> : null}
+              {restored === null ? (
+                <ChainSequenceSteps steps={{ ...chainSequence, runNext: pressNextStep }} />
+              ) : null}
 
               {showDirectNote(directFallback, chainAction.phase, chainSequence.settled) ? (
                 <p className={systemPill}>

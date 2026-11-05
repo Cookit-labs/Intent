@@ -515,6 +515,17 @@ export function endedNote(
   return strandedReply(outputSymbol(request), delivered, request.followOn)
 }
 
+/**
+ * Whether a message leaves the run where it stands. One that starts an action ends it. Anything
+ * else keeps it while a step is left to take: a question, a refusal, or what only the model can
+ * read, until it says. A run before its swap settled has no such step, and the message closes its
+ * race and card anyway, so that ends as it always has.
+ */
+export function keepsRun(stage: SequenceStage | undefined, startsAction: boolean): boolean {
+  if (startsAction) return false
+  return stage === 'measuring' || stage === 'ready' || stage === 'next' || stage === 'following'
+}
+
 /** Step 1's sentence after the measure could not finish. */
 export function unmeasuredReply(request: ChainSequenceRequest): string {
   return strandedReply(outputSymbol(request), undefined, request.followOn)
@@ -581,6 +592,30 @@ export function nextRequest(
     amount,
     tokenIn,
     ...(followOn.venue !== undefined ? { venue: followOn.venue } : {}),
+  }
+}
+
+/**
+ * What step 2 moves. A deposit, stake or send has no form to correct it, so if more than 2% over the
+ * card's quote arrived, money from elsewhere came in as well, and only the quoted amount is this
+ * swap's. No quote that can be read means what was measured. A cash-out's form can be edited.
+ */
+export function stepAmount(
+  request: ChainSequenceRequest,
+  delivered: string,
+  quoted: string | undefined
+): { amount: string; note?: string } {
+  const measured = { amount: delivered }
+  if (request.followOn.kind === 'cashout' || quoted === undefined) return measured
+  const placesOf = (text: string): number => (text.split('.')[1] ?? '').length
+  const places = Math.max(placesOf(delivered), placesOf(quoted))
+  const got = toBase(delivered, places)
+  const said = toBase(quoted, places)
+  if (got === undefined || said === undefined || said === BigInt(0)) return measured
+  if (got * BigInt(100) <= said * BigInt(102)) return measured
+  return {
+    amount: quoted,
+    note: `More arrived than this swap should bring, so this uses the quoted ${quoted} ${outputSymbol(request)}.`,
   }
 }
 
@@ -665,6 +700,43 @@ export function currencyStep(
 const NOT_THE_AMOUNT =
   'usd|usdc|dollars?|bucks?|naira|ngn|kes|ksh|ugx|tzs|shillings?|eur|euros?|gbp|pounds?'
 
+/** A figure, what follows it in its turn, and everything said after it. */
+interface Figure {
+  value: string
+  after: string
+  rest: string
+}
+
+/**
+ * The figures that could be the amount, turn by turn. Money in another unit is not one, nor "5k",
+ * "5%" or "$5", and nor is what follows "of my" or "of the": "2 of my 5" says what is held, and if
+ * that leaves too little to tell, the request is refused.
+ */
+function figuresSaid(symbol: string, turns: readonly string[]): Figure[] {
+  // "5 USDC" is 5 of a token when the token is USDC, and a sum of money when it is another's.
+  const notAmount = NOT_THE_AMOUNT.split('|')
+    .filter((unit) => unit !== symbol.toLowerCase())
+    .join('|')
+  const number = new RegExp(
+    String.raw`(?:^|[^\w.,$₦£€])(?<!\bof\s+(?:my\s+|the\s+)?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${notAmount})(?![\w+]))`,
+    'gi'
+  )
+  const spaced = spacedTurns(symbol, turns)
+  return spaced.flatMap((turn, index) =>
+    [...turn.matchAll(number)].map((match) => {
+      const after = turn.slice((match.index ?? 0) + match[0].length)
+      return {
+        value: canonicalNumber(match[1] as string),
+        after,
+        rest: [after, ...spaced.slice(index + 1)].join(' '),
+      }
+    })
+  )
+}
+
+/** A figure with no token of its own: "no make it 2", "flip 3 of it". */
+const BARE_FIGURE = /^\s*(?:$|[,.!?;:)]|of\s+(?:it|that|this|them)\b|please\b)/i
+
 function canonicalNumber(text: string): string {
   const [whole = '', fraction = ''] = text.replace(/,/g, '').split('.')
   const trimmed = fraction.replace(/0+$/, '')
@@ -675,31 +747,20 @@ function canonicalNumber(text: string): string {
 /**
  * Whether the person themselves said this amount and this token. A model's text never sets what is
  * signed, so a cash-out it wrote out runs only if the person's own words carry the same figures.
- * The amount must stand alone, so 15 is not 5, and "$5", "5 dollars", "5k" and "5%" are not 5 of a
- * token. The token must stand alone too, and a chain's name reads as its token either way round,
- * so "solana" is SOL. Only where it names the coin, though: "5 USDT on solana" did not say SOL, and
- * a model must not get to read it so. Pass what the person typed, and none of the model's lines.
+ * The amount must be the last figure stated, so a correction wins over what it corrects and what
+ * is spent wins over what is held, and it must stand alone, so 15 is not 5, and "$5", "5 dollars",
+ * "5k" and "5%" are not 5 of a token. The token must stand alone too, and a chain's name reads as
+ * its token either way round, so "solana" is SOL. Only where it names the coin, though: "5 USDT on
+ * solana" did not say SOL, and a model must not get to read it so. Pass what the person typed, and
+ * none of the model's lines.
  */
 export function sequenceWordsMatch(
   instruction: { amount: string; token: string },
   turns: readonly string[]
 ): boolean {
   const symbol = chainTokenWord(instruction.token)
-  // "5 USDC" is 5 of a token when the token is USDC, and a sum of money when it is another's.
-  const notAmount = NOT_THE_AMOUNT.split('|')
-    .filter((unit) => unit !== symbol.toLowerCase())
-    .join('|')
-  const number = new RegExp(
-    String.raw`(?:^|[^\w.,$₦£€])(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)(?!\s*(?:${notAmount})(?![\w+]))`,
-    'gi'
-  )
-  const wanted = canonicalNumber(instruction.amount)
-  return (
-    tokenSaid(instruction.token, turns) &&
-    spacedTurns(symbol, turns).some((turn) =>
-      [...turn.matchAll(number)].some((match) => canonicalNumber(match[1] as string) === wanted)
-    )
-  )
+  const last = figuresSaid(symbol, turns).at(-1)
+  return tokenSaid(instruction.token, turns) && last?.value === canonicalNumber(instruction.amount)
 }
 
 function tokenPattern(symbol: string): { token: string; names: string[] } {
@@ -743,7 +804,10 @@ export function tokenSaid(token: string, turns: readonly string[], destination =
 /**
  * Whether the amount sits next to the token given up ("5 SOL" or "SOL 5", "5 of my SOL"), and, when
  * a token received is given, that token is named after it. Read over all the person's turns in
- * order, joined, so "swap some sol", "5", "to usdc" is one swap. The reverse of a swap is not it.
+ * order, joined, so "swap some sol", "5", "to usdc" is one swap. The last figure said counts with
+ * no token of its own, "no make it 2", or as a correction, "actually 3 sol". Then the token received
+ * must be named after the token given up, and the token given up not after the figure, which would
+ * make "5 to sol from usdc" read backwards. The reverse of a swap is not it.
  */
 export function swapOrderSaid(
   amount: string,
@@ -773,8 +837,20 @@ export function swapOrderSaid(
     if (canonicalNumber(match[1] as string) === wanted)
       ends.push((match.index ?? 0) + match[0].length)
   }
-  if (tokenOut === undefined) return ends.length > 0
-  return ends.some((end) => tokenSaid(tokenOut, [joined.slice(end)], true))
+  const last = figuresSaid(symbol, turns).at(-1)
+  const isLast = last?.value === wanted
+  const bare = isLast && BARE_FIGURE.test(last.after) && !tokenSaid(tokenIn, [last.rest], true)
+  if (tokenOut === undefined) return ends.length > 0 || (bare && tokenSaid(tokenIn, turns))
+  if (ends.some((end) => tokenSaid(tokenOut, [joined.slice(end)], true))) return true
+  return (bare || (isLast && ends.length > 0)) && tokenOutFollows(token, tokenOut, joined)
+}
+
+/** Whether, after some naming of the token given up, the token received is named. */
+function tokenOutFollows(token: string, tokenOut: string, joined: string): boolean {
+  const given = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})${WORD_END}`, 'gi')
+  return [...joined.matchAll(given)].some((match) =>
+    tokenSaid(tokenOut, [joined.slice((match.index ?? 0) + match[0].length)], true)
+  )
 }
 
 /**

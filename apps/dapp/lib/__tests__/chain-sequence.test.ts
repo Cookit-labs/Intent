@@ -204,7 +204,7 @@ describe('routeCashout with an amount', () => {
     const reply = unsupportedTokenReply('SOL', 'near')
     expect(reply).toMatch(/NEAR/)
     expect(reply).not.toMatch(/then cash out/i)
-    expect(unsupportedTokenReply('SOL')).toMatch(/Swap your SOL to USDC first/)
+    expect(unsupportedTokenReply('SOL', 'solana')).toMatch(/Swap your SOL to USDC first/)
   })
 })
 

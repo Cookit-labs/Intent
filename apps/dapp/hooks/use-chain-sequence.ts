@@ -18,6 +18,7 @@ import {
   readyAction,
   secondStepPress,
   stageOnForm,
+  stepAmount,
   stepLabels,
   swapLine,
   unmeasuredReply,
@@ -37,6 +38,8 @@ interface Run extends SequenceProgress {
   delivered?: string
   /** The wallet step 1 was built for, once it has settled. */
   account?: string
+  /** What step 1's card said would arrive, kept from when it settled. */
+  quotedOut?: string
 }
 
 const UNKNOWN: Before = { status: 'unknown' }
@@ -50,6 +53,8 @@ export interface ChainSequence {
   settled: boolean
   /** The wallet step 1 was built for, once it has settled. */
   account: string | undefined
+  /** What step 1's card said would arrive. */
+  quotedOut: string | undefined
   /** How the balance before the swap stands. */
   readStatus: BeforeStatus
   /** What to say about step 2 while step 1 is unsigned. */
@@ -84,6 +89,7 @@ export function useChainSequence(
   const connected = useRef(address)
   connected.current = address
   const { phase, signed, prepared, account: builtFor } = chainAction
+  const receiveAmount = prepared?.receive?.amount
   // Read when a `before` answers, which is some way on from when it was asked.
   const phaseNow = useRef(phase)
   phaseNow.current = phase
@@ -183,9 +189,10 @@ export function useChainSequence(
         settled,
         ...(error !== undefined ? { error } : {}),
         ...(settled && known.status === 'known' ? { account: known.account } : {}),
+        ...(settled && receiveAmount !== undefined ? { quotedOut: receiveAmount } : {}),
       }
     })
-  }, [phase, signed, prepared?.kind])
+  }, [phase, signed, prepared?.kind, receiveAmount])
 
   // One read at a time, ending on unmount, on `clear` and at the limit.
   const measuring = stage === 'measuring'
@@ -252,8 +259,9 @@ export function useChainSequence(
       if (!run.settled) return
       const asked = run.request.swap.tokenOut
       const token = outputToken(slug, asked, asked)
+      const { amount } = stepAmount(run.request, run.delivered, run.quotedOut)
       const press = secondStepPress(
-        token === undefined ? undefined : nextRequest(run.request, run.delivered, token.decimals),
+        token === undefined ? undefined : nextRequest(run.request, amount, token.decimals),
         connected.current,
         run.account
       )
@@ -293,6 +301,7 @@ export function useChainSequence(
     error: run?.error,
     settled: run?.settled ?? false,
     account: run?.account,
+    quotedOut: run?.quotedOut,
     readStatus,
     swapLine: swapLine(phase, readStatus, quoted, request),
     start,

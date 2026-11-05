@@ -9,6 +9,7 @@ import { cashoutAmountFrom } from '../../lib/chains/sequence'
 import {
   deliveredLine,
   secondStepLabel,
+  stepAmount,
   stepLabels,
   stepMarks,
   type StepMark,
@@ -55,8 +56,11 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
     stage === 'ready' && delivered !== undefined && sequence.followOn.kind === 'cashout'
       ? cashoutAmountFrom(delivered)
       : undefined
-  const ownCard =
-    stage === 'ready' && delivered !== undefined ? secondStepLabel(sequence, delivered) : undefined
+  const step =
+    stage === 'ready' && delivered !== undefined
+      ? stepAmount(sequence, delivered, steps.quotedOut)
+      : undefined
+  const ownCard = step !== undefined ? secondStepLabel(sequence, step.amount) : undefined
 
   return (
     <div ref={ref}>
@@ -94,6 +98,12 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
         {stage === 'ready' && delivered !== undefined ? (
           <p role="status" className="text-sm leading-relaxed">
             {deliveredLine(delivered, sequence)}
+          </p>
+        ) : null}
+
+        {step?.note !== undefined ? (
+          <p role="status" className="text-sm leading-relaxed">
+            {step.note}
           </p>
         ) : null}
 

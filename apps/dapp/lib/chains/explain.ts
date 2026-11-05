@@ -1,3 +1,4 @@
+import { looksLikeChainAction } from './parse-action'
 import type { ChainActionKind } from './types'
 
 const EXAMPLE: Record<ChainActionKind, (symbol: string, venue: string) => string> = {
@@ -41,4 +42,16 @@ export function chainHelp(chainName: string, capabilities: readonly ChainCapabil
     examples.push(`"${EXAMPLE.send('USDC', '')}"`)
   }
   return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.`
+}
+
+/**
+ * What to say when the model could not read a message that asks to do something. Nothing for one
+ * that doesn't, which gets the ordinary answer about the model being out of reach.
+ */
+export function helpForUnread(
+  said: readonly string[],
+  chainName: string,
+  capabilities: readonly ChainCapability[]
+): string | undefined {
+  return said.some(looksLikeChainAction) ? chainHelp(chainName, capabilities) : undefined
 }

@@ -358,7 +358,7 @@ describe('what may be offered', () => {
 
 describe('words', () => {
   it('says a token must be swapped to USDC first', () => {
-    const reply = unsupportedTokenReply('SOL')
+    const reply = unsupportedTokenReply('SOL', 'solana')
     expect(reply).toMatch(/USDC/)
     expect(reply).toMatch(/swap/i)
     expect(reply).toMatch(/SOL/)

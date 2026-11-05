@@ -80,7 +80,8 @@ export function followOnRefusal(
   }
   if (followOn.kind === 'send') return sendRefusal(chain, tokenOut, followOn.recipient)
   if (!venues.some((v) => v.kinds.includes(followOn.kind))) {
-    return `Nothing on ${chainName} can ${followOn.kind} yet. ${NOTHING_MOVED}`
+    const can = followOn.kind === 'supply' ? 'take a deposit' : followOn.kind
+    return `Nothing on ${chainName} can ${can} yet. ${NOTHING_MOVED}`
   }
   return undefined
 }

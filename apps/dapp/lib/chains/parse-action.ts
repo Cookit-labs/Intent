@@ -30,7 +30,7 @@ const SEND = new RegExp(
 
 /** Sentences that ask to do something, so a miss gets told what works rather than a guess. */
 const ACTION_VERB =
-  /\b(swap|convert|exchange|trade|buy|sell|supply|lend|deposit|save|earn|stake|borrow|cash out|send|bridge|long|short)\b/i
+  /\b(swap|convert|exchange|trade|change|buy|sell|supply|lend|deposit|save|earn|stake|borrow|cash out|send|bridge|long|short)\b/i
 
 /** People say the chain for its coin. `sui` and `near` are already their symbols. */
 const TOKEN_OF_CHAIN_NAME: ReadonlyMap<string, string> = new Map([

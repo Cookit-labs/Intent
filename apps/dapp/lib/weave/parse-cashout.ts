@@ -135,8 +135,23 @@ function hasOwn(table: Record<string, string>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(table, key)
 }
 
-function isFiatWord(word: string): boolean {
+/** Whether this word or phrase names a currency, paid here or not. Lower case, single spaces. */
+export function isFiatWord(word: string): boolean {
   return hasOwn(CURRENCY_WORDS, word) || hasOwn(OTHER_FIAT, word)
+}
+
+/**
+ * The one currency the person's own words name, or nothing if they name none or more than one, so
+ * that the question is asked instead. Only words that mean a currency alone count: "my nigerian
+ * friend" says nothing about a payout.
+ */
+export function currencyNamedIn(turns: readonly string[]): CashoutCurrencyCode | undefined {
+  const text = turns.join(' ').toLowerCase().replace(/\s+/g, ' ')
+  const found = new Set<CashoutCurrencyCode>()
+  for (const [word, code] of Object.entries(CURRENCY_WORDS)) {
+    if (new RegExp(String.raw`(?<![a-z0-9])${word}(?![a-z0-9])`).test(text)) found.add(code)
+  }
+  return found.size === 1 ? [...found][0] : undefined
 }
 
 /** Plain decimal text, or nothing for a shape that is not an amount or is zero. */
