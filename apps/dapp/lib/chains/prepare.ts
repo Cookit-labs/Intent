@@ -333,7 +333,10 @@ export async function assertNativeReserve(
 ): Promise<void> {
   const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
   if (tokenIn === undefined) return
-  if (tokenIn.symbol.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return
+  const cost = request.kind === 'limit' ? limitCostOf(chainApi, request) : undefined
+  const costed = cost !== undefined && cost.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]
+  const sellsNative = tokenIn.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]
+  if (!sellsNative && !costed) return
 
   const reading = await readBalancesBriefly(chainApi, account)
   if (reading === undefined) return
@@ -342,17 +345,17 @@ export async function assertNativeReserve(
   if (native === undefined) return
   const isNative =
     tokenIn.id === native.id || (chainApi.chain === 'near' && tokenIn.id === WRAP_NEAR)
-  if (!isNative) return
+  const spends = sellsNative && isNative
+  if (!spends && !costed) return
 
   const held = toBase(native.amount, native.decimals)
   const reserve = toBase(NATIVE_FEE_RESERVE[chainApi.chain], native.decimals)
-  const asked = toBase(request.amount, native.decimals)
+  const asked = spends ? toBase(request.amount, native.decimals) : BigInt(0)
   if (held === undefined || reserve === undefined || asked === undefined) return
 
   let kept = reserve
   let keepText = `${NATIVE_FEE_RESERVE[chainApi.chain]} ${native.symbol} for network fees`
-  const cost = request.kind === 'limit' ? limitCostOf(chainApi, request) : undefined
-  if (cost !== undefined && cost.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]) {
+  if (costed) {
     const costBase = toBase(cost.amount, native.decimals)
     if (costBase !== undefined) {
       kept = reserve + costBase
@@ -364,7 +367,9 @@ export async function assertNativeReserve(
   const spendable = held > kept ? held - kept : BigInt(0)
   throw new ChainActionRefused(
     `Keep about ${keepText}. ` +
-      `You can spend up to ${fromBase(spendable, native.decimals)} ${native.symbol} here. ` +
+      (spends
+        ? `You can spend up to ${fromBase(spendable, native.decimals)} ${native.symbol} here. `
+        : `You hold ${native.amount} ${native.symbol}. `) +
       'Nothing was signed or sent.'
   )
 }

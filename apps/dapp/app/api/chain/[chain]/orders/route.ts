@@ -76,6 +76,13 @@ export async function POST(
   try {
     const { account, orderId, action } = parsed.data
     const prepared = await chainApi.limitBook.prepareExit(account, orderId, action)
+    const venue = chainApi.venues.find((v) => v.id === prepared.venueId)
+    if (venue === undefined) {
+      throw new ChainActionRefused(
+        'That order is not one I can build safely. Nothing was signed or sent.'
+      )
+    }
+    venue.assertSafe(prepared.signing, account, prepared.context)
     return NextResponse.json({ prepared })
   } catch (e) {
     if (e instanceof ChainActionRefused) {

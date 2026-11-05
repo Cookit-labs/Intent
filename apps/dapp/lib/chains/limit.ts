@@ -20,6 +20,7 @@ export interface RestingOrder {
 
 export interface LimitBook {
   openOrders(account: string, signal?: AbortSignal): Promise<RestingOrder[]>
+  /** Must refuse an order the account does not own. The route checks the signing, not ownership. */
   prepareExit(
     account: string,
     orderId: string,

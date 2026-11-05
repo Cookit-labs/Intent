@@ -99,6 +99,13 @@ describe('limit orders are checked before any venue is called', () => {
     expect(venuePrepare).not.toHaveBeenCalled()
   })
 
+  it('holds a limit order to the dollar cap', async () => {
+    await expect(
+      prepareChainAction(module(), limit({ amount: '1000' }), ACCOUNT, {})
+    ).rejects.toThrow(/caps each trade/)
+    expect(venuePrepare).not.toHaveBeenCalled()
+  })
+
   it('refuses when no venue does limit orders', async () => {
     const m = module({ venues: [], defaultVenue: {} })
     await expect(prepareChainAction(m, limit(), ACCOUNT)).rejects.toThrow(ChainActionRefused)
@@ -135,6 +142,16 @@ describe('the native reserve counts a venue setup cost', () => {
     balances.mockResolvedValue(held)
     const swap = { kind: 'swap' as const, amount: '0.005', tokenIn: 'SOL', tokenOut: 'USDC' }
     await expect(assertNativeReserve(costly(), swap, ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it('counts the cost when the token sold is not the native coin', async () => {
+    balances.mockResolvedValue({
+      ...held,
+      tokens: [{ ...held.tokens[0]!, amount: '0.001' }],
+    })
+    const buy = limit({ amount: '100', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' })
+    await expect(assertNativeReserve(costly(), buy, ACCOUNT)).rejects.toThrow(/0\.00684 SOL/)
+    await expect(assertNativeReserve(module(), buy, ACCOUNT)).resolves.toBeUndefined()
   })
 
   it('allows the same limit where the venue has no cost', async () => {
@@ -204,11 +221,51 @@ describe('POST orders', () => {
 
   it('prepares a cancel or a collect', async () => {
     current = module({ limitBook: { openOrders, prepareExit } })
-    prepareExit.mockResolvedValue({ venueId: 'book' })
+    prepareExit.mockResolvedValue({
+      venueId: 'book',
+      signing: { family: 'solana', transaction: 'x' },
+    })
     const res = await post('solana', { ...body, action: 'collect' })
     expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual({ prepared: { venueId: 'book' } })
+    await expect(res.json()).resolves.toMatchObject({ prepared: { venueId: 'book' } })
     expect(prepareExit).toHaveBeenCalledWith(ACCOUNT, 'o1', 'collect')
+  })
+
+  it('runs the venue assertSafe on what an exit builds', async () => {
+    const assertSafe = vi.fn()
+    current = module({
+      venues: [venue({ assertSafe })],
+      limitBook: { openOrders, prepareExit },
+    })
+    prepareExit.mockResolvedValue({
+      venueId: 'book',
+      signing: { family: 'solana', transaction: 'x' },
+      context: { a: 'b' },
+    })
+    expect((await post('solana', body)).status).toBe(200)
+    expect(assertSafe).toHaveBeenCalledWith({ family: 'solana', transaction: 'x' }, ACCOUNT, {
+      a: 'b',
+    })
+  })
+
+  it('refuses an exit the venue finds unsafe, or from no known venue', async () => {
+    const unsafe = () => {
+      throw new ChainActionRefused('pays a third party. Nothing was signed or sent.')
+    }
+    current = module({
+      venues: [venue({ assertSafe: unsafe })],
+      limitBook: { openOrders, prepareExit },
+    })
+    prepareExit.mockResolvedValue({
+      venueId: 'book',
+      signing: { family: 'solana', transaction: 'x' },
+    })
+    expect((await post('solana', body)).status).toBe(422)
+    prepareExit.mockResolvedValue({
+      venueId: 'ghost',
+      signing: { family: 'solana', transaction: 'x' },
+    })
+    expect((await post('solana', body)).status).toBe(422)
   })
 
   it('422s a refusal from the venue', async () => {
