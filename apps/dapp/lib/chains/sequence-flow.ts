@@ -762,13 +762,13 @@ const BARE_FIGURE = /^\s*(?:$|[,.!?;:)]|of\s+(?:it|that|this|them)\b|please\b)/i
  * is a decimal point, and dropping it would read many times the amount, while reading it as a point
  * is a guess, so neither is the amount. See `AMOUNT`.
  */
-function figureValue(text: string): string | undefined {
+export function figureValue(text: string): string | undefined {
   const plain = text.replace(/,+$/, '')
   if (plain.includes(',') && !/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(plain)) return undefined
   return canonicalNumber(plain)
 }
 
-function canonicalNumber(text: string): string {
+export function canonicalNumber(text: string): string {
   const [whole = '', fraction = ''] = text.replace(/,/g, '').split('.')
   const trimmed = fraction.replace(/0+$/, '')
   const digits = whole.replace(/^0+(?=\d)/, '') || '0'
@@ -898,19 +898,19 @@ export function cashoutSaid(
     : sequenceWordsMatch(route, turns)
 }
 
-function tokenPattern(symbol: string): { token: string; names: string[] } {
+export function tokenPattern(symbol: string): { token: string; names: string[] } {
   const names = chainNamesOf(symbol)
   const token = [symbol, ...names].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
   return { token, names }
 }
 
 /** "5sol" read as "5 sol", and "$ 5" as "$5". */
-function spacedTurns(symbol: string, turns: readonly string[]): string[] {
+export function spacedTurns(symbol: string, turns: readonly string[]): string[] {
   const glued = new RegExp(String.raw`(\d)(${tokenPattern(symbol).token})${WORD_END}`, 'gi')
   return turns.map((turn) => turn.replace(glued, '$1 $2').replace(/([$₦£€])\s+/g, '$1'))
 }
 
-const WORD_END = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
+export const WORD_END = String.raw`(?![A-Za-z0-9+]|\.[A-Za-z0-9])`
 
 /**
  * Whether the person themselves named this token, alone as a word. A chain's name counts as its

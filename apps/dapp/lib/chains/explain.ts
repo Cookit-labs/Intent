@@ -6,6 +6,7 @@ const EXAMPLE: Record<ChainActionKind, (symbol: string, venue: string) => string
   supply: (_symbol, venue) => `supply 25 USDC on ${venue}`,
   stake: (symbol, venue) => `stake 1 ${symbol} with ${venue}`,
   send: (symbol) => `send 5 ${symbol} to an address`,
+  limit: (symbol) => `sell 1 ${symbol} at $110`,
 }
 
 /** What can come after a swap, in the words someone types. */

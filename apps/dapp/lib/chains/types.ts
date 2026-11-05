@@ -1,4 +1,5 @@
 import type { ChainSlug } from '@intent/types'
+import type { LimitBook } from './limit'
 
 /**
  * Doing something on a chain that is not Stellar, in three moves: prepare on the
@@ -8,7 +9,7 @@ import type { ChainSlug } from '@intent/types'
 
 export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
+export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send' | 'limit'
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
@@ -26,6 +27,8 @@ export interface ChainActionRequest {
   venue?: string | undefined
   /** Sends only, exactly as typed. Where the money goes, so it is checked and never changed. */
   recipient?: string | undefined
+  /** Limit orders only: the price of the non-stable token in the stable one, as typed. */
+  limitPrice?: string | undefined
 }
 
 export interface NearTransaction {
@@ -75,6 +78,8 @@ export interface PreparedAction {
   signing: SigningPayload
   /** Returned unchanged at submit, for venues whose submit step needs it. */
   context?: Record<string, string> | undefined
+  /** A setup step: the same request must be prepared again once this one settles. */
+  thenPrepareAgain?: true
 }
 
 export interface SubmitInput {
@@ -213,6 +218,7 @@ export interface ChainModule {
   balances: (account: string, signal?: AbortSignal) => Promise<WalletBalances>
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
+  limitBook?: LimitBook
 }
 
 /** "an Avalanche", "a Monad". */

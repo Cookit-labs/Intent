@@ -124,7 +124,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
 
 /** Whether the agents price this first. A send has no price to race on and nothing to choose. */
 export function racesFirst(request: Pick<ChainActionRequest, 'kind'>): boolean {
-  return request.kind !== 'send'
+  return request.kind !== 'send' && request.kind !== 'limit'
 }
 
 export function looksLikeChainAction(text: string): boolean {
