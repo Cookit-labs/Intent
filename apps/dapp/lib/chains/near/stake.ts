@@ -8,6 +8,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import { isRegistered, viewCall, waitForTransaction } from './rpc'
@@ -78,6 +79,38 @@ function stakeCall(amount: string, gas: bigint): NearTransaction['actions'][numb
   return {
     type: 'FunctionCall',
     params: { methodName: 'deposit_and_stake', args: {}, gas: gas.toString(), deposit: amount },
+  }
+}
+
+/**
+ * What a stake would give back, without building the transaction. A rate Rhea does not
+ * give is left out rather than guessed. Meta Pool has no rate endpoint here, so its quote
+ * carries none.
+ */
+async function quoteRnear(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  assertStakeRequest(request, account, 'rNEAR')
+  const amount = toBaseUnits(request.amount, 24)
+  let receive: string
+  try {
+    receive = receiptAmount(amount, await viewCall<string>(RNEAR_CONTRACT, 'ft_price'))
+  } catch {
+    throw cannotRead('rNEAR')
+  }
+  const apyPercent = await rnearApyPercent()
+  return {
+    receive: { amount: receive, symbol: 'rNEAR' },
+    ...(apyPercent !== undefined ? { apyPercent } : {}),
+  }
+}
+
+async function quoteMetapool(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  assertStakeRequest(request, account, 'Meta Pool')
+  const amount = toBaseUnits(request.amount, 24)
+  try {
+    const price = await viewCall<string>(METAPOOL_CONTRACT, 'get_st_near_price')
+    return { receive: { amount: receiptAmount(amount, price), symbol: 'stNEAR' } }
+  } catch {
+    throw cannotRead('Meta Pool')
   }
 }
 
@@ -190,6 +223,7 @@ export const rnearVenue: ChainVenue = {
   id: RNEAR_VENUE_ID,
   name: 'rNEAR',
   kinds: ['stake'],
+  quote: quoteRnear,
   prepare: prepareRnear,
   assertSafe: assertRnearSafe,
 }
@@ -198,6 +232,7 @@ export const metapoolVenue: ChainVenue = {
   id: METAPOOL_VENUE_ID,
   name: 'Meta Pool',
   kinds: ['stake'],
+  quote: quoteMetapool,
   prepare: prepareMetapool,
   assertSafe: assertMetapoolSafe,
 }
@@ -218,11 +253,18 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
   const contract = Object.prototype.hasOwnProperty.call(STAKE_CONTRACTS, venueId)
     ? STAKE_CONTRACTS[venueId]
     : undefined
-  if (contract === undefined) return { ok: false, error: 'Nothing to confirm for that venue.' }
+  // The wallet has already sent, so nothing here proves that nothing moved.
+  if (contract === undefined) {
+    return { ok: false, pending: true, error: 'Nothing to confirm for that venue.' }
+  }
 
   const hash = signed.hashes[signed.hashes.length - 1]
   if (hash === undefined || signed.hashes.some((h) => !NEAR_TX_HASH.test(h))) {
-    return { ok: false, error: 'The wallet did not return a transaction hash to follow.' }
+    return {
+      ok: false,
+      pending: true,
+      error: 'The wallet did not return a transaction hash to follow.',
+    }
   }
 
   const giveUpAt = Date.now() + CONFIRM_WAIT_MS
@@ -231,6 +273,7 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
     if (outcome.state === 'unknown') {
       return {
         ok: false,
+        pending: true,
         error: `Your transaction was sent (${each}) but hasn't been confirmed yet. Don't send it again. Check ${explorerUrl(each)} in a minute.`,
       }
     }
@@ -244,6 +287,7 @@ export async function confirmStake(input: SubmitInput): Promise<SubmitResult> {
     if (outcome.signer !== account || outcome.receiver !== contract || !stakes) {
       return {
         ok: false,
+        pending: true,
         error: `Transaction ${each} is not this account's stake with this venue. Check your wallet's activity.`,
       }
     }

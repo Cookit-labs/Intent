@@ -3,11 +3,14 @@ import { z } from 'zod'
 
 import {
   ChainActionRefused,
+  quotedApy,
   tokenBySymbol,
   toBaseUnits,
   type ChainActionRequest,
+  type ChainToken,
   type ChainVenue,
   type PreparedAction,
+  type VenueQuote,
 } from '../types'
 import { assertDepositAmount, solanaAssertSafe } from './assert-safe'
 import { venueFetch } from './http'
@@ -48,7 +51,10 @@ export function createLuloVenue(options: LuloOptions): ChainVenue {
       : undefined
   }
 
-  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  function checkedDeposit(
+    request: ChainActionRequest,
+    account: string
+  ): { token: ChainToken; amount: string } {
     if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
     const token = tokenBySymbol(SOLANA_TOKENS, request.tokenIn)
     if (request.kind !== 'supply' || token === undefined || token.symbol !== 'USDC') {
@@ -56,7 +62,16 @@ export function createLuloVenue(options: LuloOptions): ChainVenue {
         `Lulo here takes USDC deposits only, not ${request.tokenIn}. Try "supply 10 USDC on Lulo".`
       )
     }
-    const amount = toBaseUnits(request.amount, token.decimals)
+    return { token, amount: toBaseUnits(request.amount, token.decimals) }
+  }
+
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    checkedDeposit(request, account)
+    return quotedApy(await readApy())
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { token, amount } = checkedDeposit(request, account)
 
     const apy = await readApy()
     const { status, body } = await venueFetch(`${LULO_API}/v1/generate.transactions.deposit`, {
@@ -102,6 +117,7 @@ export function createLuloVenue(options: LuloOptions): ChainVenue {
     id: 'lulo',
     name: 'Lulo Protected',
     kinds: ['supply'],
+    quote,
     prepare,
     assertSafe: solanaAssertSafe(LULO_POLICY),
   }

@@ -8,6 +8,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenueQuote,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import {
@@ -26,7 +27,8 @@ const SUI_DECIMALS = 9
 const SSUI_DECIMALS = 9
 const DRY_RUN_TIMEOUT_MS = 15_000
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+/** Builds the stake and dry-runs it, which moves nothing, to read what it would mint. */
+async function checkedStake(request: ChainActionRequest, account: string) {
   assertSuiAccount(account)
   if (request.tokenIn.trim().toUpperCase() !== 'SUI') {
     throw new ChainActionRefused(
@@ -69,7 +71,17 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
     )
   }
 
-  const receive = displayAmount(received, SSUI_DECIMALS)
+  return { transaction, receive: displayAmount(received, SSUI_DECIMALS) }
+}
+
+/** No apyPercent: no rate can be read from SpringSui here, and a rate is never invented. */
+async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { receive } = await checkedStake(request, account)
+  return { receive: { amount: receive, symbol: 'sSUI' } }
+}
+
+async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const { transaction, receive } = await checkedStake(request, account)
   return {
     venueId: 'springsui',
     venueName: 'SpringSui',
@@ -90,6 +102,7 @@ export const springsuiVenue: ChainVenue = {
   id: 'springsui',
   name: 'SpringSui',
   kinds: ['stake'],
+  quote,
   prepare,
   assertSafe: (payload: SigningPayload, account: string) =>
     assertPtbSafe(payload, account, SPRINGSUI_POLICY),

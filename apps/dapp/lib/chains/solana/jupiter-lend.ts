@@ -10,11 +10,14 @@ import { z } from 'zod'
 import { base64FromBytes, bytesFromBase64 } from '../base64'
 import {
   ChainActionRefused,
+  quotedApy,
   tokenBySymbol,
   toBaseUnits,
   type ChainActionRequest,
+  type ChainToken,
   type ChainVenue,
   type PreparedAction,
+  type VenueQuote,
 } from '../types'
 import {
   assertDepositAmount,
@@ -152,7 +155,10 @@ export function createJupiterLendVenue(options: JupiterLendOptions = {}): ChainV
       : { basePercent, rewardPercent }
   }
 
-  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  function checkedDeposit(
+    request: ChainActionRequest,
+    account: string
+  ): { token: ChainToken; amount: string } {
     if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
     const token = tokenBySymbol(SOLANA_TOKENS, request.tokenIn)
     if (request.kind !== 'supply' || token === undefined || !SUPPORTED.has(token.symbol)) {
@@ -160,7 +166,16 @@ export function createJupiterLendVenue(options: JupiterLendOptions = {}): ChainV
         `Jupiter Lend here takes USDC or USDT deposits only, not ${request.tokenIn}. Try "supply 10 USDC on Jupiter Lend".`
       )
     }
-    const amount = toBaseUnits(request.amount, token.decimals)
+    return { token, amount: toBaseUnits(request.amount, token.decimals) }
+  }
+
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const { token } = checkedDeposit(request, account)
+    return quotedApy(await readApy(token.id))
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { token, amount } = checkedDeposit(request, account)
 
     const apy = await readApy(token.id)
     const { status, body } = await venueFetch(`${JUPITER_API}/lend/v1/earn/deposit`, {
@@ -197,6 +212,7 @@ export function createJupiterLendVenue(options: JupiterLendOptions = {}): ChainV
     id: 'jupiter-lend',
     name: 'Jupiter Lend Earn',
     kinds: ['supply'],
+    quote,
     prepare,
     assertSafe: solanaAssertSafe(JUPITER_LEND_POLICY),
   }

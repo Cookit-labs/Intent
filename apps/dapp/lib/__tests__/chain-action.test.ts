@@ -28,6 +28,25 @@ describe('parseChainAction', () => {
     })
   })
 
+  it('writes a bare decimal the way the build route and base units accept it', () => {
+    const amount = parseChainAction('swap .5 USDC to SOL')?.amount as string
+    expect(amount).toBe('0.5')
+    expect(toBaseUnits(amount, 6)).toBe('500000')
+    expect(parseChainAction('supply $.25 USDC')?.amount).toBe('0.25')
+    expect(parseChainAction('stake .1 NEAR')?.amount).toBe('0.1')
+  })
+
+  it.each([
+    ['5', '5'],
+    ['0.5', '0.5'],
+    ['05', '05'],
+    ['1,000', '1000'],
+    ['1,000.5', '1000.5'],
+    ['$20', '20'],
+  ])('keeps %s as it read before', (typed, amount) => {
+    expect(parseChainAction(`swap ${typed} USDC to SOL`)?.amount).toBe(amount)
+  })
+
   it('reads a supply and a stake', () => {
     expect(parseChainAction('supply 100 USDC on Kamino')).toMatchObject({
       kind: 'supply',

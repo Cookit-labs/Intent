@@ -5,9 +5,9 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
 
-/** Review, sign and result for an action on Solana, Sui or NEAR. */
+/** Review, sign and result for an action on a chain other than Stellar. */
 export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Element {
-  const { phase, prepared, error, hash, explorerUrl } = action
+  const { phase, prepared, error, hash, explorerUrl, earlier } = action
   const busy = phase === 'signing' || phase === 'submitting'
 
   return (
@@ -72,6 +72,29 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
                 <li key={note}>{note}</li>
               ))}
             </ul>
+          ) : null}
+
+          {phase === 'review' && earlier !== undefined ? (
+            <p role="alert" className="flex flex-wrap items-center gap-2 text-sm leading-relaxed">
+              {earlier.text}
+              {earlier.explorerUrl !== undefined && earlier.hash !== undefined ? (
+                <a
+                  href={earlier.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                >
+                  {`${earlier.hash.slice(0, 6)}…${earlier.hash.slice(-4)}`}
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
+              ) : null}
+            </p>
+          ) : null}
+
+          {phase === 'review' && error !== undefined ? (
+            <p role="alert" className="text-sm leading-relaxed">
+              {error}
+            </p>
           ) : null}
 
           {phase === 'settled' ? (

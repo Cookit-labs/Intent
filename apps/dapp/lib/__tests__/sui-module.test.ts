@@ -8,7 +8,7 @@ import { submitSui, type SuiExecutor } from '../chains/sui/submit'
 import { SUI_TOKENS } from '../chains/sui/tokens'
 import { suiCapabilities } from '../chains/sui/capabilities'
 import { suiVenues } from '../chains/sui/venues'
-import { suiModule } from '../chains/sui/module'
+import { buildSuiVenues, suiModule } from '../chains/sui/module'
 import { tokenBySymbol, ChainActionRefused } from '../chains/types'
 import { venues } from '../venues'
 
@@ -283,8 +283,17 @@ describe('submitting signed bytes', () => {
 })
 
 describe('the module', () => {
+  it('adds 1Click once the secret that protects its deposits is there', () => {
+    expect(buildSuiVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
+      'cetus',
+      '1click-sui',
+      'navi',
+      'springsui',
+    ])
+  })
+
   it('wires only swap, supply and stake, to Cetus, NAVI and SpringSui', () => {
-    expect(suiModule.venues.map((v) => [v.id, v.kinds])).toEqual([
+    expect(buildSuiVenues({}).map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
       ['navi', ['supply']],
       ['springsui', ['stake']],
@@ -303,8 +312,8 @@ describe('the module', () => {
 
 describe('the venue list', () => {
   it('has every row of the report', () => {
-    expect(suiVenues).toHaveLength(14)
-    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(14)
+    expect(suiVenues).toHaveLength(15)
+    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(15)
   })
 
   it('is all Sui, with a real link and an honest reason', () => {
@@ -317,7 +326,9 @@ describe('the venue list', () => {
   })
 
   it('claims execution only for what is wired, each with a capability', () => {
-    const wired = suiModule.venues.map((v) => v.id).sort()
+    const wired = buildSuiVenues({})
+      .map((v) => v.id)
+      .sort()
     const claimed = suiVenues.filter((v) => v.integration === 'executes')
     expect(claimed.map((v) => v.id).sort()).toEqual(wired)
     for (const venue of claimed) expect(venue.capability).toBeTruthy()

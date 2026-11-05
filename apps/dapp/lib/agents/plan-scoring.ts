@@ -46,6 +46,14 @@ export interface PlanContext {
   offrampMaxUsd?: number
   /** The anchor's published minimum, when an offramp was offered. */
   offrampMinUsd?: number
+  /**
+   * The APY each offered route shows, by route id, on a supply or a stake race.
+   * Those routes have no slippage to rank on, so the rate gap does it. Absent
+   * on a swap race.
+   */
+  apyByRoute?: Record<string, number>
+  /** Swap routes the server could not price. Their value is unknown, so they cannot win on it. */
+  unmeasuredRoutes?: string[]
 }
 
 export interface PlanPenalty {
@@ -57,6 +65,9 @@ export interface PlanPenalty {
     | 'follow_on_not_worth_fee'
     | 'offramp_outside_limits'
     | 'slices_without_split'
+    | 'lower_rate'
+    | 'unpriced_route'
+    | 'unrated_route'
   /** Points subtracted from the route score. */
   points: number
   /** One line a person can read, naming the figures it was judged on. */
@@ -163,6 +174,50 @@ function followOnPenalties(proposal: AgentProposalResult, context: PlanContext):
   return out
 }
 
+/** Short of the score a route starts on, so a route with a rate always outranks one without. */
+const MAX_RATE_POINTS = 99
+
+/**
+ * One point of score per percentage point of APY given up against the best route offered. A route
+ * with no rate, when another has one, can't be said to earn anything, so it cannot win on rate.
+ */
+function ratePenalty(proposal: AgentProposalResult, context: PlanContext): PlanPenalty | undefined {
+  const rates = context.apyByRoute
+  if (rates === undefined || proposal.routeId === undefined) return undefined
+  const offered = Object.values(rates)
+  if (offered.length === 0) return undefined
+  const own = rates[proposal.routeId]
+  if (own === undefined) {
+    return {
+      reason: 'unrated_route',
+      points: 100,
+      detail: 'This route showed no rate, so what it earns is unknown.',
+    }
+  }
+  const best = Math.max(...offered)
+  const gap = best - own
+  if (gap <= 0) return undefined
+  return {
+    reason: 'lower_rate',
+    points: Math.min(Number(gap.toFixed(2)), MAX_RATE_POINTS),
+    detail: `Takes ${own}% APY where ${best}% was offered.`,
+  }
+}
+
+/** Enough to put a route nobody could price below every route that was measured. */
+function unpricedPenalty(
+  proposal: AgentProposalResult,
+  context: PlanContext
+): PlanPenalty | undefined {
+  if (proposal.routeId === undefined) return undefined
+  if (!context.unmeasuredRoutes?.includes(proposal.routeId)) return undefined
+  return {
+    reason: 'unpriced_route',
+    points: 100,
+    detail: 'This route could not be priced, so what it delivers is unknown.',
+  }
+}
+
 function slicePenalty(proposal: AgentProposalResult): PlanPenalty | undefined {
   if (proposal.sliceCount <= 1) return undefined
   if (proposal.executionMode === 'split') return undefined
@@ -181,6 +236,12 @@ export function planPenalties(proposal: AgentProposalResult, context: PlanContex
   if (rest !== undefined) out.push(rest)
 
   out.push(...followOnPenalties(proposal, context))
+
+  const rate = ratePenalty(proposal, context)
+  if (rate !== undefined) out.push(rate)
+
+  const unpriced = unpricedPenalty(proposal, context)
+  if (unpriced !== undefined) out.push(unpriced)
 
   const slices = slicePenalty(proposal)
   if (slices !== undefined) out.push(slices)

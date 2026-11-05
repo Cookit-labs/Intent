@@ -6,7 +6,7 @@ import type { ChainSlug } from '@intent/types'
  * routes, the hook and the chat card know nothing about any chain in particular.
  */
 
-export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near'>
+export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
 export type ChainActionKind = 'swap' | 'supply' | 'stake'
 
@@ -29,12 +29,12 @@ export interface NearTransaction {
   }[]
 }
 
-/** What the wallet is asked to sign. Base64 for Solana and Sui. */
+/** What the wallet is asked to sign. Base64 for Solana and Sui. An EVM `value` is decimal base units. */
 export type SigningPayload =
   | { family: 'solana'; transaction: string }
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
-  | { family: 'evm'; chainId: number; to: string; data: string; value: '0' }
+  | { family: 'evm'; chainId: number; to: string; data: string; value: string }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
@@ -96,18 +96,44 @@ export interface ChainToken {
 /** Raised for a refusal the user should read, such as an unknown token or thin liquidity. */
 export class ChainActionRefused extends Error {}
 
+/** What a venue says it would give back, read without building anything to sign. */
+export interface VenueQuote {
+  receive?: { amount: string; symbol: string }
+  apyPercent?: number
+  /** Only where every route on the chain is valued by the same source, as on NEAR. */
+  valueOutUsd?: number
+  /**
+   * What this route costs the wallet beyond what it delivers, as a route elsewhere would not.
+   * The race takes it off the route's value, at the chain's own price for this token.
+   */
+  walletCost?: { amount: string; symbol: string }
+}
+
 export interface ChainVenue {
   id: string
   name: string
   kinds: readonly ChainActionKind[]
+  /**
+   * A price for the agent race. Must not create a deposit address or any other
+   * thing that costs money or leaves state behind: a race quotes every venue,
+   * and only the one the user presses Review on may be built.
+   */
+  quote?: ((request: ChainActionRequest, account: string) => Promise<VenueQuote>) | undefined
   prepare: (request: ChainActionRequest, account: string) => Promise<PreparedAction>
   /**
    * Refuses a payload that does anything but what was asked: wrong signer, an
    * unexpected program, a transfer out. Runs on what the venue's API returned
    * before the user sees it, and again on signed bytes at submit, because the
    * venue's API and the browser are both outside what this server controls.
+   *
+   * `context` is what `prepare` issued, handed back by the browser. A venue that reads it
+   * must prove the server wrote it before believing any of it.
    */
-  assertSafe: (payload: SigningPayload, account: string) => void
+  assertSafe: (
+    payload: SigningPayload,
+    account: string,
+    context?: Record<string, string> | undefined
+  ) => void
   /** Overrides the module's submit where a venue lands its own transactions. */
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
 }
@@ -121,6 +147,21 @@ export interface ChainModule {
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+  /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
+  tokenHints?: Record<string, string> | undefined
+}
+
+/** "an Avalanche", "a Monad". */
+export function withArticle(name: string): string {
+  return `${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`
+}
+
+/**
+ * A venue's rate as the race reads it: base and reward together, since the agents compare
+ * one figure. No rate read means no rate here, never a zero or a guess.
+ */
+export function quotedApy(apy: PreparedAction['apy']): VenueQuote {
+  return apy === undefined ? {} : { apyPercent: apy.basePercent + (apy.rewardPercent ?? 0) }
 }
 
 export function tokenBySymbol(

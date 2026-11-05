@@ -1,3 +1,4 @@
+import { CHAIN_DESCRIPTORS } from '@intent/config'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -10,6 +11,8 @@ import { isWalletAddress } from '../../../../../lib/wallet/address'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// A send waits for the network to confirm, and a 1Click swap then waits on 1Click too.
+export const maxDuration = 60
 
 const Signed = z.discriminatedUnion('family', [
   z.object({ family: z.literal('solana'), signedTransaction: z.string().min(1).max(8192) }),
@@ -22,6 +25,8 @@ const Signed = z.discriminatedUnion('family', [
     family: z.literal('near'),
     hashes: z.array(z.string().min(1).max(128)).min(1).max(8),
   }),
+  // The venue checks its shape, so an odd answer from a wallet that may have sent is read as pending.
+  z.object({ family: z.literal('evm'), hash: z.string().max(128) }),
 ])
 
 const Body = z.object({
@@ -54,20 +59,37 @@ export async function POST(
 
   const venue = chainApi.venues.find((v) => v.id === venueId)
   if (venue === undefined) return NextResponse.json({ error: 'unknown_venue' }, { status: 404 })
-  if (signed.family !== chainApi.chain) {
+  // By family, since Avalanche and Monad are both EVM.
+  if (signed.family !== CHAIN_DESCRIPTORS[chainApi.chain].family) {
     return NextResponse.json({ error: 'wrong_chain' }, { status: 400 })
   }
 
-  try {
-    // A NEAR wallet has already sent its transactions, so there are no bytes left to check.
-    if (signed.family !== 'near') {
-      const payload: SigningPayload =
-        signed.family === 'solana'
-          ? { family: 'solana', transaction: signed.signedTransaction }
-          : { family: 'sui', transaction: signed.transaction }
-      venue.assertSafe(payload, account)
+  // NEAR and EVM wallets have already sent, so there are no bytes left to check. Their venues
+  // ask the chain what was sent instead.
+  if (signed.family !== 'near' && signed.family !== 'evm') {
+    const payload: SigningPayload =
+      signed.family === 'solana'
+        ? { family: 'solana', transaction: signed.signedTransaction }
+        : { family: 'sui', transaction: signed.transaction }
+    try {
+      venue.assertSafe(payload, account, context)
+    } catch (e) {
+      // This route is what sends the bytes, so any failure here means they never left.
+      if (e instanceof ChainActionRefused) {
+        return NextResponse.json({ ok: false, error: e.message }, { status: 422 })
+      }
+      reportError('chain/submit', e, { chain: chainApi.chain })
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'This transaction could not be checked, so nothing was sent. Build it again.',
+        },
+        { status: 422 }
+      )
     }
+  }
 
+  try {
     const input = { account, venueId, signed, ...(context !== undefined ? { context } : {}) }
     const result = await (venue.submit ?? chainApi.submit)(input)
     await logExecution({
@@ -82,17 +104,17 @@ export async function POST(
       status: result.ok ? 200 : result.pending === true ? 202 : 422,
     })
   } catch (e) {
-    if (e instanceof ChainActionRefused) {
-      return NextResponse.json({ ok: false, error: e.message }, { status: 422 })
-    }
     reportError('chain/submit', e, { chain: chainApi.chain })
     return NextResponse.json(
       {
         ok: false,
+        // Sending may have started, so no throw from here on can prove nothing moved.
+        // Sent with no outcome known: the same contract as the cash-out route.
+        pending: true,
         error:
           "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
       },
-      { status: 502 }
+      { status: 202 }
     )
   }
 }

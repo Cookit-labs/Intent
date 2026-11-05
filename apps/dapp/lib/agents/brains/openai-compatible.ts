@@ -6,10 +6,12 @@ import type {
   BrainProvider,
   ProposalOutcome,
   ProposalRequest,
+  QuotedRoute,
 } from '../brain'
 import { configuredLendingVenues } from '../../lend/venues'
 import { anchorOn, anchorsOn } from '../../offramp/anchors'
-import { SYSTEM_PROMPT } from '../brief'
+import { systemPromptFor } from '../brief'
+import type { ChainRouteQuote } from '../chain-routes'
 import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
 import type { ProviderConfig } from './providers'
@@ -139,7 +141,7 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
     .join(', ')
 
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPromptFor(req.chain) },
     {
       role: 'system',
       content: [
@@ -203,8 +205,16 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
         // The routes above are live; this table is indicative and can be badly
         // stale. Saying so stops an agent splitting the difference between the
         // two and quoting a price neither source supports.
-        `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
-        'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
+        ...(req.chain === 'stellar'
+          ? [
+              `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
+              'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
+            ]
+          : req.intent.referencePriceUsd > 0
+            ? [
+                `Market reference: $${req.intent.referencePriceUsd} per ${req.intent.input.tokenIn}, the token being paid in.`,
+              ]
+            : []),
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
         ...clarifiedLines(req.context),
         '',
@@ -262,6 +272,35 @@ function perpLines(req: ProposalRequest): string[] {
 }
 
 /**
+ * The same routes on a chain other than Stellar.
+ *
+ * A supply or a stake hands back no amount, so it is shown by its rate and a
+ * blank "receive" is never printed. The dollar value a swap delivers is shown
+ * beside the amount because tokens of different decimals are only comparable
+ * in dollars. Nothing here calls the market synthetic: these are real quotes.
+ */
+function chainRouteLines(routes: QuotedRoute[]): string[] {
+  const line = (r: QuotedRoute): string => {
+    const q = r.quote as Partial<ChainRouteQuote> | undefined
+    const pay = q?.pay !== undefined ? `${q.pay.amount} ${q.pay.symbol}` : r.sendAmount
+    const gets =
+      q?.receive !== undefined
+        ? ` -> receive ${q.receive.amount} ${q.receive.symbol}` +
+          (q.valueOutUsd !== undefined ? ` (about $${q.valueOutUsd.toFixed(2)})` : '')
+        : ''
+    const rate = q?.apyPercent !== undefined ? `, ${q.apyPercent}% APY (current rate)` : ''
+    return `  ${r.id}: send ${pay}${gets} on ${promptSafe(r.source)}${rate}`
+  }
+  return [
+    '',
+    'Routes, already priced by each venue:',
+    ...routes.map(line),
+    'Choose one by putting its id in routeId. These figures are measured, not estimates,',
+    'so do not quote a better number than the route you picked actually offers.',
+  ]
+}
+
+/**
  * Presents the priced routes the agent must choose between.
  *
  * These are real quotes against real liquidity, so the instruction is explicit
@@ -283,6 +322,8 @@ function routeLines(req: ProposalRequest): string[] {
       'No executable routes were found for this pair. Reason about the intent, and return an empty routeId.',
     ]
   }
+
+  if (req.chain !== 'stellar') return chainRouteLines(routes)
 
   return [
     '',

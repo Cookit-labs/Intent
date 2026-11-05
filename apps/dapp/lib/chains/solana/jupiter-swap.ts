@@ -11,6 +11,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { assertWrapAtMost, solanaAssertSafe } from './assert-safe'
 import { JUPITER_API, jupiterHeaders, venueFetch } from './http'
@@ -29,8 +30,11 @@ const REFERRAL_FEE_BPS = 50
  * and OKX land through programs not confirmable from their docs. See programs.ts.
  */
 const EXCLUDED_ROUTERS = 'jupiterz,dflow,okx'
-/** `/execute` waits for the transaction to land, so it gets longer than other calls. */
-const EXECUTE_TIMEOUT_MS = 70_000
+/**
+ * `/execute` waits for the transaction to land, so it gets longer than other calls, but stops
+ * short of the submit route's 60 seconds so that an answer can still be given.
+ */
+const EXECUTE_TIMEOUT_MS = 50_000
 
 const NEED_SOL_FOR_FEES =
   'This wallet needs at least 0.01 SOL to pay its own network fees before I can swap. Add a little SOL and try again.'
@@ -55,8 +59,8 @@ const Order = z.object({
 })
 
 const Executed = z.object({
-  status: z.string(),
-  signature: z.string().optional(),
+  status: z.string().optional(),
+  signature: z.string().min(1).optional(),
   code: z.number().optional(),
 })
 
@@ -76,17 +80,29 @@ function explainOrderError(code: number | undefined, tokenIn: ChainToken): strin
   return 'Jupiter could not build this swap. Nothing was signed or sent. Check that you hold the token and a little SOL for fees, then try again.'
 }
 
-function explainExecuteFailure(code: number | undefined): string {
+/**
+ * The sentence for a code that proves the swap did not land, or nothing. -1000 and -2000
+ * only say "Failed to land", and Jupiter's docs treat the blockhash's last valid height as
+ * the real expiry, so those leave open that it still lands and don't get a sentence here.
+ */
+function explainCleanFailure(code: number | undefined): string | undefined {
   if (code === -1 || code === -1004 || code === -1005 || code === -2003) {
     return 'This swap expired before it landed, so nothing moved. Get a fresh quote and sign right away.'
-  }
-  if (code === -1000 || code === -2000) {
-    return 'This swap did not land on the network, so nothing moved. Get a fresh quote and try again.'
   }
   if (code === -2 || code === -3 || code === -1002 || code === -1003 || code === -2002) {
     return 'Jupiter could not read this signed transaction, so nothing moved. Sign a fresh quote with the same wallet.'
   }
-  return 'This swap did not go through. Check your wallet’s activity, then get a fresh quote if nothing changed.'
+  return undefined
+}
+
+/** The swap may have landed, so this must not read as a failure that invites a retry. */
+function unconfirmedSwap(signature: string | undefined): SubmitResult {
+  const where = signature !== undefined ? explorerUrl(signature) : 'your wallet’s activity'
+  return {
+    ok: false,
+    pending: true,
+    error: `Jupiter hasn’t confirmed this swap, and it may still have gone through, so don’t send it again. Check ${where} first, and get a fresh quote only if nothing changed.`,
+  }
 }
 
 function shortAmount(amount: string): string {
@@ -114,7 +130,11 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
   const env = options.env ?? process.env
   const assertSafe = solanaAssertSafe(JUPITER_SWAP_POLICY)
 
-  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  /**
+   * The order call and every check on what comes back. The race and Review both go through
+   * it, so a quote the agents can pick is one Review would build.
+   */
+  async function checkedOrder(request: ChainActionRequest, account: string) {
     if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
     if (request.kind !== 'swap') {
       throw new ChainActionRefused(`Jupiter swaps tokens. It can't ${request.kind} here.`)
@@ -213,6 +233,25 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
 
     if (tokenIn.id === WRAPPED_SOL) assertWrapAtMost(order.transaction, BigInt(amount))
 
+    const { transaction, requestId } = order
+    return { order, transaction, requestId, tokenIn, tokenOut, minimum, referral }
+  }
+
+  /** What the swap would give back. The transaction is left here, since nothing signs it. */
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const { order, tokenOut } = await checkedOrder(request, account)
+    return {
+      receive: {
+        amount: fromBaseUnits(order.outAmount, tokenOut.decimals),
+        symbol: tokenOut.symbol,
+      },
+    }
+  }
+
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { order, transaction, requestId, tokenIn, tokenOut, minimum, referral } =
+      await checkedOrder(request, account)
+
     const received = fromBaseUnits(order.outAmount, tokenOut.decimals)
     const notes = [
       `The price can move before this lands. You get at least ${minimum} ${tokenOut.symbol} or the swap fails, and network fees still apply.`,
@@ -237,8 +276,8 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       pay: { amount: request.amount, symbol: tokenIn.symbol },
       receive: { amount: received, symbol: tokenOut.symbol, approximate: true },
       notes,
-      signing: { family: 'solana', transaction: order.transaction },
-      context: { requestId: order.requestId },
+      signing: { family: 'solana', transaction },
+      context: { requestId },
     }
   }
 
@@ -255,43 +294,51 @@ export function createJupiterSwapVenue(options: JupiterSwapOptions): ChainVenue 
       }
     }
     const { signedTransaction } = input.signed
-    if (feePayerSignature(signedTransaction) === undefined) {
+    const sentSignature = feePayerSignature(signedTransaction)
+    if (sentSignature === undefined) {
       return {
         ok: false,
         error: 'Your wallet returned this unsigned, so nothing was sent. Sign it again.',
       }
     }
 
-    const response = await fetch(`${JUPITER_API}/swap/v2/execute`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...jupiterHeaders(env) },
-      body: JSON.stringify({ signedTransaction, requestId }),
-      signal: AbortSignal.timeout(EXECUTE_TIMEOUT_MS),
-    })
-    // A server failure or timeout leaves the outcome unknown. Throwing sends it to the
-    // route, which tells the user to check their wallet before trying again.
+    let response: Response
+    try {
+      response = await fetch(`${JUPITER_API}/swap/v2/execute`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...jupiterHeaders(env) },
+        body: JSON.stringify({ signedTransaction, requestId }),
+        signal: AbortSignal.timeout(EXECUTE_TIMEOUT_MS),
+      })
+    } catch {
+      // A timeout or dropped connection may have come after Jupiter broadcast it.
+      return unconfirmedSwap(sentSignature)
+    }
+    // A server failure leaves the outcome unknown. Throwing sends it to the route, which
+    // tells the user to check their wallet before trying again.
     if (response.status >= 500 || response.status === 429) {
       throw new Error(`Jupiter /execute answered ${response.status}`)
     }
     const parsed = Executed.safeParse(await response.json().catch(() => undefined))
-    if (!response.ok || !parsed.success) {
-      return {
-        ok: false,
-        error:
-          'Jupiter would not take this swap, so nothing was sent. Get a fresh quote and try again.',
-      }
-    }
+    // A body that cannot be read says nothing about whether the swap landed.
+    if (!parsed.success) return unconfirmedSwap(undefined)
     const { status, signature, code } = parsed.data
-    if (status === 'Success' && signature !== undefined) {
+    if (response.ok && status === 'Success' && signature !== undefined) {
       return { ok: true, hash: signature, explorerUrl: explorerUrl(signature) }
     }
-    return { ok: false, error: explainExecuteFailure(code) }
+    // /execute can answer long after broadcast and documents no non-2xx statuses, so the
+    // status alone proves nothing. Only a failure carrying a known code does, and an error
+    // body may not repeat the status field.
+    const failed = status === 'Failed' || (!response.ok && status === undefined)
+    const refusal = failed ? explainCleanFailure(code) : undefined
+    return refusal !== undefined ? { ok: false, error: refusal } : unconfirmedSwap(signature)
   }
 
   return {
     id: 'jupiter',
     name: 'Jupiter',
     kinds: ['swap'],
+    quote,
     prepare,
     assertSafe,
     submit,

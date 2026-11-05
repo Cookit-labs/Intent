@@ -14,6 +14,10 @@ const MAX_PRICE_AGE_MS = 15 * 60_000
 /** The combined fee limit is 500 bps, and 1Click adds 25 of its own without a key. */
 const MAX_APP_FEE_BPS = 475
 
+/**
+ * A NEAR token's asset id, which is its account by rule. Other chains' ids can't be worked
+ * out from a contract, so they come from the list through `oneClickAssetId`.
+ */
 export function assetIdOf(token: ChainToken): string {
   return `nep141:${token.id}`
 }
@@ -42,6 +46,9 @@ const TokenList = z.array(
     symbol: z.string(),
     price: z.number().optional(),
     priceUpdatedAt: z.string().optional(),
+    // Allowed to be null so that a change to these can't stop NEAR's prices from being read.
+    blockchain: z.string().nullish(),
+    contractAddress: z.string().nullish(),
   })
 )
 export type OneClickToken = z.infer<typeof TokenList>[number]
@@ -230,11 +237,14 @@ export async function requestQuote(input: QuoteInput): Promise<QuoteEnvelope> {
   return parsed.data
 }
 
-/** Optional speed-up, per the docs. A failure here changes nothing about the swap. */
+/**
+ * Optional speed-up, per the docs. A failure here changes nothing about the swap. The sender
+ * account only means something on NEAR, so other chains leave it out.
+ */
 export async function notifyDeposit(
   depositAddress: string,
   txHash: string,
-  nearSenderAccount: string
+  nearSenderAccount?: string
 ): Promise<void> {
   await fetch(`${BASE_URL}/deposit/submit`, {
     method: 'POST',

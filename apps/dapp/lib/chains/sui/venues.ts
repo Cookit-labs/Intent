@@ -29,6 +29,14 @@ export const suiVenues: Venue[] = [
     integration: 'executes',
     capability: 'Swaps SUI, USDC, USDsui and USDT',
   },
+  // Listed, as Lulo is on Solana: whether this runs depends on a secret this client-safe file can't read.
+  listed(
+    '1click-sui',
+    'NEAR Intents 1Click',
+    'swap',
+    'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+    'A second swap price from competing market makers, spending USDC or USDT'
+  ),
   {
     id: 'navi',
     family: 'sui',

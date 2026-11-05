@@ -270,6 +270,13 @@ describe('preparing a 1Click swap', () => {
     expect(prepared.notes.join(' ')).toMatch(/minus a fee/)
   })
 
+  it('keeps NEAR’s cost sentence word for word', async () => {
+    const prepared = await oneClickVenue.prepare(swap(), ME)
+    expect(prepared.notes[0]).toMatch(
+      /^NEAR Intents runs on mainnet only, so this moves real funds\. .* After all costs you get about [\d.]+% less in value than you pay, and at least /
+    )
+  })
+
   it('sends the API key and app fees only when configured', async () => {
     await oneClickVenue.prepare(swap(), ME)
     expect(sim.quoteHeaders[0]).not.toHaveProperty('X-API-Key')

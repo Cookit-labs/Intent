@@ -1,5 +1,6 @@
 import type { ChainSlug } from '@intent/types'
 
+import { avalancheCapabilities, monadCapabilities } from './evm/capabilities'
 import type { ChainCapability } from './explain'
 import { nearCapabilities } from './near/capabilities'
 import { solanaCapabilities } from './solana/capabilities'
@@ -10,5 +11,7 @@ export function chainCapabilities(slug: ChainSlug): readonly ChainCapability[] |
   if (slug === 'solana') return solanaCapabilities
   if (slug === 'sui') return suiCapabilities
   if (slug === 'near') return nearCapabilities
+  if (slug === 'avalanche') return avalancheCapabilities
+  if (slug === 'monad') return monadCapabilities
   return undefined
 }

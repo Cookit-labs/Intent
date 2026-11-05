@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
+import { panelErrorMessage, recommendationLine, singleRouteNote } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
@@ -84,6 +85,9 @@ export function CompetitionPanel({
   onExecute,
   executingKey,
   locked = false,
+  chainName,
+  directRoute = false,
+  signed = false,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
@@ -95,6 +99,12 @@ export function CompetitionPanel({
    * disabling the buttons on the first pick made it one.
    */
   locked?: boolean
+  /** The chain's name, set off Stellar so a single route can be explained. */
+  chainName?: string
+  /** The direct route is being offered instead, so the error must not say agents can't act here. */
+  directRoute?: boolean
+  /** Something may have been signed, so "nothing was signed" must not be said. */
+  signed?: boolean
 }): JSX.Element | null {
   const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
@@ -106,6 +116,10 @@ export function CompetitionPanel({
   // race that was not happening and never ended.
   if (phase === 'idle') return null
 
+  // A refusal of the action itself is shown by the chat, as written, in the
+  // action card; saying "agents are not online" over it would be wrong.
+  if (error?.code === 'action_refused') return null
+
   if (error !== undefined) {
     return (
       <div className={cn(agentBubble, 'flex items-start gap-3 border-dashed')}>
@@ -113,12 +127,14 @@ export function CompetitionPanel({
         <div>
           <p className="font-medium">
             {error.code === 'chain_unsupported'
-              ? 'Agents cannot execute here'
+              ? directRoute
+                ? 'The agents did not race'
+                : 'Agents cannot execute here'
               : error.code === 'no_agent_answered'
                 ? 'No agent answered'
                 : 'Agents are not online'}
           </p>
-          <p className="mt-1 opacity-70">{error.message}</p>
+          <p className="mt-1 opacity-70">{panelErrorMessage(error.message, signed)}</p>
         </div>
       </div>
     )
@@ -133,8 +149,12 @@ export function CompetitionPanel({
   const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key] && answered(a.key))
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
 
+  const routeNote =
+    chainName !== undefined ? singleRouteNote(state.routeCount, chainName) : undefined
+
   return (
     <div className="flex flex-col gap-4">
+      {routeNote !== undefined ? <div className={systemPill}>{routeNote}</div> : null}
       {revealedAgents.length === 0 && !decided ? (
         <div className={systemPill}>
           <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
@@ -241,11 +261,12 @@ export function CompetitionPanel({
                           oracle's fair value. */}
                       <div className="flex flex-col text-xs tabular-nums">
                         <span className="font-semibold">
-                          {money(proposal?.avgPriceUsd ?? 0)} avg
+                          {proposal?.figures?.headline ??
+                            `${money(proposal?.avgPriceUsd ?? 0)} avg`}
                         </span>
                         <span className="opacity-60">
                           {[
-                            vsOracle(proposal?.vsOraclePct),
+                            proposal?.figures !== undefined ? '' : vsOracle(proposal?.vsOraclePct),
                             proposal?.executionMode === 'rest' &&
                             proposal.horizonMinutes !== undefined &&
                             proposal.horizonMinutes > 0
@@ -311,10 +332,11 @@ export function CompetitionPanel({
           {/* Recommended on the measured fill, which is the only thing scored.
               "Strongest strategy" implied a judgement of the reasoning; there
               is none — the route's real output decides, and a tie is broken
-              by a draw the agents cannot influence. */}
+              by a draw the agents cannot influence. A supply or a stake is
+              ranked on its rate instead, and the line says that rate. */}
           {unanimous
             ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
-            : `Recommended: ${proposals[winner]?.name}, best measured fill. You pick who executes.`}
+            : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
         </motion.div>
       ) : null}
     </div>

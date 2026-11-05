@@ -6,7 +6,7 @@ import { Search, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
-import { isListedOn, notOnNetworkLabel, venueDetail, venues } from '../../lib/venues'
+import { isListedOn, notOnNetworkLabel, venueDetail, venueOnChain, venues } from '../../lib/venues'
 import { categoryLabel, VenueCard, VenueLogo, VerifiedTick } from './venue-card'
 
 /** Integrated first, then quoted, then merely listed. */
@@ -42,7 +42,7 @@ export function VenueGrid({
   const rows = useMemo<Row[]>(
     () =>
       venues
-        .filter((v) => v.family === descriptor.family && isListedOn(v))
+        .filter((v) => venueOnChain(v, descriptor) && isListedOn(v))
         // Venues the app can actually use come first. Alphabetical order put
         // Aquarius — then only priced, never signed — above Soroswap, which
         // intents routed through, so the most useful thing was buried.
@@ -55,7 +55,7 @@ export function VenueGrid({
             live: notHere === undefined && (venue.integration ?? 'listed') !== 'listed',
           }
         }),
-    [descriptor.family, availableIds]
+    [descriptor, availableIds]
   )
 
   const categories = useMemo(() => {

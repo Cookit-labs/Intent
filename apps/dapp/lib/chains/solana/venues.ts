@@ -19,6 +19,16 @@ export const solanaVenues: Venue[] = [
       'Swaps USDC, USDT, SOL, JitoSOL and ONyc through Jupiter’s on-chain router. Refuses thin liquidity, and checks every transaction before you sign.',
   },
   {
+    // Listed, as Lulo is: whether this runs depends on a secret this client-safe file can't read.
+    id: '1click-solana',
+    family: 'solana',
+    name: 'NEAR Intents 1Click',
+    category: 'swap',
+    chains: ['Solana'],
+    bestFor: 'A second swap price from competing market makers, spending USDC or USDT',
+    url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+  },
+  {
     id: 'jupiter-lend',
     family: 'solana',
     name: 'Jupiter Lend Earn',
