@@ -27,6 +27,7 @@ const Signed = z.discriminatedUnion('family', [
   }),
   // The venue checks its shape, so an odd answer from a wallet that may have sent is read as pending.
   z.object({ family: z.literal('evm'), hash: z.string().max(128) }),
+  z.object({ family: z.literal('evm-typed'), signature: z.string().min(1).max(200) }),
 ])
 
 const Body = z.object({
@@ -59,14 +60,16 @@ export async function POST(
 
   const venue = chainApi.venues.find((v) => v.id === venueId)
   if (venue === undefined) return NextResponse.json({ error: 'unknown_venue' }, { status: 404 })
-  // By family, since Avalanche and Monad are both EVM.
-  if (signed.family !== CHAIN_DESCRIPTORS[chainApi.chain].family) {
+  // By family, since Avalanche and Monad are both EVM. A typed message is EVM's too.
+  const family = signed.family === 'evm-typed' ? 'evm' : signed.family
+  if (family !== CHAIN_DESCRIPTORS[chainApi.chain].family) {
     return NextResponse.json({ error: 'wrong_chain' }, { status: 400 })
   }
 
   // NEAR and EVM wallets have already sent, so there are no bytes left to check. Their venues
-  // ask the chain what was sent instead.
-  if (signed.family !== 'near' && signed.family !== 'evm') {
+  // ask the chain what was sent instead. A typed message carries only its signature, so its venue
+  // rebuilds what was signed and checks it before posting anything.
+  if (signed.family === 'solana' || signed.family === 'sui') {
     const payload: SigningPayload =
       signed.family === 'solana'
         ? { family: 'solana', transaction: signed.signedTransaction }

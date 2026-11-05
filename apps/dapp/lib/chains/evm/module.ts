@@ -3,13 +3,19 @@ import { canIssueOneClick, oneClickAssetId, oneClickOriginVenue } from '../onecl
 import { createSendVenue, SEND_VENUE_ID } from '../send'
 import type { ChainModule, ChainToken, ChainVenue } from '../types'
 import { readEvmBalances } from './balances'
+import { COW_VENUE_ID, cowBook, cowVenue } from './cow'
 import { EVM_CHAINS, type EvmChain } from './tokens'
 
 export function buildEvmVenues(
   chain: EvmChain,
   env: Record<string, string | undefined> = process.env
 ): ChainVenue[] {
-  return canIssueOneClick(env) ? [oneClickOriginVenue(chain), createSendVenue(chain)] : []
+  // CoW has no deployment on Monad, so its limit orders are Avalanche's alone.
+  const limit = chain === 'avalanche' ? [cowVenue] : []
+  return [
+    ...limit,
+    ...(canIssueOneClick(env) ? [oneClickOriginVenue(chain), createSendVenue(chain)] : []),
+  ]
 }
 
 /**
@@ -30,9 +36,14 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
     chain,
     tokens: EVM_CHAINS[chain].tokens,
     venues: buildEvmVenues(chain),
-    defaultVenue: { swap: `1click-${chain}`, send: SEND_VENUE_ID },
+    defaultVenue: {
+      swap: `1click-${chain}`,
+      send: SEND_VENUE_ID,
+      ...(chain === 'avalanche' ? { limit: COW_VENUE_ID } : {}),
+    },
     priceUsd: (token) => priceFromOneClick(chain, token),
-    // Every venue here lands its own transactions, and no venue means no submit gets this far.
+    // Every venue here lands its own transactions or posts its own orders, and no venue means no
+    // submit gets this far.
     submit: async () => ({
       ok: false,
       pending: true,
@@ -41,6 +52,7 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
     }),
     balances: (account, signal) => readEvmBalances(chain, account, undefined, signal),
     ...(tokenHints !== undefined ? { tokenHints } : {}),
+    ...(chain === 'avalanche' ? { limitBook: cowBook() } : {}),
   }
 }
 

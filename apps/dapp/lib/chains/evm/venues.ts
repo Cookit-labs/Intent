@@ -23,4 +23,16 @@ export const evmVenues: Venue[] = [
     url: ONECLICK_DOCS,
     bestFor: 'Swaps between MON, USDC and USDT0, priced by competing market makers',
   },
+  {
+    id: 'cow-limit',
+    family: 'evm',
+    name: 'CoW Protocol',
+    category: 'orderbook',
+    chains: ['Avalanche'],
+    url: 'https://cow.fi',
+    bestFor: 'Selling or buying AVAX at a price you name, for up to 7 days',
+    integration: 'executes',
+    capability:
+      'Places, reads and cancels AVAX orders against USDC or USDT, and checks every order and approval before you sign. Fills arrive in your wallet. Mainnet only. No order has been signed through this app yet.',
+  },
 ]

@@ -23,6 +23,7 @@ export interface EvmTransaction {
 
 export interface EvmClient {
   tokenBalance: (token: Address, account: Address) => Promise<bigint>
+  allowance: (token: Address, owner: Address, spender: Address) => Promise<bigint>
   nativeBalance: (account: Address) => Promise<bigint>
   waitForReceipt: (hash: Hash) => Promise<EvmReceipt>
   /** A receipt doesn't carry what a transaction paid or called, so these are read apart from it. */
@@ -45,6 +46,13 @@ export function evmClient(chain: EvmChain, transport?: Transport): EvmClient {
         abi: erc20Abi,
         functionName: 'balanceOf',
         args: [account],
+      }),
+    allowance: (token, owner, spender) =>
+      client.readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [owner, spender],
       }),
     nativeBalance: (address) => client.getBalance({ address }),
     waitForReceipt: (hash) =>

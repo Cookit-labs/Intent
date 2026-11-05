@@ -326,12 +326,16 @@ describe('the chain modules', () => {
     expect(EVM_CHAINS.avalanche.chain.id).toBe(43114)
   })
 
-  it('finds a module for both, each with its own swap venue and a wallet transfer only', () => {
+  it('finds a module for both, each with its own swap venue and a wallet transfer', () => {
     const avalancheModule = chainModule('avalanche')
     const monadModule = chainModule('monad')
     expect(avalancheModule?.chain).toBe('avalanche')
     expect(monadModule?.chain).toBe('monad')
-    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche', 'send'])
+    expect(avalancheModule?.venues.map((v) => v.id)).toEqual([
+      'cow-limit',
+      '1click-avalanche',
+      'send',
+    ])
     expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad', 'send'])
     expect(avalancheModule?.defaultVenue.swap).toBe('1click-avalanche')
     expect(monadModule?.defaultVenue.swap).toBe('1click-monad')
@@ -349,8 +353,8 @@ describe('the chain modules', () => {
     expect(MONAD_USDC.decimals).toBe(6)
   })
 
-  it('offers no venue without the secret that protects what would be issued', () => {
-    expect(buildEvmVenues('avalanche', {})).toEqual([])
+  it('offers no 1Click venue without the secret that protects what would be issued', () => {
+    expect(buildEvmVenues('avalanche', {}).map((v) => v.id)).toEqual(['cow-limit'])
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'short' })).toEqual([])
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'x'.repeat(32) }).map((v) => v.id)).toEqual([
       '1click-monad',
@@ -603,7 +607,7 @@ describe('the Apps page rows', () => {
     venues.filter((v) => venueOnChain(v, CHAIN_DESCRIPTORS[slug])).map((v) => v.id)
 
   it('shows each chain its own row and no venue that does not name it', () => {
-    expect(on('avalanche')).toEqual(['1click-avalanche'])
+    expect(on('avalanche')).toEqual(['1click-avalanche', 'cow-limit'])
     expect(on('monad')).toEqual(['1click-monad'])
   })
 
@@ -1403,6 +1407,7 @@ describe('submit: what the chain says the wallet sent', () => {
     const deposit = (receiptTo: string, status: string, transaction: () => Promise<unknown>) =>
       createEvmDeposit('avalanche', () => ({
         tokenBalance: async () => BigInt(0),
+        allowance: async () => BigInt(0),
         nativeBalance: async () => BigInt(0),
         waitForReceipt: async () => receipt({ status, to: receiptTo }) as unknown as EvmReceipt,
         transaction: transaction as EvmClient['transaction'],

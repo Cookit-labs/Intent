@@ -1,4 +1,5 @@
 import type { ChainSlug } from '@intent/types'
+import type { CowOrder } from './evm/cow-rules'
 import type { LimitBook } from './limit'
 
 /**
@@ -45,17 +46,26 @@ export type SigningPayload =
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
   | { family: 'evm'; chainId: number; to: string; data: string; value: string }
+  /** A message, not a transaction: signing it moves nothing until the venue's server posts it. */
+  | {
+      family: 'evm-typed'
+      chainId: number
+      account: string
+      typedData: { domain: object; types: object; primaryType: 'Order'; message: CowOrder }
+    }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
  * What a wallet gives back. Solana, Sui and Stellar wallets return signed bytes the
- * server checks and submits. NEAR and EVM wallets send the transactions themselves.
+ * server checks and submits. NEAR and EVM wallets send the transactions themselves. A typed EVM
+ * message comes back as a signature the server checks and posts.
  */
 export type SignedPayload =
   | { family: 'solana'; signedTransaction: string }
   | { family: 'sui'; transaction: string; signature: string }
   | { family: 'near'; hashes: string[] }
   | { family: 'evm'; hash: string }
+  | { family: 'evm-typed'; signature: string }
   | { family: 'stellar'; signedXdr: string }
 
 export type SignedOutcome =

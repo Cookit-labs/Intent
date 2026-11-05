@@ -385,6 +385,7 @@ describe('EVM balances', () => {
         read.push(token)
         return BigInt(2500000)
       },
+      allowance: async () => BigInt(0),
       nativeBalance: async () => BigInt('1500000000000000000'),
       waitForReceipt: async () => {
         throw new Error('unused')
