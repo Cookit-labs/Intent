@@ -153,6 +153,12 @@ export function limitSaid(request: ChainActionRequest, turns: readonly string[])
  * the amount, except that USDC may go unnamed after "sell", the parser's own default. A purchase
  * names it anywhere. "buy" is never a sale, and "sell" is never a purchase unless it is a swap.
  */
+const GETTING_WORDS = /\b(?:get|want|grab|pick\s+up|buy|acquire|snag|load\s+up|i['’]d\s+like)\b/i
+
+function gettingSaid(joined: string): boolean {
+  return GETTING_WORDS.test(joined.replace(/\b(?:(?:want|need)\s+to\s+)?get\s+rid\s+of\b/gi, ' '))
+}
+
 const SELLING_WORDS = /\b(?:sell|get\s+rid\s+of|dump|unload|offload|cash\s+in)\b/i
 
 function sideAndTokenOutSaid(
@@ -179,6 +185,7 @@ function sideAndTokenOutSaid(
     pair.selling &&
     !buy &&
     SELLING_WORDS.test(joined) &&
+    !gettingSaid(joined) &&
     chainTokenWord(tokenOut).toUpperCase() === 'USDC' &&
     !tokenSaid('USDT', [joined], true)
   return named || implied

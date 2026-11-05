@@ -93,14 +93,15 @@ describe('a sale the person did not word as one', () => {
     'I want 1 SOL when it hits 110',
     'pick up 1 sol at 110',
     'grab 1 sol at $110',
+    'sell my usdc to get 1 sol at 110',
+    'I want to sell 1 SOL at 110',
   ])('is not taken for "%s"', (words) => {
     expect(limitSaid(sale, [words])).toBe(false)
   })
-  it.each([
-    'get rid of 1 sol once it reaches 110',
-    'I want to sell 1 SOL at 110',
-    'dump 1 sol at 110',
-  ])('is taken for "%s"', (words) => {
-    expect(limitSaid(sale, [words])).toBe(true)
-  })
+  it.each(['get rid of 1 sol once it reaches 110', 'sell 1 SOL at $110', 'dump 1 sol at 110'])(
+    'is taken for "%s"',
+    (words) => {
+      expect(limitSaid(sale, [words])).toBe(true)
+    }
+  )
 })
