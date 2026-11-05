@@ -195,7 +195,12 @@ describe('the race with talk', () => {
     )
     const lines = out.filter((f) => f.type === 'competition:talk').map((f) => f.line)
     expect(lines).toContainEqual({ kind: 'asked', agent: 'a', to: 'b', text: 'Why Rhea?' })
-    expect(lines).toContainEqual({ kind: 'answered', agent: 'b', to: ['a'], text: 'It settles fast.' })
+    expect(lines).toContainEqual({
+      kind: 'answered',
+      agent: 'b',
+      to: ['a'],
+      text: 'It settles fast.',
+    })
   })
 
   it('sends no route with a first take, which cannot be reviewed', async () => {

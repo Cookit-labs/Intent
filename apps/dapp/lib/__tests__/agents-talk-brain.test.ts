@@ -13,20 +13,31 @@ function replying(body: unknown, init: ResponseInit = {}): typeof fetch {
 
 const toolReply = {
   choices: [
-    { finish_reason: 'tool_calls', message: { tool_calls: [{ function: { arguments: '{"to":"Jeff","question":"Why?"}' } }] } },
+    {
+      finish_reason: 'tool_calls',
+      message: { tool_calls: [{ function: { arguments: '{"to":"Jeff","question":"Why?"}' } }] },
+    },
   ],
   usage: { prompt_tokens: 10, completion_tokens: 5 },
 }
 
 function sentBody(fetchImpl: typeof fetch): Record<string, unknown> {
-  const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+  const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+    string,
+    RequestInit,
+  ]
   return JSON.parse(init.body as string) as Record<string, unknown>
 }
 
 describe('brain.talk', () => {
   it('sends the tool with the model reasoning off and a small limit', async () => {
     const fetchImpl = replying(toolReply)
-    const brain = createBrain({ provider: 'deepseek', apiKey: 'k', model: 'deepseek-v4-flash', fetchImpl })
+    const brain = createBrain({
+      provider: 'deepseek',
+      apiKey: 'k',
+      model: 'deepseek-v4-flash',
+      fetchImpl,
+    })
     const out = await brain.talk?.(call)
 
     expect(out).toMatchObject({ ok: true, args: { to: 'Jeff', question: 'Why?' } })
@@ -41,9 +52,11 @@ describe('brain.talk', () => {
     expect((body['tools'] as { function: { name: string } }[])[0]?.function.name).toBe('ask_agent')
   })
 
-  it('uses each provider\'s own setting', async () => {
+  it("uses each provider's own setting", async () => {
     const open = replying(toolReply)
-    await createBrain({ provider: 'openrouter', apiKey: 'k', model: 'x', fetchImpl: open }).talk?.(call)
+    await createBrain({ provider: 'openrouter', apiKey: 'k', model: 'x', fetchImpl: open }).talk?.(
+      call
+    )
     expect(sentBody(open)['reasoning']).toEqual({ enabled: false })
 
     const groq = replying(toolReply)
@@ -56,25 +69,33 @@ describe('brain.talk', () => {
     const fetchImpl = vi.fn(async () => {
       throw Object.assign(new Error('aborted'), { name: 'AbortError' })
     }) as unknown as typeof fetch
-    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(call)
+    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(
+      call
+    )
     expect(out).toMatchObject({ ok: false, error: 'timeout' })
   })
 
   it('reports a 429 with when it will clear', async () => {
     const fetchImpl = replying({}, { status: 429, headers: { 'retry-after': '5' } })
-    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(call)
+    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(
+      call
+    )
     expect(out).toMatchObject({ ok: false, error: 'rate_limited', retryAfterMs: 5000 })
   })
 
   it('reports a reply in prose as unusable', async () => {
     const fetchImpl = replying({ choices: [{ message: { content: 'Hello' } }] })
-    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(call)
+    const out = await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl }).talk?.(
+      call
+    )
     expect(out).toMatchObject({ ok: false, error: 'invalid_schema' })
   })
 
   it('reports no key without calling anything', async () => {
     const fetchImpl = replying(toolReply)
-    const out = await createBrain({ provider: 'groq', apiKey: '', model: 'x', fetchImpl }).talk?.(call)
+    const out = await createBrain({ provider: 'groq', apiKey: '', model: 'x', fetchImpl }).talk?.(
+      call
+    )
     expect(out).toMatchObject({ ok: false, error: 'no_api_key' })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
@@ -101,7 +122,11 @@ describe('claude talk', () => {
     const reply = (stop_reason: string, content: unknown[]) => ({
       beta: {
         messages: {
-          create: async () => ({ stop_reason, usage: { input_tokens: 1, output_tokens: 1 }, content }),
+          create: async () => ({
+            stop_reason,
+            usage: { input_tokens: 1, output_tokens: 1 },
+            content,
+          }),
         },
       },
     })

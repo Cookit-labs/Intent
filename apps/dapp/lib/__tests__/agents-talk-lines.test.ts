@@ -45,9 +45,9 @@ describe('talkSpeaker', () => {
     expect(talkSpeaker({ kind: 'asked', agent: 's', to: 'j', text: 'Why?' }, nameOf)).toBe(
       'Sonnet to Jeff'
     )
-    expect(talkSpeaker({ kind: 'answered', agent: 'j', to: ['s', 'o'], text: 'Fees.' }, nameOf)).toBe(
-      'Jeff to Sonnet and Opus'
-    )
+    expect(
+      talkSpeaker({ kind: 'answered', agent: 'j', to: ['s', 'o'], text: 'Fees.' }, nameOf)
+    ).toBe('Jeff to Sonnet and Opus')
     expect(talkSpeaker({ kind: 'changed', agent: 's' }, nameOf)).toBeUndefined()
   })
 })

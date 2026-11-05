@@ -89,7 +89,9 @@ export const ALL_HELD_LINE =
   'No agent would do this right now, so there is nothing to sign. Ask again if you still want it.'
 
 /** Every agent that answered held off, so there is nothing to recommend. */
-export function allHeld(views: { held?: true | undefined; failed?: string | undefined }[]): boolean {
+export function allHeld(
+  views: { held?: true | undefined; failed?: string | undefined }[]
+): boolean {
   const answered = views.filter((v) => v.failed === undefined)
   return answered.length > 0 && answered.every((v) => v.held === true)
 }

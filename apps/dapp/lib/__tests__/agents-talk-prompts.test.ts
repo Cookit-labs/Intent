@@ -102,7 +102,10 @@ describe('talk prompts', () => {
   it('offers only routes that can execute', () => {
     const { user } = askPrompt(
       self,
-      { ...facts, routes: [route('jupiter-1', 'Jupiter'), { ...route('x-1', 'Soroswap'), executable: false }] },
+      {
+        ...facts,
+        routes: [route('jupiter-1', 'Jupiter'), { ...route('x-1', 'Soroswap'), executable: false }],
+      },
       0
     )
     expect(user).toContain('jupiter-1')
@@ -125,11 +128,16 @@ describe('talk prompts', () => {
     const lines = Array.from({ length: 8 }, () => `Jeff to Sonnet: ${long}`)
     for (const p of [
       askPrompt(self, big, 0),
-      answerPrompt(self, big, [
-        { from: 'Jeff', text: long },
-        { from: 'Opus', text: long },
-        { from: 'Ling', text: long },
-      ], 0),
+      answerPrompt(
+        self,
+        big,
+        [
+          { from: 'Jeff', text: long },
+          { from: 'Opus', text: long },
+          { from: 'Ling', text: long },
+        ],
+        0
+      ),
       finalPrompt(self, big, lines, 0),
     ]) {
       expect(toText(p).length).toBeLessThanOrEqual(3200)
@@ -194,7 +202,9 @@ describe('readQuestion', () => {
 describe('readAnswer', () => {
   it('reads an answer and keeps it short', () => {
     expect(readAnswer({ answer: 'Fees are lower.' })).toBe('Fees are lower.')
-    expect(readAnswer({ answer: `${'Fees are lower. '.repeat(40)}` })?.length).toBeLessThanOrEqual(160)
+    expect(readAnswer({ answer: `${'Fees are lower. '.repeat(40)}` })?.length).toBeLessThanOrEqual(
+      160
+    )
   })
 
   it('takes a blank or a wrong shape as no answer', () => {
@@ -205,7 +215,13 @@ describe('readAnswer', () => {
 
 describe('readFinal', () => {
   const offered = ['jupiter-1', 'oneclick-1']
-  const base = { routeId: '', executionMode: 'fill', restPriceUsd: 0, splitPct: 0, reasoning: 'Stays.' }
+  const base = {
+    routeId: '',
+    executionMode: 'fill',
+    restPriceUsd: 0,
+    splitPct: 0,
+    reasoning: 'Stays.',
+  }
 
   it('reads keep and hold without a route', () => {
     expect(readFinal({ ...base, decision: 'keep' }, offered)).toEqual({
@@ -220,7 +236,10 @@ describe('readFinal', () => {
 
   it('reads a change to a route that was offered', () => {
     expect(
-      readFinal({ ...base, decision: 'change', routeId: 'jupiter-1', reasoning: 'Pays more.' }, offered)
+      readFinal(
+        { ...base, decision: 'change', routeId: 'jupiter-1', reasoning: 'Pays more.' },
+        offered
+      )
     ).toEqual({
       decision: 'change',
       routeId: 'jupiter-1',

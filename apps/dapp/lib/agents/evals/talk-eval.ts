@@ -37,7 +37,14 @@ interface Case {
  */
 const CASES: Case[] = [
   { id: 'small-swap', amount: '100', tokenIn: 'USDC', tokenOut: 'SOL', priceIn: 1, priceOut: 160 },
-  { id: 'large-swap', amount: '25000', tokenIn: 'USDC', tokenOut: 'AVAX', priceIn: 1, priceOut: 30 },
+  {
+    id: 'large-swap',
+    amount: '25000',
+    tokenIn: 'USDC',
+    tokenOut: 'AVAX',
+    priceIn: 1,
+    priceOut: 30,
+  },
   { id: 'sell-swap', amount: '50', tokenIn: 'NEAR', tokenOut: 'USDC', priceIn: 4, priceOut: 1 },
 ]
 

@@ -84,7 +84,12 @@ const route = (venueId: string, venueName: string): object => ({
   valueOutUsd: 99.8,
 })
 
-const started = { type: 'competition:started', competitionId: ID, agents: AGENTS, windowSeconds: 30 }
+const started = {
+  type: 'competition:started',
+  competitionId: ID,
+  agents: AGENTS,
+  windowSeconds: 30,
+}
 const take = (agent: string, routeId: string, source: string, reasoning: string): object => ({
   type: 'competition:take',
   competitionId: ID,
@@ -102,13 +107,24 @@ const talk = [
   line({ kind: 'turn', turn: 'ask', agents: [QWEN, DEEPSEEK] }),
   line({ kind: 'reading', agent: QWEN, of: [DEEPSEEK] }),
   line({ kind: 'reading', agent: DEEPSEEK, of: [QWEN] }),
-  line({ kind: 'asked', agent: QWEN, to: DEEPSEEK, text: 'Is that gap worth a route with more steps?' }),
+  line({
+    kind: 'asked',
+    agent: QWEN,
+    to: DEEPSEEK,
+    text: 'Is that gap worth a route with more steps?',
+  }),
   line({ kind: 'turn', turn: 'answer', agents: [DEEPSEEK] }),
-  line({ kind: 'answered', agent: DEEPSEEK, to: [QWEN], text: 'Yes. It pays 0.4% more, and the steps are one signature.' }),
+  line({
+    kind: 'answered',
+    agent: DEEPSEEK,
+    to: [QWEN],
+    text: 'Yes. It pays 0.4% more, and the steps are one signature.',
+  }),
   line({ kind: 'turn', turn: 'final', agents: [QWEN, DEEPSEEK] }),
 ]
 
-const sse = (frames: object[]): string => frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')
+const sse = (frames: object[]): string =>
+  frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')
 
 async function stubRace(page: Page, frames: object[]): Promise<void> {
   await page.route('**/api/agents/compete', (r) =>
@@ -142,7 +158,13 @@ test('the talk reads in order in the chat, then final strategies drop with Revie
       proposal: plan(DEEPSEEK, 'jupiter-1', 'Jupiter still pays the most.'),
       route: route('jupiter', 'Jupiter'),
     },
-    { type: 'competition:winner', competitionId: ID, winner: DEEPSEEK, scores: {}, unanimous: true },
+    {
+      type: 'competition:winner',
+      competitionId: ID,
+      winner: DEEPSEEK,
+      scores: {},
+      unanimous: true,
+    },
   ])
   await say(page, 'Swap 100 USDC to SOL')
 
@@ -153,7 +175,12 @@ test('the talk reads in order in the chat, then final strategies drop with Revie
   await expect(page.getByText('Yes. It pays 0.4% more')).toBeVisible()
   // Nothing can be reviewed while the talk runs.
   await expect(page.getByRole('button', { name: 'Review' })).toHaveCount(0)
-  await page.screenshot({ path: process.env['TALK_SHOTS'] ? `${process.env['TALK_SHOTS']}/talk-live.png` : 'test-results/talk-live.png', fullPage: true })
+  await page.screenshot({
+    path: process.env['TALK_SHOTS']
+      ? `${process.env['TALK_SHOTS']}/talk-live.png`
+      : 'test-results/talk-live.png',
+    fullPage: true,
+  })
 
   await expect(page.getByText('Qwen3.8 27B changed its strategy.')).toBeVisible()
   await expect(page.getByText('Persuaded: 0.4% more is worth one signature.')).toBeVisible()
@@ -163,10 +190,17 @@ test('the talk reads in order in the chat, then final strategies drop with Revie
   await expect(page.getByText(/All 2 agents agree/)).toBeInViewport()
   // First takes stay above the final cards.
   await expect(page.getByText('It settles in one step, so I would take 1Click.')).toBeVisible()
-  await page.screenshot({ path: process.env['TALK_SHOTS'] ? `${process.env['TALK_SHOTS']}/talk-final.png` : 'test-results/talk-final.png', fullPage: true })
+  await page.screenshot({
+    path: process.env['TALK_SHOTS']
+      ? `${process.env['TALK_SHOTS']}/talk-final.png`
+      : 'test-results/talk-final.png',
+    fullPage: true,
+  })
 })
 
-test('when every agent holds off there is nothing to sign and no false excuse', async ({ page }) => {
+test('when every agent holds off there is nothing to sign and no false excuse', async ({
+  page,
+}) => {
   await connectFakeSolanaWallet(page)
   let prepared = false
   await page.route('**/api/chain/solana/prepare', async (r) => {
@@ -176,7 +210,12 @@ test('when every agent holds off there is nothing to sign and no false excuse', 
   const held = (agent: string, why: string): object => ({
     type: 'competition:proposal',
     competitionId: ID,
-    proposal: { ...plan(agent, undefined, why), held: true, projectedAvgPriceUsd: 0, projectedSlippagePct: 0 },
+    proposal: {
+      ...plan(agent, undefined, why),
+      held: true,
+      projectedAvgPriceUsd: 0,
+      projectedSlippagePct: 0,
+    },
   })
   await stubRace(page, [
     started,
@@ -196,7 +235,12 @@ test('when every agent holds off there is nothing to sign and no false excuse', 
   await expect(page.getByRole('button', { name: 'Sign and send' })).toHaveCount(0)
   await expect(page.getByText(/agents were unavailable/i)).toHaveCount(0)
   expect(prepared).toBe(false)
-  await page.screenshot({ path: process.env['TALK_SHOTS'] ? `${process.env['TALK_SHOTS']}/talk-all-held.png` : 'test-results/talk-all-held.png', fullPage: true })
+  await page.screenshot({
+    path: process.env['TALK_SHOTS']
+      ? `${process.env['TALK_SHOTS']}/talk-all-held.png`
+      : 'test-results/talk-all-held.png',
+    fullPage: true,
+  })
 })
 
 test('one held agent keeps its reason, with no Review, beside a plan that has one', async ({
@@ -219,7 +263,13 @@ test('one held agent keeps its reason, with no Review, beside a plan that has on
       proposal: plan(DEEPSEEK, 'jupiter-1', 'Jupiter still pays the most.'),
       route: route('jupiter', 'Jupiter'),
     },
-    { type: 'competition:winner', competitionId: ID, winner: DEEPSEEK, scores: {}, unanimous: false },
+    {
+      type: 'competition:winner',
+      competitionId: ID,
+      winner: DEEPSEEK,
+      scores: {},
+      unanimous: false,
+    },
   ])
   await say(page, 'Swap 100 USDC to SOL')
 

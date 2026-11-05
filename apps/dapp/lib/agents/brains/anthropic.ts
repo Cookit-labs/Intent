@@ -1,12 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-import type {
-  AgentBrain,
-  ProposalOutcome,
-  ProposalRequest,
-  TalkCall,
-  TalkOutcome,
-} from '../brain'
+import type { AgentBrain, ProposalOutcome, ProposalRequest, TalkCall, TalkOutcome } from '../brain'
 import { SUBMIT_PROPOSAL_TOOL } from '../tool-schema'
 import { MAX_OUTPUT_TOKENS, buildMessages, meta, toOutcome } from './openai-compatible'
 import { PROVIDERS, modelFor } from './providers'

@@ -63,7 +63,8 @@ const TALK_LIMIT_MS = 15_000
 function summarise(ms: number[]): string {
   if (ms.length === 0) return 'median -, p90 -'
   const sorted = [...ms].sort((a, b) => a - b)
-  const at = (q: number): number => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
+  const at = (q: number): number =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0
   return `median ${at(0.5)}ms, p90 ${at(0.9)}ms`
 }
 

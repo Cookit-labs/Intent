@@ -31,7 +31,14 @@ const plan = (agent: string, routeId = 'jupiter-1'): AgentProposalResult => ({
 type Reply = unknown | ((call: TalkCall) => Promise<TalkOutcome>)
 
 const ok = (args: unknown): TalkOutcome => ({ ok: true, args, meta })
-const keep = { decision: 'keep', routeId: '', executionMode: 'fill', restPriceUsd: 0, splitPct: 0, reasoning: 'Stays.' }
+const keep = {
+  decision: 'keep',
+  routeId: '',
+  executionMode: 'fill',
+  restPriceUsd: 0,
+  splitPct: 0,
+  reasoning: 'Stays.',
+}
 
 /** A seat whose model replies by tool name. Anything unlisted replies with nothing useful. */
 function seat(key: string, replies: Record<string, Reply> = {}): TalkSeat & { calls: TalkCall[] } {
@@ -60,12 +67,10 @@ const asks = (to: string, question = 'Why that route?'): Record<string, unknown>
 /** Replies only when aborted, as a model past its turn does. */
 const neverAnswers = (call: TalkCall): Promise<TalkOutcome> =>
   new Promise((resolve) => {
-    call.signal?.addEventListener('abort', () =>
-      resolve({ ok: false, error: 'timeout', meta })
-    )
+    call.signal?.addEventListener('abort', () => resolve({ ok: false, error: 'timeout', meta }))
   })
 
-const later = <T,>(ms: number, value: T): Promise<T> =>
+const later = <T>(ms: number, value: T): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), ms))
 
 function start(
@@ -220,7 +225,10 @@ describe('runTalk', () => {
   })
 
   it('skips the answer turn when nobody asked', async () => {
-    const run = start([seat('a'), seat('b')], [Promise.resolve(plan('a')), Promise.resolve(plan('b'))])
+    const run = start(
+      [seat('a'), seat('b')],
+      [Promise.resolve(plan('a')), Promise.resolve(plan('b'))]
+    )
     await vi.advanceTimersByTimeAsync(20_000)
     await run.done
     expect(kinds(run.lines)).not.toContain('turn answer')
@@ -262,7 +270,10 @@ describe('runTalk', () => {
     ],
   ])('keeps the first take when a final is %s', async (_, replies) => {
     const first = plan('a')
-    const run = start([seat('a', replies), seat('b')], [Promise.resolve(first), Promise.resolve(plan('b'))])
+    const run = start(
+      [seat('a', replies), seat('b')],
+      [Promise.resolve(first), Promise.resolve(plan('b'))]
+    )
     await vi.advanceTimersByTimeAsync(20_000)
     const result = await run.done
     expect(result.finals.find((f) => f.agent === 'a')).toBe(first)
@@ -380,7 +391,7 @@ describe('runTalk', () => {
     expect(seenAt['final']).toBeLessThanOrEqual(6667)
   })
 
-  it('reports a 429 and keeps the agent\'s plan', async () => {
+  it("reports a 429 and keeps the agent's plan", async () => {
     const limited = vi.fn()
     const first = plan('a')
     const run = start(
@@ -392,7 +403,11 @@ describe('runTalk', () => {
             meta,
             retryAfterMs: 5000,
           }),
-          final_plan: async (): Promise<TalkOutcome> => ({ ok: false, error: 'rate_limited', meta }),
+          final_plan: async (): Promise<TalkOutcome> => ({
+            ok: false,
+            error: 'rate_limited',
+            meta,
+          }),
         }),
         seat('b'),
       ],
@@ -405,7 +420,7 @@ describe('runTalk', () => {
     expect(result.finals.find((f) => f.agent === 'a')).toBe(first)
   })
 
-  it('never lets one agent\'s reply change another agent\'s plan', async () => {
+  it("never lets one agent's reply change another agent's plan", async () => {
     const firstB = plan('b')
     const applied: string[] = []
     const run = start(

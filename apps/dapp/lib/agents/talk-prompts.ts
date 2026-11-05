@@ -186,7 +186,10 @@ function message(text: unknown): string | undefined {
 }
 
 /** Who was asked and what, or nothing: asking nothing is allowed, as is naming nobody real. */
-export function readQuestion(raw: unknown, others: TalkSelf[]): { to: string; text: string } | undefined {
+export function readQuestion(
+  raw: unknown,
+  others: TalkSelf[]
+): { to: string; text: string } | undefined {
   const args = fields(raw)
   const text = message(args?.['question'])
   const to = args?.['to']
