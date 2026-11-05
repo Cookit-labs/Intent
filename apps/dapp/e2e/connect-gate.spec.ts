@@ -1,11 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { BETA_NOTICE_SEEN } from './beta-notice-seen'
+
 /**
  * The connect page, with fake wallets announced the way real extensions do it:
  * the Wallet Standard for Solana and Sui, EIP-6963 for EVM. Nothing here signs or
  * reaches a chain.
  */
-test.use({ storageState: { cookies: [], origins: [] } })
+test.use({ storageState: { cookies: [], origins: BETA_NOTICE_SEEN } })
 
 const SOLANA_ADDRESS = 'vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg'
 const SUI_ADDRESS = `0x${'ab'.repeat(32)}`
@@ -134,7 +136,7 @@ test('the picker offers the six chains, and not Arc', async ({ page }) => {
   await connectButton(page).click()
   const chains = dialog(page).getByRole('button')
   for (const name of ['Stellar', 'Solana', 'Avalanche', 'Sui', 'Monad', 'NEAR']) {
-    await expect(chains.filter({ hasText: new RegExp(`^${name}$`) })).toBeVisible()
+    await expect(chains.filter({ hasText: new RegExp(`^${name}(Beta)?$`) })).toBeVisible()
   }
   await expect(chains.filter({ hasText: 'Arc' })).toHaveCount(0)
 })
@@ -260,6 +262,46 @@ test('the switcher asks for a wallet on a chain that has none, in place', async 
   await page.getByRole('menuitem', { name: /Solana mainnet/ }).click()
   await expect(page).toHaveURL(/\/solana\/intents$/)
   await expect(dialog(page)).toHaveCount(0)
+})
+
+test('toggling between chains warns once on each, then never again', async ({ page }) => {
+  const notice = page.getByRole('alertdialog')
+  const toggleTo = async (chain: RegExp, address: RegExp): Promise<void> => {
+    await page.getByRole('button', { name: /Switch chain/ }).click()
+    await page.getByRole('menuitem', { name: chain }).click()
+    await expect(page).toHaveURL(address)
+  }
+
+  await page.goto('/solana/intents')
+  await page.evaluate(() => {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith('intent-beta-notice')) window.localStorage.removeItem(key)
+    }
+  })
+  await connectButton(page).click()
+  await dialog(page).getByRole('button', { name: 'Solana' }).click()
+  await dialog(page).getByRole('button', { name: 'Fake Solana' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Solana is in beta' })).toBeVisible()
+  await page.getByRole('button', { name: 'I understand' }).click()
+  await expect(notice).toHaveCount(0)
+
+  await page.getByRole('button', { name: /Switch chain/ }).click()
+  await page.getByRole('menuitem', { name: /Sui mainnet/ }).click()
+  await dialog(page).getByRole('button', { name: 'Fake Sui' }).click()
+  await expect(page.getByRole('alertdialog', { name: 'Sui is in beta' })).toBeVisible()
+  await page.getByRole('button', { name: 'I understand' }).click()
+  await expect(notice).toHaveCount(0)
+
+  for (let round = 0; round < 2; round += 1) {
+    await toggleTo(/Solana mainnet/, /\/solana\/intents$/)
+    await expect(notice).toHaveCount(0)
+    await toggleTo(/Sui mainnet/, /\/sui\/intents$/)
+    await expect(notice).toHaveCount(0)
+  }
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: /Switch chain/ })).toBeVisible()
+  await expect(notice).toHaveCount(0)
 })
 
 test('the mobile layout keeps the steps in view, without the slides', async ({ page }) => {

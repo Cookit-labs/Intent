@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+import { BETA_NOTICE_SEEN } from './e2e/beta-notice-seen'
+
 /**
  * Browser smoke pass against a production build of the dapp.
  *
@@ -62,7 +64,7 @@ export default defineConfig({
           sameSite: 'Lax',
         },
       ],
-      origins: [],
+      origins: BETA_NOTICE_SEEN,
     },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

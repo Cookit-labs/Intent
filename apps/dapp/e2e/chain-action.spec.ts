@@ -1,11 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { BETA_NOTICE_SEEN } from './beta-notice-seen'
+
 /**
  * The chat's path on a chain that is not Stellar, from typed words to a signed
  * result, with a fake wallet the way a real one announces itself. Both server
  * routes are stubbed, so nothing reaches a chain and no agent or price is needed.
  */
-test.use({ storageState: { cookies: [], origins: [] } })
+test.use({ storageState: { cookies: [], origins: BETA_NOTICE_SEEN } })
 
 const ADDRESS = 'vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg'
 const UNSIGNED = btoa('unsigned-transaction')

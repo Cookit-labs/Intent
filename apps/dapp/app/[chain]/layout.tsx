@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { WalletGate } from '../../components/connect/wallet-gate'
 import { ChatHost } from '../../components/intents/chat-host'
 import { AppShell } from '../../components/layout/app-shell'
+import { BetaChainNotice } from '../../components/layout/beta-chain-notice'
 import { ChainProvider } from '../../providers/chain-provider'
 
 /**
@@ -37,6 +38,7 @@ export default async function ChainLayout({
   return (
     <ChainProvider segment={chain}>
       <WalletGate bypass={bypass}>
+        <BetaChainNotice />
         <AppShell>
           <ChatHost key={chain}>{children}</ChatHost>
         </AppShell>
