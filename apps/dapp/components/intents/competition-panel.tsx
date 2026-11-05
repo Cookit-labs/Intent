@@ -167,13 +167,17 @@ export function CompetitionPanel({
   const threadLength = thread.length
   const threadEnd = useRef<HTMLDivElement | null>(null)
   const racing = phase === 'competing'
+  const shownCards = Object.values(revealed).filter(Boolean).length
+  const followed = useRef(false)
+  if (racing) followed.current = true
 
-  // The talk grows below the fold while someone watches, so it stays in view.
+  // The talk and the cards after it grow below the fold while someone watches,
+  // so they stay in view. A reopened conversation never ran here, so it isn't moved.
   useEffect(() => {
-    if (threadLength === 0 || !racing) return
+    if (threadLength === 0 || !followed.current) return
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     threadEnd.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' })
-  }, [threadLength, racing])
+  }, [threadLength, shownCards, phase])
 
   // Nothing to show until something is running. The panel used to paint
   // "Broadcasting…" and four "thinking…" placeholders whenever the phase was
@@ -294,8 +298,6 @@ export function CompetitionPanel({
             )
           })
         : null}
-      {thread.length > 0 ? <div ref={threadEnd} aria-hidden /> : null}
-
       {revealedAgents.length === 0 && !decided && thread.length === 0 ? (
         <div className={systemPill}>
           <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
@@ -492,6 +494,7 @@ export function CompetitionPanel({
       {decided && everyoneHeld ? <div className={systemPill}>{ALL_HELD_LINE}</div> : null}
 
       {decided && unanswered !== undefined ? <div className={systemPill}>{unanswered}</div> : null}
+      {thread.length > 0 ? <div ref={threadEnd} aria-hidden /> : null}
     </div>
   )
 }
