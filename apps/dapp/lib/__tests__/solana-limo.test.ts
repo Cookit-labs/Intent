@@ -77,7 +77,10 @@ function open(base64: string): Message {
   return getCompiledTransactionMessageDecoder().decode(messageBytes) as unknown as Message
 }
 
-/** A changed message, with the extra signers' slots filled as they are on a real payload. */
+/**
+ * A message re-sealed with the order key's real signature, so an unchanged message still verifies. A
+ * changed one has to be refused for what changed, which each case's words below pin down.
+ */
 function close(message: Message): string {
   const bytes = getCompiledTransactionMessageEncoder().encode(
     message as unknown as Parameters<
@@ -88,7 +91,8 @@ function close(message: Message): string {
   return Buffer.concat([
     Buffer.from([count]),
     Buffer.alloc(64),
-    Buffer.alloc(64 * (count - 1), 1),
+    count > 1 ? Buffer.from(base.transaction, 'base64').subarray(65, 129) : Buffer.alloc(0),
+    Buffer.alloc(64 * Math.max(count - 2, 0), 1),
     Buffer.from(bytes),
   ]).toString('base64')
 }
@@ -734,6 +738,37 @@ describe('limoAssertSafe', () => {
   })
 })
 
+describe('the order key’s signature', () => {
+  const sealed = (bytes: Buffer): SigningPayload => ({
+    family: 'solana',
+    transaction: bytes.toString('base64'),
+  })
+
+  it('refuses a raised priority fee kept under the old signature, in words', () => {
+    const i = indexOfInstruction(baseMessage, 'ComputeBudget111111111111111111111111111111', 3)
+    const changed = replaceInstruction(baseMessage, i, {
+      data: Uint8Array.from([3, ...u64(BigInt(200_000))]),
+    })
+    expect(refusal(() => assertWith(changed))).toMatch(/signature.*Nothing was sent\.$/)
+  })
+
+  it('refuses junk in its slot', () => {
+    const bytes = Buffer.from(base.transaction, 'base64')
+    bytes.fill(1, 65, 129)
+    expect(refusal(() => limoAssertSafe(sealed(bytes), ACCOUNT, base.context))).toMatch(
+      /signature.*Nothing was sent\.$/
+    )
+  })
+
+  it('refuses one bit changed in it', () => {
+    const bytes = Buffer.from(base.transaction, 'base64')
+    bytes[100] = (bytes[100] as number) ^ 1
+    expect(refusal(() => limoAssertSafe(sealed(bytes), ACCOUNT, base.context))).toMatch(
+      /signature.*Nothing was sent\.$/
+    )
+  })
+})
+
 describe('solanaAssertSafe', () => {
   it('still refuses an extra signer for a venue that creates no account', () => {
     const assertSafe = solanaAssertSafe(JUPITER_SWAP_POLICY)
@@ -840,7 +875,7 @@ describe('kamino limit venue', () => {
     expect(prepared.summary).toMatch(/110 USDC/)
     expect(prepared.notes).toEqual([
       'This stays open until it fills or you cancel it. There is no expiry.',
-      'Costs about 0.003 SOL, probably not refunded, and locks 0.00384 SOL until you close the order.',
+      'Locks about 0.00684 SOL until you close the order, then it comes back, less the network fee. Each token account opened for this order locks about 0.002 SOL more, which comes back only if you close that account.',
       'Only Pyth Express Relay searchers fill it. It may never fill, and small orders are less likely to.',
       'Kamino can upgrade this program, so your escrowed amount carries that risk.',
     ])
@@ -859,7 +894,7 @@ describe('kamino limit venue', () => {
   it('states a cost other than the usual one, rather than the usual figure', async () => {
     stubRpc(liveConfig(configBytes({ txnFee: 5_000_000, ataCost: 1_000_000 })))
     const prepared = await venue.prepare(SOL_FOR_USDC, ACCOUNT)
-    expect(prepared.notes[1]).toMatch(/^Costs about 0\.006 SOL/)
+    expect(prepared.notes[1]).toMatch(/^Locks about 0\.00984 SOL until/)
   })
 
   it.each([
@@ -1044,9 +1079,10 @@ describe('limoBook', () => {
       status: 'filled',
       limitPrice: '186.345',
     })
-    // Rent of 3,841,920 lamports plus the tip of 24,350.
+    // The 3,841,920 lamports the account holds plus the tip of 24,350.
     expect(order?.collectable).toEqual([{ amount: '0.00386627', symbol: 'SOL' }])
     expect(order?.note).toMatch(/SOL/)
+    expect(order?.note).not.toMatch(/rent/)
   })
 
   it('tells an open order from a partly filled one, and neither has anything to collect', async () => {
@@ -1117,6 +1153,7 @@ describe('limoBook', () => {
       expect(prepared.kind).toBe('limit')
       expect(prepared.summary).toMatch(/SOL/)
       expect(prepared.summary).toMatch(/back/)
+      expect(prepared.summary).not.toMatch(/rent/)
       expect(prepared.receive).toEqual({
         amount: '0.00386627',
         symbol: 'SOL',
@@ -1165,6 +1202,7 @@ describe('limoBook', () => {
       stubRpc(liveOrder(orderLike({ status: 0, remaining: BigInt(200000000), filled: BigInt(0) })))
       const prepared = await book.prepareExit(FIXTURE_MAKER, FIXTURE().address, 'cancel')
       expect(prepared.summary).toMatch(/0\.2 SOL/)
+      expect(prepared.summary).not.toMatch(/rent/)
       expect(prepared.receive).toEqual({ amount: '0.2', symbol: 'SOL', approximate: false })
       expect(() => limoAssertSafe(prepared.signing, FIXTURE_MAKER)).not.toThrow()
     })
@@ -1327,6 +1365,9 @@ describe('the app knows about it', () => {
       name: 'Kamino Limit Orders',
       integration: 'executes',
     })
+    const row = solanaVenues.find((v) => v.id === 'kamino-limit')
+    expect(row?.capability).toMatch(/Locks about 0\.00684 SOL until you close the order/)
+    expect(row?.capability).not.toMatch(/0\.003/)
   })
 
   it('is one of the things this chain says it can do', () => {

@@ -1,3 +1,5 @@
+import { createPublicKey, verify } from 'node:crypto'
+
 import {
   AccountRole,
   getAddressDecoder,
@@ -36,6 +38,8 @@ import { SOLANA_TOKENS } from './tokens'
 const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111'
 const WRAPPED_SOL = 'So11111111111111111111111111111111111111112'
 const MAX_U64 = BigInt('18446744073709551615')
+/** The DER header of an ed25519 public key, which the raw 32 bytes of an address follow. */
+const ED25519_PUBLIC_KEY_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 
 const CREATE_ORDER_DATA = [141, 54, 37, 207, 237, 210, 250, 215]
 const CLOSE_ORDER_DATA = [244, 27, 12, 226, 45, 247, 230, 43]
@@ -199,7 +203,8 @@ export interface LimoClose {
 
 /**
  * Closes an order, whether it is open or filled, as the one instruction does both: what is left comes
- * back with its tips and rent. SOL returns wrapped, so it is unwrapped in the same transaction.
+ * back with its tips and the SOL it locked. SOL returns wrapped, so it is unwrapped in the same
+ * transaction.
  */
 export function closeInstructions(close: LimoClose): Instruction[] {
   const { account, order, inputMint, outputMint } = close
@@ -326,6 +331,20 @@ function amountIn(context: Record<string, string> | undefined, key: string): big
   return amount
 }
 
+/** Written out with node's ed25519 rather than the kit's because `assertSafe` is synchronous. */
+function signedBy(address: string, message: Uint8Array, signature: Uint8Array): boolean {
+  try {
+    const key = createPublicKey({
+      key: Buffer.concat([ED25519_PUBLIC_KEY_PREFIX, encodeAddress(address)]),
+      format: 'der',
+      type: 'spki',
+    })
+    return verify(null, message, key, signature)
+  } catch {
+    return false
+  }
+}
+
 function assertCreate(
   transaction: DecodedSolanaTransaction,
   account: string,
@@ -360,10 +379,20 @@ function assertCreate(
     'the limit order',
     CREATE_ORDER_ACCOUNTS
   )
-  // A wallet that strips it would otherwise leave a transaction the network can only reject.
-  const { signatures } = getTransactionDecoder().decode(bytesFromBase64(signedPayload))
-  if ((signatures[order as Address] ?? null) === null) {
-    refused('This order is missing its own signature, so your wallet may have changed it.')
+  // A wallet that drops it or changes the message would otherwise leave a transaction the network can
+  // only reject, and an answer submit can't read as a clean failure. "Nothing was signed" would be
+  // false by here, since this can only fail on what a wallet returned.
+  const { signatures, messageBytes } = getTransactionDecoder().decode(
+    bytesFromBase64(signedPayload)
+  )
+  const signature = signatures[order as Address] ?? null
+  if (
+    signature === null ||
+    !signedBy(order, Uint8Array.from(messageBytes), Uint8Array.from(signature))
+  ) {
+    throw new ChainActionRefused(
+      'This order’s signature no longer matches the transaction, so the network would reject it. Your wallet may have changed it. Build it again. Nothing was sent.'
+    )
   }
 }
 
@@ -395,12 +424,12 @@ const generic = solanaAssertSafe(LIMO_POLICY)
  * Passes only what this file would have built for this account. A close carries everything it needs
  * in its own accounts, and the program refuses a maker who isn't the order's.
  *
- * A create's mints and amounts are compared with `context`, and that is the limit of what it can
- * show. At `prepare` this server wrote the context, so a wrong sum or a wrong build is caught. At
- * submit the browser hands it back unproven, as no secret is required to place an order, so a browser
- * rewriting bytes and context together passes on the amounts, and on which offered pair, and only on
- * those: the wallet, config, vault, accounts and steps are all still held to what they must be. Such
- * a browser could send what it had signed by itself anyway, without coming here.
+ * A create's mints and amounts are compared with `context`, which shows only that the two agree.
+ * Bytes and context both come from `orderAmounts`, so this does not bind either to the person's words:
+ * only the tests of those sums do. At submit the browser hands the context back unproven, so a browser
+ * rewriting both passes on the amounts and on which offered pair. No proof is asked for, because anyone
+ * holding the wallet's signature can broadcast directly. The wallet, config, vault, accounts and steps
+ * are still held to what they must be.
  */
 export function limoAssertSafe(
   payload: SigningPayload,

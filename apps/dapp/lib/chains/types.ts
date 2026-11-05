@@ -139,7 +139,10 @@ export interface ChainVenue {
    * venue's API and the browser are both outside what this server controls.
    *
    * `context` is what `prepare` issued, handed back by the browser. A venue that reads it
-   * must prove the server wrote it before believing any of it.
+   * must prove the server wrote it before believing any of it. The exception is a venue that only
+   * compares it with the signed bytes, and whose submit does nothing else with it, as Kamino's limit
+   * orders do: anyone holding the wallet's signature can broadcast those bytes directly, so a proof
+   * would stop nothing.
    */
   assertSafe: (
     payload: SigningPayload,

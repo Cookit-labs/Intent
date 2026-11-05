@@ -41,7 +41,7 @@ import {
   ORDER_DISCRIMINATOR_BASE58,
   type LimoOrder,
 } from './limo-rules'
-import { LIMO_GLOBAL_CONFIG, LIMO_ORDER_BYTES, LIMO_PROGRAM } from './programs'
+import { LIMO_GLOBAL_CONFIG, LIMO_ORDER_BYTES, LIMO_ORDER_RENT, LIMO_PROGRAM } from './programs'
 import { fromBaseUnits } from './tokens'
 
 const VENUE_ID = 'kamino-limit'
@@ -50,8 +50,9 @@ const SOL_DECIMALS = 9
 const READ_TIMEOUT_MS = 15_000
 const MAX_U64 = BigInt('18446744073709551615')
 /**
- * `create_order` takes this from the maker inside the program, where the signed bytes can't show it,
- * so the live config is read and held to this. The fee is 0.003 SOL today.
+ * `create_order` moves this from the maker onto the order account inside the program, where the signed
+ * bytes can't show it, so the live config is read and held to this. It is 0.003 SOL today, and in
+ * simulation on 5 November 2026 it came back at close.
  */
 const MAX_ORDER_COST_LAMPORTS = BigInt(10_000_000)
 
@@ -236,13 +237,17 @@ async function checkedCost(inputMint: string, symbol: string): Promise<bigint> {
   }
   if (config.cost > MAX_ORDER_COST_LAMPORTS) {
     refused(
-      `Kamino now charges about ${fromBaseUnits(config.cost.toString(), SOL_DECIMALS)} SOL to place an order, above the ${fromBaseUnits(MAX_ORDER_COST_LAMPORTS.toString(), SOL_DECIMALS)} SOL I accept.`
+      `Kamino now takes about ${fromBaseUnits(config.cost.toString(), SOL_DECIMALS)} SOL to place an order, above the ${fromBaseUnits(MAX_ORDER_COST_LAMPORTS.toString(), SOL_DECIMALS)} SOL I accept.`
     )
   }
   if (vault === null || vault === undefined || vault.owner !== TOKEN_PROGRAM) {
     refused(`Kamino has no vault for ${symbol} yet, so I can’t place this.`)
   }
   return config.cost
+}
+
+function shortSol(lamports: bigint): string {
+  return String(Number(Number(fromBaseUnits(lamports.toString(), SOL_DECIMALS)).toFixed(5)))
 }
 
 async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
@@ -275,7 +280,7 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
     receive: { amount: received, symbol: output.symbol, approximate: false },
     notes: [
       'This stays open until it fills or you cancel it. There is no expiry.',
-      `Costs about ${fromBaseUnits(cost.toString(), SOL_DECIMALS)} SOL, probably not refunded, and locks 0.00384 SOL until you close the order.`,
+      `Locks about ${shortSol(cost + BigInt(LIMO_ORDER_RENT))} SOL until you close the order, then it comes back, less the network fee. Each token account opened for this order locks about 0.002 SOL more, which comes back only if you close that account.`,
       'Only Pyth Express Relay searchers fill it. It may never fill, and small orders are less likely to.',
       'Kamino can upgrade this program, so your escrowed amount carries that risk.',
     ],
@@ -338,7 +343,7 @@ function restingOrder(
     ...fields,
     status: 'filled',
     collectable: [{ amount: back, symbol: 'SOL' }],
-    note: `It filled, and your ${output.symbol} was paid then. Closing it brings back about ${back} SOL of rent and tips.`,
+    note: `It filled, and your ${output.symbol} was paid then. Closing it brings back about ${back} SOL, what it locked plus any tips.`,
   }
 }
 
@@ -426,7 +431,7 @@ async function prepareExit(
       venueId: VENUE_ID,
       venueName: VENUE_NAME,
       kind: 'limit',
-      summary: `Close your filled Kamino order and get about ${back} SOL back, its rent and tips.`,
+      summary: `Close your filled Kamino order and get about ${back} SOL back, what it locked plus any tips.`,
       pay: { amount: '0', symbol: 'SOL' },
       receive: { amount: back, symbol: 'SOL', approximate: false },
       notes: [`Your ${output.symbol} was paid when it filled, so this doesn’t change that.`],
@@ -438,7 +443,7 @@ async function prepareExit(
     venueId: VENUE_ID,
     venueName: VENUE_NAME,
     kind: 'limit',
-    summary: `Cancel your Kamino order and get back ${remaining} ${input.symbol}, plus about ${back} SOL of rent and tips.`,
+    summary: `Cancel your Kamino order and get back ${remaining} ${input.symbol}, plus about ${back} SOL, what it locked plus any tips.`,
     pay: { amount: '0', symbol: input.symbol },
     receive: { amount: remaining, symbol: input.symbol, approximate: false },
     notes: ['A searcher could still fill it before this lands. Whatever filled stays yours.'],

@@ -62,7 +62,7 @@ export const solanaVenues: Venue[] = [
     url: 'https://kamino.com',
     integration: 'executes',
     capability:
-      'Places, reads, cancels and closes SOL orders against USDC or USDT, and checks every transaction before you sign. Costs about 0.003 SOL to place, and it may never fill.',
+      'Places, reads, cancels and closes SOL orders against USDC or USDT, and checks every transaction before you sign. Locks about 0.00684 SOL until you close the order, then it comes back, and it may never fill.',
   },
   {
     id: 'onre',
