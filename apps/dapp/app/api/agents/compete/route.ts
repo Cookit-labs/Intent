@@ -303,6 +303,9 @@ export async function POST(request: Request): Promise<Response> {
   let context: string[]
   let reading: ReadingForIntent | undefined
   let chainAction: ChainActionRequest | undefined
+  // Asked for by the client, because a tab from before talk shipped knows nothing
+  // of a held plan: it would offer Review on one and sign the winner's trade.
+  let clientTalks: boolean
 
   try {
     const body = (await request.json()) as {
@@ -311,6 +314,7 @@ export async function POST(request: Request): Promise<Response> {
       context?: unknown
       reading?: unknown
       chainAction?: unknown
+      talk?: unknown
     }
     if (typeof body.text !== 'string' || body.text.trim() === '') {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
@@ -318,6 +322,7 @@ export async function POST(request: Request): Promise<Response> {
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
     chainAction = chainActionFromBody(body.chainAction)
+    clientTalks = body.talk === true
     // Stellar's live-asset lookup is for Stellar's tickers; a chain action
     // names its tokens itself and they are checked against the chain's own list.
     if (chain === 'stellar' || chainAction === undefined) await ensureLiveAssets(tickersIn(text))
@@ -443,14 +448,27 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
+  let closed = false
+  // Fires when the person has gone, such as sending a note that restarts the race.
+  const personLeft = new AbortController()
+
   const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      closed = true
+      personLeft.abort()
+    },
     async start(controller) {
       const encoder = new TextEncoder()
-      let closed = false
 
       const send = (frame: CompetitionFrame): void => {
         if (closed) return
-        controller.enqueue(encoder.encode(encodeFrame(frame)))
+        try {
+          controller.enqueue(encoder.encode(encodeFrame(frame)))
+        } catch {
+          // The stream ended underneath us, which is the person leaving by another name.
+          closed = true
+          personLeft.abort()
+        }
       }
 
       // What each agent did, for the analytics log. Only outcomes and timings:
@@ -492,7 +510,7 @@ export async function POST(request: Request): Promise<Response> {
 
       // Agents talk once at least two of them can. A brain that can't keeps its
       // first take, and a race where fewer than two can runs as it always has.
-      const talking = roster.filter((a) => a.brain.talk !== undefined).length >= 2
+      const talking = clientTalks && roster.filter((a) => a.brain.talk !== undefined).length >= 2
       const talkStartedAt = Date.now()
       const rawFirstTakes = new Map<string, AgentProposalResult>()
       const firstTakeAborts: AbortController[] = []
@@ -523,6 +541,9 @@ export async function POST(request: Request): Promise<Response> {
         const began = Date.now()
         const controllerForAgent = new AbortController()
         firstTakeAborts.push(controllerForAgent)
+        personLeft.signal.addEventListener('abort', () => controllerForAgent.abort(), {
+          once: true,
+        })
         const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
         try {
@@ -643,6 +664,7 @@ export async function POST(request: Request): Promise<Response> {
             for (const abort of firstTakeAborts) abort.abort()
           },
           onRateLimited: (agentKey, retryAfterMs) => noteRateLimited(agentKey, retryAfterMs),
+          signal: personLeft.signal,
         })
         proposals = finals
         for (const final of finals) {
@@ -668,8 +690,10 @@ export async function POST(request: Request): Promise<Response> {
             'None of the agents answered this time. Nothing was proposed. Try again in a moment.',
         })
         await record(null, null, {})
-        closed = true
-        controller.close()
+        if (!closed) {
+          closed = true
+          controller.close()
+        }
         return
       }
 
@@ -758,8 +782,10 @@ export async function POST(request: Request): Promise<Response> {
           scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
         )
       )
-      closed = true
-      controller.close()
+      if (!closed) {
+        closed = true
+        controller.close()
+      }
     },
   })
 

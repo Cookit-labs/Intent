@@ -62,6 +62,8 @@ export interface TalkInput {
   /** Ends first takes still running. Called at the close, only if someone has answered. */
   closeLateTakes: () => void
   onRateLimited: (agent: string, retryAfterMs: number | undefined) => void
+  /** Aborted when the person has left, so nothing more is spent on a race nobody will see. */
+  signal?: AbortSignal
 }
 
 interface Exchange {
@@ -90,11 +92,13 @@ export async function runTalk(input: TalkInput): Promise<TalkResult> {
 
   const allSettled = (): boolean => settled >= takes.length
   const elapsed = (): number => Date.now() - startedAt
-  const left = (): number => TALK_CLOSE_MS - elapsed()
+  const abandoned = (): boolean => input.signal?.aborted === true
+  const left = (): number => (abandoned() ? 0 : TALK_CLOSE_MS - elapsed())
+  input.signal?.addEventListener('abort', () => wake?.(), { once: true })
 
   /** Resolves when `ready` holds or the clock reaches `atMs`, whichever comes first. */
   const until = async (ready: () => boolean, atMs: number): Promise<void> => {
-    while (!ready() && elapsed() < atMs) {
+    while (!ready() && !abandoned() && elapsed() < atMs) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, atMs - elapsed())
         wake = () => {
@@ -109,7 +113,7 @@ export async function runTalk(input: TalkInput): Promise<TalkResult> {
   const finish = async (talked: boolean, questions: number): Promise<TalkResult> => {
     await until(allSettled, TALK_CLOSE_MS)
     if (!allSettled()) {
-      if (landed.size > 0) input.closeLateTakes()
+      if (landed.size > 0 || abandoned()) input.closeLateTakes()
       await Promise.all(takes)
     }
     const inOrder = seats.flatMap((s) => {
@@ -161,7 +165,7 @@ export async function runTalk(input: TalkInput): Promise<TalkResult> {
     deadlineAt: number
   ): Promise<TalkOutcome | undefined> => {
     const talk = seat.talk
-    if (talk === undefined) return undefined
+    if (talk === undefined || abandoned()) return undefined
     const abort = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<undefined>((resolve) => {
@@ -174,8 +178,17 @@ export async function runTalk(input: TalkInput): Promise<TalkResult> {
       )
     })
     const request: TalkCall = { agent: seat.key, ...prompt, tool, signal: abort.signal }
-    const outcome = await Promise.race([talk(request), expired])
+    let leave: (() => void) | undefined
+    const left = new Promise<undefined>((resolve) => {
+      leave = () => {
+        abort.abort()
+        resolve(undefined)
+      }
+      input.signal?.addEventListener('abort', leave, { once: true })
+    })
+    const outcome = await Promise.race([talk(request), expired, left])
     clearTimeout(timer)
+    if (leave !== undefined) input.signal?.removeEventListener('abort', leave)
     if (outcome !== undefined && !outcome.ok && outcome.error === 'rate_limited') {
       input.onRateLimited(seat.key, outcome.retryAfterMs)
     }

@@ -79,6 +79,7 @@ function start(
   overrides: {
     applyFinal?: (agent: string, choice: FinalChoice) => AgentProposalResult | undefined
     onRateLimited?: (agent: string, ms: number | undefined) => void
+    signal?: AbortSignal
   } = {}
 ) {
   const lines: TalkLine[] = []
@@ -103,6 +104,7 @@ function start(
       }),
     closeLateTakes,
     onRateLimited: overrides.onRateLimited ?? (() => undefined),
+    ...(overrides.signal !== undefined ? { signal: overrides.signal } : {}),
   })
   return { lines, closeLateTakes, done }
 }
@@ -361,6 +363,39 @@ describe('runTalk', () => {
     )
     await vi.advanceTimersByTimeAsync(20_000)
     expect((await run.done).finals).toHaveLength(2)
+  })
+
+  it('stops calling models and ends at once when the person has left', async () => {
+    const left = new AbortController()
+    const a = seat('a', { ask_agent: neverAnswers })
+    const b = seat('b', { ask_agent: neverAnswers })
+    const run = start([a, b], [Promise.resolve(plan('a')), Promise.resolve(plan('b'))], {
+      signal: left.signal,
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(a.calls.map((c) => c.tool.name)).toEqual(['ask_agent'])
+    const asked = a.calls[0]?.signal
+
+    left.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    const result = await run.done
+
+    expect(asked?.aborted).toBe(true)
+    expect(a.calls.map((c) => c.tool.name)).toEqual(['ask_agent'])
+    expect(result.finals).toHaveLength(2)
+  })
+
+  it('ends first takes still running when the person has left, even with no answer yet', async () => {
+    const left = new AbortController()
+    const run = start([seat('a'), seat('b')], [later(30_000, undefined), later(30_000, undefined)], {
+      signal: left.signal,
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+    left.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run.closeLateTakes).toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await run.done
   })
 
   it('shares a turn among what time is left', async () => {

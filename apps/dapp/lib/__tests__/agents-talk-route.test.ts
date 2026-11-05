@@ -129,20 +129,21 @@ function agent(
   }
 }
 
-const post = (chain = 'near'): Request =>
+const post = (chain = 'near', talk = true): Request =>
   new Request('http://localhost/api/agents/compete', {
     method: 'POST',
     body: JSON.stringify({
       text: 'swap 5 NEAR to USDC',
       chain,
+      ...(talk ? { talk: true } : {}),
       account: 'a.near',
       ...(chain === 'near' ? { chainAction: action } : {}),
     }),
   })
 
-async function race(chain = 'near'): Promise<Record<string, any>[]> {
+async function race(chain = 'near', talk = true): Promise<Record<string, any>[]> {
   const { POST } = await import('../../app/api/agents/compete/route')
-  const text = await (await POST(post(chain))).text()
+  const text = await (await POST(post(chain, talk))).text()
   return text
     .split('\n\n')
     .map((chunk) => chunk.replace(/^data: /, '').trim())
@@ -176,6 +177,47 @@ describe('the race with talk', () => {
     expect(types(out)).not.toContain('competition:talk')
     expect(types(out).filter((t) => t === 'competition:proposal')).toHaveLength(2)
     expect(types(out)).toContain('competition:winner')
+  })
+
+  it('runs the race an older client was built for when it does not ask for talk', async () => {
+    // A tab open from before talk shipped knows nothing of a held plan, and would
+    // offer Review on one and sign the winner's trade.
+    const called = vi.fn()
+    state.roster = [
+      agent('a', { final_plan: final('hold', '', 'Not now.') }),
+      agent('b', { final_plan: final('hold', '', 'Too thin.') }),
+    ]
+    for (const seat of state.roster as { brain: { talk: unknown } }[]) seat.brain.talk = called
+    const out = await race('near', false)
+    expect(types(out)).not.toContain('competition:take')
+    expect(types(out)).not.toContain('competition:talk')
+    expect(called).not.toHaveBeenCalled()
+    expect(types(out).filter((t) => t === 'competition:proposal')).toHaveLength(2)
+    expect(types(out)).toContain('competition:winner')
+  })
+
+  it('stops the models when the person leaves mid-talk', async () => {
+    let asked: AbortSignal | undefined
+    const waiting = (call: TalkCall): Promise<unknown> =>
+      new Promise((resolve) => {
+        asked = call.signal
+        call.signal?.addEventListener('abort', () => resolve({ ok: false, error: 'timeout', meta }))
+      })
+    const seats = [agent('a', {}), agent('b', {})] as { brain: { talk: unknown } }[]
+    for (const seat of seats) seat.brain.talk = waiting
+    state.roster = seats
+
+    const { POST } = await import('../../app/api/agents/compete/route')
+    const reader = (await POST(post())).body?.getReader()
+    while (asked === undefined) {
+      const { done } = (await reader?.read()) ?? { done: true }
+      if (done === true) break
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(asked).toBeDefined()
+
+    await reader?.cancel()
+    expect(asked?.aborted).toBe(true)
   })
 
   it('shows first takes and talk first, and final plans after', async () => {

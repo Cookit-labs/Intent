@@ -247,6 +247,8 @@ export function useCompetition(
             ...(chainRace !== undefined ? { chainAction: chainRace.request } : {}),
             ...(parsed?.reading !== undefined ? { reading: parsed.reading } : {}),
             chain,
+            // This client can show a race that talks, held plans included.
+            talk: true,
             ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
             ...(accountRef.current !== undefined && accountRef.current !== ''
               ? { account: accountRef.current }
