@@ -1730,8 +1730,13 @@ describe('a stale card, before the wallet opens', () => {
     expect(QUOTE_EXPIRED).not.toMatch(/Review/)
   })
 
-  it('is left to the server on chains whose bytes it sends, and to NEAR as it was', () => {
-    for (const family of ['solana', 'sui', 'near'] as const) {
+  it('is stopped on NEAR too, whose wallet also sends for itself', () => {
+    expect(quoteExpiredBeforeSigning(card('near', '2020-01-01T00:00:00.000Z'), NOW)).toBe(true)
+    expect(quoteExpiredBeforeSigning(card('near'), NOW)).toBe(false)
+  })
+
+  it('is left to the server on chains whose bytes it sends', () => {
+    for (const family of ['solana', 'sui'] as const) {
       expect(quoteExpiredBeforeSigning(card(family, '2020-01-01T00:00:00.000Z'), NOW)).toBe(false)
     }
   })

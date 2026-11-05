@@ -1,3 +1,4 @@
+import { QUOTE_EXPIRED, START_AGAIN } from '../chains/signing-flow'
 import type { ChainActionRequest } from '../chains/types'
 import type { CompetitionErrorCode } from './competition'
 import type { ChainRouteQuote } from './chain-routes'
@@ -241,15 +242,28 @@ export function recommendationLine(
 export const STEP_NOT_STARTED =
   'This step did not start. The swap stands, and what arrived stays in your wallet.'
 
+/** An expired card proved nothing moved, so the sequence is back at `ready` with its button. */
+export const STEP_CARD_EXPIRED =
+  "This step's card expired. Press the button above for a fresh one. The swap stands, so don't send your request again."
+
+/** A wallet that gave no answer may have sent step 2, so there is no button at this point. */
+const STEP_UNCONFIRMED =
+  "The swap stands, so don't send your request again. If this step did not go out, what arrived stays in your wallet."
+
 /**
  * A refusal of step 2, once the swap before it was signed. The server words its refusals as if
- * nothing had been, which is true of step 2 and false of the sequence.
+ * nothing had been, which is true of step 2 and false of the sequence. Sending the request again
+ * would offer the swap a second time, so nothing here tells the person to.
  */
 export function stepErrorMessage(
   message: string | undefined,
   sequenceSettled: boolean
 ): string | undefined {
   if (message === undefined || !sequenceSettled) return message
+  if (message === QUOTE_EXPIRED) return STEP_CARD_EXPIRED
+  if (message.endsWith(START_AGAIN)) {
+    return `${message.slice(0, -START_AGAIN.length)}${STEP_UNCONFIRMED}`
+  }
   if (!/nothing was signed or sent/i.test(message)) return message
   const rest = message
     .replace(/,\s*so nothing was signed or sent(?:,\s*so try again[^.]*)?\.?/gi, '.')
