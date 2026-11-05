@@ -4,4 +4,6 @@ import type { ChainCapability } from '../explain'
 export const solanaCapabilities: ChainCapability[] = [
   { kind: 'swap', venue: 'Jupiter', symbol: 'SOL', then: ['cashout', 'supply', 'send'] },
   { kind: 'supply', venue: 'Jupiter Lend', symbol: 'USDC' },
+  { kind: 'stake', venue: 'Jito', symbol: 'SOL' },
+  { kind: 'unstake', venue: 'Jito', symbol: 'JitoSOL' },
 ]

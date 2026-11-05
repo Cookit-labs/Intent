@@ -15,8 +15,7 @@ import { METAPOOL_CONTRACT, RNEAR_CONTRACT, TGAS, USDC_NEAR, USDT_NEAR, WRAP_NEA
  * - Storage attaches exactly 0.00125 NEAR, the `storage_balance_bounds` minimum
  *   on every contract here.
  * - A stake or wrap attaches at most 1,000 NEAR. Stablecoin transfers carry at most
- *   10,000 tokens. Dollar caps run earlier, in `prepareChainAction`. These ceilings
- *   only stop a payload far outside any trade that cap would pass.
+ *   10,000 tokens.
  * - Gas is limited per method below, and to 300 TGas for a whole transaction.
  *
  * What this cannot do: a 1Click deposit address comes from 1Click's API, and any

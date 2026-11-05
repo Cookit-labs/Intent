@@ -75,7 +75,7 @@ function entriesFor(): Entry[] {
 export function ChainSwitcher({
   caption,
 }: {
-  /** A line under the pill, such as the trade cap. The menu opens below it. */
+  /** A line under the pill. The menu opens below it. */
   caption?: ReactNode
 } = {}): JSX.Element {
   const { slug, network, descriptor } = useChain()

@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 
 import { buildBlendSupply, prepareBlendSupply } from '../../../../lib/lend/blend-client'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
-import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
@@ -62,17 +61,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/build', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
-  }
-
-  // Against the mainnet cap; see `assertReserveWithinCap` for how a reserve is
-  // priced.
-  try {
-    await assertReserveWithinCap(body.asset, body.amount)
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
-      { status: 400 }
-    )
   }
 
   try {

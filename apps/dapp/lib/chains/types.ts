@@ -8,7 +8,18 @@ import type { ChainSlug } from '@intent/types'
 
 export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
+export type ChainActionKind =
+  | 'swap'
+  | 'supply'
+  | 'stake'
+  | 'send'
+  | 'withdraw'
+  | 'unstake'
+  | 'borrow'
+  | 'repay'
+  | 'stream'
+  | 'invoice'
+  | 'pay_invoice'
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
@@ -24,8 +35,17 @@ export interface ChainActionRequest {
   tokenOut?: string | undefined
   /** A venue the user named. Absent means the chain's default for this kind. */
   venue?: string | undefined
-  /** Sends only, exactly as typed. Where the money goes, so it is checked and never changed. */
+  /**
+   * Who gets paid or billed, exactly as typed: sends, streams and invoices. It decides where the
+   * money goes, so it is checked and never changed.
+   */
   recipient?: string | undefined
+  /** Streams only: whole days the amount is paid over. */
+  durationDays?: string | undefined
+  /** Invoices only: when it is due, as YYYY-MM-DD. */
+  dueDate?: string | undefined
+  /** Paying an invoice only: the invoice's id on chain, as digits. */
+  invoiceId?: string | undefined
 }
 
 export interface NearTransaction {
@@ -41,7 +61,15 @@ export type SigningPayload =
   | { family: 'solana'; transaction: string }
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
-  | { family: 'evm'; chainId: number; to: string; data: string; value: string }
+  | {
+      family: 'evm'
+      chainId: number
+      to: string
+      data: string
+      value: string
+      /** An ERC-20 `approve` the wallet sends and sees confirmed first, when the call pulls a token. */
+      approval?: { to: string; data: string } | undefined
+    }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
@@ -205,6 +233,11 @@ export interface ChainModule {
   tokens: readonly ChainToken[]
   venues: readonly ChainVenue[]
   defaultVenue: Partial<Record<ChainActionKind, string>>
+  /**
+   * Where a token only one venue here can take goes when no venue is named, by upper-case symbol.
+   * Comes before the default, which would only refuse it.
+   */
+  venueForToken?: Partial<Record<ChainActionKind, Record<string, string>>> | undefined
   /** Dollars per display unit, or nothing if no live price, in which case the trade is refused. */
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */

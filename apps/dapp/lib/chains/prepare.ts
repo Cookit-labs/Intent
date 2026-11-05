@@ -1,13 +1,13 @@
 import { CHAIN_DESCRIPTORS } from '@intent/config'
 
-import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
+import { resolveRecipient, withResolvedName, type ResolvedName } from './names/resolve'
 import { WRAP_NEAR } from './near/tokens'
-import { sendRefusal } from './recipient'
 import { fromBase, toBase } from './sequence'
 import { holdingOf } from './sequence-flow'
 import {
   ChainActionRefused,
   tokenBySymbol,
+  type ChainActionKind,
   type ChainActionRequest,
   type ChainModule,
   type ChainToken,
@@ -59,7 +59,9 @@ function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVen
     }
     return named
   }
-  const defaultId = chainApi.defaultVenue[request.kind]
+  const defaultId =
+    chainApi.venueForToken?.[request.kind]?.[request.tokenIn.trim().toUpperCase()] ??
+    chainApi.defaultVenue[request.kind]
   const venue = usable.find((v) => v.id === defaultId) ?? usable[0]
   if (venue === undefined) {
     throw new ChainActionRefused(`Nothing here can ${request.kind} on this chain yet.`)
@@ -99,66 +101,58 @@ export function assertKnownTokens(chainApi: ChainModule, request: ChainActionReq
   return tokenIn
 }
 
-/**
- * Refuses an amount that is not a positive number, a token with no live price,
- * and a trade over the dollar cap. Shared with the agent race so a refused
- * amount is refused in the same words before any agent or venue is called.
- *
- * The cap always reads as mainnet, because these chains only run on mainnet. The
- * Stellar network a deployment defaults to says nothing about Solana's funds.
- */
-export async function assertAmountWithinCap(
-  chainApi: ChainModule,
-  request: ChainActionRequest,
-  tokenIn: ChainToken,
-  env: Record<string, string | undefined> = process.env
-): Promise<void> {
-  const price = await chainApi.priceUsd(tokenIn)
+/** Refuses an amount that is not a positive number, in the same words on every route. */
+export function assertValidAmount(request: Pick<ChainActionRequest, 'amount'>): void {
   const amount = Number(request.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new ChainActionRefused(`"${request.amount}" is not an amount.`)
   }
-  // The cap's own wording is for whoever runs the deployment, so a person gets this instead.
-  const usd = price === undefined ? Number.NaN : amount * price
-  const noun = request.kind === 'send' ? 'transfer' : 'trade'
-  try {
-    assertWithinCap(usd, env, 'mainnet')
-  } catch (e) {
-    if (!(e instanceof TradeCapExceeded)) throw e
-    throw new ChainActionRefused(
-      Number.isFinite(usd)
-        ? `This app caps each ${noun} at ${tradeCapUsd(env, 'mainnet')}, and this one is about ${usd.toFixed(2)}. Try a smaller amount.`
-        : `This ${noun} could not be valued in dollars right now, so it was not built. Try again shortly.`
-    )
-  }
 }
 
-/** A send names who it pays and nothing else does. Refused before anything is priced or read. */
-function assertRecipientRule(
+const NAMES_SOMEONE: ReadonlySet<ChainActionKind> = new Set(['send', 'stream', 'invoice'])
+
+/** The kinds that pay out of the wallet what they name, so the wallet must hold it. */
+const SPENDS_FROM_WALLET: ReadonlySet<ChainActionKind> = new Set([
+  'swap',
+  'supply',
+  'stake',
+  'send',
+  'repay',
+  'stream',
+  'pay_invoice',
+])
+
+/**
+ * Only these name who they pay or bill, and each must. A person typed it, so it is checked here on
+ * every chain, before anything is priced. A name is read here too, and what it reads to must pass
+ * the same checks: from here on the action knows only that address.
+ */
+async function assertRecipientRule(
   chainApi: ChainModule,
   request: ChainActionRequest,
   tokenIn: ChainToken,
   account: string
-): void {
-  if (request.kind !== 'send') {
+): Promise<ResolvedName | undefined> {
+  if (!NAMES_SOMEONE.has(request.kind)) {
     if (request.recipient !== undefined) {
       throw new ChainActionRefused(
-        'Only a send takes an address, so this was not built. Nothing was signed or sent.'
+        `A ${request.kind.replace('_', ' ')} doesn't take an address, so this was not built. Nothing was signed or sent.`
       )
     }
-    return
+    return undefined
   }
   if (request.recipient === undefined) {
-    throw new ChainActionRefused('A send needs an address to go to. Nothing was signed or sent.')
+    throw new ChainActionRefused(
+      `A ${request.kind} needs an address to go to. Nothing was signed or sent.`
+    )
   }
-  const refusal = sendRefusal(chainApi.chain, tokenIn.symbol, request.recipient, account)
-  if (refusal !== undefined) throw new ChainActionRefused(refusal)
+  return resolveRecipient(chainApi.chain, tokenIn.symbol, request.recipient, account)
 }
 
 /**
  * Whether a step could run after a swap, asked while the swap is unsigned: what the chat alone
  * can't know, such as the venues this deployment offers and whether a receiver can take the token.
- * The amount isn't known yet, so the dollar cap and the reserve are asked again at the step itself.
+ * The amount isn't known yet, so the fee reserve is asked again at the step itself.
  */
 export async function assertFollowOnCanRun(
   chainApi: ChainModule,
@@ -176,29 +170,26 @@ export async function assertFollowOnCanRun(
 
 /**
  * Prepares an action, with the same order of checks as every other money route:
- * known tokens, a dollar value under the cap, then the build, then a check of
- * what the venue's API returned before anyone is asked to sign it.
- *
- * The cap always reads as mainnet, because these chains only run on mainnet. The
- * Stellar network a deployment defaults to says nothing about Solana's funds.
+ * known tokens, a real amount, then the build, then a check of what the venue's
+ * API returned before anyone is asked to sign it.
  */
 export async function prepareChainAction(
   chainApi: ChainModule,
-  request: ChainActionRequest,
-  account: string,
-  env: Record<string, string | undefined> = process.env
+  typed: ChainActionRequest,
+  account: string
 ): Promise<PreparedAction> {
-  const tokenIn = assertKnownTokens(chainApi, request)
-  assertRecipientRule(chainApi, request, tokenIn, account)
+  const tokenIn = assertKnownTokens(chainApi, typed)
+  const named = await assertRecipientRule(chainApi, typed, tokenIn, account)
+  const request = named === undefined ? typed : { ...typed, recipient: named.address }
 
-  await assertAmountWithinCap(chainApi, request, tokenIn, env)
+  assertValidAmount(request)
   await assertNativeReserve(chainApi, request, account)
   await assertHeldForSend(chainApi, request, tokenIn, account)
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
   venue.assertSafe(prepared.signing, account, prepared.context)
-  return prepared
+  return named === undefined ? prepared : withResolvedName(prepared, named)
 }
 
 /** Native coin kept back for network fees, in display units: a trade may not spend into it. */
@@ -259,7 +250,7 @@ async function assertHeldForSend(
   tokenIn: ChainToken,
   account: string
 ): Promise<void> {
-  if (request.kind !== 'send') return
+  if (request.kind !== 'send' && request.kind !== 'stream' && request.kind !== 'pay_invoice') return
   if (tokenIn.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]) return
   const reading = await readBalancesBriefly(chainApi, account)
   if (reading === undefined) return
@@ -287,6 +278,8 @@ export async function assertNativeReserve(
   request: ChainActionRequest,
   account: string
 ): Promise<void> {
+  // Taking out of a position or borrowing adds to the wallet, so there is no fee money to protect.
+  if (!SPENDS_FROM_WALLET.has(request.kind)) return
   const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
   if (tokenIn === undefined) return
   if (tokenIn.symbol.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return

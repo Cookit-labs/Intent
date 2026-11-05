@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 
 import { buildBlendRepay, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
-import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -62,20 +61,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/repay', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
-  }
-
-  // An omitted amount clears the whole liability, which cannot be valued ahead
-  // of time. That liability can only have come from a borrow this cap already
-  // bounded, so repaying it is not a way to move more than the cap.
-  if (body.amount !== undefined) {
-    try {
-      await assertReserveWithinCap(body.asset, body.amount)
-    } catch (e) {
-      return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
-        { status: 400 }
-      )
-    }
   }
 
   try {

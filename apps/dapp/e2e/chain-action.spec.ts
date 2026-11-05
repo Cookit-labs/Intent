@@ -171,10 +171,10 @@ test('a transaction with no outcome yet says so, and is not shown as a failure',
 test('a refusal from the server is shown as written', async ({ page }) => {
   await connectFakeSolanaWallet(page)
   await page.route('**/api/chain/solana/prepare', (route) =>
-    route.fulfill({ status: 422, json: { error: 'This app caps each trade at $500.' } })
+    route.fulfill({ status: 422, json: { error: 'Nothing here can swap on this chain yet.' } })
   )
   await say(page, 'Swap 9000 USDC to SOL')
-  await expect(page.getByRole('alert').filter({ hasText: 'caps each trade' })).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Nothing here can swap' })).toBeVisible()
 })
 
 test('an instruction it cannot read gets told what works, and nothing is built', async ({

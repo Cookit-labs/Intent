@@ -34,7 +34,6 @@ const STELLAR_ONLY = [
   'Borrow and repay: done from your position in the History tab, where you can see what it can support and the price at which it would be liquidated. Not run from the chat.',
   'Cash out: send USDC or XLM to a Nigerian bank account, paid in naira, through an anchor. A form collects the bank details. Mainnet only.',
   'Leveraged positions: open a long or short on an asset with leverage, for example "long XLM 10x with 50 USDC".',
-  'Each trade is capped at $500 on mainnet.',
 ]
 
 const NATIVE_NOT_SENT: Record<string, string> = {
@@ -91,6 +90,31 @@ export function capabilitySheet(chain: string): string {
       `Stake: stake an asset for a staking token. ${raced('stake') ? 'Agents compete to propose the best venue; you' : 'You'} review it and sign in your wallet.`
     )
   }
+  if (offered('withdraw')) {
+    lines.push(
+      'Withdraw: take an asset back out of a lending or earn venue, naming the venue, for example "withdraw 25 USDC from Aave". You review it and sign in your wallet.'
+    )
+  }
+  if (offered('unstake')) {
+    lines.push(
+      'Unstake: turn a staking token back into the asset, for example "unstake 1 sSUI". Some venues pay later or charge a fee, and the card says which. You review it and sign in your wallet.'
+    )
+  }
+  if (offered('borrow')) {
+    lines.push(
+      'Borrow and repay: borrow against collateral already supplied, for example "borrow 25 USDC on Aave", and repay it with "repay 25 USDC on Aave". A loan can be liquidated. You review it and sign in your wallet.'
+    )
+  }
+  if (offered('stream')) {
+    lines.push(
+      'Stream: pay someone over time, for example "stream 100 USDC to an address over 30 days". You review it and sign in your wallet, and the person paid withdraws what has streamed.'
+    )
+  }
+  if (offered('invoice')) {
+    lines.push(
+      'Invoice: bill an address on chain, for example "invoice an address 100 USDC due 2027-01-31", and pay one with "pay invoice 12 with 100 USDC". You review it and sign in your wallet.'
+    )
+  }
   const sendable = SENDABLE[chain as ChainWithActions]
   if (offered('send') && sendable !== undefined) {
     lines.push(
@@ -123,7 +147,7 @@ export function capabilitySheet(chain: string): string {
         "Cash out does not run from NEAR: Weave's NEAR deposits aren't working yet. Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request."
       )
     } else if (chain === 'monad') {
-      lines.push('Cash out and deposit after a swap do not run on Monad.')
+      lines.push('Cash out after a swap does not run on Monad.')
     }
   }
   lines.push('Limit orders are not available off Stellar.', balanceLine(chain))

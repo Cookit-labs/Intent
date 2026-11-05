@@ -62,11 +62,6 @@ describe.skipIf(SKIP)('the Sui prepare route', () => {
     ],
     ['a token in that is unknown', { kind: 'supply', amount: '1', tokenIn: 'SCAM' }, /verified/],
     [
-      'over the cap',
-      { kind: 'swap', amount: '501', tokenIn: 'USDC', tokenOut: 'SUI' },
-      /\$?500|limit|cap/i,
-    ],
-    [
       'a named venue that cannot do this',
       { kind: 'swap', amount: '1', tokenIn: 'USDC', tokenOut: 'SUI', venue: 'navi' },
       /can't swap/,
@@ -79,7 +74,7 @@ describe.skipIf(SKIP)('the Sui prepare route', () => {
     ['staking anything but SUI', { kind: 'stake', amount: '1', tokenIn: 'USDC' }, /stakes SUI/],
     [
       'a listed staker that is not wired',
-      { kind: 'stake', amount: '1', tokenIn: 'SUI', venue: 'haedal' },
+      { kind: 'stake', amount: '1', tokenIn: 'SUI', venue: 'aftermath' },
       /can't stake/,
     ],
     [

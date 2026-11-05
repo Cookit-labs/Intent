@@ -28,9 +28,45 @@ const SEND = new RegExp(
   'i'
 )
 
+const FROM_VENUE = String.raw`(?:\s+(?:from|on|at|in|via|with|using)\s+([a-z0-9][a-z0-9 .-]{1,30}?))?`
+const ADDRESS = String.raw`([a-z0-9](?:[a-z0-9._:-]*[a-z0-9])?)`
+
+const WITHDRAW = new RegExp(
+  String.raw`^(?:please\s+)?(?:withdraw|redeem)\s+${AMOUNT}\s*${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+const UNSTAKE = new RegExp(
+  String.raw`^(?:please\s+)?unstake\s+${AMOUNT}\s*${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+const BORROW = new RegExp(
+  String.raw`^(?:please\s+)?borrow\s+${AMOUNT}\s*${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+const REPAY = new RegExp(
+  String.raw`^(?:please\s+)?(?:repay|pay back)\s+${AMOUNT}\s*${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+/** The length is said in days or months, a month read as 30 days, so nothing is left to a default. */
+const STREAM = new RegExp(
+  String.raw`^(?:please\s+)?(?:stream|pay)\s+${AMOUNT}\s*${TOKEN}\s+to\s+${ADDRESS}\s+over\s+(\d{1,4})\s+(day|days|month|months)${FROM_VENUE}${END}`,
+  'i'
+)
+const INVOICE = new RegExp(
+  String.raw`^(?:please\s+)?invoice\s+${ADDRESS}\s+(?:for\s+)?${AMOUNT}\s*${TOKEN}\s+due\s+(\d{4}-\d{2}-\d{2})${FROM_VENUE}${END}`,
+  'i'
+)
+/** The amount is said too, so what is paid is what the person read, and the invoice must match it. */
+const PAY_INVOICE = new RegExp(
+  String.raw`^(?:please\s+)?pay\s+invoice\s+#?(\d{1,30})\s+(?:with\s+)?${AMOUNT}\s*${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+
+const DAYS_IN_A_MONTH = 30
+
 /** Sentences that ask to do something, so a miss gets told what works rather than a guess. */
 const ACTION_VERB =
-  /\b(swap|convert|exchange|trade|change|buy|sell|supply|lend|deposit|save|earn|stake|borrow|cash out|send|bridge|long|short)\b/i
+  /(swap|convert|exchange|trade|change|buy|sell|supply|lend|deposit|save|earn|stake|unstake|withdraw|redeem|borrow|repay|stream|invoice|cash out|send|bridge|long|short)/i
 
 /** People say the chain for its coin. `sui` and `near` are already their symbols. */
 const TOKEN_OF_CHAIN_NAME: ReadonlyMap<string, string> = new Map([
@@ -119,12 +155,75 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       recipient: send[3] as string,
     }
   }
+  return parsePositionAction(text.trim()) ?? parsePaymentAction(text.trim())
+}
+
+/** Taking out of a position, or borrowing against one: an amount, a token and maybe a venue. */
+function parsePositionAction(text: string): ChainActionRequest | null {
+  const shapes = [
+    ['withdraw', WITHDRAW],
+    ['unstake', UNSTAKE],
+    ['borrow', BORROW],
+    ['repay', REPAY],
+  ] as const
+  for (const [kind, shape] of shapes) {
+    const match = shape.exec(text)
+    if (match !== null) {
+      return {
+        kind,
+        amount: amountOf(match[1] as string),
+        tokenIn: chainTokenWord(match[2] as string),
+        venue: match[3]?.trim(),
+      }
+    }
+  }
   return null
 }
 
-/** Whether the agents price this first. A send has no price to race on and nothing to choose. */
+function parsePaymentAction(text: string): ChainActionRequest | null {
+  const stream = STREAM.exec(text)
+  if (stream !== null) {
+    const count = Number(stream[4])
+    const months = (stream[5] as string).toLowerCase().startsWith('month')
+    if (count === 0) return null
+    return {
+      kind: 'stream',
+      amount: amountOf(stream[1] as string),
+      tokenIn: chainTokenWord(stream[2] as string),
+      recipient: stream[3] as string,
+      durationDays: String(months ? count * DAYS_IN_A_MONTH : count),
+      venue: stream[6]?.trim(),
+    }
+  }
+  const invoice = INVOICE.exec(text)
+  if (invoice !== null) {
+    return {
+      kind: 'invoice',
+      recipient: invoice[1] as string,
+      amount: amountOf(invoice[2] as string),
+      tokenIn: chainTokenWord(invoice[3] as string),
+      dueDate: invoice[4] as string,
+      venue: invoice[5]?.trim(),
+    }
+  }
+  const pay = PAY_INVOICE.exec(text)
+  if (pay !== null) {
+    return {
+      kind: 'pay_invoice',
+      invoiceId: pay[1] as string,
+      amount: amountOf(pay[2] as string),
+      tokenIn: chainTokenWord(pay[3] as string),
+      venue: pay[4]?.trim(),
+    }
+  }
+  return null
+}
+
+const RACED_KINDS: readonly ChainActionRequest['kind'][] = ['swap', 'supply', 'stake']
+
+/** Whether the agents price this first. Only a choice between venues on a price has a race to run. */
 export function racesFirst(request: Pick<ChainActionRequest, 'kind'>): boolean {
-  return request.kind !== 'send'
+  return RACED_KINDS.includes(request.kind)
 }
 
 export function looksLikeChainAction(text: string): boolean {

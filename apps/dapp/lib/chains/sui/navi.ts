@@ -16,8 +16,7 @@ import {
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import { naviApy, poolNotes } from './navi-rules'
-import { NAVI_POLICY } from './policies'
-import { assertPtbSafe } from './safety'
+import { assertNaviSafe, prepareNaviWithdraw } from './navi-withdraw'
 import { SUI_TOKENS } from './tokens'
 
 const REQUEST_TIMEOUT_MS = 10_000
@@ -62,6 +61,7 @@ async function quote(request: ChainActionRequest, account: string): Promise<Venu
 }
 
 async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  if (request.kind === 'withdraw') return prepareNaviWithdraw(request, account)
   const { token, amount, pool } = await checkedPool(request, account)
 
   const tx = new Transaction()
@@ -93,10 +93,9 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
 export const naviVenue: ChainVenue = {
   id: 'navi',
   name: 'NAVI',
-  kinds: ['supply'],
+  kinds: ['supply', 'withdraw'],
   assertCanFollow: takesOnly('NAVI', ['USDC']),
   quote,
   prepare,
-  assertSafe: (payload: SigningPayload, account: string) =>
-    assertPtbSafe(payload, account, NAVI_POLICY),
+  assertSafe: (payload: SigningPayload, account: string) => assertNaviSafe(payload, account),
 }

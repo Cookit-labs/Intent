@@ -5,7 +5,6 @@ import {
   buildBlendCollateralWithdraw,
   prepareBlendWithdraw,
 } from '../../../../lib/lend/blend-client'
-import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { explainPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -73,19 +72,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/collateral', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
-  }
-
-  // Posting moves the user's funds into the pool, so it is capped. Reclaiming
-  // returns them to a plain supply balance of the same account and is not.
-  if (body.direction === 'post') {
-    try {
-      await assertReserveWithinCap(body.asset, body.amount as string)
-    } catch (e) {
-      return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
-        { status: 400 }
-      )
-    }
   }
 
   try {

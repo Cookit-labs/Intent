@@ -37,6 +37,17 @@ describe('the token list', () => {
         6,
       ],
       ['USDT', '0x375f70cf2ae4c00bf37117d0c85a2c71545e6ee05c4a5c7d282cd66a4504b068::usdt::USDT', 6],
+      ['WAL', '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL', 9],
+      [
+        'sSUI',
+        '0x83556891f4a0f233ce7b05cfe7f957d4020492a34f5405b2cb9377d060bef4bf::spring_sui::SPRING_SUI',
+        9,
+      ],
+      [
+        'afSUI',
+        '0xf325ce1300e8dac124071d3152c5c5ee6174914f8bc2161e88329cf579246efc::afsui::AFSUI',
+        9,
+      ],
     ])
   })
 
@@ -286,23 +297,37 @@ describe('the module', () => {
   it('adds 1Click once the secret that protects its deposits is there', () => {
     expect(buildSuiVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
       'cetus',
+      'deepbook',
+      'momentum',
       '1click-sui',
       'navi',
+      'suilend',
+      'scallop',
       'springsui',
+      'aftermath',
+      'walrus',
       'send',
     ])
   })
 
-  it('wires only swap, supply and stake, to Cetus, NAVI and SpringSui', () => {
+  it('wires each venue to what it does, and a default for each kind', () => {
     expect(buildSuiVenues({}).map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
-      ['navi', ['supply']],
-      ['springsui', ['stake']],
+      ['deepbook', ['swap']],
+      ['momentum', ['swap']],
+      ['navi', ['supply', 'withdraw']],
+      ['suilend', ['supply', 'withdraw']],
+      ['scallop', ['supply', 'withdraw']],
+      ['springsui', ['stake', 'unstake']],
+      ['aftermath', ['stake', 'unstake']],
+      ['walrus', ['stake', 'unstake']],
     ])
     expect(suiModule.defaultVenue).toEqual({
       swap: 'cetus',
       supply: 'navi',
+      withdraw: 'navi',
       stake: 'springsui',
+      unstake: 'springsui',
       send: 'send',
     })
   })
@@ -311,15 +336,17 @@ describe('the module', () => {
     expect(suiCapabilities).toEqual([
       { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'withdraw', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
+      { kind: 'unstake', venue: 'SpringSui', symbol: 'sSUI' },
     ])
   })
 })
 
 describe('the venue list', () => {
   it('has every row of the report', () => {
-    expect(suiVenues).toHaveLength(15)
-    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(15)
+    expect(suiVenues).toHaveLength(16)
+    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(16)
   })
 
   it('is all Sui, with a real link and an honest reason', () => {

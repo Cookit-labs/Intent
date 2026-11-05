@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 
 import { buildBlendBorrow, prepareBlendWithdraw } from '../../../../lib/lend/blend-client'
-import { assertReserveWithinCap } from '../../../../lib/lend/cap'
 import { explainPoolError, isTransientPoolError } from '../../../../lib/lend/pool-errors'
 import { readReserveList } from '../../../../lib/lend/reserves'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
@@ -70,16 +69,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (e) {
     reportError('lend/borrow', e, { account: body.account, asset: body.asset })
     return NextResponse.json({ error: 'Could not read Blend reserves.' }, { status: 502 })
-  }
-
-  // A borrow adds exposure the same as a supply does, so it is capped the same.
-  try {
-    await assertReserveWithinCap(body.asset, body.amount)
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
-      { status: 400 }
-    )
   }
 
   try {

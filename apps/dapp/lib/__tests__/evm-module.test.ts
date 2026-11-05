@@ -326,21 +326,54 @@ describe('the chain modules', () => {
     expect(EVM_CHAINS.avalanche.chain.id).toBe(43114)
   })
 
-  it('finds a module for both, each with its own swap venue and a wallet transfer only', () => {
+  it('finds a module for both, each with its own venues and a wallet transfer', () => {
     const avalancheModule = chainModule('avalanche')
     const monadModule = chainModule('monad')
     expect(avalancheModule?.chain).toBe('avalanche')
     expect(monadModule?.chain).toBe('monad')
-    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche', 'send'])
-    expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad', 'send'])
+    expect(avalancheModule?.venues.map((v) => v.id)).toEqual([
+      '1click-avalanche',
+      'uniswap-avalanche',
+      'pharaoh',
+      'aave-avalanche',
+      'sablier-avalanche',
+      'bulla',
+      'send',
+    ])
+    expect(monadModule?.venues.map((v) => v.id)).toEqual([
+      '1click-monad',
+      'uniswap-monad',
+      'aave-monad',
+      'neverland',
+      'morpho',
+      'euler-monad',
+      'curvance',
+      'beefy-monad',
+      'fastlane',
+      'sablier-monad',
+      'send',
+    ])
     expect(avalancheModule?.defaultVenue.swap).toBe('1click-avalanche')
     expect(monadModule?.defaultVenue.swap).toBe('1click-monad')
     expect(chainModule('arc')).toBeUndefined()
   })
 
   it('lists the tokens the brief names, with the contracts 1Click lists', () => {
-    expect(AVALANCHE_TOKENS.map((t) => t.symbol)).toEqual(['AVAX', 'USDC', 'USDT'])
-    expect(MONAD_TOKENS.map((t) => t.symbol)).toEqual(['MON', 'USDC', 'USDT0'])
+    expect(AVALANCHE_TOKENS.map((t) => t.symbol)).toEqual([
+      'AVAX',
+      'USDC',
+      'USDT',
+      'WAVAX',
+      'WETH.e',
+    ])
+    expect(MONAD_TOKENS.map((t) => t.symbol)).toEqual([
+      'MON',
+      'USDC',
+      'USDT0',
+      'WMON',
+      'WETH',
+      'shMON',
+    ])
     expect(AVAX_USDC.id.toLowerCase().startsWith('0xb97ef9ef8734')).toBe(true)
     expect(MONAD_USDC.id.toLowerCase().startsWith('0x754704bc059f')).toBe(true)
     expect(AVAX.id).toBe(EVM_NATIVE_ID)
@@ -349,11 +382,25 @@ describe('the chain modules', () => {
     expect(MONAD_USDC.decimals).toBe(6)
   })
 
-  it('offers no venue without the secret that protects what would be issued', () => {
-    expect(buildEvmVenues('avalanche', {})).toEqual([])
-    expect(buildEvmVenues('monad', { AUTH_SECRET: 'short' })).toEqual([])
-    expect(buildEvmVenues('monad', { AUTH_SECRET: 'x'.repeat(32) }).map((v) => v.id)).toEqual([
+  it('keeps 1Click and sends behind the secret, and the onchain venues out from behind it', () => {
+    const ids = (chain: 'avalanche' | 'monad', env: Record<string, string>): string[] =>
+      buildEvmVenues(chain, env).map((v) => v.id)
+    expect(ids('avalanche', {})).not.toContain('1click-avalanche')
+    expect(ids('avalanche', {})).not.toContain('send')
+    expect(ids('avalanche', {})).toContain('aave-avalanche')
+    expect(ids('monad', { AUTH_SECRET: 'short' })).not.toContain('1click-monad')
+    expect(ids('monad', { AUTH_SECRET: 'short' })).toContain('aave-monad')
+    expect(ids('monad', { AUTH_SECRET: 'x'.repeat(32) })).toEqual([
       '1click-monad',
+      'uniswap-monad',
+      'aave-monad',
+      'neverland',
+      'morpho',
+      'euler-monad',
+      'curvance',
+      'beefy-monad',
+      'fastlane',
+      'sablier-monad',
       'send',
     ])
   })
@@ -438,7 +485,9 @@ describe('the race on these chains', () => {
     })
     expect(capabilitySheet('avalanche')).toContain('Agents compete')
     expect(capabilitySheet('monad')).toContain('Agents compete')
-    expect(capabilitySheet('monad')).not.toMatch(/Supply:|Stake:|limit order/)
+    expect(capabilitySheet('monad')).toContain('Supply:')
+    expect(capabilitySheet('monad')).toContain('Stake:')
+    expect(capabilitySheet('monad')).not.toMatch(/limit order/)
     expect(capabilitySheet('arc')).not.toContain('Agents compete')
   })
 
@@ -536,7 +585,7 @@ describe('naming the chain you are on', () => {
     ['monad', 'Monad'],
   ])('builds on %s when told "on %s"', async (slug, venue) => {
     const request = swap({ tokenOut: toNative[slug], venue })
-    const prepared = await prepareChainAction(moduleFor(slug), request, ACCOUNT, {})
+    const prepared = await prepareChainAction(moduleFor(slug), request, ACCOUNT)
     expect(prepared.venueId).toBe(`1click-${slug}`)
   })
 
@@ -545,7 +594,7 @@ describe('naming the chain you are on', () => {
     async (venue) => {
       const request = swap({ tokenOut: 'MON', venue })
       await expect(quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)).resolves.toEqual([])
-      await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})).rejects.toThrow(
+      await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT)).rejects.toThrow(
         /can't swap here/
       )
       expect(sim.quotes.filter((q) => q['dry'] === false)).toEqual([])
@@ -558,7 +607,7 @@ describe('naming the chain you are on', () => {
       const request = swap({ tokenOut: 'MON', venue })
       const routes = await quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)
       expect(routes.map((r) => r.id)).toEqual(['1click-monad-1'])
-      const prepared = await prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})
+      const prepared = await prepareChainAction(moduleFor('monad'), request, ACCOUNT)
       expect(prepared.venueId).toBe('1click-monad')
     }
   )
@@ -566,7 +615,7 @@ describe('naming the chain you are on', () => {
   it('refuses a venue that isn’t here', async () => {
     const request = swap({ tokenOut: 'MON', venue: 'jupiter' })
     await expect(quoteChainRoutes(moduleFor('monad'), request, ACCOUNT)).resolves.toEqual([])
-    await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT, {})).rejects.toThrow(
+    await expect(prepareChainAction(moduleFor('monad'), request, ACCOUNT)).rejects.toThrow(
       /"jupiter" can't swap here/
     )
   })
@@ -579,7 +628,7 @@ describe('naming the chain you are on', () => {
     const api = twoVenues(chain)
     const routes = await quoteChainRoutes(api, ab(venue), ACCOUNT)
     expect(routes.map((r) => r.id)).toEqual(['alpha-1', 'beta-1'])
-    await expect(prepareChainAction(api, ab(venue), ACCOUNT, {})).resolves.toMatchObject({
+    await expect(prepareChainAction(api, ab(venue), ACCOUNT)).resolves.toMatchObject({
       venueId: 'beta',
     })
   })
@@ -588,11 +637,11 @@ describe('naming the chain you are on', () => {
     const api = twoVenues('solana')
     const routes = await quoteChainRoutes(api, ab('alpha'), ACCOUNT)
     expect(routes.map((r) => r.id)).toEqual(['alpha-1'])
-    await expect(prepareChainAction(api, ab('alpha'), ACCOUNT, {})).resolves.toMatchObject({
+    await expect(prepareChainAction(api, ab('alpha'), ACCOUNT)).resolves.toMatchObject({
       venueId: 'alpha',
     })
     await expect(quoteChainRoutes(api, ab('monad'), ACCOUNT)).resolves.toEqual([])
-    await expect(prepareChainAction(api, ab('monad'), ACCOUNT, {})).rejects.toThrow(
+    await expect(prepareChainAction(api, ab('monad'), ACCOUNT)).rejects.toThrow(
       /"monad" can't swap here/
     )
   })
@@ -603,8 +652,26 @@ describe('the Apps page rows', () => {
     venues.filter((v) => venueOnChain(v, CHAIN_DESCRIPTORS[slug])).map((v) => v.id)
 
   it('shows each chain its own row and no venue that does not name it', () => {
-    expect(on('avalanche')).toEqual(['1click-avalanche'])
-    expect(on('monad')).toEqual(['1click-monad'])
+    expect(on('avalanche')).toEqual([
+      '1click-avalanche',
+      'uniswap-avalanche',
+      'pharaoh',
+      'aave-avalanche',
+      'sablier-avalanche',
+      'bulla',
+    ])
+    expect(on('monad')).toEqual([
+      '1click-monad',
+      'uniswap-monad',
+      'aave-monad',
+      'neverland',
+      'morpho',
+      'euler-monad',
+      'curvance',
+      'beefy-monad',
+      'fastlane',
+      'sablier-monad',
+    ])
   })
 
   it('changes nothing for another family or for Arc', () => {
@@ -815,8 +882,7 @@ describe('prepare', () => {
     const prepared = await prepareChainAction(
       monadModule,
       swap({ tokenIn: 'MON', tokenOut: 'USDT0', amount: '100' }),
-      ACCOUNT,
-      {}
+      ACCOUNT
     )
     expect(prepared.venueId).toBe('1click-monad')
     expect(prepared.signing).toMatchObject({

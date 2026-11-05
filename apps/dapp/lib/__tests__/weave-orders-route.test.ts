@@ -114,7 +114,6 @@ beforeEach(() => {
     isDepositAddress: (a: string) => a.endsWith('.near'),
   }
   vi.stubEnv('WEAVE_CASHOUT_CURRENCIES', 'NGN,KES')
-  vi.stubEnv('MAINNET_MAX_TRADE_USD', '')
 })
 
 describe('checks before anything is asked of Weave', () => {
@@ -251,32 +250,17 @@ describe('a retry of the same attempt', () => {
   })
 })
 
-describe('the cap', () => {
-  it('refuses above the cap in a plain sentence, asking Weave nothing', async () => {
-    const res = await POST(post({ amount: '501' }))
-    expect(res.status).toBe(400)
-    const { message } = await res.json()
-    expect(message).toContain('$500')
-    expect(message).toContain('$501.00')
-    expect(message).not.toContain('MAINNET_MAX_TRADE_USD')
-    expect(called(state.weave['quote'])).not.toHaveBeenCalled()
-  })
-
-  it('reads the cap as mainnet whatever the page is on', async () => {
-    state.mainnet = false
-    expect((await POST(post({ amount: '501' }))).status).toBe(400)
-  })
-
-  it('allows exactly the cap', async () => {
+describe('the size of a cash-out', () => {
+  it('has no dollar limit of its own', async () => {
     called(state.weave['quote']).mockResolvedValueOnce({
       ok: true,
-      value: { destAmount: 1, netUsd: 500, seconds: 1 },
+      value: { destAmount: 1, netUsd: 50_000, seconds: 1 },
     })
     called(state.weave['createOrder']).mockResolvedValueOnce({
       ok: true,
-      value: { ...placed, deposit: { ...placed.deposit, amount: '500' } },
+      value: { ...placed, deposit: { ...placed.deposit, amount: '50000' } },
     })
-    expect((await POST(post({ amount: '500' }))).status).toBe(200)
+    expect((await POST(post({ amount: '50000' }))).status).toBe(200)
   })
 })
 

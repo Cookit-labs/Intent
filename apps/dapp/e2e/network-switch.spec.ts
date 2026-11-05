@@ -13,13 +13,11 @@ test.skip(
 test('the menu switches the page from testnet to mainnet and back', async ({ page }) => {
   await page.goto('/stellar-testnet/apps')
   await expect(page.getByRole('button', { name: /^Chain: Stellar testnet/ })).toBeVisible()
-  await expect(page.locator('header')).not.toContainText('Trades up to')
 
   await page.getByRole('button', { name: /^Chain: / }).click()
   await page.getByRole('menuitem', { name: /Stellar mainnet/ }).click()
   await page.waitForURL('**/stellar-mainnet/apps')
   await expect(page.getByRole('button', { name: /^Chain: Stellar mainnet/ })).toBeVisible()
-  await expect(page.locator('header')).toContainText('Trades up to')
 
   await page.getByRole('button', { name: /^Chain: / }).click()
   await page.getByRole('menuitem', { name: /Stellar testnet/ }).click()

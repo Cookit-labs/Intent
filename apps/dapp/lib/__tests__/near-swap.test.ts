@@ -490,35 +490,18 @@ describe('what 1Click can refuse', () => {
 })
 
 describe('the whole prepare path for NEAR', () => {
-  const noCap = { MAINNET_MAX_TRADE_USD: '500' }
-
   it('defaults swaps to 1Click', async () => {
-    const prepared = await prepareChainAction(nearModule, swap(), ME, noCap)
+    const prepared = await prepareChainAction(nearModule, swap(), ME)
     expect(prepared.venueId).toBe('1click')
   })
 
-  it('refuses over the cap before asking for any quote', async () => {
-    await expect(
-      prepareChainAction(nearModule, swap({ amount: '501' }), ME, noCap)
-    ).rejects.toThrow(/caps each trade/)
-    await expect(
-      prepareChainAction(
-        nearModule,
-        swap({ tokenIn: 'NEAR', tokenOut: 'USDC', amount: '126' }),
-        ME,
-        noCap
-      )
-    ).rejects.toThrow(/caps each trade/)
-    expect(sim.quotes).toHaveLength(0)
-  })
-
   it('refuses an unknown token and a venue that cannot do this', async () => {
-    await expect(
-      prepareChainAction(nearModule, swap({ tokenIn: 'DOGE' }), ME, noCap)
-    ).rejects.toThrow(/verified token/)
-    await expect(
-      prepareChainAction(nearModule, swap({ venue: 'rnear' }), ME, noCap)
-    ).rejects.toThrow(/can't swap here/)
+    await expect(prepareChainAction(nearModule, swap({ tokenIn: 'DOGE' }), ME)).rejects.toThrow(
+      /verified token/
+    )
+    await expect(prepareChainAction(nearModule, swap({ venue: 'rnear' }), ME)).rejects.toThrow(
+      /can't swap here/
+    )
   })
 
   it('reads the price of the exact asset, not another with the same symbol', async () => {
@@ -534,13 +517,10 @@ describe('the whole prepare path for NEAR', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('has no price when the token list fails, so the trade is refused', async () => {
+  it('has no price when the token list fails', async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response('nope', { status: 500 }))
     const usdc = nearModule.tokens.find((t) => t.symbol === 'USDC')
     await expect(nearModule.priceUsd(usdc as NonNullable<typeof usdc>)).resolves.toBeUndefined()
-    await expect(prepareChainAction(nearModule, swap(), ME, noCap)).rejects.toThrow(
-      /could not be valued/
-    )
   })
 })
 

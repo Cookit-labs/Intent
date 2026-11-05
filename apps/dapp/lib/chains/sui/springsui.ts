@@ -9,9 +9,9 @@ import {
   type PreparedAction,
   type SigningPayload,
   type VenueQuote,
-  takesOnly,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
+import { stakesAfterSwap } from './haedal'
 import {
   mintedAmount,
   SPRINGSUI_PACKAGE,
@@ -21,6 +21,11 @@ import {
   SSUI_WEIGHT_HOOK,
 } from './policies'
 import { assertPtbSafe } from './safety'
+import {
+  assertSpringsuiUnstakeSafe,
+  isSpringsuiRedeem,
+  prepareSpringsuiUnstake,
+} from './springsui-unstake'
 import { displayAmount } from './tokens'
 
 const SUI_SYSTEM_STATE = '0x5'
@@ -82,6 +87,7 @@ async function quote(request: ChainActionRequest, account: string): Promise<Venu
 }
 
 async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  if (request.kind === 'unstake') return prepareSpringsuiUnstake(request, account)
   const { transaction, receive } = await checkedStake(request, account)
   return {
     venueId: 'springsui',
@@ -102,10 +108,13 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
 export const springsuiVenue: ChainVenue = {
   id: 'springsui',
   name: 'SpringSui',
-  kinds: ['stake'],
-  assertCanFollow: takesOnly('SpringSui', ['SUI']),
+  kinds: ['stake', 'unstake'],
+  assertCanFollow: stakesAfterSwap('SpringSui'),
   quote,
   prepare,
+  // A redeem and a mint are never allowed in one transaction: each policy allows only its own.
   assertSafe: (payload: SigningPayload, account: string) =>
-    assertPtbSafe(payload, account, SPRINGSUI_POLICY),
+    isSpringsuiRedeem(payload)
+      ? assertSpringsuiUnstakeSafe(payload, account)
+      : assertPtbSafe(payload, account, SPRINGSUI_POLICY),
 }

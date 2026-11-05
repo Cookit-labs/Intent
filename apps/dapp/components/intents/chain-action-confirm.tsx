@@ -5,6 +5,28 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
 import { stepErrorMessage } from '../../lib/agents/chain-race'
+import type { PreparedAction } from '../../lib/chains/types'
+
+function cardLine({ kind, pay, venueName }: PreparedAction): string {
+  const what = `${pay.amount} ${pay.symbol}`
+  switch (kind) {
+    case 'send':
+      return `This moves ${what} from your wallet`
+    case 'withdraw':
+    case 'unstake':
+      return `You take ${what} out of ${venueName}`
+    case 'borrow':
+      return `You borrow ${what} from ${venueName}, and owe it back with interest`
+    case 'repay':
+      return `You repay ${what} to ${venueName}`
+    case 'stream':
+      return `This commits ${what} from your wallet to a stream on ${venueName}`
+    case 'invoice':
+      return `This bills ${what} on ${venueName}, and moves nothing from your wallet`
+    default:
+      return `You pay ${what} on ${venueName}`
+  }
+}
 
 /** Review, sign and result for an action on a chain other than Stellar. */
 export function ChainActionConfirm({
@@ -27,7 +49,9 @@ export function ChainActionConfirm({
       {phase === 'building' ? (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
-          {action.building === 'send' ? 'Building this transfer' : 'Getting a live price'}
+          {action.building === 'swap' || action.building === 'supply' || action.building === 'stake'
+            ? 'Getting a live price'
+            : 'Building this transaction'}
         </p>
       ) : null}
 
@@ -62,9 +86,7 @@ export function ChainActionConfirm({
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium [overflow-wrap:anywhere]">{prepared.summary}</span>
             <span className="text-muted-foreground text-xs">
-              {prepared.kind === 'send'
-                ? `This moves ${prepared.pay.amount} ${prepared.pay.symbol} from your wallet`
-                : `You pay ${prepared.pay.amount} ${prepared.pay.symbol} on ${prepared.venueName}`}
+              {cardLine(prepared)}
               {prepared.receive !== undefined
                 ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
                 : ''}

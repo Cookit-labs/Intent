@@ -18,10 +18,9 @@ import { buildSorobanSwap, prepareSorobanSwap } from '../../../../lib/swap/build
 import { createSoroswapApi } from '../../../../lib/swap/soroswap-api'
 import { createSoroswapAggregatorQuoter } from '../../../../lib/swap/sources/soroswap-aggregator-quoter'
 import { builderFor, type VenueKind } from '../../../../lib/swap/venue-routing'
-import { applySlippage, fromBaseUnits } from '../../../../lib/swap/assets'
+import { applySlippage } from '../../../../lib/swap/assets'
 import { ensureLiveAssets } from '../../../../lib/swap/live-assets'
 import { checkSlippageBps } from '../../../../lib/swap/slippage'
-import { assertTradeWithinCap } from '../../../../lib/server/trade-cap'
 import { DEFAULT_SLIPPAGE_BPS } from '../../../../lib/swap/build-tx'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
@@ -140,18 +139,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
 
-  // The cap reads the fresh quote, never the client's figure. On a fixed
-  // output the client's send amount is a claim about nothing — the envelope
-  // spends up to the quoted input widened by the tolerance, so that ceiling
-  // is what is capped.
-  const slippageBps = slippage.bps ?? DEFAULT_SLIPPAGE_BPS
-  const spends =
-    fresh.quote.kind === 'strict_receive'
-      ? widen(fresh.quote.sendAmount, slippageBps)
-      : fresh.quote.sendAmount
-  const capped = await overCap(fresh.quote.from.code, spends)
-  if (capped !== undefined) return capped
-
   try {
     const built = await buildSwapTransaction({
       account: body.account,
@@ -180,24 +167,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     // rather than being flattened into a generic error.
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'could not build the transaction' },
-      { status: 400 }
-    )
-  }
-}
-
-/**
- * The mainnet cap, checked on what a fresh quote says will leave the account
- * — in base units of the asset sent — and never on a figure the client sent.
- * A no-op on testnet. Answers the refusal so each venue's builder can return
- * it as is.
- */
-async function overCap(symbol: string, baseAmount: string): Promise<NextResponse | undefined> {
-  try {
-    await assertTradeWithinCap(symbol, fromBaseUnits(baseAmount))
-    return undefined
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'over the mainnet trade cap' },
       { status: 400 }
     )
   }
@@ -234,9 +203,6 @@ async function buildViaSoroban(
   if (!fresh.ok) {
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
-
-  const capped = await overCap(fresh.quote.from.code, fresh.quote.sendAmount)
-  if (capped !== undefined) return capped
 
   const minReceive = applySlippage(fresh.quote.destAmount, slippageBps)
 
@@ -333,9 +299,6 @@ async function buildViaAggregator(
     return NextResponse.json({ error: 'no_route', reason: fresh.failure.reason }, { status: 200 })
   }
 
-  const capped = await overCap(fresh.quoted.quote.from.code, fresh.quoted.quote.sendAmount)
-  if (capped !== undefined) return capped
-
   let built
   try {
     built = await buildAggregatorSwap({ account, quoted: fresh.quoted, api: createSoroswapApi() })
@@ -429,9 +392,6 @@ async function buildViaAquarius(
     )
   }
 
-  const capped = await overCap(fresh.from.code, fresh.sendAmount)
-  if (capped !== undefined) return capped
-
   const minReceive = applySlippage(fresh.destAmount, slippageBps)
 
   let built
@@ -505,9 +465,6 @@ async function buildViaPhoenix(
       { status: 200 }
     )
   }
-
-  const capped = await overCap(fresh.from.code, fresh.sendAmount)
-  if (capped !== undefined) return capped
 
   const minReceive = applySlippage(fresh.destAmount, slippageBps)
 
