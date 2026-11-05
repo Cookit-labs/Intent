@@ -1,6 +1,6 @@
 import { QUOTE_EXPIRED, START_AGAIN } from '../chains/signing-flow'
 import type { ChainActionRequest } from '../chains/types'
-import type { CompetitionErrorCode } from './competition'
+import type { AgentProposalView, CompetitionErrorCode } from './competition'
 import type { ChainRouteQuote } from './chain-routes'
 import { isUnmeasuredSwap } from './settle-chain-plan'
 
@@ -120,6 +120,22 @@ export function showDirectNote(
 /** The agent that is shown as selected holds only while a build or its aftermath is live. */
 export function selectionHolds(phase: ChainActionPhaseName): boolean {
   return phase !== 'idle' && phase !== 'failed'
+}
+
+/**
+ * Whether an agent's card may be reviewed at all.
+ *
+ * A held plan never can: the route fallback would otherwise sign the winner's
+ * trade for an agent that argued against doing anything. A reopened plan with
+ * no route counts as held, since the server may not have kept the marker.
+ */
+export function canReview(
+  view: Pick<AgentProposalView, 'held'> | undefined,
+  route: unknown,
+  restored: boolean
+): boolean {
+  if (view?.held === true) return false
+  return !restored || route !== undefined
 }
 
 export type ReviewOutcome = 'prepared' | 'refused' | 'ignored'
