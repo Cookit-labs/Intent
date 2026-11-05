@@ -25,24 +25,30 @@ Method: downloaded and read `@kamino-finance/limo-sdk@4.0.0` source from npm (ta
 ## 2. Transactions and what assert-safe must verify
 
 ### Create (SDK order, wSOL input shown; `wrapUnwrapSol` true by default)
+
 1. (only if the vault for the input mint does not exist) Limo `initialize_vault` (payer = user, creates the escrow vault token account, PDA seeds `["escrow_vault", globalConfig, mint]`). User pays that rent; not refundable (the vault is shared). Common mints already have vaults.
 2. System `create_account`: payer user, new account = order keypair (co-signer), 424 bytes, 3,841,920 lamports (0.00384 SOL), owner = Limo program.
 3. If input is SOL: ATA program `create_idempotent` for the user's wSOL ATA, System `transfer` of exactly the input amount user -> wSOL ATA, Token `sync_native` (data `[17]`).
 4. Limo `create_order(input_amount, output_amount, order_type)`. Accounts: maker (signer, writable), global_config (writable), pda_authority, order, input_mint, output_mint, maker_ata (user's input ATA), input_vault (PDA), input token program, output token program, system program, event authority, program. On chain it transfers `input_amount` from maker_ata to the vault and transfers `ata_creation_cost + txn_fee_cost` lamports from the maker to the global config account (on prod: 3,000,000 + 0 = 0.003 SOL).
 5. If input is SOL: Token `close_account` of the wSOL ATA, destination = user (unwraps any leftover; note this also unwraps any pre-existing wSOL balance in that ATA).
 6. Optional: Limo `update_order` (mode 0 permissionless = true, mode 1 counterparty).
+
 - Rent / who pays back: order account rent (0.00384 SOL) returns to the maker when the order is closed (`close = maker`). The 0.003 SOL "txn fee cost" goes to the global config account. In the public program source (last commit 2025-11-26) it is NOT refunded at close; the SDK 4.0.0 `Order` struct has a newer `feePaid` field described as "refunded to the maker via close = maker", and the deployed program is newer than the public source (redeployed 2026-09-11), so whether it is refunded is UNVERIFIED. Budget for losing 0.003 SOL.
 - Correction, from simulation on 2026-11-05 (`solana-limo.live.test.ts`, read and simulate only): the 0.003 SOL is returned on close. A simulated create left the order account at 6,841,920 lamports (rent plus the fee) and the global config's balance unchanged, so on the deployed binary the fee sits on the order account, as the SDK's `feePaid` says, not in the config as step 4 above and sections 3 and 5 below say. A simulated close of a real filled order holding 6,841,920 lamports paid the maker 6,816,920, which is all of it less the 25,000 lamport network and priority fee. Not yet seen on a landed transaction.
 - Gap to handle: the SDK does not create the maker's OUTPUT token account. When the output is not wSOL the filler needs the maker's output ATA to exist (take_order's `maker_output_ata` is checked with `verify_ata`). Prod `ata_creation_cost` is 0, so the program does not subsidise it. Add an ATA-program `create_idempotent` for the output mint (owner = user) to our create tx, or fills for that order can fail. (Reasoned from source; not tested.) When the output is SOL, fills pay native SOL straight to the maker (no ATA needed).
 
 ### Cancel / close
+
 1. If SOL input: ATA `create_idempotent` wSOL ATA (owner user). Otherwise ATA `create_idempotent` for the input mint ATA (owner user).
 2. Limo `close_order_and_claim_tip`. Accounts: maker (signer), order (writable, closed to maker), global_config, pda_authority, input_mint, output_mint, maker_input_ata, input_vault, input token program, system program, event authority, program. On chain: returns `remaining_input_amount` from the vault to maker_input_ata, pays `tip_amount` lamports from pda_authority to the maker, closes the order account and refunds its rent to the maker. Fails if `now < last_updated_timestamp + order_close_delay_seconds` (0 on prod now), if the order is in a flash operation, or if status is already Cancelled.
 3. If SOL: Token `close_account` of the wSOL ATA to user (unwraps).
+
 - For a filled order the maker's output has ALREADY been paid at fill time (to the maker's output ATA, or native SOL). Closing only returns leftover input, the tips, and rent. Filled orders stay as 424-byte accounts (22,375 of 22,739 prod order accounts are status Filled) until the maker closes them, so the app should offer "close" for filled orders to recover 0.00384 SOL plus tips.
 
 ### What the pre-sign decoder should verify (create)
+
 Existing policy shape `programs: {id: {discriminators}}`, `mayWrapSol` fits. Additional checks needed because limo is not a token transfer the current code understands:
+
 - Program allow-list: Limo `LiMoM9...`, System, Token (or Token-2022), ATA, ComputeBudget. Nothing else.
 - Limo create_order: decode the data and require input_amount == requested raw amount, output_amount == requested raw output (price = output/input, check both), order_type == 0.
 - Account checks on that instruction: maker == the signer/owner; global_config == `prod7Mog8...` (pin it; a different config means a different admin and filler set, and a hostile config could hold or block funds); pda_authority == PDA(["authority", globalConfig]); input_vault == PDA(["escrow_vault", globalConfig, inputMint]); maker_ata == the owner's ATA for inputMint; input_mint and output_mint == the requested mints; token programs match the mints' owners; order account == the key of the extra order signer and is the account created by the create_account instruction (space 424, owner Limo, lamports 3,841,920 +/- config, payer = user).
@@ -52,6 +58,7 @@ Existing policy shape `programs: {id: {discriminators}}`, `mayWrapSol` fits. Add
 - Verify the price: the dapp should decode and show input mint/amount, output mint/min amount, and the implied price from the two u64s, using mint decimals from chain.
 
 ### What to verify (cancel)
+
 close_order_and_claim_tip: maker == user; order account is one the app read from chain with `maker == user` (fetch and compare; the program enforces has_one maker, so a wrong order simply fails); maker_input_ata is the user's own ATA (token::authority = maker is enforced on chain, but check anyway); pda_authority and vault PDAs as above; global_config pinned; no extra transfers.
 
 ## 3. Fill behaviour
@@ -78,6 +85,7 @@ close_order_and_claim_tip: maker == user; order account is one the app read from
 Buildable, yes, non-custodial and kit-native. Estimated work: build the create/cancel/close instructions (SDK `*Ix` functions or a small hand-written kit builder), add an assert-safe policy for Limo, read orders by maker, UI for open/partially filled/filled-unclosed orders.
 
 Main risks:
+
 1. Funds sit in a Kamino PDA vault under an UPGRADEABLE program controlled by one non-program-verified key. A malicious or buggy upgrade could affect all escrowed input. Audits predate the latest binary.
 2. No expiry and no guaranteed filler. Order stays open until the price is hit and a searcher wants it; the person must cancel to get funds back, and dust or off-market orders may never fill. Permissionless is off by default, so only Pyth Express Relay searchers can fill (verified from source and chain).
 3. Cost: 0.003 SOL non-refundable (probably) per order, plus 0.00384 SOL rent refunded only after the user closes the order (including after fill), plus one-time vault rent for new input mints.
