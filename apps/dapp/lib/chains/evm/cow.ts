@@ -167,10 +167,6 @@ async function mustRead<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-function shown(units: bigint, decimals: number): string {
-  return fromBase(units, decimals)
-}
-
 async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
   const owner = assertAccount(account)
   if (request.kind !== 'limit')
@@ -211,7 +207,7 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
     const held = await mustRead(() => client.tokenBalance(WAVAX, owner))
     if (held < sold) {
       const short = sold - held
-      const amount = shown(short, input.decimals)
+      const amount = fromBase(short, input.decimals)
       return {
         ...shared,
         summary: `Wrap ${amount} AVAX into WAVAX, which CoW trades. You approve and sign the order next, and nothing is offered until then.`,
@@ -259,7 +255,7 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
 
   const validTo = Math.floor(Date.now() / 1000) + COW_ORDER_LIFETIME_S
   const order = cowOrder({ sellToken, buyToken, receiver: owner, sellAmount, buyAmount, validTo })
-  const receive = shown(bought, output.decimals)
+  const receive = fromBase(bought, output.decimals)
   return {
     ...shared,
     summary: `Offer ${request.amount} ${input.symbol} on CoW for at least ${receive} ${output.symbol}, at ${limitPrice} ${pair.quote} per ${pair.base}.`,
