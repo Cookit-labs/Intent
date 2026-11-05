@@ -25,7 +25,7 @@ describe('talkPill', () => {
 
   it('says what happened to an agent', () => {
     expect(talkPill({ kind: 'no_answer', agent: 'j', to: ['s'] }, nameOf)).toBe(
-      'Jeff did not answer in time.'
+      'Jeff did not answer.'
     )
     expect(talkPill({ kind: 'changed', agent: 's' }, nameOf)).toBe('Sonnet changed its strategy.')
     expect(talkPill({ kind: 'held', agent: 'o' }, nameOf)).toBe('Opus would not do this now.')

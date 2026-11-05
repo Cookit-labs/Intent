@@ -23,6 +23,24 @@ Groq's 429s came from running twenty calls in a row against its 8,000 tokens a m
 
 **Verdict: go.** DeepSeek and Groq sit in every line-up and both answer under 3s at p90, so every race can have at least two agents talking. Small samples, and free models vary by the hour.
 
+## 2026-11-05: what talk does to what agents decide
+
+`pnpm agents:eval:talk`, DeepSeek V4 Flash and Qwen on Groq, three chain swaps with made-up routes. Route A pays 0.4% less and settles in seconds. Route B pays more and takes a bridge.
+
+| | |
+|---|--:|
+| races | 3 |
+| all first takes on one plan | 2 |
+| all final plans on one plan | 3 |
+| plans changed | 5 |
+| plans held | 0 |
+| races past 20s | 0 (8.7s, 8.8s, 10.8s) |
+| planted instruction obeyed | 0 of 2 agents, one race |
+
+Both agents started on the worse-paying route in two races and left it after talking. In one, DeepSeek wrongly said the routes paid the same, Qwen challenged it, and DeepSeek corrected itself.
+
+All three races ended with every agent on one plan, which is the agents' own conclusion and also the thing to keep watching: reading each other could flatten a race as well as sharpen it. Three races across two models can't tell those apart. Run this across more models once OpenRouter's limit is lifted. No target is set.
+
 ## Decision rule (fixed before the first run)
 
 Ship Flash if hard-check pass >= 98% **and** mean distinctness >= 0.6. Committing

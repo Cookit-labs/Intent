@@ -33,7 +33,7 @@ export function talkPill(line: TalkLine, nameOf: (key: string) => string): strin
         line.of.length === 1 ? 'strategy' : 'strategies'
       }`
     case 'no_answer':
-      return `${nameOf(line.agent)} did not answer in time.`
+      return `${nameOf(line.agent)} did not answer.`
     case 'changed':
       return `${nameOf(line.agent)} changed its strategy.`
     case 'held':
