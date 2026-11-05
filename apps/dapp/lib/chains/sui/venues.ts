@@ -90,13 +90,18 @@ export const suiVenues: Venue[] = [
     'https://www.bucketprotocol.io',
     'USDB savings, though the current rate may not compete'
   ),
-  listed(
-    'deepbook',
-    'DeepBook',
-    'orderbook',
-    'https://www.deepbook.tech',
-    "Sui's on-chain order book, for limit orders"
-  ),
+  {
+    id: 'deepbook-limit',
+    family: 'sui',
+    name: 'DeepBook',
+    category: 'orderbook',
+    chains: ['Sui'],
+    url: 'https://deepbook.xyz',
+    bestFor: 'Selling or buying SUI at a price you name, for up to 7 days',
+    integration: 'executes',
+    capability:
+      'Places, reads, cancels and collects SUI orders against USDC, and checks every transaction before you sign. Filled or cancelled tokens wait in your DeepBook account until you collect them.',
+  },
   {
     id: 'springsui',
     family: 'sui',

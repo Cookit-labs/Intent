@@ -289,22 +289,27 @@ describe('the module', () => {
       '1click-sui',
       'navi',
       'springsui',
+      'deepbook-limit',
       'send',
     ])
   })
 
-  it('wires only swap, supply and stake, to Cetus, NAVI and SpringSui', () => {
+  it('wires swap, supply, stake and limit, to Cetus, NAVI, SpringSui and DeepBook', () => {
     expect(buildSuiVenues({}).map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
       ['navi', ['supply']],
       ['springsui', ['stake']],
+      ['deepbook-limit', ['limit']],
     ])
     expect(suiModule.defaultVenue).toEqual({
       swap: 'cetus',
       supply: 'navi',
       stake: 'springsui',
       send: 'send',
+      limit: 'deepbook-limit',
     })
+    expect(suiModule.limitBook).toBeDefined()
+    expect(suiModule.venues.find((v) => v.id === 'deepbook-limit')?.name).toBe('DeepBook')
   })
 
   it('offers one capability per wired kind', () => {
@@ -312,6 +317,7 @@ describe('the module', () => {
       { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
+      { kind: 'limit', venue: 'DeepBook', symbol: 'SUI' },
     ])
   })
 })
@@ -338,6 +344,17 @@ describe('the venue list', () => {
     const claimed = suiVenues.filter((v) => v.integration === 'executes')
     expect(claimed.map((v) => v.id).sort()).toEqual(wired)
     for (const venue of claimed) expect(venue.capability).toBeTruthy()
+  })
+
+  it('lists DeepBook once, as the limit venue that runs', () => {
+    expect(suiVenues.filter((v) => v.name === 'DeepBook')).toEqual([
+      expect.objectContaining({
+        id: 'deepbook-limit',
+        category: 'orderbook',
+        integration: 'executes',
+        url: 'https://deepbook.xyz',
+      }),
+    ])
   })
 
   it('leaves Linq listed', () => {
