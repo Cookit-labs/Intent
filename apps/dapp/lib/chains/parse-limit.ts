@@ -98,11 +98,40 @@ export function limitSaid(request: ChainActionRequest, turns: readonly string[])
   const priced = new RegExp(String.raw`(?:\b(?:at|hits?|reach(?:es)?)\s+|@\s*)\$?${NUMBER}`, 'gi')
   const amount = [...joined.matchAll(counted)].at(-1)
   const price = [...joined.matchAll(priced)].at(-1)
-  return (
-    tokenSaid(request.tokenIn, turns) &&
-    amount !== undefined &&
-    price !== undefined &&
-    figureValue(amount[1] as string) === canonicalNumber(request.amount) &&
-    figureValue(price[1] as string) === canonicalNumber(request.limitPrice)
-  )
+  if (
+    !tokenSaid(request.tokenIn, turns) ||
+    amount === undefined ||
+    price === undefined ||
+    figureValue(amount[1] as string) !== canonicalNumber(request.amount) ||
+    figureValue(price[1] as string) !== canonicalNumber(request.limitPrice)
+  ) {
+    return false
+  }
+  return sideAndTokenOutSaid(request, joined, amount)
+}
+
+/**
+ * The side and the token received must be the person's too. Selling names the token received after
+ * the amount, except that USDC may go unnamed after "sell", the parser's own default. A purchase
+ * names it anywhere. "buy" is never a sale, and "sell" is never a purchase unless it is a swap.
+ */
+function sideAndTokenOutSaid(
+  request: ChainActionRequest,
+  joined: string,
+  amount: RegExpMatchArray
+): boolean {
+  const tokenOut = request.tokenOut
+  if (tokenOut === undefined) return false
+  const pair = limitPair(request.tokenIn, tokenOut)
+  if (pair === undefined) return false
+  const sell = /\bsell\b/i.test(joined)
+  const buy = /\bbuy\b/i.test(joined)
+  const swap = /\b(?:swap|convert|exchange|trade|change)\b/i.test(joined)
+  if (pair.selling ? buy && !sell : sell && !buy && !swap) return false
+  const end = (amount.index ?? 0) + amount[0].length
+  const after = joined.slice(end)
+  const named = pair.selling
+    ? tokenSaid(tokenOut, [after], true)
+    : tokenSaid(tokenOut, [joined], true)
+  return named || (pair.selling && sell && chainTokenWord(tokenOut).toUpperCase() === 'USDC')
 }

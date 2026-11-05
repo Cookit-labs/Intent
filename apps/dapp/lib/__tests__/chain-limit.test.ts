@@ -118,6 +118,38 @@ describe('limitSaid', () => {
     expect(limitSaid({ ...asked, limitPrice: '120' }, ['sell 1 SOL at $110'])).toBe(false)
     expect(limitSaid({ ...asked, amount: '2' }, ['sell 1 SOL at $110'])).toBe(false)
   })
+  it('refuses a token received they did not name', () => {
+    const usdt = { ...asked, tokenOut: 'USDT' }
+    expect(limitSaid(usdt, ['sell 1 SOL for USDC at 110'])).toBe(false)
+    expect(limitSaid(usdt, ['sell 1 SOL for USDT at 110'])).toBe(true)
+  })
+  it('refuses a sale when they said buy', () => {
+    expect(limitSaid({ ...asked, limitPrice: '100' }, ['buy 1 SOL at 100'])).toBe(false)
+  })
+  it('refuses a purchase when they said sell', () => {
+    const buying = {
+      kind: 'limit' as const,
+      amount: '50',
+      tokenIn: 'USDC',
+      tokenOut: 'SOL',
+      limitPrice: '90',
+    }
+    expect(limitSaid(buying, ['sell 50 USDC at 90'])).toBe(false)
+  })
+  it('lets USDC go unnamed after sell, and takes swap and buy wordings', () => {
+    expect(limitSaid(asked, ['sell 1 SOL at 110'])).toBe(true)
+    expect(limitSaid(asked, ['limit sell 1 SOL at 110'])).toBe(true)
+    expect(limitSaid(asked, ['swap 1 SOL at 110'])).toBe(false)
+    const buying = {
+      kind: 'limit' as const,
+      amount: '50',
+      tokenIn: 'USDC',
+      tokenOut: 'SOL',
+      limitPrice: '90',
+    }
+    expect(limitSaid(buying, ['swap 50 USDC to SOL at 90'])).toBe(true)
+    expect(limitSaid(buying, ['buy SOL with 50 USDC at $90'])).toBe(true)
+  })
   it('refuses price and amount swapped round', () => {
     expect(limitSaid({ ...asked, amount: '110', limitPrice: '1' }, ['sell 1 SOL at $110'])).toBe(
       false
