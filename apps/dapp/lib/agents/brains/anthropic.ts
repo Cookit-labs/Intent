@@ -1,6 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-import type { AgentBrain, ProposalOutcome, ProposalRequest } from '../brain'
+import type {
+  AgentBrain,
+  ProposalOutcome,
+  ProposalRequest,
+  TalkCall,
+  TalkOutcome,
+} from '../brain'
 import { SUBMIT_PROPOSAL_TOOL } from '../tool-schema'
 import { MAX_OUTPUT_TOKENS, buildMessages, meta, toOutcome } from './openai-compatible'
 import { PROVIDERS, modelFor } from './providers'
@@ -62,7 +68,45 @@ export interface ClaudeBrainOptions {
 export function createClaudeBrain(options: ClaudeBrainOptions = {}): AgentBrain {
   const apiKey = options.apiKey ?? process.env[config.apiKeyEnv]
   const model = options.model ?? modelFor(config.id)
-  let client = options.client
+  let shared = options.client
+
+  /** No retries: an answer on a second attempt arrives after the race it was meant for has ended. */
+  const clientFor = (): Anthropic | undefined => {
+    if (shared === undefined && apiKey !== undefined && apiKey !== '') {
+      shared = new Anthropic({ apiKey, maxRetries: 0 })
+    }
+    return shared
+  }
+
+  /** A failed call as a value, so one agent's failure stays its own. */
+  const failureOf = (
+    e: unknown,
+    agent: string,
+    latencyMs: number
+  ): Extract<TalkOutcome, { ok: false }> => {
+    if (e instanceof Anthropic.APIUserAbortError) {
+      return { ok: false, error: 'timeout', meta: meta(config, model, latencyMs, undefined) }
+    }
+    if (e instanceof Anthropic.APIError) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[agents] ${agent}: HTTP ${e.status ?? '-'} from anthropic for ${model}: ${e.message.slice(0, 300)}`
+      )
+    }
+    if (e instanceof Anthropic.RateLimitError) {
+      const seconds = Number(e.headers.get('retry-after'))
+      return {
+        ok: false,
+        error: 'rate_limited',
+        meta: meta(config, model, latencyMs, undefined),
+        ...(Number.isFinite(seconds) && seconds > 0 ? { retryAfterMs: seconds * 1000 } : {}),
+      }
+    }
+    if (e instanceof Anthropic.BadRequestError) {
+      return { ok: false, error: 'invalid_schema', meta: meta(config, model, latencyMs, undefined) }
+    }
+    return { ok: false, error: 'upstream_error', meta: meta(config, model, latencyMs, undefined) }
+  }
 
   return {
     id: config.id,
@@ -74,13 +118,9 @@ export function createClaudeBrain(options: ClaudeBrainOptions = {}): AgentBrain 
       const startedAt = Date.now()
       const elapsed = (): number => Date.now() - startedAt
 
+      const client = clientFor()
       if (client === undefined) {
-        if (apiKey === undefined || apiKey === '') {
-          return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
-        }
-        // No retries: an answer on a second attempt arrives after the race
-        // it was meant for has ended.
-        client = new Anthropic({ apiKey, maxRetries: 0 })
+        return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
       }
 
       const messages = buildMessages(req)
@@ -111,36 +151,7 @@ export function createClaudeBrain(options: ClaudeBrainOptions = {}): AgentBrain 
           req.signal !== undefined ? { signal: req.signal } : undefined
         )
       } catch (e) {
-        if (e instanceof Anthropic.APIUserAbortError) {
-          return { ok: false, error: 'timeout', meta: meta(config, model, elapsed(), undefined) }
-        }
-        if (e instanceof Anthropic.APIError) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[agents] ${req.agent}: HTTP ${e.status ?? '-'} from anthropic for ${model}: ${e.message.slice(0, 300)}`
-          )
-        }
-        if (e instanceof Anthropic.RateLimitError) {
-          const seconds = Number(e.headers.get('retry-after'))
-          return {
-            ok: false,
-            error: 'rate_limited',
-            meta: meta(config, model, elapsed(), undefined),
-            ...(Number.isFinite(seconds) && seconds > 0 ? { retryAfterMs: seconds * 1000 } : {}),
-          }
-        }
-        if (e instanceof Anthropic.BadRequestError) {
-          return {
-            ok: false,
-            error: 'invalid_schema',
-            meta: meta(config, model, elapsed(), undefined),
-          }
-        }
-        return {
-          ok: false,
-          error: 'upstream_error',
-          meta: meta(config, model, elapsed(), undefined),
-        }
+        return failureOf(e, req.agent, elapsed())
       }
 
       const usage = {
@@ -165,6 +176,66 @@ export function createClaudeBrain(options: ClaudeBrainOptions = {}): AgentBrain 
       }
 
       return toOutcome(req, call.input, meta(config, model, elapsed(), usage))
+    },
+
+    /**
+     * One short talk turn. Low effort, since a turn has seconds and one small
+     * tool call to make. Thinking stays as the model has it: effort is what
+     * every model named here accepts, where turning it off differs by model.
+     */
+    async talk(turn: TalkCall): Promise<TalkOutcome> {
+      const startedAt = Date.now()
+      const elapsed = (): number => Date.now() - startedAt
+      const client = clientFor()
+      if (client === undefined) {
+        return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
+      }
+
+      let response: Anthropic.Beta.BetaMessage
+      try {
+        response = await client.beta.messages.create(
+          {
+            model,
+            max_tokens: config.talk?.maxTokens ?? MAX_OUTPUT_TOKENS,
+            betas: ['server-side-fallback-2026-07-01'],
+            fallbacks: 'default',
+            output_config: { effort: 'low' },
+            system: turn.system,
+            messages: [{ role: 'user', content: turn.user }],
+            tools: [
+              {
+                name: turn.tool.name,
+                description: turn.tool.description,
+                input_schema: stripNumericBounds(
+                  turn.tool.parameters
+                ) as Anthropic.Beta.BetaTool['input_schema'],
+                strict: true,
+              },
+            ],
+            tool_choice: { type: 'auto' },
+          },
+          turn.signal !== undefined ? { signal: turn.signal } : undefined
+        )
+      } catch (e) {
+        return failureOf(e, turn.agent, elapsed())
+      }
+
+      const usage = {
+        prompt_tokens: response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens,
+        prompt_cache_hit_tokens: response.usage.cache_read_input_tokens ?? 0,
+      }
+      if (response.stop_reason === 'refusal') {
+        return { ok: false, error: 'refused', meta: meta(config, model, elapsed(), usage) }
+      }
+      const call = response.content.find(
+        (b): b is Anthropic.Beta.BetaToolUseBlock =>
+          b.type === 'tool_use' && b.name === turn.tool.name
+      )
+      if (call === undefined) {
+        return { ok: false, error: 'invalid_schema', meta: meta(config, model, elapsed(), usage) }
+      }
+      return { ok: true, args: call.input, meta: meta(config, model, elapsed(), usage) }
     },
   }
 }
