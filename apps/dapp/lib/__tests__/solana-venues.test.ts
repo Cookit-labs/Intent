@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { parseChainAction } from '../chains/parse-action'
+import { parseChainLimit } from '../chains/parse-limit'
 import { prepareChainAction } from '../chains/prepare'
 import { solanaCapabilities } from '../chains/solana/capabilities'
 import { decodeSolanaTransaction } from '../chains/solana/assert-safe'
@@ -670,12 +671,18 @@ describe('module', () => {
       '1click-solana',
       'jupiter-lend',
       'kamino',
+      'kamino-limit',
       'send',
     ])
   })
 
-  it('offers the three venues that need no key', () => {
-    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual(['jupiter', 'jupiter-lend', 'kamino'])
+  it('offers the four venues that need no key', () => {
+    expect(buildSolanaVenues({}).map((v) => v.id)).toEqual([
+      'jupiter',
+      'jupiter-lend',
+      'kamino',
+      'kamino-limit',
+    ])
     expect(solanaModule.defaultVenue).toMatchObject({ swap: 'jupiter', supply: 'jupiter-lend' })
     expect(solanaModule.chain).toBe('solana')
   })
@@ -743,8 +750,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(15)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(15)
+    expect(solanaVenues).toHaveLength(16)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(16)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])
@@ -780,8 +787,8 @@ describe('venues page', () => {
 describe('capabilities', () => {
   it('has one entry per wired kind, and each example parses and resolves', async () => {
     const kinds = solanaCapabilities.map((c) => c.kind)
-    expect(new Set(kinds)).toEqual(new Set(['swap', 'supply']))
-    expect(kinds).toHaveLength(2)
+    expect(new Set(kinds)).toEqual(new Set(['swap', 'supply', 'limit']))
+    expect(kinds).toHaveLength(3)
     const swap = solanaCapabilities.find((c) => c.kind === 'swap')!
     expect(parseChainAction(`swap 10 USDC to ${swap.symbol}`)).toMatchObject({
       kind: 'swap',
@@ -791,6 +798,12 @@ describe('capabilities', () => {
     expect(parseChainAction(`supply 10 USDC on ${supply.venue}`)).toMatchObject({
       kind: 'supply',
       venue: supply.venue,
+    })
+    const limit = solanaCapabilities.find((c) => c.kind === 'limit')!
+    expect(parseChainLimit(`sell 1 ${limit.symbol} at $110`)).toMatchObject({
+      kind: 'limit',
+      tokenIn: limit.symbol,
+      limitPrice: '110',
     })
   })
 })

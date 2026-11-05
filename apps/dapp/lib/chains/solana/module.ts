@@ -5,6 +5,7 @@ import { readSolanaBalances } from './balances'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
 import { createKaminoVenue } from './kamino'
+import { createKaminoLimitVenue, limoBook } from './limo'
 import { createLuloVenue } from './lulo'
 import { createPriceSource } from './price'
 import { createSolanaSubmit } from './submit'
@@ -24,6 +25,7 @@ export function buildSolanaVenues(
     ...(canIssueOneClick(env) ? [oneClickOriginVenue('solana')] : []),
     createJupiterLendVenue({ env }),
     createKaminoVenue(),
+    createKaminoLimitVenue(),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),
     ...(canIssueOneClick(env) ? [createSendVenue('solana')] : []),
   ]
@@ -33,8 +35,14 @@ export const solanaModule: ChainModule = {
   chain: 'solana',
   tokens: SOLANA_TOKENS,
   venues: buildSolanaVenues(),
-  defaultVenue: { swap: 'jupiter', supply: 'jupiter-lend', send: SEND_VENUE_ID },
+  defaultVenue: {
+    swap: 'jupiter',
+    supply: 'jupiter-lend',
+    send: SEND_VENUE_ID,
+    limit: 'kamino-limit',
+  },
   priceUsd,
   submit: createSolanaSubmit({ deadlineMs: SUBMIT_DEADLINE_MS }),
   balances: readSolanaBalances,
+  limitBook: limoBook(),
 }

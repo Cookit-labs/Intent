@@ -53,6 +53,18 @@ export const solanaVenues: Venue[] = [
       'Deposits USDC into Kamino’s largest USDC vault by deposits, and names it before you sign. Withdrawing isn’t wired here yet.',
   },
   {
+    id: 'kamino-limit',
+    family: 'solana',
+    name: 'Kamino Limit Orders',
+    category: 'orderbook',
+    chains: ['Solana'],
+    bestFor: 'Selling or buying SOL at a price you name, with no expiry',
+    url: 'https://kamino.com',
+    integration: 'executes',
+    capability:
+      'Places, reads, cancels and closes SOL orders against USDC or USDT, and checks every transaction before you sign. Costs about 0.003 SOL to place, and it may never fill.',
+  },
+  {
     id: 'onre',
     family: 'solana',
     name: 'OnRe (ONyc)',

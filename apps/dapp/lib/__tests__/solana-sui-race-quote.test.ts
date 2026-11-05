@@ -426,12 +426,14 @@ describe('the race on these chains', () => {
     expect(buildSuiVenues(env).map((v) => v.id)).not.toContain('1click-sui')
   })
 
-  it('gives every venue on these chains a quote to race with, but a wallet transfer', () => {
+  it('gives every venue on these chains a quote to race with, but a transfer or a limit', () => {
     const lulo = createLuloVenue({ apiKey: 'k' })
     const env = { AUTH_SECRET: 'x'.repeat(48) }
     for (const venue of [...buildSolanaVenues(env), lulo, ...buildSuiVenues(env)]) {
-      if (venue.kinds.includes('send')) expect(venue.quote, venue.id).toBeUndefined()
-      else expect(venue.quote, venue.id).toBeTypeOf('function')
+      // A limit order names its own price, so it never races.
+      if (venue.kinds.includes('send') || venue.kinds.includes('limit')) {
+        expect(venue.quote, venue.id).toBeUndefined()
+      } else expect(venue.quote, venue.id).toBeTypeOf('function')
     }
   })
 
