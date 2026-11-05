@@ -239,6 +239,27 @@ export function recommendationLine(
   return `Recommended: ${name}, ${why}. You pick who executes.`
 }
 
+const UNANSWERED_REASON: Readonly<Record<string, string>> = {
+  rate_limited: 'rate limited',
+  timeout: 'too slow',
+  upstream_error: 'provider error',
+  invalid_schema: 'unusable answer',
+  refused: 'declined',
+  no_api_key: 'not set up',
+}
+
+/** Who left the race and why, so a short race explains itself. Nothing if everyone answered. */
+export function unansweredLine(
+  agents: readonly { name: string; failed?: string | undefined }[]
+): string | undefined {
+  const gone = agents.filter((a) => a.failed !== undefined)
+  if (gone.length === 0) return undefined
+  const names = gone
+    .map((a) => `${a.name} (${UNANSWERED_REASON[a.failed as string] ?? 'no answer'})`)
+    .join(', ')
+  return `${gone.length} ${gone.length === 1 ? 'agent' : 'agents'} didn't answer: ${names}.`
+}
+
 export const STEP_NOT_STARTED =
   'This step did not start. The swap stands, and what arrived stays in your wallet.'
 
