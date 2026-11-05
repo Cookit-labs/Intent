@@ -102,6 +102,8 @@ export async function POST(request: Request): Promise<NextResponse> {
             cashOutPrompt(chain) !== ''
           ? ['weave']
           : [],
+    // Off Stellar a follow-on that can't be honoured is refused before the swap, not dropped.
+    ...(onChain !== undefined ? { reportRefusedFollowOn: true } : {}),
   })
 
   if (result === null) {
@@ -183,6 +185,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         // Null rather than omitted, so the client distinguishes "no follow-on"
         // from a field that failed to serialise.
         followOn: reading.followOn,
+        ...(reading.followOnRefused !== undefined
+          ? { followOnRefused: reading.followOnRefused }
+          : {}),
         style: result.style,
         ...(result.amountOf !== undefined ? { amountOf: result.amountOf } : {}),
         ...(result.limitPriceUsd !== undefined ? { limitPriceUsd: result.limitPriceUsd } : {}),

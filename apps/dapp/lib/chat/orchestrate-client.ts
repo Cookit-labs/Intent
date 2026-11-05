@@ -11,6 +11,8 @@ export interface ActReading {
   amountStated: boolean
   amountIsUsd: boolean
   followOn: FollowOnAction | null
+  /** Off Stellar only: a follow-on the server read and this chain can't honour. */
+  followOnRefused?: { kind: 'lend' | 'offramp'; venue: string }
   style: 'market' | 'limit' | 'accumulate' | 'hedge' | 'rebalance' | 'route_liquidity'
   limitPriceUsd?: number
   /** What a bare quantity counts; absent when the model did not say. */
@@ -39,6 +41,13 @@ function replyOf(value: unknown): { reply?: string } {
 
 function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+function refusedOf(value: unknown): Pick<ActReading, 'followOnRefused'> {
+  const refused = value as { kind?: unknown; venue?: unknown } | null | undefined
+  if (refused?.kind !== 'lend' && refused?.kind !== 'offramp') return {}
+  const venue = typeof refused.venue === 'string' ? refused.venue : ''
+  return { followOnRefused: { kind: refused.kind, venue } }
 }
 
 /**
@@ -111,6 +120,7 @@ export async function fetchOrchestrate(
             amountStated: a['amountStated'] === true,
             amountIsUsd: a['amountIsUsd'] === true,
             followOn: (a['followOn'] as FollowOnAction | null | undefined) ?? null,
+            ...refusedOf(a['followOnRefused']),
             style,
             ...(a['amountOf'] === 'sent' || a['amountOf'] === 'received'
               ? { amountOf: a['amountOf'] }

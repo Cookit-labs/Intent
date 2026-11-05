@@ -203,6 +203,19 @@ describe('the vocabulary a reading is held to', () => {
       allowedAnchors: ['testanchor', 'moneygram'],
     })
     expect(ensureLiveAssets).toHaveBeenCalled()
+    expect(optionsOf()).not.toHaveProperty('reportRefusedFollowOn')
+  })
+
+  it('asks to be told of a refused follow-on off Stellar, and passes it on', async () => {
+    const followOnRefused = { kind: 'lend', venue: 'aave' }
+    orchestrateWithLlm.mockResolvedValue({
+      ...act,
+      reading: { ...reading, tokenIn: 'SOL', amountIsUsd: false, followOnRefused },
+    })
+    const { POST } = await route()
+    const res = await POST(post({ turns: turns('x'), chain: 'solana' }))
+    expect(optionsOf()['reportRefusedFollowOn']).toBe(true)
+    expect(await res.json()).toMatchObject({ followOn: null, followOnRefused })
   })
 
   it("uses the chain's tokens off Stellar and never asks the Stellar registry", async () => {
