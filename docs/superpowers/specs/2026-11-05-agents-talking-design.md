@@ -68,7 +68,7 @@ This table comes from the branches as read on 2026-11-05. Neither has merged, an
 
 The clock starts when `competition:started` is sent, after routes are quoted. All of this happens inside the one request in `app/api/agents/compete/route.ts`, so there is no shared state.
 
-1. **Blind first take.** Each agent calls the existing `propose`, with the existing prompt and tool, in parallel. It sees no other agent. Shown as it lands.
+1. **Each agent thinks first.** Each agent works through the intent on its own, calling the existing `propose`, with the existing prompt and tool, in parallel. It sees no other agent. Shown as it lands.
 2. **Talk opens** when every agent has a first take, or at 8 seconds, whichever comes first. It needs at least two first takes, so if only one is in at 8 seconds, talk opens when the second lands. It never opens after 14 seconds, which leaves each turn at least 2 seconds. With no talk, the race still ends by 20 seconds if anyone has answered.
 3. **Ask turn.** Each agent gets the intent, its own plan and the others' plans, and may ask one question of one agent, or ask nothing.
 4. **Answer turn.** Only agents that were asked make a call. One call answers all of its questions.
@@ -115,7 +115,7 @@ A slow seat is still called. It keeps its first take when it misses a turn, per 
 
 ## Independence rules
 
-- First takes are blind.
+- Each agent thinks through the intent and forms its own plan before seeing any other.
 - Each agent reads the others' plans in a different order, rotated by seat, as routes already are.
 - Talk prompts say: improve your own plan, and change it only if you are persuaded. They contain no instruction to agree, to reach consensus, or to differ.
 - A final plan comes only from that agent's own model call. Otherwise its first take stands.
@@ -172,7 +172,7 @@ The talk is saved with the turn on that browser, so it survives a reload and sho
 
 ## How we'll know it works
 
-- Unit tests: turn order, every row of the failure table, blind first takes, no plan copied across agents, prompts free of steering words, hold-off, unanimity, and pacing.
+- Unit tests: turn order, every row of the failure table, first takes made before seeing other agents, no plan copied across agents, prompts free of steering words, hold-off, unanimity, and pacing.
 - Extend `pnpm agents:eval`: for each golden case, record how often agents chose the same plan before and after talk, and how often a plan changed. No target is set. If talk makes agents collapse into one plan, the owner should see it. Add a case where a planted instruction arrives through another agent's message.
 - A real race on each of the six chains on a preview with its own Postgres, as preview-first requires. Check that the talk reads as real, and time it.
 - No claim that a chain is proven until someone signs there with a real wallet.
