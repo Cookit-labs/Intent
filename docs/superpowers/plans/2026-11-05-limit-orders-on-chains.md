@@ -37,28 +37,30 @@
 
 ## File map
 
-| File | Responsibility |
-|---|---|
-| `lib/chains/limit.ts` | Pure price and amount maths, price sanity, `RestingOrder`, `LimitBook` |
-| `lib/chains/parse-limit.ts` | Reads a limit order from typed words, and the words gate |
-| `app/api/chain/[chain]/orders/route.ts` | Lists orders, builds an exit |
-| `lib/chains/solana/limo.ts`, `limo-rules.ts` | Kamino venue, book and safety |
-| `lib/chains/sui/deepbook.ts`, `deepbook-rules.ts` | DeepBook venue, book and policy |
-| `lib/chains/near/rhea-dcl.ts`, `rhea-dcl-rules.ts` | Rhea venue, book and safety |
-| `lib/chains/evm/cow.ts`, `cow-rules.ts` | CoW venue, book and safety |
-| `components/intents/chain-orders-card.tsx` | The list, with Cancel and Collect |
-| `lib/agents/rest-option.ts` | The resting option given to agents, and the band |
+| File                                               | Responsibility                                                         |
+| -------------------------------------------------- | ---------------------------------------------------------------------- |
+| `lib/chains/limit.ts`                              | Pure price and amount maths, price sanity, `RestingOrder`, `LimitBook` |
+| `lib/chains/parse-limit.ts`                        | Reads a limit order from typed words, and the words gate               |
+| `app/api/chain/[chain]/orders/route.ts`            | Lists orders, builds an exit                                           |
+| `lib/chains/solana/limo.ts`, `limo-rules.ts`       | Kamino venue, book and safety                                          |
+| `lib/chains/sui/deepbook.ts`, `deepbook-rules.ts`  | DeepBook venue, book and policy                                        |
+| `lib/chains/near/rhea-dcl.ts`, `rhea-dcl-rules.ts` | Rhea venue, book and safety                                            |
+| `lib/chains/evm/cow.ts`, `cow-rules.ts`            | CoW venue, book and safety                                             |
+| `components/intents/chain-orders-card.tsx`         | The list, with Cancel and Collect                                      |
+| `lib/agents/rest-option.ts`                        | The resting option given to agents, and the band                       |
 
 ---
 
 ### Task 1: The maths and the words
 
 **Files:**
+
 - Create: `apps/dapp/lib/chains/limit.ts`, `apps/dapp/lib/chains/parse-limit.ts`
 - Modify: `apps/dapp/lib/chains/types.ts` (`ChainActionKind` adds `'limit'`; `ChainActionRequest` adds `limitPrice?: string | undefined`), `apps/dapp/lib/chains/parse-action.ts` (`racesFirst` false for `limit`)
 - Test: `apps/dapp/lib/__tests__/chain-limit.test.ts`
 
 **Interfaces:**
+
 - Produces, in `limit.ts`:
   - `limitPair(tokenIn: string, tokenOut: string): { base: string; quote: string; selling: boolean } | undefined`. Quote is the stablecoin side (USDC or USDT), and nothing for two stablecoins or no stablecoin.
   - `limitOutput(amountIn: string, price: string, selling: boolean, decimalsIn: number, decimalsOut: number): bigint`. Exact BigInt arithmetic. Selling: amount times price. Buying: amount divided by price. Always rounds up, so the order never accepts less than the stated price.
@@ -121,13 +123,34 @@ describe('assertRestingPrice', () => {
 describe('parseChainLimit', () => {
   it.each([
     ['sell 1 SOL at $110', { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' }],
-    ['sell 1 sol for usdt at 110', { amount: '1', tokenIn: 'sol', tokenOut: 'usdt', limitPrice: '110' }],
-    ['limit sell 1 SOL at 110', { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' }],
-    ['swap 1 SOL to USDC at $110', { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' }],
-    ['swap 1 SOL to USDC when it hits 110.50', { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110.50' }],
-    ['swap 50 USDC to SOL at 90', { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' }],
-    ['buy SOL with 50 USDC at $90', { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' }],
-    ['buy SOL at $90 with 50 USDC', { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' }],
+    [
+      'sell 1 sol for usdt at 110',
+      { amount: '1', tokenIn: 'sol', tokenOut: 'usdt', limitPrice: '110' },
+    ],
+    [
+      'limit sell 1 SOL at 110',
+      { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' },
+    ],
+    [
+      'swap 1 SOL to USDC at $110',
+      { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' },
+    ],
+    [
+      'swap 1 SOL to USDC when it hits 110.50',
+      { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110.50' },
+    ],
+    [
+      'swap 50 USDC to SOL at 90',
+      { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' },
+    ],
+    [
+      'buy SOL with 50 USDC at $90',
+      { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' },
+    ],
+    [
+      'buy SOL at $90 with 50 USDC',
+      { amount: '50', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' },
+    ],
     ['sell 1 solana at 110', { amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' }],
   ])('reads %s', (typed, want) => {
     expect(parseChainLimit(typed)).toEqual({ kind: 'limit', venue: undefined, ...want })
@@ -146,7 +169,13 @@ describe('parseChainLimit', () => {
 })
 
 describe('limitSaid', () => {
-  const asked = { kind: 'limit' as const, amount: '1', tokenIn: 'SOL', tokenOut: 'USDC', limitPrice: '110' }
+  const asked = {
+    kind: 'limit' as const,
+    amount: '1',
+    tokenIn: 'SOL',
+    tokenOut: 'USDC',
+    limitPrice: '110',
+  }
   it('wants the amount by its token and the price after it, in the persons own words', () => {
     expect(limitSaid(asked, ['sell 1 SOL at $110'])).toBe(true)
     expect(limitSaid(asked, ['sell 1 SOL', 'at 110'])).toBe(true)
@@ -156,7 +185,9 @@ describe('limitSaid', () => {
     expect(limitSaid({ ...asked, amount: '2' }, ['sell 1 SOL at $110'])).toBe(false)
   })
   it('refuses price and amount swapped round', () => {
-    expect(limitSaid({ ...asked, amount: '110', limitPrice: '1' }, ['sell 1 SOL at $110'])).toBe(false)
+    expect(limitSaid({ ...asked, amount: '110', limitPrice: '1' }, ['sell 1 SOL at $110'])).toBe(
+      false
+    )
   })
 })
 ```
@@ -179,11 +210,13 @@ Expected: FAIL, cannot load `../chains/limit`.
 ### Task 2: The routes and the checks every venue shares
 
 **Files:**
+
 - Create: `apps/dapp/app/api/chain/[chain]/orders/route.ts`
 - Modify: `apps/dapp/lib/chains/prepare.ts`, `apps/dapp/lib/chains/capabilities.ts` (and each chain's `capabilities.ts`), `apps/dapp/app/api/chain/[chain]/prepare/route.ts`
 - Test: `apps/dapp/lib/__tests__/chain-limit-routes.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1.
 - Produces: `GET /api/chain/[chain]/orders?account=` returns `{ orders: RestingOrder[] }`, 404 `unknown_chain`, 400 `invalid_account`, 503 `orders_unavailable`, and rate family `read`. `POST` with `{ account, orderId, action }` returns a prepared action as the prepare route does, with rate family `build` and the same wallet gate as the prepare route. 422 with `error` for a refusal.
 - Produces: `assertLimitCanRun(chainApi: ChainModule, request: ChainActionRequest, account: string): Promise<void>` in `prepare.ts`, which `prepareChainAction` calls for `limit`.
@@ -192,6 +225,7 @@ Expected: FAIL, cannot load `../chains/limit`.
 - [ ] **Step 1: Write the failing tests**
 
 Cover, with a mocked module (as `chain-price-route.test.ts` does):
+
 - `prepareChainAction` for `limit` on `monad` throws the `LIMIT_NOT_HERE` copy.
 - A `limit` request with a price that fails `assertRestingPrice` is refused before the venue's `prepare` runs, and the venue was not called.
 - No live price: refused with `I have no live price for SOL, so I can't check that price. Nothing was signed or sent.`, venue not called.
@@ -209,10 +243,12 @@ Cover, with a mocked module (as `chain-price-route.test.ts` does):
 ### Task 3: Solana, Kamino
 
 **Files:**
+
 - Create: `apps/dapp/lib/chains/solana/limo.ts`, `apps/dapp/lib/chains/solana/limo-rules.ts`, `apps/dapp/lib/__tests__/solana-limo.test.ts`, `apps/dapp/lib/__tests__/solana-limo.live.test.ts`
 - Modify: `apps/dapp/lib/chains/solana/venues.ts`, `module.ts`, `programs.ts`, `capabilities.ts`, `sign.ts` if needed
 
 **Interfaces:**
+
 - Consumes: Task 1 and 2. `decodeSolanaTransaction`, `associatedTokenAccount`, `ownWrappedSolAccount` from `assert-safe.ts`.
 - Produces: venue id `kamino-limit`, name `Kamino Limit Orders`, kinds `['limit']`, `limitCost` `0.00684 SOL`. `limoBook(): LimitBook`.
 - Pinned values: program `LiMoM9rMhrdYrfzUCxQppvxCSG1FcrUK9G8uLq4A1GF`, global config `prod7Mog8r56sn5dPwze8nVdf94veEawdxNNqd5v7A1`, instruction bytes and account order from `docs/research/2026-11-05-limit-orders/solana.md`. Pairs: SOL, USDC and USDT only.
@@ -238,10 +274,12 @@ Cover, with a mocked module (as `chain-price-route.test.ts` does):
 ### Task 4: Sui, DeepBook
 
 **Files:**
+
 - Create: `apps/dapp/lib/chains/sui/deepbook.ts`, `apps/dapp/lib/chains/sui/deepbook-rules.ts`, `apps/dapp/lib/__tests__/sui-deepbook.test.ts`, `apps/dapp/lib/__tests__/sui-deepbook.live.test.ts`
 - Modify: `apps/dapp/lib/chains/sui/safety.ts`, `policies.ts`, `venues.ts`, `module.ts`, `capabilities.ts`, `apps/dapp/lib/chains/venue-logos` (or wherever the logo table lives), `apps/dapp/public/`
 
 **Interfaces:**
+
 - Produces: `ReadObject = (argument) => string | undefined`, passed to `PtbPolicy.checkCall` as a fourth argument. Existing policies ignore it. Venue id `deepbook-limit`, name `DeepBook`, kinds `['limit']`. `deepbookBook(): LimitBook`.
 - Pinned values: package, pools and registry from `docs/research/2026-11-05-limit-orders/sui.md`. Pair: SUI/USDC only. Order type POST_ONLY, so it can never fill at once. Expiry now plus 7 days. Tick, lot and minimum read from the chain, never the indexer, which disagrees.
 
@@ -272,10 +310,12 @@ Cover, with a mocked module (as `chain-price-route.test.ts` does):
 ### Task 5: NEAR, Rhea
 
 **Files:**
+
 - Create: `apps/dapp/lib/chains/near/rhea-dcl.ts`, `apps/dapp/lib/chains/near/rhea-dcl-rules.ts`, `apps/dapp/lib/__tests__/near-rhea-dcl.test.ts`, `apps/dapp/lib/__tests__/near-rhea-dcl.live.test.ts`
 - Modify: `apps/dapp/lib/chains/near/safety.ts` (header comment and a new export), `venues.ts`, `module.ts`, `capabilities.ts`, logo table and `apps/dapp/public/`
 
 **Interfaces:**
+
 - Produces: `assertDclOrderSafe(payload, account, expected)`, `assertDclExitSafe(payload, account, orderId)`, venue id `rhea-limit`, name `Rhea`, kinds `['limit']`, `rheaBook(): LimitBook`, and `pointForPrice(priceUsdcPerNear: number, selling: boolean, delta: number): number`.
 - Pinned values: contract `dclv2.ref-labs.near`, pool `17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1|wrap.near|100`, delta 1, USDC/wNEAR only. Storage capped at 0.5 NEAR.
 
@@ -301,6 +341,7 @@ describe('pointForPrice', () => {
 ```
 
 Also:
+
 - A sale at a point at or above the pool's `current_point`, or a purchase at or below it, is refused. `LimitOrderWithSwap` swaps a marketable part at once with no minimum out, so an order must never be marketable.
 - First use builds, in order: storage on `dclv2` as its own transaction, buy-token storage if unregistered, then the token transaction. `near_deposit` first when selling native NEAR.
 - `assertDclOrderSafe` passes that, and refuses: another contract, another pool, another `buy_token`, a changed amount or point, extra keys in `msg`, `client_id` other than `""`, deposit other than 1 yocto, gas above 250 TGas, storage above 0.5 NEAR. `ft_transfer_call` stays refused everywhere else: the existing `assertNearPayloadSafe` tests still pass unchanged.
@@ -318,10 +359,12 @@ Also:
 ### Task 6: Avalanche, CoW, and signing a message
 
 **Files:**
+
 - Create: `apps/dapp/lib/chains/evm/cow.ts`, `apps/dapp/lib/chains/evm/cow-rules.ts`, `apps/dapp/lib/__tests__/evm-cow.test.ts`, `apps/dapp/lib/__tests__/evm-cow.live.test.ts`
 - Modify: `apps/dapp/lib/chains/types.ts` (`SigningPayload` and `SignedPayload` add `evm-typed`), `apps/dapp/lib/adapters/evm-adapter.ts` (`signOn`), `apps/dapp/lib/chains/evm/venues.ts`, `module.ts`, `capabilities.ts`, logo table and `apps/dapp/public/`
 
 **Interfaces:**
+
 - Produces: `SigningPayload` variant `{ family: 'evm-typed'; chainId: number; account: string; typedData: { domain: object; types: object; primaryType: 'Order'; message: CowOrder } }`, `SignedPayload` variant `{ family: 'evm-typed'; signature: string }`. Venue id `cow-limit`, name `CoW Protocol`, kinds `['limit']`, on Avalanche only. `cowBook(): LimitBook`.
 - Pinned values: settlement, relayer, WAVAX, USDC and the type fields from `docs/research/2026-11-05-limit-orders/evm.md`. `validTo` now plus 7 days, `feeAmount` `"0"`, both balances `erc20`, `partiallyFillable` true, kind `sell`, empty app data with no hooks, no partner fee.
 
@@ -346,10 +389,12 @@ Also:
 ### Task 7: The chat
 
 **Files:**
+
 - Create: `apps/dapp/components/intents/chain-orders-card.tsx`, `apps/dapp/lib/chains/orders-view.ts`, `apps/dapp/lib/__tests__/chain-orders-view.test.ts`
 - Modify: `apps/dapp/components/intents/intent-chat.tsx`, `apps/dapp/lib/chains/parse-sequence.ts` (`readChainMessage`), `apps/dapp/hooks/use-chain-action.ts`, `apps/dapp/lib/chains/signing-flow.ts`
 
 **Interfaces:**
+
 - Consumes: Tasks 1, 2, and `thenPrepareAgain`.
 - Produces: `ChainMessageRead` adds `{ kind: 'limit'; action: ChainActionRequest }` and `{ kind: 'orders' }`. `ordersAsked(text: string): boolean`. `orderLine(order: RestingOrder): string`. `exitsFor(order: RestingOrder): ('cancel' | 'collect')[]`. `freshExit(listed: RestingOrder, now: RestingOrder | undefined, action): 'cancel' | 'collect' | 'gone'`. The hook adds `prepareExit(orderId, action, text)`.
 
@@ -373,10 +418,12 @@ Also:
 ### Task 8: The model reads limit orders
 
 **Files:**
+
 - Modify: `apps/dapp/lib/chains/parse-sequence.ts` (`ReadSwap`, `chainRouteFromReading`), `apps/dapp/lib/orchestrate/orchestrate.ts` and its per-chain prompt, `apps/dapp/app/api/intent/orchestrate/route.ts`
 - Test: `apps/dapp/lib/__tests__/chain-limit-reading.test.ts`
 
 **Interfaces:**
+
 - Consumes: `parseChainLimit`, `limitSaid`, `LIMIT_NOT_HERE`.
 - Produces: `chainRouteFromReading` returns `{ action }` with `kind: 'limit'` when the instruction parses as one and `limitSaid` holds, and otherwise a refusal.
 
@@ -399,10 +446,12 @@ Also:
 ### Task 9: Agents recommend a strategy
 
 **Files:**
+
 - Create: `apps/dapp/lib/agents/rest-option.ts`, `apps/dapp/lib/__tests__/agents-rest-option.test.ts`
 - Modify: `apps/dapp/lib/agents/brief.ts` (`CHAIN_BRIEF`), `apps/dapp/lib/agents/settle-chain-plan.ts`, `apps/dapp/lib/agents/chain-routes.ts`, `apps/dapp/lib/agents/market-context.ts`, `apps/dapp/lib/agents/chain-race.ts` (`chainRequestFor`, `recommendationLine`), `apps/dapp/app/api/agents/compete/route.ts`, `apps/dapp/components/intents/competition-panel.tsx`
 
 **Interfaces:**
+
 - Consumes: `limitPair`, a chain's `limit` venue and its `limitCost`.
 - Produces:
   - `restOption(chainApi, request, marketUsd): RestOption | undefined`, where `RestOption = { venueId: string; venueName: string; marketUsd: number; selling: boolean; cost?: { amount: string; symbol: string }; notes: string[] }`. Nothing unless the request is a swap with a stablecoin side and the chain has a limit venue for that pair.
@@ -417,6 +466,7 @@ Also:
 - `settleChainPlan` keeps a sale resting 2% above the market. It turns into a fill: a sale below the market, one 6% above, a purchase above the market, and `split` always. Without a `rest` argument, it always fills, as today.
 - Scoring: a rest proposal never outscores the best measured fill, as it has no measured fill, so `Recommended` stays on measured figures.
 - `unanimous` is false when one agent fills and another rests, so the panel doesn't say they agree.
+- Off Stellar, a decided race always states one recommended strategy, including when agents agree or only one route exists: `Recommended: fill now via Jupiter. All 2 agents agree. You pick who executes.` The user asked for this, and Stellar's line does not change.
 - `restAlternativeLine`: `1 agent suggests resting at $98.00 through Kamino: it could get more, costs about 0.003 SOL, and may never fill. You choose.`
 - Pressing Review on a rest proposal prepares a `limit` request whose amount and tokens are the person's, and a route whose amount differs from what was asked is still refused.
 - The chain brief names the option only when the market context lists one, and tells agents to weigh the cost against the amount, so a very small swap fills. Stellar's prompt hash test still passes.
