@@ -14,7 +14,7 @@ import {
   STORAGE_DEPOSIT_YOCTO,
 } from '../chains/near/safety'
 import { nearVenues } from '../chains/near/venues'
-import { assertNativeReserve } from '../chains/prepare'
+import { assertLimitCanRun, assertNativeReserve, prepareChainAction } from '../chains/prepare'
 import {
   ChainActionRefused,
   type ChainActionRequest,
@@ -874,6 +874,54 @@ describe('the reserve', () => {
 
   it('names the most first use can cost, for anyone showing it before an account is known', () => {
     expect(rheaVenue.limitCost).toEqual({ amount: '0.5', symbol: 'NEAR' })
+  })
+})
+
+describe('what the wallet holds', () => {
+  const row = (symbol: string, id: string, amount: string, decimals: number, native = false) => ({
+    symbol,
+    id,
+    amount,
+    decimals,
+    native,
+    listed: true,
+  })
+  const near = (amount: string) => row('NEAR', 'near', amount, 24, true)
+  const wnear = (amount: string) => row('wNEAR', WRAP, amount, 24)
+  const usdc = (amount: string) => row('USDC', USDC, amount, 6)
+  const spy = vi.fn()
+  const holding = (...tokens: ReturnType<typeof row>[]): ChainModule => ({
+    ...nearModule,
+    venues: nearModule.venues.map((v) => (v.id === 'rhea-limit' ? { ...v, prepare: spy } : v)),
+    priceUsd: async () => 4,
+    balances: async () => ({ tokens, complete: true }),
+  })
+
+  beforeEach(() => {
+    spy.mockReset()
+    firstUse()
+  })
+
+  it('stops a purchase with no USDC before it can pay for storage', async () => {
+    await expect(
+      prepareChainAction(holding(near('1'), wnear('0'), usdc('0')), buying(), ME)
+    ).rejects.toThrow('You hold 0 USDC, and this order needs 10. Nothing was signed or sent.')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('counts NEAR and wNEAR together on a sale', async () => {
+    await expect(
+      assertLimitCanRun(holding(near('0.3'), wnear('0.3'), usdc('0')), selling(), ME)
+    ).rejects.toThrow('You hold 0.6 NEAR, and this order needs 1. Nothing was signed or sent.')
+    await expect(
+      assertLimitCanRun(holding(near('0.6'), wnear('0.6'), usdc('0')), selling(), ME)
+    ).resolves.toBeUndefined()
+  })
+
+  it('does not count wNEAR or NEAR toward USDC', async () => {
+    await expect(
+      assertLimitCanRun(holding(near('100'), wnear('100'), usdc('9')), buying(), ME)
+    ).rejects.toThrow('You hold 9 USDC, and this order needs 10. Nothing was signed or sent.')
   })
 })
 

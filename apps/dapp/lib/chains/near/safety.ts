@@ -24,8 +24,9 @@ import { METAPOOL_CONTRACT, RNEAR_CONTRACT, TGAS, USDC_NEAR, USDT_NEAR, WRAP_NEA
  *
  * Bounds:
  * - `ft_transfer` attaches exactly 1 yoctoNEAR, as NEP-141 requires.
- * - Storage attaches exactly 0.00125 NEAR, the `storage_balance_bounds` minimum
- *   on every contract here.
+ * - Storage attaches exactly 0.00125 NEAR, the `storage_balance_bounds` minimum on
+ *   every token here. Rhea's DCL contract is the exception: its minimum is 0.5 NEAR,
+ *   and `assertDclOrderSafe` holds it to that as a cap.
  * - A stake or wrap attaches at most 1,000 NEAR. Stablecoin transfers carry at most
  *   10,000 tokens. Dollar caps run earlier, in `prepareChainAction`. These ceilings
  *   only stop a payload far outside any trade that cap would pass.
@@ -356,7 +357,7 @@ function assertDclPlacement(
 /**
  * The one place `ft_transfer_call` is allowed. A payload is either setup, storage and nothing else,
  * or the order alone. Never both: a wallet given several transactions promises neither their order
- * nor to stop after one fails, so an order signed beside its storage could land without it.
+ * nor to stop after one fails, so an order signed beside its storage could land without it, and fail.
  */
 export function assertDclOrderSafe(
   payload: SigningPayload,

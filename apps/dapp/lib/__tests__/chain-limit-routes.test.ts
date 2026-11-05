@@ -121,6 +121,89 @@ describe('limit orders are checked before any venue is called', () => {
   })
 })
 
+describe('a limit order needs what it gives up in the wallet', () => {
+  const row = (symbol: string, id: string, amount: string, native = false) => ({
+    symbol,
+    id,
+    amount,
+    decimals: id === 'so11' ? 9 : 6,
+    native,
+    listed: true,
+  })
+  const buy = limit({ amount: '2', tokenIn: 'USDC', tokenOut: 'SOL', limitPrice: '90' })
+  const built = { signing: { family: 'solana', transaction: 'x' } }
+
+  it('refuses less than the order needs, before any venue is called', async () => {
+    balances.mockResolvedValue({
+      tokens: [row('SOL', 'so11', '5', true), row('USDC', 'usdc', '1.5')],
+      complete: true,
+    })
+    await expect(prepareChainAction(module(), buy, ACCOUNT)).rejects.toThrow(
+      'You hold 1.5 USDC, and this order needs 2. Nothing was signed or sent.'
+    )
+    expect(venuePrepare).not.toHaveBeenCalled()
+  })
+
+  it('holds a sale of the native coin to the same check', async () => {
+    balances.mockResolvedValue({ tokens: [row('SOL', 'so11', '0.5', true)], complete: true })
+    await expect(prepareChainAction(module(), limit(), ACCOUNT)).rejects.toThrow(
+      'You hold 0.5 SOL, and this order needs 1. Nothing was signed or sent.'
+    )
+    expect(venuePrepare).not.toHaveBeenCalled()
+  })
+
+  it('matches on the token id, so a copied symbol counts for nothing', async () => {
+    balances.mockResolvedValue({
+      tokens: [row('SOL', 'so11', '5', true), row('USDC', 'not-usdc', '100')],
+      complete: true,
+    })
+    await expect(prepareChainAction(module(), buy, ACCOUNT)).rejects.toThrow(
+      'You hold 0 USDC, and this order needs 2. Nothing was signed or sent.'
+    )
+    expect(venuePrepare).not.toHaveBeenCalled()
+  })
+
+  it('passes exactly what the order needs', async () => {
+    venuePrepare.mockResolvedValue(built)
+    balances.mockResolvedValue({
+      tokens: [row('SOL', 'so11', '5', true), row('USDC', 'usdc', '2')],
+      complete: true,
+    })
+    await prepareChainAction(module(), buy, ACCOUNT)
+    expect(venuePrepare).toHaveBeenCalledTimes(1)
+  })
+
+  it.each<[string, () => void]>([
+    ['a read that fails', () => balances.mockRejectedValue(new Error('no read'))],
+    [
+      'a list that may be missing the token',
+      () =>
+        balances.mockResolvedValue({ tokens: [row('SOL', 'so11', '5', true)], complete: false }),
+    ],
+    [
+      'a token that could not be read',
+      () =>
+        balances.mockResolvedValue({
+          tokens: [row('SOL', 'so11', '5', true)],
+          complete: true,
+          unread: ['USDC'],
+        }),
+    ],
+  ])('does not refuse on %s', async (_name, arrange) => {
+    arrange()
+    venuePrepare.mockResolvedValue(built)
+    await prepareChainAction(module(), buy, ACCOUNT)
+    expect(venuePrepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads nothing for an order refused on its price', async () => {
+    await expect(
+      prepareChainAction(module(), limit({ limitPrice: '90' }), ACCOUNT)
+    ).rejects.toThrow(/would sell below/)
+    expect(balances).not.toHaveBeenCalled()
+  })
+})
+
 describe('the native reserve counts a venue setup cost', () => {
   const held = {
     tokens: [

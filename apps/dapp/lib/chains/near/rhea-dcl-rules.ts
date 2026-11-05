@@ -42,9 +42,9 @@ export function pointForPrice(priceUsdcPerNear: number, selling: boolean, delta:
 }
 
 /**
- * `LimitOrderWithSwap` swaps a marketable part at once with no minimum out, so an order must rest
- * beyond the pool's own price: a sale below its current point, a purchase above it. Read just before
- * building, so it can still cross before it lands.
+ * `LimitOrderWithSwap` swaps a marketable part at once, with no minimum out in the message, so an order
+ * must rest beyond the pool's own price: a sale below its current point, a purchase above it. Read
+ * just before building, so it can still cross before it lands. Why not plain `LimitOrder`: see near.md.
  */
 export function assertRestingPoint(point: number, currentPoint: number, selling: boolean): void {
   if (selling ? point >= currentPoint : point <= currentPoint) {

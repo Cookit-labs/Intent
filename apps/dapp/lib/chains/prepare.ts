@@ -188,7 +188,7 @@ export const LIMIT_NOT_HERE: Partial<Record<ChainWithActions, string>> = {
 export async function assertLimitCanRun(
   chainApi: ChainModule,
   request: ChainActionRequest,
-  _account: string
+  account: string
 ): Promise<void> {
   const notHere = LIMIT_NOT_HERE[chainApi.chain]
   if (notHere !== undefined) throw new ChainActionRefused(notHere)
@@ -207,6 +207,38 @@ export async function assertLimitCanRun(
     )
   }
   assertRestingPrice(request.limitPrice ?? '', market, pair.selling, pair.base)
+  await assertHeldForLimit(chainApi, request, account)
+}
+
+/**
+ * Refuses an order for more than the wallet holds of what it gives up, matched on the token's id,
+ * before a venue can ask for any setup. NEAR's table entry is `wrap.near` and stands for the native
+ * coin too, so a sale there counts both. A read that fails or runs late doesn't refuse.
+ */
+async function assertHeldForLimit(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string
+): Promise<void> {
+  const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
+  if (tokenIn === undefined) return
+  const reading = await readBalancesBriefly(chainApi, account)
+  if (reading === undefined) return
+  const amount = holdingOf(reading, tokenIn)
+  if (amount === undefined) return
+  const native =
+    chainApi.chain === 'near' && tokenIn.id === WRAP_NEAR
+      ? reading.tokens.find((t) => t.native)
+      : undefined
+  const token = toBase(amount, tokenIn.decimals)
+  const coin = native === undefined ? BigInt(0) : toBase(native.amount, tokenIn.decimals)
+  const asked = toBase(request.amount, tokenIn.decimals)
+  if (token === undefined || coin === undefined || asked === undefined) return
+  const held = token + coin
+  if (asked <= held) return
+  throw new ChainActionRefused(
+    `You hold ${fromBase(held, tokenIn.decimals)} ${tokenIn.symbol}, and this order needs ${request.amount}. Nothing was signed or sent.`
+  )
 }
 
 /**
