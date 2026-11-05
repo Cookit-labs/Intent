@@ -42,7 +42,10 @@ export function chainHelp(chainName: string, capabilities: readonly ChainCapabil
   ) {
     examples.push(`"${EXAMPLE.send('USDC', '')}"`)
   }
-  return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.`
+  const orders = capabilities.some((c) => c.kind === 'limit')
+    ? ' Say "my orders" to see, cancel or collect a limit order.'
+    : ''
+  return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.${orders}`
 }
 
 export const RATE_LIMITED = "You're sending messages quickly. Wait a minute and try again."

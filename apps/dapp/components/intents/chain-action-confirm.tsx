@@ -5,6 +5,8 @@ import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
 import { stepErrorMessage } from '../../lib/agents/chain-race'
+import { limitSettledNote } from '../../lib/chains/orders-view'
+import { useChain } from '../../providers/chain-provider'
 
 /** Review, sign and result for an action on a chain other than Stellar. */
 export function ChainActionConfirm({
@@ -19,6 +21,7 @@ export function ChainActionConfirm({
   typedStep?: string | undefined
 }): JSX.Element {
   const { phase, prepared, hash, explorerUrl, earlier } = action
+  const { slug } = useChain()
   const error = stepErrorMessage(action.error, sequenceSettled, typedStep)
   const busy = phase === 'signing' || phase === 'submitting'
 
@@ -111,7 +114,29 @@ export function ChainActionConfirm({
             </p>
           ) : null}
 
-          {phase === 'settled' ? (
+          {phase === 'settled' && action.canContinue ? (
+            <div className="flex flex-col gap-2">
+              <p className="flex items-center gap-2 text-sm font-medium" role="status">
+                Done. One more signature finishes this.
+              </p>
+              <div>
+                <Button size="sm" onClick={action.continueSetup}>
+                  Continue
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {phase === 'settled' &&
+          !action.canContinue &&
+          prepared.kind === 'limit' &&
+          action.source?.kind === 'request' ? (
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              {limitSettledNote(slug)}
+            </p>
+          ) : null}
+
+          {phase === 'settled' && action.canContinue ? null : phase === 'settled' ? (
             <p className="flex items-center gap-2 text-sm font-medium" role="status">
               Sent
               {explorerUrl !== undefined ? (

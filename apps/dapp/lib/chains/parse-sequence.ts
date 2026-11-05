@@ -5,6 +5,9 @@ import {
   routeCashout,
   type CashoutRoute,
 } from '../weave/parse-cashout'
+import { LIMIT_NOT_HERE } from './limit'
+import { ordersAsked } from './orders-view'
+import { limitShapeRefusal, parseChainLimit } from './parse-limit'
 import { AMOUNT, amountOf, chainTokenWord, dollarsOn, parseChainAction } from './parse-action'
 import {
   SEQUENCE_CASHOUT_CHAINS,
@@ -112,6 +115,8 @@ export type ChainMessageRead =
   | { kind: 'refusal'; refusal: string }
   | { kind: 'sequence'; request: ChainSequenceRequest }
   | { kind: 'action'; action: ChainActionRequest }
+  | { kind: 'limit'; action: ChainActionRequest }
+  | { kind: 'orders' }
   | { kind: 'cashout'; route: CashoutGoes }
   | { kind: 'model' }
 
@@ -161,6 +166,19 @@ export function readChainMessage(
   }
   const currency = swapIntoCurrency(text, chain, chainName)
   if (currency !== undefined) return currency
+  // Before the plain parser, which would read "swap 50 USDC to SOL at 90" as a swap on a venue "90".
+  const notHere = LIMIT_NOT_HERE[chain]
+  const limit = parseChainLimit(text)
+  if (limit !== null) {
+    return notHere === undefined
+      ? { kind: 'limit', action: limit }
+      : { kind: 'refusal', refusal: notHere }
+  }
+  const shape = limitShapeRefusal(text)
+  if (shape !== undefined) return { kind: 'refusal', refusal: notHere ?? shape }
+  if (ordersAsked(text)) {
+    return notHere === undefined ? { kind: 'orders' } : { kind: 'refusal', refusal: notHere }
+  }
   const action = parseChainAction(text)
   return action === null ? { kind: 'model' } : { kind: 'action', action }
 }
@@ -178,7 +196,7 @@ export function messageStartsAction(route: CashoutRoute, read: ChainMessageRead 
   if (cashoutStarts(route)) return true
   if (read === null) return false
   if (read.kind === 'cashout') return cashoutStarts(read.route)
-  return read.kind === 'sequence' || read.kind === 'action'
+  return read.kind === 'sequence' || read.kind === 'action' || read.kind === 'limit'
 }
 
 /**

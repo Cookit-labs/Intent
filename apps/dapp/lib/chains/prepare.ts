@@ -1,7 +1,7 @@
 import { CHAIN_DESCRIPTORS } from '@intent/config'
 
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
-import { assertRestingPrice, limitPair } from './limit'
+import { assertRestingPrice, LIMIT_NOT_HERE, limitPair } from './limit'
 import { WRAP_NEAR } from './near/tokens'
 import { sendRefusal } from './recipient'
 import { fromBase, toBase } from './sequence'
@@ -175,11 +175,7 @@ export async function assertFollowOnCanRun(
   await venue.assertCanFollow(step, account)
 }
 
-/** Chains where a limit order is refused, and why. */
-export const LIMIT_NOT_HERE: Partial<Record<ChainWithActions, string>> = {
-  monad:
-    'Monad has no limit order venue I would trust with your money yet. The only real option, Kuru, keeps deposits in an upgradeable contract with no audit I could find. Nothing was signed or sent.',
-}
+export { LIMIT_NOT_HERE }
 
 /**
  * Refuses a limit order that cannot run here, before any venue is asked: no safe venue on the chain,

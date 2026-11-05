@@ -1,5 +1,11 @@
 import { RACE_HEADER } from '../api/network-fetch'
-import type { PreparedAction, SignedOutcome, SignedPayload, SigningPayload } from './types'
+import type {
+  ChainActionRequest,
+  PreparedAction,
+  SignedOutcome,
+  SignedPayload,
+  SigningPayload,
+} from './types'
 import {
   CHECK_WALLET,
   accountMismatch,
@@ -132,6 +138,8 @@ export interface SignAttempt {
   amount: string
   at: number
   hash?: string
+  /** An exit from a resting order, as `action:orderId`. Its amount is 0, so this tells exits apart. */
+  exit?: string
 }
 
 export type AttemptStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -158,7 +166,8 @@ function isAttempt(value: unknown): value is SignAttempt {
     typeof a.tokenIn === 'string' &&
     typeof a.amount === 'string' &&
     typeof a.at === 'number' &&
-    (a.hash === undefined || typeof a.hash === 'string')
+    (a.hash === undefined || typeof a.hash === 'string') &&
+    (a.exit === undefined || typeof a.exit === 'string')
   )
 }
 
@@ -192,7 +201,8 @@ function sameAttempt(a: SignAttempt, b: SignAttempt): boolean {
     a.chain === b.chain &&
     a.account === b.account &&
     a.tokenIn === b.tokenIn &&
-    a.amount === b.amount
+    a.amount === b.amount &&
+    a.exit === b.exit
   )
 }
 
@@ -274,7 +284,7 @@ function sameAmount(a: string, b: string): boolean {
 /** The newest attempt at this same action inside the window, if there is one. */
 export function earlierAttempt(
   storage: AttemptStorage | undefined,
-  asked: Pick<SignAttempt, 'chain' | 'account' | 'tokenIn' | 'amount'>,
+  asked: Pick<SignAttempt, 'chain' | 'account' | 'tokenIn' | 'amount'> & { exit?: string },
   now: number = Date.now()
 ): SignAttempt | undefined {
   const matches = readAttempts(storage, now).filter(
@@ -282,7 +292,8 @@ export function earlierAttempt(
       a.chain === asked.chain &&
       accountMismatch(a.account, asked.account) === undefined &&
       a.tokenIn.toUpperCase() === asked.tokenIn.toUpperCase() &&
-      sameAmount(a.amount, asked.amount)
+      a.exit === asked.exit &&
+      (asked.exit !== undefined || sameAmount(a.amount, asked.amount))
   )
   return matches[matches.length - 1]
 }
@@ -311,4 +322,21 @@ export function attemptNotice(attempt: SignAttempt, now: number = Date.now()): A
     hash: attempt.hash,
     ...(explorerUrl !== undefined ? { explorerUrl } : {}),
   }
+}
+
+/** What a card was built from, so a setup step can build the next one from the same thing. */
+export type ActionSource =
+  | { kind: 'request'; request: ChainActionRequest; asked: string }
+  | { kind: 'exit'; orderId: string; action: 'cancel' | 'collect'; asked: string }
+
+/**
+ * The source to build again once a setup step has settled, however many rounds there are, and
+ * nothing while a build is under way or when the card was not a setup step.
+ */
+export function continueSource(
+  phase: string,
+  prepared: Pick<PreparedAction, 'thenPrepareAgain'> | undefined,
+  source: ActionSource | undefined
+): ActionSource | undefined {
+  return phase === 'settled' && prepared?.thenPrepareAgain === true ? source : undefined
 }

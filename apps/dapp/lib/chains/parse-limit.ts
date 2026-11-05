@@ -78,6 +78,44 @@ export function parseChainLimit(text: string): ChainActionRequest | null {
   return null
 }
 
+const SHAPE_VERB = /^(?:please\s+)?(?:limit\s+)?(?:sell|buy|swap|convert|exchange|trade|change)\b/i
+const PRICE_AT_END = new RegExp(
+  String.raw`(?:\bat|@|\bwhen\s+it\s+(?:hits|reaches)|\bif\s+it\s+(?:hits|reaches))\s*\$?(\d[\d,]*(?:\.\d+)?)${END}`,
+  'i'
+)
+const BUY_BY_COUNT = new RegExp(
+  String.raw`^(?:please\s+)?(?:limit\s+)?buy\s+${COUNT}\s*${TOKEN}\s+`,
+  'i'
+)
+const SELL_BY_DOLLARS = new RegExp(
+  String.raw`^(?:please\s+)?(?:limit\s+)?sell\s+\$[\d,.]+\s*(?:of\s+)?${TOKEN}\b`,
+  'i'
+)
+
+export const LIMIT_EXAMPLES = 'for example "sell 1 SOL at $110" or "buy SOL with 180 USDC at $90"'
+
+/**
+ * What to tell someone who gave a price but not an order the strict reader can take, such as a
+ * purchase sized in what it gets or a sale in dollars. Nothing for a message that names no price,
+ * so a plain swap is left alone.
+ */
+export function limitShapeRefusal(text: string): string | undefined {
+  const typed = text.trim()
+  const price = PRICE_AT_END.exec(typed)
+  if (!SHAPE_VERB.test(typed) || price === null) return undefined
+  const buy = BUY_BY_COUNT.exec(typed)
+  if (buy !== null) {
+    const symbol = chainTokenWord(buy[2] as string).toUpperCase()
+    return `Say how much you will spend, for example "buy ${symbol} with 180 USDC at $${price[1] as string}". Nothing was signed or sent.`
+  }
+  const sell = SELL_BY_DOLLARS.exec(typed)
+  if (sell !== null) {
+    const symbol = chainTokenWord(sell[1] as string).toUpperCase()
+    return `Say how much ${symbol}, for example "sell 0.05 ${symbol} at $110". Nothing was signed or sent.`
+  }
+  return `I could not read that as a limit order. Say it in full, ${LIMIT_EXAMPLES}. Nothing was signed or sent.`
+}
+
 const NUMBER = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)`
 
 /**

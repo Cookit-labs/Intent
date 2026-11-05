@@ -1,5 +1,11 @@
 import { chainTokenWord } from './parse-action'
-import { ChainActionRefused, type PreparedAction } from './types'
+import { ChainActionRefused, type ChainWithActions, type PreparedAction } from './types'
+
+/** Chains where a limit order is refused, and why. */
+export const LIMIT_NOT_HERE: Partial<Record<ChainWithActions, string>> = {
+  monad:
+    'Monad has no limit order venue I would trust with your money yet. The only real option, Kuru, keeps deposits in an upgradeable contract with no audit I could find. Nothing was signed or sent.',
+}
 
 const STABLES = ['USDC', 'USDT']
 
