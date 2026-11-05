@@ -387,9 +387,13 @@ describe('runTalk', () => {
 
   it('ends first takes still running when the person has left, even with no answer yet', async () => {
     const left = new AbortController()
-    const run = start([seat('a'), seat('b')], [later(30_000, undefined), later(30_000, undefined)], {
-      signal: left.signal,
-    })
+    const run = start(
+      [seat('a'), seat('b')],
+      [later(30_000, undefined), later(30_000, undefined)],
+      {
+        signal: left.signal,
+      }
+    )
     await vi.advanceTimersByTimeAsync(1000)
     left.abort()
     await vi.advanceTimersByTimeAsync(0)
