@@ -456,7 +456,12 @@ beforeEach(() => {
   chain.waitForReceipt = async () => {
     throw new Error('no receipt')
   }
-  answer = (call) => (call.url === `${API}/quote` ? QUOTE_OK : { status: 404, body: {} })
+  answer = (call) =>
+    call.url === `${API}/quote`
+      ? QUOTE_OK
+      : call.url.startsWith(`${API}/account/`)
+        ? { status: 200, body: [] }
+        : { status: 404, body: {} }
   vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
     const call: Call = {
       method: init?.method ?? 'GET',
@@ -564,6 +569,59 @@ describe('prepare', () => {
         signingScheme: 'eip712',
       },
     })
+  })
+
+  const withBook = (rows: Record<string, unknown>[]) => (call: Call) =>
+    call.url === `${API}/quote`
+      ? QUOTE_OK
+      : call.url.startsWith(`${API}/account/${ME}/orders`)
+        ? { status: 200, body: rows }
+        : { status: 404, body: {} }
+
+  it('refuses a new order while one selling the same token is open', async () => {
+    chain.tokenBalance = async () => BigInt(ONE_AVAX)
+    chain.allowance = async () => BigInt(ONE_AVAX)
+    const blocked =
+      'You already have an open CoW order selling AVAX. Cancel it or wait for it to fill before placing another. Nothing was signed or sent.'
+    answer = withBook([apiOrder()])
+    expect(await prepareRefusal(sale())).toBe(blocked)
+    answer = withBook([apiOrder({ executedSellAmount: '1', executedBuyAmount: '1' })])
+    expect(await prepareRefusal(sale())).toBe(blocked)
+    answer = withBook([apiOrder({ status: 'presignaturePending' })])
+    expect(await prepareRefusal(sale())).toBe(blocked)
+    expect(chain.reads).toEqual([])
+  })
+
+  it('refuses at every step, not only at the order, so no setup leans on a shared allowance', async () => {
+    answer = withBook([apiOrder()])
+    expect(await prepareRefusal(sale())).toMatch(/^You already have an open CoW order/)
+    chain.tokenBalance = async () => BigInt(ONE_AVAX)
+    expect(await prepareRefusal(sale())).toMatch(/^You already have an open CoW order/)
+  })
+
+  it('places an order beside closed ones, or beside one selling another token', async () => {
+    chain.tokenBalance = async () => BigInt(ONE_AVAX)
+    chain.allowance = async () => BigInt(ONE_AVAX)
+    answer = withBook([
+      apiOrder({ status: 'fulfilled' }),
+      apiOrder({ status: 'cancelled' }),
+      apiOrder({ status: 'expired' }),
+      apiOrder({ sellToken: USDC.toLowerCase(), buyToken: COW_BUY_NATIVE.toLowerCase() }),
+    ])
+    expect((await cowVenue.prepare(sale(), ME)).signing.family).toBe('evm-typed')
+  })
+
+  it('refuses when the open orders can’t be read, since it can’t tell', async () => {
+    answer = (call) =>
+      call.url === `${API}/quote`
+        ? QUOTE_OK
+        : call.url.startsWith(`${API}/account/`)
+          ? { status: 503, body: {} }
+          : { status: 404, body: {} }
+    expect(await prepareRefusal(sale())).toMatch(
+      /couldn’t check your open CoW orders.*Nothing was signed or sent\.$/
+    )
+    expect(chain.reads).toEqual([])
   })
 
   it('refuses in words when CoW cannot be reached', async () => {
@@ -733,6 +791,15 @@ describe('submit', () => {
     expect(out).toMatchObject({ ok: false })
     expect((out as { error: string }).error).toMatch(/^That is too small for CoW's solvers to fill/)
     expect((out as { pending?: boolean }).pending).toBeUndefined()
+  })
+
+  it('reads CoW’s DuplicatedOrder as the order already resting, under this app’s id', async () => {
+    answer = () => ({ status: 400, body: { errorType: 'DuplicatedOrder', description: 'x' } })
+    expect(await submit(await signed(READY))).toEqual({
+      ok: true,
+      hash: uid,
+      explorerUrl: `https://explorer.cow.fi/avax/orders/${uid}`,
+    })
   })
 
   it('says it may have gone through when CoW does not answer', async () => {

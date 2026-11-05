@@ -196,6 +196,7 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
   const buyAmount = bought.toString()
 
   await assertQuotable({ sellToken, buyToken, sellAmount }, owner)
+  await assertNoOpenSale(owner, sellToken, input.symbol)
 
   const client = evmClient('avalanche')
   const sold = BigInt(sellAmount)
@@ -310,7 +311,7 @@ function restingOrder(order: ApiOrder): RestingOrder | undefined {
   const status: RestingOrder['status'] =
     order.status === 'fulfilled'
       ? 'filled'
-      : order.status === 'open' || order.status === 'presignaturePending'
+      : isOpen(order)
         ? spent > BigInt(0)
           ? 'partly'
           : 'open'
@@ -330,19 +331,48 @@ function restingOrder(order: ApiOrder): RestingOrder | undefined {
   }
 }
 
-async function openOrders(account: string, signal?: AbortSignal): Promise<RestingOrder[]> {
-  const owner = assertAccount(account)
+/** The account's latest orders on CoW, newest first, as CoW lists them. */
+async function accountOrders(owner: Address, signal?: AbortSignal): Promise<ApiOrder[]> {
   const response = await fetch(`${API}/account/${owner}/orders?limit=100`, {
-    ...(signal !== undefined ? { signal } : {}),
+    signal: signal ?? AbortSignal.timeout(API_TIMEOUT_MS),
   })
   if (!response.ok) throw new Error(`CoW answered ${response.status} for the account's orders`)
   const rows = z.array(z.unknown()).parse(await response.json())
-  const since = Math.floor(Date.now() / 1000) - SHOWN_AFTER_CLOSE_S
   return rows.flatMap((row) => {
     const parsed = ApiOrder.safeParse(row)
-    if (!parsed.success || !sameAddress(parsed.data.owner, owner)) return []
-    if (parsed.data.validTo < since) return []
-    const mapped = restingOrder(parsed.data)
+    return parsed.success && sameAddress(parsed.data.owner, owner) ? [parsed.data] : []
+  })
+}
+
+function isOpen(order: ApiOrder): boolean {
+  return order.status === 'open' || order.status === 'presignaturePending'
+}
+
+/**
+ * One open order per token sold. Every order selling a token draws on the one allowance the vault
+ * relayer has for it, and on the one balance, so a second order would either rest on an allowance
+ * that can't cover both, or replace the one the first relies on. An unreadable book refuses too.
+ */
+async function assertNoOpenSale(owner: Address, sellToken: string, symbol: string): Promise<void> {
+  let orders: ApiOrder[]
+  try {
+    orders = await accountOrders(owner)
+  } catch {
+    return refused('I couldn’t check your open CoW orders just now, so try again in a moment.')
+  }
+  if (orders.some((o) => isOpen(o) && sameAddress(o.sellToken, sellToken))) {
+    refused(
+      `You already have an open CoW order selling ${symbol}. Cancel it or wait for it to fill before placing another.`
+    )
+  }
+}
+
+async function openOrders(account: string, signal?: AbortSignal): Promise<RestingOrder[]> {
+  const owner = assertAccount(account)
+  const since = Math.floor(Date.now() / 1000) - SHOWN_AFTER_CLOSE_S
+  return (await accountOrders(owner, signal)).flatMap((order) => {
+    if (order.validTo < since) return []
+    const mapped = restingOrder(order)
     return mapped === undefined ? [] : [mapped]
   })
 }
@@ -371,7 +401,7 @@ async function prepareExit(
   }
   if (!sameAddress(order.owner, owner)) refused('That order belongs to another wallet.')
   if (order.uid.toLowerCase() !== uid) refused('That is not a CoW order I can change.')
-  if (order.status !== 'open' && order.status !== 'presignaturePending') {
+  if (!isOpen(order)) {
     refused('That order is no longer open, so there is nothing to cancel.')
   }
   return {
@@ -556,6 +586,8 @@ async function postOrder(input: SubmitInput, signature: string): Promise<SubmitR
   }
   if (response.status >= 400 && response.status < 500) {
     const type = await errorType(response)
+    // The same signed order again, after an answer that never arrived: it is resting already.
+    if (type === 'DuplicatedOrder') return { ok: true, hash: uid, explorerUrl: `${EXPLORER}${uid}` }
     if (type === 'SellAmountDoesNotCoverFee')
       return { ok: false, error: `${TOO_SMALL} The order was not placed.` }
     return {

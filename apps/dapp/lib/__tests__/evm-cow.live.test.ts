@@ -82,7 +82,11 @@ describe.skipIf(process.env['SKIP_LIVE'] === '1')('CoW on Avalanche, read and qu
       ])
       expect(separator).toBe(
         hashDomain({
-          domain: { ...COW_DOMAIN, verifyingContract: COW_SETTLEMENT as Address },
+          domain: {
+            ...COW_DOMAIN,
+            chainId: BigInt(COW_DOMAIN.chainId),
+            verifyingContract: COW_SETTLEMENT as Address,
+          },
           types: {
             EIP712Domain: [
               { name: 'name', type: 'string' },
