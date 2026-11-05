@@ -1,6 +1,7 @@
 import { CHAIN_DESCRIPTORS } from '@intent/config'
 
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
+import { assertRestingPrice, limitPair } from './limit'
 import { WRAP_NEAR } from './near/tokens'
 import { sendRefusal } from './recipient'
 import { fromBase, toBase } from './sequence'
@@ -83,7 +84,7 @@ export function assertKnownTokens(chainApi: ChainModule, request: ChainActionReq
       `I can't confirm ${request.tokenIn} as a verified token on this chain, so I won't touch it.${hintFor(request.tokenIn)}`
     )
   }
-  if (request.kind === 'swap') {
+  if (request.kind === 'swap' || request.kind === 'limit') {
     if (
       request.tokenOut === undefined ||
       tokenBySymbol(chainApi.tokens, request.tokenOut) === undefined
@@ -174,6 +175,40 @@ export async function assertFollowOnCanRun(
   await venue.assertCanFollow(step, account)
 }
 
+/** Chains where a limit order is refused, and why. */
+export const LIMIT_NOT_HERE: Partial<Record<ChainWithActions, string>> = {
+  monad:
+    'Monad has no limit order venue I would trust with your money yet. The only real option, Kuru, keeps deposits in an upgradeable contract with no audit I could find. Nothing was signed or sent.',
+}
+
+/**
+ * Refuses a limit order that cannot run here, before any venue is asked: no safe venue on the chain,
+ * a pair with no stablecoin, no venue, no live market price, or a price that would fill at once.
+ */
+export async function assertLimitCanRun(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  _account: string
+): Promise<void> {
+  const notHere = LIMIT_NOT_HERE[chainApi.chain]
+  if (notHere !== undefined) throw new ChainActionRefused(notHere)
+  const pair = limitPair(request.tokenIn, request.tokenOut ?? '')
+  if (pair === undefined) {
+    throw new ChainActionRefused(
+      'Limit orders here need USDC or USDT on one side. Nothing was signed or sent.'
+    )
+  }
+  pickVenue(chainApi, request)
+  const base = tokenBySymbol(chainApi.tokens, pair.base)
+  const market = base === undefined ? undefined : await chainApi.priceUsd(base)
+  if (market === undefined || !Number.isFinite(market) || !(market > 0)) {
+    throw new ChainActionRefused(
+      `I have no live price for ${pair.base}, so I can't check that price. Nothing was signed or sent.`
+    )
+  }
+  assertRestingPrice(request.limitPrice ?? '', market, pair.selling, pair.base)
+}
+
 /**
  * Prepares an action, with the same order of checks as every other money route:
  * known tokens, a dollar value under the cap, then the build, then a check of
@@ -190,6 +225,7 @@ export async function prepareChainAction(
 ): Promise<PreparedAction> {
   const tokenIn = assertKnownTokens(chainApi, request)
   assertRecipientRule(chainApi, request, tokenIn, account)
+  if (request.kind === 'limit') await assertLimitCanRun(chainApi, request, account)
 
   await assertAmountWithinCap(chainApi, request, tokenIn, env)
   await assertNativeReserve(chainApi, request, account)
@@ -273,6 +309,14 @@ async function assertHeldForSend(
   )
 }
 
+function limitCostOf(chainApi: ChainModule, request: ChainActionRequest): ChainVenue['limitCost'] {
+  try {
+    return pickVenue(chainApi, request).limitCost
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Refuses spending a wallet's whole native balance, which would leave nothing for the fee.
  * Reads the balance once and compares in base units. A read that fails or runs late passes:
@@ -304,11 +348,22 @@ export async function assertNativeReserve(
   const reserve = toBase(NATIVE_FEE_RESERVE[chainApi.chain], native.decimals)
   const asked = toBase(request.amount, native.decimals)
   if (held === undefined || reserve === undefined || asked === undefined) return
-  if (asked <= held - reserve) return
 
-  const spendable = held > reserve ? held - reserve : BigInt(0)
+  let kept = reserve
+  let keepText = `${NATIVE_FEE_RESERVE[chainApi.chain]} ${native.symbol} for network fees`
+  const cost = request.kind === 'limit' ? limitCostOf(chainApi, request) : undefined
+  if (cost !== undefined && cost.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]) {
+    const costBase = toBase(cost.amount, native.decimals)
+    if (costBase !== undefined) {
+      kept = reserve + costBase
+      keepText = `${fromBase(kept, native.decimals)} ${native.symbol} for network fees and the ${cost.amount} ${cost.symbol} this order costs to set up`
+    }
+  }
+  if (asked <= held - kept) return
+
+  const spendable = held > kept ? held - kept : BigInt(0)
   throw new ChainActionRefused(
-    `Keep about ${NATIVE_FEE_RESERVE[chainApi.chain]} ${native.symbol} for network fees. ` +
+    `Keep about ${keepText}. ` +
       `You can spend up to ${fromBase(spendable, native.decimals)} ${native.symbol} here. ` +
       'Nothing was signed or sent.'
   )

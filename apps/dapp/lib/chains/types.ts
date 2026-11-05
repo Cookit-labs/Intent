@@ -153,6 +153,8 @@ export interface ChainVenue {
    * only: nothing is built. A venue without this can't follow a swap.
    */
   assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
+  /** A limit order's one-off setup cost in the native coin, kept back on top of the fee reserve. */
+  limitCost?: { amount: string; symbol: string } | undefined
 }
 
 /** A step that would follow a swap. The amount isn't known until the swap has delivered it. */
