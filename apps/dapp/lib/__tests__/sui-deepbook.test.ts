@@ -439,13 +439,14 @@ describe('placing an order', () => {
     expect(again.notes.join(' ')).not.toMatch(/opens a DeepBook account/)
   })
 
-  it('carries the three notes, word for word', async () => {
+  it('carries its notes, word for word', async () => {
     const prepared = await deepbookVenue.prepare(sell(), ME)
     expect(prepared.notes).toEqual(
       expect.arrayContaining([
-        'Filled or cancelled tokens stay in your DeepBook account until you press Collect, which needs a second signature.',
-        'Expires in 7 days. Anything unfilled then waits to be collected.',
+        'Filled tokens stay in your DeepBook account until you press Collect, which needs a second signature. Cancelling brings back what is left in one signature.',
+        'Expires in 7 days. After that, cancel it to bring back what is left.',
         'It never fills at once. If the price has already passed yours, placing it fails and nothing moves.',
+        "DeepBook's contracts can be upgraded by the multisig that holds their upgrade key, so your deposit carries that risk.",
       ])
     )
   })
@@ -612,14 +613,22 @@ interface JsonCall {
   typeArguments: string[]
   arguments: { Input?: number; Result?: number; NestedResult?: [number, number]; GasCoin?: true }[]
 }
+interface JsonMerge {
+  destination: unknown
+  sources: unknown[]
+}
 interface JsonCommand {
   MoveCall?: JsonCall
   SplitCoins?: { coin: unknown; amounts: { Input: number }[] }
+  MergeCoins?: JsonMerge
   TransferObjects?: { objects: unknown[]; address: { Input: number } }
 }
 interface JsonInput {
   Pure?: { bytes: string }
-  Object?: { SharedObject?: { objectId: string; initialSharedVersion: string; mutable: boolean } }
+  Object?: {
+    SharedObject?: { objectId: string; initialSharedVersion: string; mutable: boolean }
+    ImmOrOwnedObject?: { objectId: string; version: string; digest: string }
+  }
 }
 interface JsonTx {
   inputs: JsonInput[]
@@ -870,6 +879,73 @@ describe('DEEPBOOK_POLICY on a placed order', () => {
     })
     expect(() => check(tampered, context)).toThrow(/deposits a different amount/)
     expect(() => check(tampered, context)).toThrow(NOT_SENT)
+  })
+
+  describe('a merge beside the split', () => {
+    const SPLIT = { NestedResult: [0, 0] }
+    const coinInput = (objectId: string): JsonInput => ({
+      Object: { ImmOrOwnedObject: { objectId, version: '9', digest: DIGEST } },
+    })
+
+    /** Adds a merge straight after the split at step 0, keeping every later step's references true. */
+    function mergeAfterSplit(
+      data: JsonTx,
+      merge: (coin: (objectId: string) => { Input: number }) => JsonMerge
+    ): void {
+      const coin = (objectId: string): { Input: number } => {
+        data.inputs.push(coinInput(objectId))
+        return { Input: data.inputs.length - 1 }
+      }
+      expect(data.commands[0]?.SplitCoins).toBeDefined()
+      for (const command of data.commands) {
+        for (const argument of command.MoveCall?.arguments ?? []) {
+          if (argument.Result !== undefined && argument.Result > 0) argument.Result += 1
+          if (argument.NestedResult !== undefined && argument.NestedResult[0] > 0) {
+            argument.NestedResult[0] += 1
+          }
+        }
+      }
+      data.commands.splice(1, 0, { MergeCoins: merge(coin) })
+    }
+
+    it('still passes one between other coins, which puts nothing into the deposit', async () => {
+      const { base, context } = await firstUse()
+      const tampered = await rewrite(base, (data) => {
+        mergeAfterSplit(data, (coin) => ({
+          destination: coin(USDC_COIN),
+          sources: [coin(USDC_COIN_2)],
+        }))
+      })
+      expect(() => check(tampered, context)).not.toThrow()
+    })
+
+    it('refuses more coin merged into the deposit, past what the card says', async () => {
+      const { base, context } = await firstUse()
+      const tampered = await rewrite(base, (data) => {
+        mergeAfterSplit(data, (coin) => ({ destination: SPLIT, sources: [coin(USDC_COIN)] }))
+      })
+      expect(() => check(tampered, context)).toThrow(/deposits a different amount/)
+      expect(() => check(tampered, context)).toThrow(NOT_SENT)
+    })
+
+    it('refuses the split merged into something else', async () => {
+      const { base, context } = await firstUse()
+      const tampered = await rewrite(base, (data) => {
+        mergeAfterSplit(data, (coin) => ({ destination: coin(USDC_COIN), sources: [SPLIT] }))
+      })
+      expect(() => check(tampered, context)).toThrow(/deposits a different amount/)
+    })
+
+    it('refuses it however the split is named', async () => {
+      const { base, context } = await firstUse()
+      const tampered = await rewrite(base, (data) => {
+        mergeAfterSplit(data, (coin) => ({
+          destination: { Result: 0 },
+          sources: [coin(USDC_COIN)],
+        }))
+      })
+      expect(() => check(tampered, context)).toThrow(/deposits a different amount/)
+    })
   })
 
   it('refuses a deposit that does not come from the split it checked', async () => {

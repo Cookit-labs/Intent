@@ -280,9 +280,13 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
       ...(manager === 'new'
         ? ['This opens a DeepBook account that only you control, to hold the order’s tokens.']
         : []),
-      'Filled or cancelled tokens stay in your DeepBook account until you press Collect, which needs a second signature.',
-      'Expires in 7 days. Anything unfilled then waits to be collected.',
+      'Filled tokens stay in your DeepBook account until you press Collect, which needs a second signature. Cancelling brings back what is left in one signature.',
+      'Expires in 7 days. After that, cancel it to bring back what is left.',
       'It never fills at once. If the price has already passed yours, placing it fails and nothing moves.',
+      // Read on chain on 5 November 2026: the `UpgradeCap` is policy 0, compatible, at 0x37f187e1...64d2,
+      // and version 9 was signed as a multisig. The Move source sets no policy, and whose keys those
+      // are isn't on chain, so this doesn't name anyone.
+      "DeepBook's contracts can be upgraded by the multisig that holds their upgrade key, so your deposit carries that risk.",
     ],
     signing: { family: 'sui', transaction },
     context: {

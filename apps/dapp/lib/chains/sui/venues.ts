@@ -100,7 +100,7 @@ export const suiVenues: Venue[] = [
     bestFor: 'Selling or buying SUI at a price you name, for up to 7 days',
     integration: 'executes',
     capability:
-      'Places, reads, cancels and collects SUI orders against USDC, and checks every transaction before you sign. Filled or cancelled tokens wait in your DeepBook account until you collect them.',
+      'Places, reads, cancels and collects SUI orders against USDC, and checks every transaction before you sign. Filled tokens wait in your DeepBook account until you collect them.',
   },
   {
     id: 'springsui',

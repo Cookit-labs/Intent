@@ -432,7 +432,11 @@ function pureU64(read: ReadPure, argument: TxArgument | undefined): string | und
   }
 }
 
-/** The one coin split for the deposit, which must be exactly the amount the order holds. */
+/**
+ * The one coin split for the deposit, which must be exactly the amount the order holds. A split coin
+ * only grows by being merged into, and the coin's own merges target the wallet's coins, so one that
+ * touches the split is what would put more in than the card says.
+ */
 function assertDeposit(
   data: TxData,
   read: ReadPure,
@@ -448,7 +452,14 @@ function assertDeposit(
     only === undefined ||
     only.split.amounts.length !== 1 ||
     !isResultOf(coin, only.index) ||
-    pureU64(read, only.split.amounts[0]) !== amount
+    pureU64(read, only.split.amounts[0]) !== amount ||
+    data.commands.some(
+      (command) =>
+        command.$kind === 'MergeCoins' &&
+        [command.MergeCoins.destination, ...command.MergeCoins.sources].some((merged) =>
+          isResultOf(merged, only.index)
+        )
+    )
   ) {
     refused('This order deposits a different amount than it needs.')
   }
