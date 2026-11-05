@@ -1769,6 +1769,11 @@ export function IntentChat({
 
   /** Step 1: the same race as a plain swap, with the sequence watching its card. */
   function runSequenceSwap(request: ChainSequenceRequest, text: string): void {
+    // Sized here and not on the way in, so a currency question left open is priced when answered.
+    if (request.swap.amountIsUsd === true) {
+      sizeThen(request.swap, text, (swap) => runSequenceSwap({ ...request, swap }, text))
+      return
+    }
     setAffordError(null)
     // A new race is the one thing that lifts the "already signed" latch.
     chainAction.release()
@@ -1778,8 +1783,8 @@ export function IntentChat({
   }
 
   /**
-   * "$5 of SOL" as a count of SOL at a price read now, and says so. Both ways an action starts come
-   * through here first, so a figure in dollars can't reach a race or a card as that many tokens.
+   * "$5 of SOL" as a count of SOL at a price read now, and says so. The two places a race or a card
+   * starts come through here first, so a figure in dollars can't reach one as that many tokens.
    */
   function sizeThen(
     request: ChainActionRequest,
@@ -1803,9 +1808,11 @@ export function IntentChat({
         return
       }
       go(out.request)
-      if (out.line !== undefined) {
-        setSequenceNote(out.line)
-        recordLive('agent', out.line)
+      const { line } = out
+      if (line !== undefined) {
+        // Added to, not over, a note on what a run left behind, such as USDC still in the wallet.
+        setSequenceNote((shown) => (shown === null ? line : `${shown} ${line}`))
+        recordLive('agent', line)
       }
     })
   }
@@ -1841,10 +1848,6 @@ export function IntentChat({
 
   /** A swap and what follows it. Whatever could not finish is refused here, before step 1. */
   function startChainSequence(request: ChainSequenceRequest, text: string): void {
-    if (request.swap.amountIsUsd === true) {
-      sizeThen(request.swap, text, (swap) => startChainSequence({ ...request, swap }, text))
-      return
-    }
     const capabilities = chainCapabilities(slug)
     if (capabilities === undefined) return
     const { followOn } = request
@@ -2958,6 +2961,8 @@ export function IntentChat({
             onSelect={(turn) => {
               if (chainSigning(chainAction.phase)) return
               leaveSequence()
+              // Off Stellar, a price or check still on its way must not start anything over this.
+              if (chainCapabilities(slug) !== undefined) latest.current.turn += 1
               // A race on screen ends when another turn is opened.
               if (chainRace !== null) {
                 clearChainRace()

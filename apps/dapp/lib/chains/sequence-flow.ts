@@ -791,14 +791,67 @@ export function sequenceWordsMatch(
 ): boolean {
   const symbol = chainTokenWord(instruction.token)
   const last = figuresSaid(symbol, turns).at(-1)
-  return tokenSaid(instruction.token, turns) && last?.value === canonicalNumber(instruction.amount)
+  return (
+    tokenSaid(instruction.token, turns) &&
+    last?.value === canonicalNumber(instruction.amount) &&
+    countStandsOverDollars(symbol, turns)
+  )
 }
+
+interface DollarFigure {
+  value: string | undefined
+  start: number
+  end: number
+}
+
+/** Every figure in US dollars. Another country's dollars, R$ or CA$, are not these. */
+function dollarFigures(text: string): DollarFigure[] {
+  const number = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)`
+  const dollars = new RegExp(
+    String.raw`(?:(?<![A-Za-z])|(?<=\bus))\$${number}|(?:^|[^\w.,$₦£€])${number}\s*(?:usd|dollars?|bucks?)(?![\w+])`,
+    'gi'
+  )
+  return [...text.matchAll(dollars)].map((match) => {
+    const at = match.index ?? 0
+    return {
+      value: figureValue((match[1] ?? match[2]) as string),
+      start: match[2] === undefined ? at : at + match[0].indexOf(match[2]),
+      end: at + match[0].length,
+    }
+  })
+}
+
+function byToken(token: string): RegExp {
+  return new RegExp(
+    String.raw`^\s*(?:(?:usd|dollars?)\s+)?(?:worth\s+)?(?:of\s+)?(?:my\s+|the\s+)?(?:${token})${WORD_END}`,
+    'i'
+  )
+}
+
+/**
+ * With dollars said as well, a count is only a count if it names its token and comes last. In "$1
+ * of SOL, no make it 2" the 2 corrects the dollars, and in "5 SOL if it is above $100" either figure
+ * could be taken for the amount, so the person is asked to say it in full and no model chooses.
+ */
+function countStandsOverDollars(symbol: string, turns: readonly string[]): boolean {
+  const joined = spacedTurns(symbol, turns).join('\n')
+  const money = dollarFigures(joined).at(-1)
+  if (money === undefined) return true
+  const plain = figuresSaid(symbol, [joined]).at(-1)
+  if (plain === undefined || money.start >= joined.length - plain.after.length) return false
+  return byToken(tokenPattern(symbol).token).test(plain.after)
+}
+
+/** What may come right before a bare figure that corrects an earlier one. */
+const CORRECTING =
+  /(?:^|\n|\b(?:actually|no|nope|instead|rather|sorry|make it|change it to))[\s,:-]*$/i
 
 /**
  * Whether the person themselves said this many dollars of this token: "$5 of SOL", "5 dollars worth
  * of my SOL", "SOL worth $5". The same rules as a count of tokens, for the same reason. It must be
- * the last figure stated, so a correction wins, and it must sit by the token given up, or be a bare
- * correction after it, so "$5 of USDC to SOL" is not $5 of SOL. A token received is named after it.
+ * the last figure stated, so a correction wins, and it must sit by the token given up, so "$5 of
+ * USDC to SOL" is not $5 of SOL. A bare figure counts only as a correction of dollars already said
+ * of that token, so "5 SOL if it is above $100" is not $100 of SOL. A token received is named after.
  */
 export function dollarsSaid(
   amount: string,
@@ -808,39 +861,30 @@ export function dollarsSaid(
 ): boolean {
   const symbol = chainTokenWord(tokenIn)
   const { token } = tokenPattern(symbol)
-  const joined = spacedTurns(symbol, turns).join(' ')
-  const number = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)`
-  const dollars = new RegExp(
-    String.raw`\$${number}|(?:^|[^\w.,$₦£€])${number}\s*(?:usd|dollars?|bucks?)(?![\w+])`,
-    'gi'
-  )
-  const last = [...joined.matchAll(dollars)].at(-1)
-  if (last === undefined) return false
-  if (figureValue((last[1] ?? last[2]) as string) !== canonicalNumber(amount)) return false
+  const joined = spacedTurns(symbol, turns).join('\n')
+  const figures = dollarFigures(joined)
+  const last = figures.at(-1)
+  if (last === undefined || last.value !== canonicalNumber(amount)) return false
 
-  const start = last.index ?? 0
-  const end = start + last[0].length
-  const after = joined.slice(end)
+  const after = joined.slice(last.end)
   const plain = figuresSaid(symbol, [joined]).at(-1)
-  if (plain !== undefined && joined.length - plain.after.length > end) return false
+  if (plain !== undefined && joined.length - plain.after.length > last.end) return false
 
-  const follows = new RegExp(
-    String.raw`^\s*(?:(?:usd|dollars?)\s+)?(?:worth\s+)?(?:of\s+)?(?:my\s+|the\s+)?(?:${token})${WORD_END}`,
-    'i'
-  ).exec(after)
-  const precedes = new RegExp(
-    String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})\s+worth\s+(?:of\s+)?\s*$`,
-    'i'
-  ).test(joined.slice(0, start))
-  if (follows !== null || precedes) {
+  const worth = new RegExp(String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})\s+worth\s+(?:of\s+)?$`, 'i')
+  const named = (figure: DollarFigure): boolean =>
+    byToken(token).test(joined.slice(figure.end)) || worth.test(joined.slice(0, figure.start))
+
+  if (named(last)) {
+    const follows = byToken(token).exec(after)
     const rest = follows === null ? after : after.slice(follows[0].length)
     return tokenOut === undefined || tokenSaid(tokenOut, [rest], true)
   }
-  const bare =
+  const correction =
+    figures.slice(0, -1).some(named) &&
     BARE_FIGURE.test(after) &&
-    tokenSaid(tokenIn, [joined.slice(0, start)]) &&
+    CORRECTING.test(joined.slice(0, last.start)) &&
     !tokenSaid(tokenIn, [after], true)
-  if (!bare) return false
+  if (!correction) return false
   return tokenOut === undefined || tokenOutFollows(token, tokenOut, joined)
 }
 

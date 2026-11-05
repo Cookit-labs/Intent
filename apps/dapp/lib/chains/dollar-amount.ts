@@ -19,6 +19,8 @@ export function unitsForDollars(
   const units = Math.floor((sum / priceUsd) * scale) / scale
   if (units <= 0) return undefined
   const text = units.toFixed(places)
+  // Past 1e21 this is exponent form, which is not an amount and would read as far fewer tokens.
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return undefined
   return text.includes('.') ? text.replace(/\.?0+$/, '') : text
 }
 

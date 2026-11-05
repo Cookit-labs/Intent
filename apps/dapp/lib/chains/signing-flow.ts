@@ -263,6 +263,14 @@ export function noteSubmitAnswer(
   }
 }
 
+/** A retyped "$5 of SOL" comes to a slightly different count once the price moves. */
+const SAME_AMOUNT_WITHIN = 0.03
+
+function sameAmount(a: string, b: string): boolean {
+  const [x, y] = [Number(a), Number(b)]
+  return Math.abs(x - y) <= SAME_AMOUNT_WITHIN * Math.max(x, y)
+}
+
 /** The newest attempt at this same action inside the window, if there is one. */
 export function earlierAttempt(
   storage: AttemptStorage | undefined,
@@ -274,7 +282,7 @@ export function earlierAttempt(
       a.chain === asked.chain &&
       accountMismatch(a.account, asked.account) === undefined &&
       a.tokenIn.toUpperCase() === asked.tokenIn.toUpperCase() &&
-      Number(a.amount) === Number(asked.amount)
+      sameAmount(a.amount, asked.amount)
   )
   return matches[matches.length - 1]
 }

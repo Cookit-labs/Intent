@@ -275,6 +275,12 @@ describe('the warning that survives a reload', () => {
       expect(earlierAttempt(started(), { ...asking, ...change }, later(3))).toBeUndefined()
     })
 
+    it('warns about a dollar amount retyped after the price moved', () => {
+      expect(earlierAttempt(started(), { ...asking, amount: '5.1' }, later(3))).toEqual(attempt)
+      expect(earlierAttempt(started(), { ...asking, amount: '4.9' }, later(3))).toEqual(attempt)
+      expect(earlierAttempt(started(), { ...asking, amount: '5.5' }, later(3))).toBeUndefined()
+    })
+
     it('reads an EVM address, a token and an amount however they were written', () => {
       const same = { ...asking, account: '0xABC', tokenIn: 'usdc', amount: '5.0' }
       expect(earlierAttempt(started(), same, later(3))).toEqual(attempt)
