@@ -16,6 +16,8 @@ import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
+import { runTalk } from '../../../../lib/agents/talk'
+import { applyFinalChoice } from '../../../../lib/agents/talk-final'
 import {
   assertAmountWithinCap,
   assertKnownTokens,
@@ -488,85 +490,175 @@ export async function POST(request: Request): Promise<Response> {
         ...(chainFacts !== undefined ? { routeCount: market.routes?.length ?? 0 } : {}),
       })
 
+      // Agents talk once at least two of them can. A brain that can't keeps its
+      // first take, and a race where fewer than two can runs as it always has.
+      const talking = roster.filter((a) => a.brain.talk !== undefined).length >= 2
+      const talkStartedAt = Date.now()
+      const rawFirstTakes = new Map<string, AgentProposalResult>()
+      const firstTakeAborts: AbortController[] = []
+
+      // The checked plan for what this request is, whichever turn produced it.
+      const settleAndMeasure = (proposal: AgentProposalResult): AgentProposalResult => {
+        const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
+        return measured(
+          chainFacts === undefined ? settlePlan(proposal, intent, book) : settleChainPlan(proposal),
+          own?.quote as SwapQuote | ChainRouteQuote | undefined,
+          market.prices
+        )
+      }
+
+      const sendProposal = (proposal: AgentProposalResult): void => {
+        const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
+        send({
+          type: 'competition:proposal',
+          competitionId,
+          proposal,
+          ...(own !== undefined ? { route: own.quote } : {}),
+        })
+      }
+
       // Agents run concurrently and are emitted as they finish, so one slow
       // agent delays only its own card.
-      const settled = await Promise.all(
-        roster.map(async (agent, seat) => {
-          const began = Date.now()
-          const controllerForAgent = new AbortController()
-          const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
+      const takes = roster.map(async (agent, seat) => {
+        const began = Date.now()
+        const controllerForAgent = new AbortController()
+        firstTakeAborts.push(controllerForAgent)
+        const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
-          try {
-            const outcome = await agent.brain.propose({
-              intent,
-              agent: agent.key,
-              seat,
-              market,
-              chain,
-              ...(context.length > 0 ? { context } : {}),
-              signal: controllerForAgent.signal,
-            })
+        try {
+          const outcome = await agent.brain.propose({
+            intent,
+            agent: agent.key,
+            seat,
+            market,
+            chain,
+            ...(context.length > 0 ? { context } : {}),
+            signal: controllerForAgent.signal,
+          })
 
-            if (!outcome.ok) {
-              if (outcome.error === 'rate_limited') {
-                noteRateLimited(agent.key, outcome.retryAfterMs)
-              }
-              attempts.push({
-                agent: agent.key,
-                model: agent.model,
-                ok: false,
-                latencyMs: Date.now() - began,
-                error: outcome.error,
-              })
-              // Said, and left empty. No placeholder: an agent that did not
-              // answer has no proposal, and showing one would be inventing it.
-              send({
-                type: 'competition:failed',
-                competitionId,
-                agent: agent.key,
-                error: outcome.error,
-              })
-              return undefined
+          if (!outcome.ok) {
+            if (outcome.error === 'rate_limited') {
+              noteRateLimited(agent.key, outcome.retryAfterMs)
             }
-
-            // This agent's own route, so executing it signs what it proposed
-            // rather than what the winner proposed.
-            const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
-
-            const proposal = measured(
-              chainFacts === undefined
-                ? settlePlan(outcome.proposal, intent, book)
-                : settleChainPlan(outcome.proposal),
-              own?.quote as SwapQuote | ChainRouteQuote | undefined,
-              market.prices
-            )
-
             attempts.push({
               agent: agent.key,
               model: agent.model,
-              ok: true,
+              ok: false,
               latencyMs: Date.now() - began,
-              routeId: proposal.routeId,
-              executionMode: proposal.executionMode,
-              // Passed for every agent; raceRecordFrom is the one place that
-              // keeps it only for the row that actually won.
-              reasoning: proposal.reasoning,
+              error: outcome.error,
             })
-
+            // Said, and left empty. No placeholder: an agent that did not
+            // answer has no proposal, and showing one would be inventing it.
             send({
-              type: 'competition:proposal',
+              type: 'competition:failed',
+              competitionId,
+              agent: agent.key,
+              error: outcome.error,
+            })
+            return undefined
+          }
+
+          // This agent's own route, so executing it signs what it proposed
+          // rather than what the winner proposed.
+          const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
+
+          const proposal = settleAndMeasure(outcome.proposal)
+          rawFirstTakes.set(agent.key, outcome.proposal)
+
+          attempts.push({
+            agent: agent.key,
+            model: agent.model,
+            ok: true,
+            latencyMs: Date.now() - began,
+            routeId: proposal.routeId,
+            executionMode: proposal.executionMode,
+            // Passed for every agent; raceRecordFrom is the one place that
+            // keeps it only for the row that actually won.
+            reasoning: proposal.reasoning,
+          })
+
+          // A first take in a race that talks may still change, so it carries
+          // no route: there is nothing to review until final plans are in.
+          if (talking) {
+            send({
+              type: 'competition:take',
               competitionId,
               proposal,
-              ...(own !== undefined ? { route: own.quote } : {}),
+              ...(own !== undefined ? { source: own.source } : {}),
             })
-            return proposal
-          } finally {
-            clearTimeout(timer)
+          } else {
+            sendProposal(proposal)
           }
-        })
-      )
+          return proposal
+        } finally {
+          clearTimeout(timer)
+        }
+      })
 
-      const proposals = settled.filter((p): p is AgentProposalResult => p !== undefined)
+      let proposals: AgentProposalResult[]
+      if (talking) {
+        const firstTakes = new Map<string, AgentProposalResult>()
+        takes.forEach((take, i) => {
+          const key = roster[i]?.key
+          void take.then((plan) => {
+            if (plan !== undefined && key !== undefined) firstTakes.set(key, plan)
+          })
+        })
+        const { finals } = await runTalk({
+          seats: roster.map(({ key, name, brain }) => ({
+            key,
+            name,
+            talk: brain.talk?.bind(brain),
+          })),
+          takes,
+          facts: {
+            chain,
+            // Whatever the clarifier confirmed, since every agent is held to it.
+            intent: context.length > 0 ? `${text} (${context.join('; ')})` : text,
+            routes: market.routes ?? [],
+          },
+          startedAt: talkStartedAt,
+          emit: (line) => send({ type: 'competition:talk', competitionId, line }),
+          applyFinal: (agentKey, choice) => {
+            const first = firstTakes.get(agentKey)
+            const rawFirst = rawFirstTakes.get(agentKey)
+            if (first === undefined || rawFirst === undefined) return undefined
+            const seat = roster.findIndex((a) => a.key === agentKey)
+            return applyFinalChoice({
+              first,
+              rawFirst,
+              choice,
+              request: {
+                intent,
+                agent: agentKey,
+                seat,
+                market,
+                chain,
+                ...(context.length > 0 ? { context } : {}),
+              },
+              settle: settleAndMeasure,
+            })
+          },
+          closeLateTakes: () => {
+            for (const abort of firstTakeAborts) abort.abort()
+          },
+          onRateLimited: (agentKey, retryAfterMs) => noteRateLimited(agentKey, retryAfterMs),
+        })
+        proposals = finals
+        for (const final of finals) {
+          // The record shows what the agent ended on, not where it started.
+          const attempt = attempts.find((a) => a.agent === final.agent && a.ok)
+          if (attempt !== undefined && attempt.ok) {
+            attempt.routeId = final.routeId
+            attempt.executionMode = final.executionMode
+            attempt.reasoning = final.reasoning
+          }
+          sendProposal(final)
+        }
+      } else {
+        const settled = await Promise.all(takes)
+        proposals = settled.filter((p): p is AgentProposalResult => p !== undefined)
+      }
 
       if (proposals.length === 0) {
         send({
@@ -625,6 +717,8 @@ export async function POST(request: Request): Promise<Response> {
       }
 
       const scored = scoreProposals(proposals, { competitionId, plan })
+      // An agent that held off has no plan to score.
+      const heldOff = new Set(proposals.filter((p) => p.held === true).map((p) => p.agent))
       const winner = pickWinner(scored)
       let unanimous: boolean | null = null
 
@@ -642,11 +736,15 @@ export async function POST(request: Request): Promise<Response> {
           type: 'competition:winner',
           competitionId,
           winner,
-          scores: Object.fromEntries(scored.map((s) => [s.agent, s.score])),
+          scores: Object.fromEntries(
+            scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
+          ),
           // Only the agents that actually lost points, so the common case
           // sends nothing extra.
           penalties: Object.fromEntries(
-            scored.filter((s) => s.penalties.length > 0).map((s) => [s.agent, s.penalties])
+            scored
+              .filter((s) => s.penalties.length > 0 && !heldOff.has(s.agent))
+              .map((s) => [s.agent, s.penalties])
           ),
           unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
@@ -656,7 +754,9 @@ export async function POST(request: Request): Promise<Response> {
       await record(
         winner,
         winner !== null ? unanimous : null,
-        Object.fromEntries(scored.map((s) => [s.agent, s.score]))
+        Object.fromEntries(
+          scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
+        )
       )
       closed = true
       controller.close()

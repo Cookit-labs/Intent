@@ -267,10 +267,7 @@ export async function runTalk(input: TalkInput): Promise<TalkResult> {
         if (final.held === true) {
           heldCount += 1
           emit({ kind: 'held', agent: seat.key })
-        } else if (
-          final.routeId !== first.routeId ||
-          final.executionMode !== first.executionMode
-        ) {
+        } else if (final.routeId !== first.routeId || final.executionMode !== first.executionMode) {
           changedCount += 1
           emit({ kind: 'changed', agent: seat.key })
         }
