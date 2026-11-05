@@ -2,6 +2,27 @@
 
 Run with `pnpm agents:eval [model]`. 20 intents x 4 agents = 80 live calls per run.
 
+## 2026-11-05: how fast agents can talk
+
+`lib/agents/evals/talk-speed.ts`, one short talk turn of about 400 tokens, 400 output tokens at most.
+
+| model | setting | answered | median | p90 |
+|-------|---------|---------:|-------:|----:|
+| `qwen/qwen3.8-27b` (Groq) | normal | 9/10 | 752ms | 1121ms |
+| `qwen/qwen3.8-27b` (Groq) | `reasoning_effort: 'none'` | 3/10, the rest 429 | 610ms | 612ms |
+| `deepseek-v4-flash` | normal | 5/10, the rest cut off by the output limit | 2630ms | 3403ms |
+| `deepseek-v4-flash` | `thinking: { type: 'disabled' }` | 10/10 | 1332ms | 1562ms |
+| `cohere/north-mini-code:free` | normal | 1/3, the rest cut off | 7133ms | 7133ms |
+| `cohere/north-mini-code:free` | `reasoning: { enabled: false }` | 3/3 | 1164ms | 1438ms |
+| `google/gemma-4-26b-a4b-it:free` | either | 0, upstream 429 | - | - |
+| `poolside/laguna-xs-2.1:free` | either | 0, 404: no longer served by OpenRouter | - | - |
+
+Claude Sonnet was not measured: no key here. DeepSeek first takes took 3.4s to 5.1s, against a 7.2s median on 2026-09-08.
+
+Groq's 429s came from running twenty calls in a row against its 8,000 tokens a minute, not from the setting.
+
+**Verdict: go.** DeepSeek and Groq sit in every line-up and both answer under 3s at p90, so every race can have at least two agents talking. Small samples, and free models vary by the hour.
+
 ## Decision rule (fixed before the first run)
 
 Ship Flash if hard-check pass >= 98% **and** mean distinctness >= 0.6. Committing
