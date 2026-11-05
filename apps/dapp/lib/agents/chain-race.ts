@@ -4,6 +4,10 @@ import type { CompetitionErrorCode } from './competition'
 import type { ChainRouteQuote } from './chain-routes'
 import { isUnmeasuredSwap } from './settle-chain-plan'
 
+function dollars(n: number): string {
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+}
+
 /**
  * The route as a chain route, or nothing. A Stellar quote has no `kind`, so it
  * can never be mistaken for one and signed through the chain path.
@@ -51,6 +55,23 @@ export function chainRequestFor(
   const chain = asChainRoute(route)
   if (chain === undefined) return undefined
   const r = chain.request
+  if (chain.rest !== undefined) {
+    if (
+      r.kind !== 'swap' ||
+      asked.kind !== 'swap' ||
+      r.amount !== asked.amount ||
+      r.tokenIn !== asked.tokenIn ||
+      (r.tokenOut ?? '') !== (asked.tokenOut ?? '')
+    ) {
+      return undefined
+    }
+    return {
+      ...asked,
+      kind: 'limit',
+      venue: chain.rest.venueId,
+      limitPrice: String(Number(chain.rest.priceUsd.toPrecision(8))),
+    }
+  }
   if (
     r.kind !== asked.kind ||
     r.amount !== asked.amount ||
@@ -195,6 +216,7 @@ export function needsDirectRoute(state: {
 export function chainFigures(route: unknown): { headline: string } | undefined {
   const chain = asChainRoute(route)
   if (chain === undefined) return undefined
+  if (chain.rest !== undefined) return { headline: `Rests at ${dollars(chain.rest.priceUsd)}` }
   if (chain.request.kind === 'swap') {
     return isUnmeasuredSwap(chain) ? { headline: 'Price unknown' } : undefined
   }
@@ -219,9 +241,18 @@ export function routeFigures(
 
 /** The venue a route executes on: a Stellar quote's source, or a chain route's venue. */
 export function routeSource(route: unknown): string | undefined {
-  const r = route as { source?: unknown; venueName?: unknown } | null | undefined
-  const name = r?.source ?? r?.venueName
+  const r = route as
+    | { source?: unknown; venueName?: unknown; rest?: { venueName?: unknown } }
+    | null
+    | undefined
+  const name = r?.rest?.venueName ?? r?.source ?? r?.venueName
   return typeof name === 'string' ? name : undefined
+}
+
+/** The one-off cost of a resting route, for the line that offers resting as an alternative. */
+export function routeRestCost(route: unknown): { amount: string; symbol: string } | undefined {
+  return (route as { rest?: { cost?: { amount: string; symbol: string } } } | null | undefined)
+    ?.rest?.cost
 }
 
 /**
@@ -237,6 +268,30 @@ export function recommendationLine(
       ? 'best measured fill'
       : `${figures.headline.charAt(0).toLowerCase()}${figures.headline.slice(1)}`
   return `Recommended: ${name}, ${why}. You pick who executes.`
+}
+
+/**
+ * The line under a decided race off Stellar. It always states one strategy, also when the agents
+ * agree or there is a single route, so the person is never left without a recommendation.
+ */
+export function chainRecommendationLine(
+  winner: {
+    executionMode?: string | undefined
+    restPriceUsd?: number | undefined
+    source?: string | undefined
+  },
+  options: { agreeing?: number } = {}
+): string {
+  const plan =
+    winner.executionMode === 'rest' && winner.restPriceUsd !== undefined
+      ? `rest at ${dollars(winner.restPriceUsd)}`
+      : 'fill now'
+  const via = winner.source !== undefined ? ` via ${winner.source}` : ''
+  const agree =
+    options.agreeing !== undefined && options.agreeing > 1
+      ? ` All ${options.agreeing} agents agree.`
+      : ''
+  return `Recommended: ${plan}${via}.${agree} You pick who executes.`
 }
 
 const UNANSWERED_REASON: Readonly<Record<string, string>> = {

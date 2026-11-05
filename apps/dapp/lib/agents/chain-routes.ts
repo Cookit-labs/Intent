@@ -14,6 +14,13 @@ export interface ChainRouteQuote {
   apyPercent?: number
   valueInUsd?: number
   valueOutUsd?: number
+  /** An agent proposed resting instead of this fill: the limit venue and the price it waits at. */
+  rest?: {
+    venueId: string
+    venueName: string
+    priceUsd: number
+    cost?: { amount: string; symbol: string }
+  }
 }
 
 /**

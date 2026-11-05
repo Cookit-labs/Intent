@@ -7,11 +7,13 @@ import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 import type { CompetitionState } from '../../lib/agents/competition'
 import {
   panelErrorMessage,
+  chainRecommendationLine,
   recommendationLine,
   singleRouteNote,
   unansweredLine,
 } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
+import { restAlternativeLine } from '../../lib/agents/rest-option'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
 
@@ -156,6 +158,10 @@ export function CompetitionPanel({
   // No card for one, but a line says who left, so a short race doesn't look like the whole field.
   const unanswered = unansweredLine(
     agents.map((a) => ({ name: a.name, failed: proposals[a.key]?.failed }))
+  )
+
+  const restAlternative = restAlternativeLine(
+    Object.values(proposals).filter((p) => p.failed === undefined)
   )
 
   const routeNote =
@@ -343,10 +349,20 @@ export function CompetitionPanel({
               is none — the route's real output decides, and a tie is broken
               by a draw the agents cannot influence. A supply or a stake is
               ranked on its rate instead, and the line says that rate. */}
-          {unanimous
-            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
-            : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
+          {chainName !== undefined
+            ? chainRecommendationLine(proposals[winner] ?? {}, {
+                agreeing: unanimous
+                  ? Object.values(proposals).filter((p) => p.failed === undefined).length
+                  : 0,
+              })
+            : unanimous
+              ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+              : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
         </motion.div>
+      ) : null}
+
+      {decided && chainName !== undefined && restAlternative !== undefined ? (
+        <div className={systemPill}>{restAlternative}</div>
       ) : null}
 
       {decided && unanswered !== undefined ? <div className={systemPill}>{unanswered}</div> : null}

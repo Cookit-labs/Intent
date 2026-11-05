@@ -73,7 +73,7 @@ export function tieBreak(competitionId: string, agent: string): number {
 
 export function scoreProposals(
   proposals: AgentProposalResult[],
-  options: { competitionId: string; plan?: PlanContext }
+  options: { competitionId: string; plan?: PlanContext; restsBelowFills?: boolean }
 ): ScoredProposal[] {
   if (proposals.length === 0) return []
 
@@ -89,6 +89,12 @@ export function scoreProposals(
       // Nothing to sign is disqualifying, whatever the numbers say. A losing
       // real route beats a winning opinion.
       if (a.executable !== b.executable) return a.executable ? -1 : 1
+      // A rest has no measured fill to be best at, so it never takes the lead from one that has.
+      if (options.restsBelowFills === true) {
+        const aRests = a.proposal.executionMode === 'rest'
+        const bRests = b.proposal.executionMode === 'rest'
+        if (aRests !== bRests) return aRests ? 1 : -1
+      }
       if (b.score !== a.score) return b.score - a.score
       return tieBreak(options.competitionId, a.agent) - tieBreak(options.competitionId, b.agent)
     })

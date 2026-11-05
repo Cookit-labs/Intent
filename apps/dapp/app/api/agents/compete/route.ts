@@ -21,6 +21,8 @@ import {
   assertKnownTokens,
   assertNativeReserve,
 } from '../../../../lib/chains/prepare'
+import { limitPair } from '../../../../lib/chains/limit'
+import { restOption, restRoute } from '../../../../lib/agents/rest-option'
 import { chainModule } from '../../../../lib/chains/registry'
 import {
   ChainActionRefused,
@@ -170,8 +172,18 @@ async function chainRaceFacts(
   // The chain's market already leaves out Stellar's assets, prices, lending
   // rates and anchors; see `buildMarketContext`.
   const base = await buildMarketContextAsync(chain)
+  const pair = action.kind === 'swap' ? limitPair(action.tokenIn, action.tokenOut ?? '') : undefined
+  const baseToken = chainApi.tokens.find((t) => t.symbol.toUpperCase() === pair?.base)
+  const marketUsd =
+    pair === undefined || baseToken === undefined
+      ? undefined
+      : pair.selling
+        ? price
+        : await chainApi.priceUsd(baseToken).catch(() => undefined)
+  const rest = marketUsd === undefined ? undefined : restOption(chainApi, action, marketUsd)
   const market: MarketContext = {
     ...base,
+    ...(rest !== undefined ? { rest } : {}),
     prices: price !== undefined && tokenIn !== undefined ? { [tokenIn.symbol]: price } : {},
     venues: chainApi.venues
       .filter((v) => routes.some((r) => r.id === `${v.id}-1`))
@@ -536,7 +548,7 @@ export async function POST(request: Request): Promise<Response> {
             const proposal = measured(
               chainFacts === undefined
                 ? settlePlan(outcome.proposal, intent, book)
-                : settleChainPlan(outcome.proposal),
+                : settleChainPlan(outcome.proposal, own !== undefined ? market.rest : undefined),
               own?.quote as SwapQuote | ChainRouteQuote | undefined,
               market.prices
             )
@@ -557,7 +569,20 @@ export async function POST(request: Request): Promise<Response> {
               type: 'competition:proposal',
               competitionId,
               proposal,
-              ...(own !== undefined ? { route: own.quote } : {}),
+              ...(own !== undefined
+                ? {
+                    route:
+                      proposal.executionMode === 'rest' &&
+                      market.rest !== undefined &&
+                      proposal.restPriceUsd !== undefined
+                        ? restRoute(
+                            own.quote as ChainRouteQuote,
+                            market.rest,
+                            proposal.restPriceUsd
+                          )
+                        : own.quote,
+                  }
+                : {}),
             })
             return proposal
           } finally {
@@ -624,7 +649,11 @@ export async function POST(request: Request): Promise<Response> {
         ...(unmeasuredRoutes.length > 0 ? { unmeasuredRoutes } : {}),
       }
 
-      const scored = scoreProposals(proposals, { competitionId, plan })
+      const scored = scoreProposals(proposals, {
+        competitionId,
+        plan,
+        ...(chainFacts !== undefined ? { restsBelowFills: true } : {}),
+      })
       const winner = pickWinner(scored)
       let unanimous: boolean | null = null
 
