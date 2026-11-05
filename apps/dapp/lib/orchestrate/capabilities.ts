@@ -43,12 +43,20 @@ const NATIVE_NOT_SENT: Record<string, string> = {
   near: "Native NEAR can't be sent yet; USDC and the listed tokens can.",
 }
 
-const OWN_TOKEN: Record<string, string> = {
+export const OWN_TOKEN: Record<string, string> = {
   solana: 'SOL',
   sui: 'SUI',
   near: 'NEAR',
   avalanche: 'AVAX',
   monad: 'MON',
+}
+
+/** Solana, Sui and NEAR list every token a wallet holds. Avalanche and Monad can only read the ones Intent knows. */
+function balanceLine(chain: string): string {
+  const readsAll = chain === 'solana' || chain === 'sui' || chain === 'near'
+  return readsAll
+    ? 'Balance: ask what you hold and the wallet is listed token by token, every token it holds.'
+    : 'Balance: ask what you hold and the wallet is listed token by token, the tokens Intent knows on this chain.'
 }
 
 const NOTHING_RUNS = 'Nothing can be swapped, supplied or staked on this chain right now.'
@@ -118,9 +126,6 @@ export function capabilitySheet(chain: string): string {
       lines.push('Cash out and deposit after a swap do not run on Monad.')
     }
   }
-  lines.push(
-    'Limit orders are not available off Stellar.',
-    'Balance: ask what you hold and the wallet is listed token by token, every token it holds, with those Intent cannot trade marked unlisted.'
-  )
+  lines.push('Limit orders are not available off Stellar.', balanceLine(chain))
   return bullets(lines)
 }

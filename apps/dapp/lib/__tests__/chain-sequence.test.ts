@@ -667,3 +667,67 @@ describe('the output token of a model reading', () => {
     ).toHaveProperty('refusal')
   })
 })
+
+describe('the order of a swap in the persons words', () => {
+  const swap = (tokenIn: string, tokenOut: string, amountUsd = 5) =>
+    reading({ tokenIn, tokenOut, amountUsd })
+
+  it('refuses a reversed swap, though each word is there', () => {
+    expect(swapFromReading(swap('JitoSOL', 'SOL'), ['swap 5 SOL to JitoSOL'])).toHaveProperty(
+      'refusal'
+    )
+  })
+
+  it('passes the same order, with the amount either side of the token', () => {
+    expect(swapFromReading(swap('SOL', 'JitoSOL'), ['swap 5 SOL to JitoSOL'])).toMatchObject({
+      tokenIn: 'SOL',
+      tokenOut: 'JitoSOL',
+    })
+    expect(swapFromReading(swap('SOL', 'USDC'), ['swap SOL 5 to USDC'])).toMatchObject({
+      tokenIn: 'SOL',
+    })
+    expect(swapFromReading(swap('SOL', 'USDC'), ['swap 5 of my sol to usdc'])).toMatchObject({
+      tokenIn: 'SOL',
+    })
+  })
+
+  it('refuses an amount that sits beside the other token', () => {
+    expect(swapFromReading(swap('SOL', 'USDC'), ['swap SOL to 5 USDC'])).toHaveProperty('refusal')
+  })
+
+  it('reads across clarified turns in order', () => {
+    expect(swapFromReading(swap('SOL', 'USDC'), ['swap some sol', '5', 'to usdc'])).toMatchObject({
+      tokenIn: 'SOL',
+      tokenOut: 'USDC',
+    })
+    expect(swapFromReading(swap('USDC', 'SOL'), ['swap some sol', '5', 'to usdc'])).toHaveProperty(
+      'refusal'
+    )
+  })
+
+  it('applies to a sequence, and a cash-out with no output named only needs the amount by the token', () => {
+    const send = { kind: 'send', venue: '', recipient: ADDRESS }
+    expect(
+      sequenceFromReading(reading({ tokenIn: 'USDC', tokenOut: 'SOL', followOn: send }), [
+        `swap 5 SOL to USDC then send to ${ADDRESS}`,
+      ])
+    ).toHaveProperty('refusal')
+    expect(
+      sequenceFromReading(reading({ followOn: { kind: 'offramp', venue: 'weave' } }), [
+        'cash out 5 SOL',
+      ])
+    ).toMatchObject({ followOn: { kind: 'cashout' } })
+  })
+})
+
+describe('a venue the model adds to a plain action', () => {
+  const read = { ...reading(), action: 'supply' }
+  it('is dropped unless the person said it, keeping the action', () => {
+    expect(
+      chainRouteFromReading(read, 'supply 25 USDC on Kamino', ['supply 25 USDC'])
+    ).toMatchObject({ action: { kind: 'supply', amount: '25', venue: undefined } })
+    expect(
+      chainRouteFromReading(read, 'supply 25 USDC on Kamino', ['supply 25 USDC on kamino'])
+    ).toMatchObject({ action: { venue: 'Kamino' } })
+  })
+})

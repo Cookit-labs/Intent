@@ -143,7 +143,8 @@ describe('capabilitySheet multi-step forms', () => {
     const sheet = await sheetWith('k')
     for (const chain of ['solana', 'sui', 'near', 'avalanche', 'monad']) {
       expect(sheet(chain)).toContain('Limit orders are not available off Stellar')
-      expect(sheet(chain)).toMatch(/Balance:.*every token/)
+      expect(sheet(chain)).toMatch(/Balance:/)
+      expect(sheet(chain)).not.toContain('unlisted')
     }
   }, 60_000)
 
@@ -192,4 +193,42 @@ describe('the orchestrator prompt', () => {
     expect(system).toMatch(/character for character/)
     expect(system).toMatch(/Swap 5 SOL to USDC, then send to/)
   })
+})
+
+describe('balances are described as each chain reads them', () => {
+  it('says every token where the chain reads every token, and the known ones elsewhere', async () => {
+    vi.resetModules()
+    vi.stubEnv('AUTH_SECRET', 'x'.repeat(48))
+    const { capabilitySheet: sheet } = await import('../orchestrate/capabilities')
+    for (const chain of ['solana', 'sui', 'near']) {
+      expect(sheet(chain)).toMatch(/Balance:.*every token it holds/)
+    }
+    for (const chain of ['avalanche', 'monad']) {
+      expect(sheet(chain)).toMatch(/Balance:.*the tokens Intent knows/)
+      expect(sheet(chain)).not.toContain('every token')
+    }
+    vi.unstubAllEnvs()
+  }, 60_000)
+})
+
+describe('the prompt off Stellar', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it.each(['solana', 'sui', 'near', 'avalanche', 'monad'])(
+    'says nothing of Stellar things on %s, except what is not available',
+    async (chain) => {
+      let system = ''
+      const fetchImpl = (async (_url: string, init: { body: string }) => {
+        system = (JSON.parse(init.body) as { messages: { content: string }[] }).messages[0]
+          ?.content as string
+        return new Response('{}', { status: 200 })
+      }) as unknown as typeof fetch
+      await orchestrateWithLlm([{ role: 'user', content: 'hi' }], { apiKey: 'k', chain, fetchImpl })
+      const said = system
+        .replace('Limit orders are not available off Stellar.', '')
+        .replace('The person is on the chain named in the facts below, not on Stellar.', '')
+      expect(said).not.toMatch(/(xlm|lumens?|stellar|blend|defindex|anchors?)/i)
+      expect(said).not.toContain('.xlm')
+    }
+  )
 })

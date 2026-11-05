@@ -1,7 +1,7 @@
 import { parseCashout } from '../weave/parse-cashout'
 import { AMOUNT, amountOf, chainTokenWord, parseChainAction } from './parse-action'
 import type { ChainSequenceRequest, FollowOn } from './sequence'
-import { sequenceWordsMatch, tokenSaid } from './sequence-flow'
+import { sequenceWordsMatch, swapOrderSaid } from './sequence-flow'
 import type { ChainActionRequest } from './types'
 
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
@@ -162,11 +162,18 @@ export function requestSaid(
 ): boolean {
   if (!sequenceWordsMatch({ amount: request.amount, token: request.tokenIn }, said)) return false
   const out = request.tokenOut
-  const outSaid =
+  // Named in order: the amount by the token given up, and the token received after it. A cash-out
+  // takes USDC, so with one following, a swap that names no output is to USDC.
+  const named = out !== undefined && swapOrderSaid(request.amount, request.tokenIn, out, said)
+  const implied =
     out === undefined ||
-    tokenSaid(out, said, true) ||
-    (usdcImplied && chainTokenWord(out).toUpperCase() === 'USDC')
-  if (!outSaid) return false
+    (usdcImplied &&
+      chainTokenWord(out).toUpperCase() === 'USDC' &&
+      swapOrderSaid(request.amount, request.tokenIn, undefined, said))
+  if (out !== undefined && !named && !implied) return false
+  if (out === undefined && !swapOrderSaid(request.amount, request.tokenIn, undefined, said)) {
+    return false
+  }
   return request.recipient === undefined || typedExactly(request.recipient, said)
 }
 
@@ -258,8 +265,13 @@ export function chainRouteFromReading(
   }
   const action = parseChainAction(instruction)
   if (action !== null) {
-    return requestSaid(action, said)
-      ? { action }
+    // A venue the model added is dropped, and the action kept, unless the person named it.
+    const own =
+      action.venue !== undefined && !venueSaid(action.venue, said)
+        ? { ...action, venue: undefined }
+        : action
+    return requestSaid(own, said)
+      ? { action: own }
       : refuseUnsaid(
           {
             ...read,

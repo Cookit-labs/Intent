@@ -741,6 +741,43 @@ export function tokenSaid(token: string, turns: readonly string[], destination =
 }
 
 /**
+ * Whether the amount sits next to the token given up ("5 SOL" or "SOL 5", "5 of my SOL"), and, when
+ * a token received is given, that token is named after it. Read over all the person's turns in
+ * order, joined, so "swap some sol", "5", "to usdc" is one swap. The reverse of a swap is not it.
+ */
+export function swapOrderSaid(
+  amount: string,
+  tokenIn: string,
+  tokenOut: string | undefined,
+  turns: readonly string[]
+): boolean {
+  const symbol = chainTokenWord(tokenIn)
+  const { token } = tokenPattern(symbol)
+  const joined = spacedTurns(symbol, turns).join(' ')
+  const number = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)(?![\w%]|[.,]\d)`
+  const before = new RegExp(
+    String.raw`(?:^|[^\w.,$₦£€])${number}\s*(?:of\s+)?(?:my\s+|the\s+)?(?:${token})${WORD_END}`,
+    'gi'
+  )
+  const after = new RegExp(
+    String.raw`(?:^|[^A-Za-z0-9.+])(?:${token})${WORD_END}[\s:=x]*${number}`,
+    'gi'
+  )
+  const wanted = canonicalNumber(amount)
+  const ends: number[] = []
+  for (const match of joined.matchAll(before)) {
+    if (canonicalNumber(match[1] as string) === wanted)
+      ends.push((match.index ?? 0) + match[0].length)
+  }
+  for (const match of joined.matchAll(after)) {
+    if (canonicalNumber(match[1] as string) === wanted)
+      ends.push((match.index ?? 0) + match[0].length)
+  }
+  if (tokenOut === undefined) return ends.length > 0
+  return ends.some((end) => tokenSaid(tokenOut, [joined.slice(end)], true))
+}
+
+/**
  * The answer to "which currency?" when it was typed as a cash-out, "cash out to KES", while a swap
  * waits on the question. Nothing for a request with its own amount, which is a new request.
  */

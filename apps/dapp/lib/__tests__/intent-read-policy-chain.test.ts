@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { chainReadPolicy } from '../intent-read-policy'
+import { chainReadPolicy, tokenHintIn } from '../intent-read-policy'
 import { readingFromArguments } from '../parse-intent-llm'
 
 const args = (over: Record<string, unknown> = {}) => ({
@@ -59,5 +59,18 @@ describe('chainReadPolicy', () => {
   it('offers deposit venues from the module and no Stellar ones', () => {
     expect(chainReadPolicy('solana')?.venues.length).toBeGreaterThan(0)
     expect(chainReadPolicy('solana')?.venues).not.toContain('blend')
+  })
+})
+
+describe('tokenHintIn', () => {
+  it('answers with the chains hint for a symbol the person wrote', () => {
+    expect(tokenHintIn('monad', 'swap 5 usdt to mon')).toContain('USDT0')
+    expect(tokenHintIn('monad', 'swap 5 USDT0 to mon')).toBeUndefined()
+  })
+
+  it('has nothing on Stellar, on a chain with no hint, or for a longer word', () => {
+    expect(tokenHintIn('stellar', 'swap 5 usdt to xlm')).toBeUndefined()
+    expect(tokenHintIn('solana', 'swap 5 usdt to sol')).toBeUndefined()
+    expect(tokenHintIn('monad', 'swap 5 usdtx to mon')).toBeUndefined()
   })
 })

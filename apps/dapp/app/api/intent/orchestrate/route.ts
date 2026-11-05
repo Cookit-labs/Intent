@@ -4,6 +4,7 @@ import { z } from 'zod'
 import {
   LENDABLE_ONLY,
   chainReadPolicy,
+  tokenHintIn,
   OFFRAMP_ANCHORS,
   lendingVenuesOn,
   unknownTickers,
@@ -106,6 +107,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (result === null) {
     // A ticker typed in capitals that nothing here recognises is most likely
     // the reason. Saying so lets the chat ask which token was meant.
+    const hint = onChain === undefined ? undefined : tokenHintIn(chain, latest)
+    if (hint !== undefined) {
+      await logIntentRead({ understood: false, reason: 'unclear' })
+      return NextResponse.json({ outcome: 'unclear', reply: hint })
+    }
     const unknown = onChain === undefined ? unknownTickers(latest) : []
     if (unknown.length > 0) {
       await logIntentRead({ understood: false, reason: 'unknown_token' })

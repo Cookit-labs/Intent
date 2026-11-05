@@ -97,3 +97,15 @@ export function chainReadPolicy(
   const venues = found.venues.filter((v) => v.kinds.includes('supply')).map((v) => v.id)
   return { symbols: [...new Set(symbols)], venues }
 }
+
+/**
+ * The chain's sentence for a token the person wrote that it spells another way, such as USDT for
+ * Monad's USDT0, or nothing. For a message that could not be read, so they are told why.
+ */
+export function tokenHintIn(chain: string, text: string): string | undefined {
+  const hints = chainModule(chain)?.tokenHints
+  if (hints === undefined) return undefined
+  const words = new Set(text.toUpperCase().match(/[A-Z0-9]+/g) ?? [])
+  const symbol = Object.keys(hints).find((key) => words.has(key.toUpperCase()))
+  return symbol === undefined ? undefined : hints[symbol]
+}
