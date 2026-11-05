@@ -26,6 +26,7 @@ import {
   readAccount,
   readOnlyRpc,
   readStakePool,
+  stakedPositions,
   stakedTokenOrRefuse,
   withdrawSol,
   withdrawSolRule,
@@ -205,6 +206,8 @@ export function createJitoVenue(options: JitoOptions = {}): ChainVenue {
     kinds: ['stake', 'unstake'],
     assertCanFollow: takesOnly('Jito', ['SOL']),
     quote,
+    positions: (account) =>
+      stakedPositions(rpc, account, JITOSOL_MINT, 'JitoSOL', JITOSOL_DECIMALS),
     prepare: (request, account) =>
       request.kind === 'unstake'
         ? prepareUnstake(request, account)

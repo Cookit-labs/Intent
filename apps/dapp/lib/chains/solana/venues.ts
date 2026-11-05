@@ -1,6 +1,7 @@
 import type { Venue } from '@intent/types'
 
 import { jitoListing } from './jito-listing'
+import { kaminoLendListing } from './kamino-lend-listing'
 import { marinadeListing } from './marinade-listing'
 import { solayerListing } from './solayer-listing'
 import { streamflowVenue } from './streamflow-listing'
@@ -43,7 +44,7 @@ export const solanaVenues: Venue[] = [
     url: 'https://jup.ag/lend',
     integration: 'executes',
     capability:
-      'Deposits USDC or USDT and shows the current rate. Jupiter labels the API beta. Withdrawing isn’t wired here yet.',
+      'Deposits USDC or USDT and shows the current rate. Withdraws them too, built from the chain with no company server. Jupiter labels its deposit API beta.',
   },
   {
     id: 'kamino',
@@ -55,7 +56,7 @@ export const solanaVenues: Venue[] = [
     url: 'https://kamino.com',
     integration: 'executes',
     capability:
-      'Deposits USDC into Kamino’s largest USDC vault by deposits, and names it before you sign. Withdrawing isn’t wired here yet.',
+      'Deposits USDC into Kamino’s largest USDC vault by deposits, and names it before you sign. Withdraws through Kamino’s API, which this exit depends on.',
   },
   {
     id: 'onre',
@@ -159,6 +160,7 @@ export const solanaVenues: Venue[] = [
     bestFor: 'Oracle-priced perpetuals against a pool. Leverage can lose your whole position',
     url: 'https://jup.ag/perps',
   },
+  kaminoLendListing,
   jitoListing,
   marinadeListing,
   solayerListing,

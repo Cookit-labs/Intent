@@ -670,6 +670,7 @@ describe('module', () => {
       '1click-solana',
       'jupiter-lend',
       'kamino',
+      'kamino-lend',
       'jito',
       'marinade',
       'solayer',
@@ -683,6 +684,7 @@ describe('module', () => {
       'jupiter',
       'jupiter-lend',
       'kamino',
+      'kamino-lend',
       'jito',
       'marinade',
       'solayer',
@@ -736,8 +738,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(19)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(19)
+    expect(solanaVenues).toHaveLength(20)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(20)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])
@@ -771,10 +773,11 @@ describe('venues page', () => {
 })
 
 describe('capabilities', () => {
-  it('has one entry per wired kind, and each example parses and resolves', async () => {
+  it('names every wired kind, and each example parses and resolves', async () => {
     const kinds = solanaCapabilities.map((c) => c.kind)
-    expect(new Set(kinds)).toEqual(new Set(['swap', 'supply', 'stake', 'unstake']))
-    expect(kinds).toHaveLength(4)
+    expect(new Set(kinds)).toEqual(
+      new Set(['swap', 'supply', 'withdraw', 'borrow', 'repay', 'stake', 'unstake', 'claim'])
+    )
     const swap = solanaCapabilities.find((c) => c.kind === 'swap')!
     expect(parseChainAction(`swap 10 USDC to ${swap.symbol}`)).toMatchObject({
       kind: 'swap',

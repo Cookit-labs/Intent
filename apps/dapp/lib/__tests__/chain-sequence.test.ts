@@ -191,7 +191,8 @@ describe('routeCashout with an amount', () => {
       token: 'SOL',
     })
     expect(routeCashout({ unsupportedToken: 'SOL', amount: '0.5' }, 'monad')).toEqual({
-      kind: 'pass',
+      kind: 'token',
+      token: 'SOL',
     })
   })
 
@@ -203,7 +204,7 @@ describe('routeCashout with an amount', () => {
   it('says on NEAR only what is true there', () => {
     const reply = unsupportedTokenReply('SOL', 'near')
     expect(reply).toMatch(/NEAR/)
-    expect(reply).not.toMatch(/then cash out/i)
+    expect(reply).not.toMatch(/Swap your SOL/i)
     expect(unsupportedTokenReply('SOL', 'solana')).toMatch(/Swap your SOL to USDC first/)
   })
 })
@@ -250,10 +251,10 @@ describe('followOnRefusal', () => {
 
   it('names why a cash-out cannot run', () => {
     expect(followOnRefusal('near', 'NEAR', { kind: 'cashout' }, swapVenue)).toMatch(
-      /Weave.*NEAR deposits.*unavailable/
+      /don't run from NEAR.*Weave can't open an order/
     )
     expect(followOnRefusal('monad', 'Monad', { kind: 'cashout' }, swapVenue)).toMatch(
-      /don't run on Monad/
+      /don't run from Monad.*Weave doesn't list Monad/
     )
     expect(followOnRefusal('solana', 'Solana', { kind: 'cashout' }, swapVenue)).toBeUndefined()
   })

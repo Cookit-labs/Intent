@@ -18,6 +18,7 @@ const OTHER_LST = '0x460c669acd3f294dc4247a6877ec2532340ffde76162ab201e72fe95355
 const mocks = vi.hoisted(() => ({
   simulate: vi.fn(),
   getObjects: vi.fn(),
+  getBalance: vi.fn(),
   built: [] as Transaction[],
   bytes: '',
 }))
@@ -25,7 +26,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../chains/sui/client', async (original) => ({
   ...(await original<typeof import('../chains/sui/client')>()),
   suiClient: () => ({
-    core: { simulateTransaction: mocks.simulate, getObjects: mocks.getObjects },
+    core: {
+      simulateTransaction: mocks.simulate,
+      getObjects: mocks.getObjects,
+      getBalance: mocks.getBalance,
+    },
   }),
   buildUnsigned: async (tx: Transaction) => {
     mocks.built.push(tx)
@@ -241,6 +246,56 @@ describe('building a SpringSui unstake', () => {
     await expect(
       springsuiVenue.prepare({ kind: 'unstake', amount: '2', tokenIn: 'sSUI' }, ME)
     ).rejects.toThrow(/fee/)
+  })
+})
+
+describe('what SpringSui positions report', () => {
+  beforeEach(() => {
+    mocks.getBalance.mockReset()
+  })
+
+  it('counts sSUI in the wallet as staked, to the last unit', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: { balance: '1234567891' } })
+    expect(await springsuiVenue.positions?.(ME)).toEqual([
+      { slot: 'staked', symbol: 'sSUI', amount: '1.234567891' },
+    ])
+    expect(mocks.getBalance).toHaveBeenCalledWith({ owner: ME, coinType: SSUI_TYPE })
+  })
+
+  it('reads a real zero as nothing there', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: { balance: '0' } })
+    expect(await springsuiVenue.positions?.(ME)).toEqual([])
+  })
+
+  it('throws when it can not read, never an empty list', async () => {
+    mocks.getBalance.mockRejectedValue(new Error('rpc down'))
+    await expect(springsuiVenue.positions?.(ME)).rejects.toThrow('rpc down')
+  })
+
+  it('throws on a balance that is no number', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: {} })
+    await expect(springsuiVenue.positions?.(ME)).rejects.toThrow(/unreadable/)
+  })
+
+  it('throws on a malformed account', async () => {
+    await expect(springsuiVenue.positions?.('nope')).rejects.toThrow(ChainActionRefused)
+  })
+
+  it('empties the whole position to the last unit', async () => {
+    mocks.bytes = await built(goodRedeem)
+    mocks.simulate.mockResolvedValue({
+      Transaction: { balanceChanges: [] },
+      commandResults: [{ returnValues: [{ bcs: u64Coin('2075784416') }] }],
+    })
+    await springsuiVenue.prepare(
+      { kind: 'unstake', amount: '1.234567891', wholePosition: true, tokenIn: 'sSUI' },
+      ME
+    )
+    const coin = mocks.built[0]?.getData().commands[0]
+    expect(coin?.$kind).toBe('$Intent')
+    expect(coin?.$kind === '$Intent' ? coin.$Intent.data['balance'] : undefined).toBe(
+      BigInt('1234567891')
+    )
   })
 })
 

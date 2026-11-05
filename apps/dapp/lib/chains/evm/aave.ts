@@ -1,9 +1,11 @@
 import {
+  decodeAbiParameters,
   encodeFunctionData,
   formatUnits,
   isAddress,
   maxUint256,
   parseAbi,
+  toFunctionSelector,
   zeroAddress,
   type Address,
   type Hex,
@@ -19,6 +21,7 @@ import {
   type ChainToken,
   type ChainVenue,
   type PreparedAction,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
 import {
@@ -48,6 +51,11 @@ const SECONDS_PER_YEAR = 31_536_000
 const RAY = 1e27
 /** Oracle prices are USD with eight decimals. BASE_CURRENCY_UNIT reads 1e8 on all three markets. */
 const ORACLE_UNIT = 1e8
+/**
+ * What a whole repay names over the debt, for interest that adds before it lands. A hundredth of a
+ * percent is about 17 hours at 5% a year. `repayBuild` says why this isn't the max-uint form.
+ */
+const REPAY_MARGIN_DIVISOR = BigInt(10_000)
 
 const POOL_ABI = parseAbi([
   'function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)',
@@ -159,7 +167,8 @@ function checkPoolCall(market: AaveMarket, call: DecodedCall, context: CheckCont
   if (token === undefined) {
     refuse(`This uses a token I haven't confirmed for ${market.name}.`)
   }
-  if (amount === BigInt(0) || amount === maxUint256) {
+  // Max-uint on a withdraw is the Pool's own "all of mine", and it pays only `to`, checked below.
+  if (amount === BigInt(0) || (amount === maxUint256 && functionName !== 'withdraw')) {
     refuse('This transaction’s amount is not one the person asked for.')
   }
 
@@ -218,7 +227,7 @@ export function aavePolicy(market: AaveMarket): EvmCallPolicy {
   }
 }
 
-async function readReserve(market: AaveMarket, token: ChainToken, reader: EvmReaderClient) {
+export async function readReserve(market: AaveMarket, token: ChainToken, reader: EvmReaderClient) {
   const contract = { address: market.dataProvider as Address, abi: DATA_PROVIDER_ABI }
   const args = [token.id as Address] as const
   const [config, data, paused, caps] = await Promise.all([
@@ -268,7 +277,11 @@ function assertTakesAny(market: AaveMarket, token: ChainToken, reserve: Reserve)
   const { name, chain } = market
   const where = `${name} on ${EVM_CHAINS[chain].name}`
   if (!reserve.active) refuse(`${where} isn't open for ${token.symbol} right now.`)
-  if (reserve.paused) refuse(`${where} has paused ${token.symbol} right now.`)
+  if (reserve.paused) {
+    refuse(
+      `${where} has paused ${token.symbol} right now. Nothing can go in or come out until it reopens, and what you hold there stays yours.`
+    )
+  }
 }
 
 function assertOpenForNew(market: AaveMarket, token: ChainToken, reserve: Reserve): void {
@@ -423,14 +436,22 @@ async function borrowNotes(
   ]
 }
 
-async function withdrawNotes(
+/** What the card says, what the call names, and the figure shown. */
+interface ExitBuild {
+  notes: string[]
+  callAmount: bigint
+  shown: string
+}
+
+async function withdrawBuild(
   market: AaveMarket,
   token: ChainToken,
   reserve: Reserve,
+  request: ChainActionRequest,
   amount: bigint,
   account: Address,
   reader: EvmReaderClient
-): Promise<string[]> {
+): Promise<ExitBuild> {
   assertTakesAny(market, token, reserve)
   const [supplied, , , , , , , , usedAsCollateral] = await reader.readContract({
     address: market.dataProvider as Address,
@@ -438,21 +459,32 @@ async function withdrawNotes(
     functionName: 'getUserReserveData',
     args: [token.id as Address, account],
   })
-  if (amount > supplied) {
+  const whole = request.wholePosition === true
+  if (whole && supplied === BigInt(0)) {
+    refuse(`You have no ${token.symbol} supplied to ${market.name} here.`)
+  }
+  if (!whole && amount > supplied) {
     refuse(
       `You have ${display(supplied, token)} ${token.symbol} supplied to ${market.name} here, which is less than this.`
     )
   }
-  if (amount > reserve.free) {
+  const taken = whole ? supplied : amount
+  if (taken > reserve.free) {
     refuse(
-      `Only about ${display(reserve.free, token)} ${token.symbol} is free on ${market.name} right now, since the rest is lent out. It frees up as borrowers repay.`
+      `Only about ${display(reserve.free, token)} ${token.symbol} is free on ${market.name} right now, since the rest is lent out. You can take that much now, and more frees up as borrowers repay.`
     )
   }
   const position = await readAccount(market, account, reader)
   const notes = [
-    `You have about ${display(supplied, token)} ${token.symbol} supplied here. Interest keeps adding to it, so a small remainder can stay after this.`,
+    whole
+      ? `This takes all of your ${token.symbol} here, with the interest earned up to the moment it lands, so nothing stays behind.`
+      : `You have about ${display(supplied, token)} ${token.symbol} supplied here. Interest keeps adding to it, so a small remainder can stay after this.`,
   ]
-  if (position.debt === BigInt(0) || !usedAsCollateral) return notes
+  const call = {
+    callAmount: whole ? maxUint256 : amount,
+    shown: whole ? display(supplied, token) : request.amount,
+  }
+  if (position.debt === BigInt(0) || !usedAsCollateral) return { notes, ...call }
 
   const eMode = await reader.readContract({
     address: market.pool as Address,
@@ -465,19 +497,22 @@ async function withdrawNotes(
       `Your account is in E-Mode with a loan open, and I can't check what this withdraw would do to it. Repay the loan first.`
     )
   }
-  const value = await valueOf(market, token, amount, reader)
+  const value = await valueOf(market, token, taken, reader)
   const held = position.collateral * position.threshold
   const removed = value * reserve.threshold
   const health = held > removed ? (held - removed) / position.debt : BigInt(0)
   if (health < MIN_HEALTH_BPS) {
     refuse(
-      `This withdraw would leave your health factor at ${healthText(health)}. This app stops at ${MIN_HEALTH_FACTOR}, to keep room before liquidation. Repay some of the loan first, or withdraw less.`
+      `This ${token.symbol} backs your loan on ${market.name}, and taking it out would leave your health factor at ${healthText(health)}. This app stops at ${MIN_HEALTH_FACTOR}, to keep room before liquidation. Repay some of the loan first, or withdraw less.`
     )
   }
-  return [
-    ...notes,
-    `This supply backs your loan, so taking it out leaves your health factor at ${healthText(health)}.`,
-  ]
+  return {
+    notes: [
+      ...notes,
+      `This supply backs your loan, so taking it out leaves your health factor at ${healthText(health)}.`,
+    ],
+    ...call,
+  }
 }
 
 async function assertHolds(
@@ -499,14 +534,22 @@ async function assertHolds(
   }
 }
 
-async function repayNotes(
+/**
+ * A whole repay names a number just over the debt, not max-uint. The Pool takes the lesser of what
+ * is named and what is owed, so nothing past the debt moves, and the approval still equals the
+ * amount, so `checkPoolCall` allows nothing new. Max-uint would need an allowance covering the debt
+ * as it stands when this lands, and `call.ts` rightly refuses an unlimited one, so interest passing
+ * an exact approval would revert it. Interest passing this number only leaves a remainder.
+ */
+async function repayBuild(
   market: AaveMarket,
   token: ChainToken,
   reserve: Reserve,
+  request: ChainActionRequest,
   amount: bigint,
   account: Address,
   reader: EvmReaderClient
-): Promise<string[]> {
+): Promise<ExitBuild> {
   assertTakesAny(market, token, reserve)
   const [, , owed] = await reader.readContract({
     address: market.dataProvider as Address,
@@ -517,14 +560,99 @@ async function repayNotes(
   if (owed === BigInt(0)) {
     refuse(`You don't owe any ${token.symbol} on ${market.name} here.`)
   }
+  if (request.wholePosition === true) {
+    const callAmount = owed + owed / REPAY_MARGIN_DIVISOR + BigInt(1)
+    await assertHolds(token, owed, account, reader)
+    return {
+      callAmount,
+      shown: display(owed, token),
+      notes: [
+        `This pays off your whole ${token.symbol} loan, about ${display(owed, token)}. Interest keeps adding until it lands, so this allows up to ${display(callAmount, token)}. Only what you owe is taken, and the rest stays in your wallet. An approval for the rest stays until it is used or replaced.`,
+        `Your wallet needs a little more than the loan, since it grows until this lands. If it grew past ${display(callAmount, token)} first, that much is paid and a small remainder stays owing.`,
+      ],
+    }
+  }
   await assertHolds(token, amount < owed ? amount : owed, account, reader)
   const owes = `You owe about ${display(owed, token)} ${token.symbol}. Interest keeps adding, so paying that exact amount can leave a small remainder.`
-  return amount > owed
-    ? [
-        owes,
-        'Only what you owe is taken, and the rest stays in your wallet. An approval for the rest stays until it is used or replaced.',
-      ]
-    : [owes]
+  return {
+    callAmount: amount,
+    shown: request.amount,
+    notes:
+      amount > owed
+        ? [
+            owes,
+            'Only what you owe is taken, and the rest stays in your wallet. An approval for the rest stays until it is used or replaced.',
+          ]
+        : [owes],
+  }
+}
+
+/** Aave V3's errors, then the numbered strings of the older code Neverland runs. */
+const REVERT_REASONS: Record<string, 'zero-ltv' | 'health' | 'paused'> = {
+  [toFunctionSelector('LtvValidationFailed()')]: 'zero-ltv',
+  [toFunctionSelector('HealthFactorLowerThanLiquidationThreshold()')]: 'health',
+  [toFunctionSelector('ReservePaused()')]: 'paused',
+  '57': 'zero-ltv',
+  '35': 'health',
+  '29': 'paused',
+}
+const ERROR_STRING = '0x08c379a0'
+
+function revertData(error: unknown): string | undefined {
+  let current: unknown = error
+  while (typeof current === 'object' && current !== null) {
+    const { data, cause } = current as { data?: unknown; cause?: unknown }
+    if (typeof data === 'string') return data
+    current = cause
+  }
+  return undefined
+}
+
+function revertReason(data: string | undefined) {
+  if (data === undefined) return undefined
+  if (!data.startsWith(ERROR_STRING)) return REVERT_REASONS[data.slice(0, 10)]
+  try {
+    const [code] = decodeAbiParameters([{ type: 'string' }], `0x${data.slice(10)}`)
+    return REVERT_REASONS[code]
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Words for an exit the Pool turned down, asked again only once it has. The chain's reason is the
+ * one thing that names a hold from another token: USDC and USDT count for nothing toward a loan on
+ * Aave's Avalanche market, and such collateral has to come out before any other can.
+ */
+async function refuseFailedExit(
+  market: AaveMarket,
+  token: ChainToken,
+  data: Hex,
+  account: Address,
+  reader: EvmReaderClient
+): Promise<never> {
+  let reason: ReturnType<typeof revertReason>
+  try {
+    await reader.call({ account, to: market.pool as Address, data })
+  } catch (error) {
+    reason = revertReason(revertData(error))
+  }
+  if (reason === 'zero-ltv') {
+    refuse(
+      `You have a loan on ${market.name}, and part of your collateral is in a token it doesn't count toward loans right now. ${market.name} makes you withdraw that token first, or repay the loan, before ${token.symbol} can come out.`
+    )
+  }
+  if (reason === 'health') {
+    refuse(
+      `${market.name} won't release this, because your loan needs it as collateral. Repay some of the loan first, or withdraw less.`
+    )
+  }
+  if (reason === 'paused') {
+    refuse(`${market.name} has paused ${token.symbol} right now, so this can't go through yet.`)
+  }
+  return refuse(
+    `This would fail on the chain right now, and ${market.name} didn't say why in a way I can read. What you hold there hasn't changed. Check you have enough for the network fee, or try a smaller amount.`
+  )
 }
 
 function supplyNotes(market: AaveMarket, token: ChainToken, reserve: Reserve): string[] {
@@ -544,6 +672,13 @@ const SUMMARY: Record<
   withdraw: (amount, symbol, where) => `Withdraw ${amount} ${symbol} from ${where}.`,
   borrow: (amount, symbol, where) => `Borrow ${amount} ${symbol} from ${where} at a variable rate.`,
   repay: (amount, symbol, where) => `Repay ${amount} ${symbol} of your loan on ${where}.`,
+}
+
+const WHOLE_SUMMARY: Record<'withdraw' | 'repay', (typeof SUMMARY)['repay']> = {
+  withdraw: (amount, symbol, where) =>
+    `Withdraw all of your ${symbol}, about ${amount}, from ${where}.`,
+  repay: (amount, symbol, where) =>
+    `Repay all of your ${symbol} loan, about ${amount}, on ${where}.`,
 }
 
 /** A market's token price in dollars, from the oracle its Pool uses. Any doubt is no price. */
@@ -602,43 +737,91 @@ export function createAaveVenue(
       const reserve = await readReserve(market, token, reader)
 
       let notes: string[]
+      let callAmount = amount
+      let shown = request.amount
       if (kind === 'supply') {
         assertSupplyOpen(market, token, reserve, amount)
         await assertHolds(token, amount, person, reader)
         notes = supplyNotes(market, token, reserve)
-      } else if (kind === 'withdraw') {
-        notes = await withdrawNotes(market, token, reserve, amount, person, reader)
       } else if (kind === 'borrow') {
         notes = await borrowNotes(market, token, reserve, amount, person, reader)
       } else {
-        notes = await repayNotes(market, token, reserve, amount, person, reader)
+        const build = kind === 'withdraw' ? withdrawBuild : repayBuild
+        ;({ notes, callAmount, shown } = await build(
+          market,
+          token,
+          reserve,
+          request,
+          amount,
+          person,
+          reader
+        ))
       }
 
       const pullsToken = kind === 'supply' || kind === 'repay'
+      const data = poolCalldata(kind, token.id as Address, callAmount, person)
       const { signing, needsApproval } = await buildEvmCall(
         {
           chain: market.chain,
           account,
           to: market.pool,
-          data: poolCalldata(kind, token.id as Address, amount, person),
-          ...(pullsToken ? { pull: { token: token.id, spender: market.pool, units: amount } } : {}),
+          data,
+          ...(pullsToken
+            ? { pull: { token: token.id, spender: market.pool, units: callAmount } }
+            : {}),
         },
         reader
-      )
+      ).catch((error: unknown) => {
+        if (error instanceof ChainActionRefused && (kind === 'withdraw' || kind === 'repay')) {
+          return refuseFailedExit(market, token, data, person, reader)
+        }
+        throw error
+      })
+      const whole = request.wholePosition === true && (kind === 'withdraw' || kind === 'repay')
+      const summary = whole ? WHOLE_SUMMARY[kind] : SUMMARY[kind]
       return {
         venueId: market.id,
         venueName: market.name,
         kind,
-        summary: SUMMARY[kind](request.amount, token.symbol, `${market.name} on ${chainName}`),
-        pay: { amount: request.amount, symbol: token.symbol },
+        summary: summary(shown, token.symbol, `${market.name} on ${chainName}`),
+        pay: { amount: shown, symbol: token.symbol },
         ...(kind === 'supply' ? { apy: { basePercent: ratePercent(reserve.liquidityRate) } } : {}),
         notes: [
           ...notes,
-          ...(needsApproval ? [approvalNote(market.name, request.amount, token.symbol)] : []),
+          ...(needsApproval
+            ? [approvalNote(market.name, display(callAmount, token), token.symbol)]
+            : []),
           ...market.riskNotes,
         ],
         signing,
       }
+    })
+  }
+
+  /** One multicall, so every figure is from the same block. A failed read throws. */
+  async function positions(account: string): Promise<VenuePosition[]> {
+    if (!isAddress(account, { strict: false }) || sameAddress(account, zeroAddress)) {
+      refuse('That is not a wallet address on this chain.')
+    }
+    const rows = await readerNow().multicall({
+      allowFailure: false,
+      contracts: market.tokens.map((token) => ({
+        address: market.dataProvider as Address,
+        abi: DATA_PROVIDER_ABI,
+        functionName: 'getUserReserveData' as const,
+        args: [token.id as Address, account as Address] as const,
+      })),
+    })
+    return market.tokens.flatMap((token, index): VenuePosition[] => {
+      const [supplied, , owed] = rows[index] as readonly bigint[] as [bigint, bigint, bigint]
+      return [
+        ...(supplied > BigInt(0)
+          ? [{ slot: 'supplied' as const, symbol: token.symbol, amount: display(supplied, token) }]
+          : []),
+        ...(owed > BigInt(0)
+          ? [{ slot: 'borrowed' as const, symbol: token.symbol, amount: display(owed, token) }]
+          : []),
+      ]
     })
   }
 
@@ -652,6 +835,7 @@ export function createAaveVenue(
     ),
     quote,
     prepare,
+    positions,
     ...evmCallVenueParts(policy, client),
   }
 }

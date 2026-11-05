@@ -38,10 +38,14 @@ export interface BorrowState {
   xdr?: string
   /** Ticker, for display. */
   asset?: string
-  /** Base units, or the sentinel when repaying everything. */
+  /** Base units. On a repayment of everything, a little over what is owed: the pool refunds it. */
   amount?: string
-  /** True when a repayment clears the whole liability. */
+  /** True when a repayment clears the whole liability, by the pool's own simulation. */
   everything?: boolean
+  /** What is owed now, in base units, when repaying. */
+  owed?: string
+  /** What a repayment leaves owing, in base units. */
+  remaining?: string
   hash?: string
   explorerUrl?: string
   error?: string
@@ -56,9 +60,9 @@ export interface BorrowState {
 }
 
 export interface BorrowRequest {
-  /** The reserve's asset, as a contract id. */
-  assetId: string
-  /** Ticker, for display only. */
+  /** The reserve's asset, as a contract id. A repayment may name a ticker instead. */
+  assetId?: string
+  /** Ticker. Decides the asset only when a repayment gives no contract id. */
   symbol: string
   /** Base units. Required to borrow; omit to repay everything. */
   amount?: string
@@ -97,7 +101,9 @@ export function useBorrow(): Borrow {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               account: signer,
-              asset: request.assetId,
+              ...(request.assetId !== undefined
+                ? { asset: request.assetId }
+                : { symbol: request.symbol }),
               ...(request.amount !== undefined ? { amount: request.amount } : {}),
             }),
           })
@@ -105,6 +111,9 @@ export function useBorrow(): Borrow {
             xdr?: string
             amount?: string
             everything?: boolean
+            owed?: string
+            remaining?: string
+            symbol?: string
             error?: string
             transient?: boolean
           }
@@ -123,9 +132,11 @@ export function useBorrow(): Borrow {
             phase: 'review',
             direction,
             xdr: built.xdr,
-            asset: request.symbol,
+            asset: built.symbol ?? request.symbol,
             ...(built.amount !== undefined ? { amount: built.amount } : {}),
             ...(built.everything !== undefined ? { everything: built.everything } : {}),
+            ...(built.owed !== undefined ? { owed: built.owed } : {}),
+            ...(built.remaining !== undefined ? { remaining: built.remaining } : {}),
           })
         } catch {
           setState({ phase: 'failed', direction, error: 'Could not reach the network.' })

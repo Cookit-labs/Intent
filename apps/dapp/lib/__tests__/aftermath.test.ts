@@ -1,6 +1,6 @@
 import { bcs } from '@mysten/sui/bcs'
 import { Inputs, Transaction } from '@mysten/sui/transactions'
-import { toBase64 } from '@mysten/sui/utils'
+import { deriveDynamicFieldID, toBase64 } from '@mysten/sui/utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -11,6 +11,7 @@ import {
   AFTERMATH_TOKENS,
   AFTERMATH_VALIDATOR,
   AFTERMATH_VAULT,
+  AFTERMATH_VAULT_STATE,
   aftermathVenue,
 } from '../chains/sui/aftermath'
 import { ChainActionRefused } from '../chains/types'
@@ -23,6 +24,7 @@ const DIGEST = '11111111111111111111111111111111'
 const mocks = vi.hoisted(() => ({
   simulate: vi.fn(),
   getObjects: vi.fn(),
+  getBalance: vi.fn(),
   systemState: vi.fn(),
   built: [] as Transaction[],
   bytes: '',
@@ -34,6 +36,7 @@ vi.mock('../chains/sui/client', async (original) => ({
     core: {
       simulateTransaction: mocks.simulate,
       getObjects: mocks.getObjects,
+      getBalance: mocks.getBalance,
       getCurrentSystemState: mocks.systemState,
     },
   }),
@@ -352,6 +355,171 @@ describe('building an Aftermath unstake', () => {
     await expect(
       aftermathVenue.prepare({ kind: 'unstake', amount: '2', tokenIn: 'afSUI' }, ME)
     ).rejects.toThrow(/epoch/)
+  })
+
+  it('empties the whole position to the last unit', async () => {
+    mocks.bytes = await built(goodUnstake)
+    answers('2000000000')
+    await aftermathVenue.prepare(
+      { kind: 'unstake', amount: '1.234567891', wholePosition: true, tokenIn: 'afSUI' },
+      ME
+    )
+    const coin = mocks.built[0]?.getData().commands[0]
+    expect(coin?.$kind).toBe('$Intent')
+    expect(coin?.$kind === '$Intent' ? coin.$Intent.data['balance'] : undefined).toBe(
+      BigInt('1234567891')
+    )
+  })
+
+  it('says how out of a position too small to unstake', async () => {
+    answers('999999999')
+    await expect(
+      aftermathVenue.prepare({ kind: 'unstake', amount: '0.9', tokenIn: 'afSUI' }, ME)
+    ).rejects.toThrow(/swap 0.9 afSUI to SUI.*Nothing was signed or sent/)
+  })
+
+  it('says plainly there is nothing to claim', async () => {
+    mocks.bytes = await built(goodUnstake)
+    answers('2000000000')
+    const { notes } = await aftermathVenue.prepare(
+      { kind: 'unstake', amount: '2', tokenIn: 'afSUI' },
+      ME
+    )
+    expect(notes.join(' ')).toMatch(/You sign nothing more, and there is nothing to claim/)
+    expect(notes.join(' ')).toMatch(/15 hours/)
+  })
+})
+
+describe('what Aftermath positions report', () => {
+  /** The real table, and the key a real request was stored at: see aftermath.live.test.ts. */
+  const TABLE = '0xac7ab1a584cf8e19b633d1c868b914080275ea87853eb716a949c778b75f00d9'
+  const SLOT_0 = '0x421de7c0d9405782fe95ff04911ffd1678ca82f84d75c54fc8bdc5eda19d10da'
+
+  function vaultWith(records: unknown[], overrides: Record<string, unknown> = {}): void {
+    const state = {
+      ...STATE,
+      active_epoch: '1302',
+      pending_unstake_records: { contents: { id: TABLE, size: String(records.length) } },
+      ...overrides,
+    }
+    mocks.getObjects.mockImplementation(async ({ objectIds }: { objectIds: string[] }) =>
+      objectIds[0] === AFTERMATH_VAULT_STATE
+        ? { objects: [{ json: state }] }
+        : {
+            objects: objectIds.map((id) => {
+              const index = Array.from({ length: records.length }, (_, i) =>
+                deriveDynamicFieldID(TABLE, 'u64', bcs.u64().serialize(i).toBytes())
+              ).indexOf(id)
+              return records[index]
+            }),
+          }
+    )
+  }
+
+  const record = (requester: string | null, amount: string) => ({
+    json: { value: { requester, afsui_amount: amount, afsui_id: FOREIGN } },
+  })
+
+  beforeEach(() => {
+    mocks.getBalance.mockReset()
+    mocks.getBalance.mockResolvedValue({ balance: { balance: '0' } })
+    mocks.systemState.mockResolvedValue({
+      systemState: {
+        epoch: '1302',
+        epochStartTimestampMs: String(Date.now() - 20 * 3_600_000),
+        parameters: { epochDurationMs: '86400000' },
+      },
+    })
+    vaultWith([])
+  })
+
+  it('reads an empty wallet with nothing waiting as empty', async () => {
+    expect(await aftermathVenue.positions?.(ME)).toEqual([])
+  })
+
+  it('counts afSUI in the wallet as staked, to the last unit', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: { balance: '1234567891' } })
+    expect(await aftermathVenue.positions?.(ME)).toEqual([
+      { slot: 'staked', symbol: 'afSUI', amount: '1.234567891' },
+    ])
+    expect(mocks.getBalance).toHaveBeenCalledWith({ owner: ME, coinType: AFSUI_TYPE })
+  })
+
+  it('looks where the contract stores a request', async () => {
+    vaultWith([record(ME, '2000000000')])
+    await aftermathVenue.positions?.(ME)
+    expect(mocks.getObjects).toHaveBeenCalledWith(expect.objectContaining({ objectIds: [SLOT_0] }))
+  })
+
+  it('adds up what this account is waiting for, and nobody else’s', async () => {
+    vaultWith([
+      record(ME, '2000000000'),
+      record(THIEF, '9000000000'),
+      record(null, '7000000000'),
+      record(ME, '500000000'),
+    ])
+    expect(await aftermathVenue.positions?.(ME)).toEqual([
+      { slot: 'cooling', symbol: 'afSUI', amount: '2.5', readyInHours: 4 },
+    ])
+  })
+
+  it('shows both when some is in the wallet and some on its way', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: { balance: '1000000000' } })
+    vaultWith([record(ME, '2000000000')])
+    expect((await aftermathVenue.positions?.(ME))?.map((p) => p.slot)).toEqual([
+      'staked',
+      'cooling',
+    ])
+  })
+
+  it('shows one hour once the chain has moved past the vault, since it is due', async () => {
+    vaultWith([record(ME, '2000000000')], { active_epoch: '1301' })
+    const found = await aftermathVenue.positions?.(ME)
+    expect(found?.[0]?.readyInHours).toBe(1)
+  })
+
+  it('throws when the balance can not be read', async () => {
+    mocks.getBalance.mockRejectedValue(new Error('rpc down'))
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow('rpc down')
+  })
+
+  it('throws on a balance that is no number', async () => {
+    mocks.getBalance.mockResolvedValue({ balance: { balance: 'x' } })
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow(/unreadable/)
+  })
+
+  it('throws when the vault can not be read', async () => {
+    mocks.getObjects.mockResolvedValue({ objects: [new Error('gone')] })
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow(/unreadable/)
+  })
+
+  it('throws when a waiting request can not be read', async () => {
+    vaultWith([new Error('gone')])
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow('gone')
+  })
+
+  it.each([
+    ['no amount', { json: { value: { requester: ME } } }],
+    ['no requester field', { json: { value: { afsui_amount: '1' } } }],
+    ['no fields', { json: null }],
+  ])('throws on a waiting request with %s', async (_name, broken) => {
+    vaultWith([broken])
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow(/unreadable/)
+  })
+
+  it('throws rather than read part of a list too long to read', async () => {
+    vaultWith([], { pending_unstake_records: { contents: { id: TABLE, size: '501' } } })
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow(/Too many/)
+  })
+
+  it('throws when the epoch can not be read and a figure depends on it', async () => {
+    vaultWith([record(ME, '2000000000')])
+    mocks.systemState.mockRejectedValue(new Error('rpc down'))
+    await expect(aftermathVenue.positions?.(ME)).rejects.toThrow('rpc down')
+  })
+
+  it('throws on a malformed account', async () => {
+    await expect(aftermathVenue.positions?.('nope')).rejects.toThrow(ChainActionRefused)
   })
 })
 

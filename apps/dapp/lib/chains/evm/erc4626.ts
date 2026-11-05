@@ -1,4 +1,12 @@
-import { encodeFunctionData, erc20Abi, formatUnits, isAddress, parseAbi, type Address } from 'viem'
+import {
+  encodeFunctionData,
+  erc20Abi,
+  formatUnits,
+  isAddress,
+  maxUint256,
+  parseAbi,
+  type Address,
+} from 'viem'
 
 import {
   ChainActionRefused,
@@ -11,6 +19,7 @@ import {
   type ChainToken,
   type ChainVenue,
   type PreparedAction,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
 import {
@@ -55,6 +64,10 @@ export interface VaultVenueConfig {
   assertAsReviewed: (reader: EvmReaderClient) => Promise<void>
   /** How much more it will take, where it can say. Morpho's `maxDeposit` always answers zero. */
   readRoom?: ((reader: EvmReaderClient, account: Address) => Promise<bigint>) | undefined
+  /** Why this account can't leave right now, in plain words, where the vault can bar an exit. */
+  readExitBlock?:
+    | ((reader: EvmReaderClient, account: Address) => Promise<string | undefined>)
+    | undefined
 }
 
 export interface VaultVenueDeps {
@@ -65,6 +78,7 @@ export interface VaultVenueDeps {
 const VAULT_CALLS = parseAbi([
   'function deposit(uint256 assets, address receiver) returns (uint256 shares)',
   'function withdraw(uint256 assets, address receiver, address owner) returns (uint256 shares)',
+  'function redeem(uint256 shares, address receiver, address owner) returns (uint256 assets)',
 ])
 
 const VAULT_READS = parseAbi([
@@ -99,10 +113,13 @@ function checkVaultCall(vault: ReviewedVault, call: DecodedCall, context: CheckC
     if (approval.units !== assets) refuse("This approval doesn't match the amount.")
     return
   }
-  const [assets, receiver, owner] = call.args as readonly [bigint, string, string]
+  // A withdraw names assets and a redeem names shares. Both name who is paid and whose position it is.
+  const [amount, receiver, owner] = call.args as readonly [bigint, string, string]
   if (!sameAddress(receiver, account)) refuse('This withdrawal pays someone else.')
   if (!sameAddress(owner, account)) refuse("This withdrawal takes from someone else's position.")
-  if (assets <= BigInt(0)) refuse('This withdrawal is for nothing.')
+  if (amount <= BigInt(0)) refuse('This withdrawal is for nothing.')
+  // Euler reads max-uint as a whole balance, and nothing here builds it: a redeem names the shares.
+  if (amount === maxUint256) refuse('This withdrawal doesn’t name an amount.')
   if (approval !== undefined) refuse('A withdrawal needs no approval.')
 }
 
@@ -117,7 +134,7 @@ export function vaultPolicy(
     contracts: {
       [vault.address]: {
         abi: VAULT_CALLS,
-        functions: ['deposit', 'withdraw'],
+        functions: ['deposit', 'withdraw', 'redeem'],
         check: (call, context) => checkVaultCall(vault, call, context),
       },
     },
@@ -281,24 +298,22 @@ export function createVaultVenue(config: VaultVenueConfig, deps: VaultVenueDeps 
   ): Promise<PreparedAction> {
     const reader = readerNow()
     const { units, owner } = checkedRequest(request, account)
-    const position = await mustRead(async () => {
-      const shares = await readBalance(reader, vault.address, owner)
-      return reader.readContract({
-        address: vault.address as Address,
-        abi: VAULT_READS,
-        functionName: 'convertToAssets',
-        args: [shares],
-      })
-    })
+    const whole = request.wholePosition === true
+    const { shares, position } = await mustRead(() => readPosition(reader, owner))
     if (position === BigInt(0)) refuse(`You have no ${asset.symbol} in ${vault.name}.`)
-    if (position < units) {
+    if (!whole && position < units) {
       refuse(
         `You have about ${formatUnits(position, asset.decimals)} ${asset.symbol} in ${vault.name}, which is less than ${request.amount}.`
       )
     }
-    // A way out must not depend on this reading: if it fails, trying the call below still decides.
-    const free = await config.readLiquidity(reader).catch(() => undefined)
-    if (free !== undefined && free < units) {
+    const taken = whole ? position : units
+    // A way out must not depend on these readings: if one fails, trying the call below still decides.
+    const [free, barred] = await Promise.all([
+      config.readLiquidity(reader).catch(() => undefined),
+      config.readExitBlock?.(reader, owner).catch(() => undefined),
+    ])
+    if (barred !== undefined) refuse(`${barred} Your position is still there.`)
+    if (free !== undefined && free < taken) {
       refuse(
         `${vault.name} can pay out about ${roughly(free, asset.decimals)} ${asset.symbol} right now, because the rest is lent out. Your position is still there. Try a smaller amount, or try again later.`
       )
@@ -308,23 +323,70 @@ export function createVaultVenue(config: VaultVenueConfig, deps: VaultVenueDeps 
         chain,
         account: owner,
         to: vault.address,
-        data: encodeFunctionData({
-          abi: VAULT_CALLS,
-          functionName: 'withdraw',
-          args: [units, owner, owner],
-        }),
+        // Shares don't accrue, so redeeming all of them leaves nothing, whatever interest has added.
+        data: whole
+          ? encodeFunctionData({
+              abi: VAULT_CALLS,
+              functionName: 'redeem',
+              args: [shares, owner, owner],
+            })
+          : encodeFunctionData({
+              abi: VAULT_CALLS,
+              functionName: 'withdraw',
+              args: [units, owner, owner],
+            }),
       },
       reader
-    )
+    ).catch((error: unknown) => {
+      if (!(error instanceof ChainActionRefused)) throw error
+      return refuse(
+        `This would fail on the chain right now: ${vault.name} wouldn't pay this out. Your position is still there. If you borrowed against it in ${name}'s own app, repay that first. Otherwise try a smaller amount, or try again later, and check you have enough for the network fee.`
+      )
+    })
+    const shown = whole ? formatUnits(position, asset.decimals) : request.amount
     return {
       venueId: id,
       venueName: name,
       kind: 'withdraw',
-      summary: `Withdraw ${request.amount} ${asset.symbol} from ${vault.name} on ${name}, back to your own wallet.`,
-      pay: { amount: request.amount, symbol: asset.symbol },
-      notes: ['Whatever you leave in the vault keeps earning, with the same risks as before.'],
+      summary: whole
+        ? `Withdraw all of your ${asset.symbol}, about ${shown}, from ${vault.name} on ${name}, back to your own wallet.`
+        : `Withdraw ${request.amount} ${asset.symbol} from ${vault.name} on ${name}, back to your own wallet.`,
+      pay: { amount: shown, symbol: asset.symbol },
+      ...(whole ? { receive: { amount: shown, symbol: asset.symbol, approximate: true } } : {}),
+      notes: [
+        whole
+          ? `This cashes in every share you hold, so nothing stays in the vault. What you get is what those shares are worth when this lands.`
+          : 'Whatever you leave in the vault keeps earning, with the same risks as before.',
+      ],
       signing,
     }
+  }
+
+  async function readPosition(reader: EvmReaderClient, owner: string) {
+    const shares = await readBalance(reader, vault.address, owner)
+    if (shares === BigInt(0)) return { shares, position: BigInt(0) }
+    const position = await reader.readContract({
+      address: vault.address as Address,
+      abi: VAULT_READS,
+      functionName: 'convertToAssets',
+      args: [shares],
+    })
+    return { shares, position }
+  }
+
+  /** A failed read throws, since empty would say the money isn't here. */
+  async function positions(account: string): Promise<VenuePosition[]> {
+    if (!isAddress(account)) refuse(`That is not ${withArticle(chainName)} account.`)
+    const { position } = await readPosition(readerNow(), account)
+    return position === BigInt(0)
+      ? []
+      : [
+          {
+            slot: 'supplied',
+            symbol: asset.symbol,
+            amount: formatUnits(position, asset.decimals),
+          },
+        ]
   }
 
   const followsAs = takesOnly(name, [asset.symbol])
@@ -333,6 +395,7 @@ export function createVaultVenue(config: VaultVenueConfig, deps: VaultVenueDeps 
     id,
     name,
     kinds: ['supply', 'withdraw'],
+    positions,
     assertCanFollow: async (step, account) => {
       if (step.kind !== 'supply') refuse(`${name} can only supply after a swap.`)
       await followsAs(step, account)

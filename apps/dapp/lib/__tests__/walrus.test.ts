@@ -6,14 +6,20 @@ import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress, toBase64 } from '@mysten/sui/utils'
 import { describe, expect, it, vi } from 'vitest'
 
+import { parseChainAction } from '../chains/parse-action'
+import { prepareChainAction } from '../chains/prepare'
 import {
   assertWalrusSafe,
   createWalrusVenue,
+  MAX_POSITIONS_PER_TRANSACTION,
   phaseOf,
   pickNode,
+  planClaim,
   planUnstake,
+  planWholeUnstake,
   STAKED_WAL_TYPE,
   stakingStateFrom,
+  venuePositionsFrom,
   WAL_TYPE,
   WALRUS_ORIGINAL_PACKAGE,
   WALRUS_PACKAGE,
@@ -26,8 +32,14 @@ import {
   type WalrusDeps,
 } from '../chains/sui/walrus'
 import { walrusListing } from '../chains/sui/walrus-listing'
-import { ChainActionRefused, type ChainActionRequest } from '../chains/types'
+import {
+  ChainActionRefused,
+  type ChainActionRequest,
+  type ChainModule,
+  type ChainVenue,
+} from '../chains/types'
 
+const ID_A = normalizeSuiAddress('0x51')
 const ME = '0x00000000000000000000000000000000000000000000000000000000000000a1'
 const THIEF = '0x000000000000000000000000000000000000000000000000000000000000dead'
 const FOREIGN = '0x00000000000000000000000000000000000000000000000000000000000bad01'
@@ -797,7 +809,7 @@ describe('unstaking', () => {
     expect(prepared.summary).toContain('epoch 44, about 17 Nov 2026')
     const text = prepared.notes.join(' ')
     expect(text).toContain("can't be cancelled")
-    expect(text).toContain('ask to unstake 10 WAL again')
+    expect(text).toContain('say "claim my WAL"')
     expect(() => venue.assertSafe(prepared.signing, ME)).not.toThrow()
   })
 
@@ -865,6 +877,485 @@ describe('unstaking', () => {
     const { venue, build } = venueOver({ owned: [object] })
     await expect(venue.prepare(unstake('1'), ME)).rejects.toThrow(/couldn't read/)
     expect(build).not.toHaveBeenCalled()
+  })
+})
+
+const objectId = (n: number) => normalizeSuiAddress(`0x${(n + 0x100).toString(16)}`)
+const EPOCH_44 = 1742914804744 + 43 * 1_209_600_000
+const paysBack = (amount: string) => ({
+  Transaction: { balanceChanges: [{ coinType: WAL_TYPE, address: ME, amount }] },
+})
+
+function recipients(tx: Transaction): string[] {
+  const data = tx.getData()
+  return data.commands.flatMap((c) => {
+    if (c.$kind !== 'TransferObjects') return []
+    const address = c.TransferObjects.address
+    const input = address.$kind === 'Input' ? data.inputs[address.Input] : undefined
+    if (input?.$kind !== 'Pure') return ['unreadable']
+    const bytes = Uint8Array.from(Buffer.from(input.Pure.bytes, 'base64'))
+    return [normalizeSuiAddress(bcs.Address.parse(bytes))]
+  })
+}
+
+function collectedObjects(tx: Transaction): string[] {
+  const data = tx.getData()
+  return data.commands.flatMap((c) => {
+    if (c.$kind !== 'MoveCall' || c.MoveCall.function !== 'withdraw_stake') return []
+    const argument = c.MoveCall.arguments[1]
+    const input = argument?.$kind === 'Input' ? data.inputs[argument.Input] : undefined
+    return input?.$kind === 'Object' && input.Object.$kind === 'ImmOrOwnedObject'
+      ? [input.Object.ImmOrOwnedObject.objectId]
+      : ['not a whole position']
+  })
+}
+
+describe('what positions report', () => {
+  const held = (overrides: Partial<Position>) => position(overrides)
+
+  it('reads nothing as empty', () => {
+    expect(venuePositionsFrom([], STATE)).toEqual([])
+  })
+
+  it('adds several stakes into one figure, to the last unit', () => {
+    const found = venuePositionsFrom(
+      [
+        held({ objectId: '0x1', principal: BigInt('1234567891') }),
+        held({ objectId: '0x2', principal: BigInt('2000000000') }),
+      ],
+      STATE
+    )
+    expect(found).toEqual([{ slot: 'staked', symbol: 'WAL', amount: '3.234567891' }])
+  })
+
+  it('tells staked, ready and waiting apart by the state on chain', () => {
+    const found = venuePositionsFrom(
+      [
+        held({ objectId: '0x1', principal: BigInt(10) * WAL }),
+        held({ objectId: '0x2', principal: BigInt(3) * WAL, withdrawEpoch: 42 }),
+        held({ objectId: '0x3', principal: BigInt(4) * WAL, withdrawEpoch: 43 }),
+        held({ objectId: '0x4', principal: BigInt(5) * WAL, withdrawEpoch: 44 }),
+        held({ objectId: '0x5', principal: BigInt(6) * WAL, withdrawEpoch: 45 }),
+      ],
+      STATE,
+      EPOCH_44 - 5 * 3_600_000
+    )
+    expect(found).toEqual([
+      { slot: 'staked', symbol: 'WAL', amount: '10' },
+      { slot: 'claimable', symbol: 'WAL', amount: '7' },
+      { slot: 'cooling', symbol: 'WAL', amount: '5', readyInHours: 5 },
+      { slot: 'cooling', symbol: 'WAL', amount: '6', readyInHours: 5 + 14 * 24 },
+    ])
+  })
+
+  it.each<[string, Partial<Position>]>([
+    ['a stake not yet earning', { activationEpoch: 44 }],
+    ['a stake with a node that has left', { nodeId: normalizeSuiAddress(GONE) }],
+  ])('counts %s as staked: nobody asked to end it', (_name, overrides) => {
+    expect(phaseOf(position(overrides), STATE).name).toBe('ready')
+    expect(venuePositionsFrom([position(overrides)], STATE)).toEqual([
+      { slot: 'staked', symbol: 'WAL', amount: '10' },
+    ])
+  })
+
+  it('never says under an hour for an epoch running late', () => {
+    const found = venuePositionsFrom([position({ withdrawEpoch: 44 })], STATE, EPOCH_44 + 1000)
+    expect(found[0]?.readyInHours).toBe(1)
+  })
+
+  it('reads the wallet through the venue', async () => {
+    const { venue } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(10) * WAL, STAKED),
+        ownedObject(objectId(2), BigInt(3) * WAL, withdrawing(43)),
+      ],
+    })
+    expect(await venue.positions?.(ME)).toEqual([
+      { slot: 'staked', symbol: 'WAL', amount: '10' },
+      { slot: 'claimable', symbol: 'WAL', amount: '3' },
+    ])
+  })
+
+  it('throws when the wallet can not be read, never an empty list', async () => {
+    const { venue, core } = venueOver()
+    core.listOwnedObjects.mockRejectedValue(new Error('rpc down'))
+    await expect(venue.positions?.(ME)).rejects.toThrow('rpc down')
+  })
+
+  it('throws when the epoch can not be read', async () => {
+    const { venue, core } = venueOver()
+    core.getObject.mockRejectedValue(new Error('rpc down'))
+    await expect(venue.positions?.(ME)).rejects.toThrow('rpc down')
+  })
+
+  it('throws on a position it does not understand', async () => {
+    const { venue } = venueOver({ owned: [ownedObject(ID_A, WAL, { '@variant': 'Slashed' })] })
+    await expect(venue.positions?.(ME)).rejects.toThrow(/couldn't read/)
+  })
+
+  it('throws on a list it could not finish', async () => {
+    const { venue, core } = venueOver()
+    core.listOwnedObjects.mockResolvedValue({
+      objects: [ownedObject(ID_A, WAL, STAKED)],
+      hasNextPage: true,
+      cursor: 'next',
+    } as never)
+    await expect(venue.positions?.(ME)).rejects.toThrow(/more staked WAL positions/)
+  })
+
+  it('throws on a malformed account', async () => {
+    const { venue } = venueOver()
+    await expect(venue.positions?.('nope')).rejects.toThrow(ChainActionRefused)
+  })
+})
+
+describe('claiming', () => {
+  const claim = (tokenIn = 'WAL', amount = 'all'): ChainActionRequest => ({
+    kind: 'claim',
+    amount,
+    tokenIn,
+  })
+  const ready = (id: string, wal: number) =>
+    position({ objectId: id, principal: BigInt(wal) * WAL, withdrawEpoch: 43 })
+  const waiting = (id: string, wal: number, epoch = 44) =>
+    position({ objectId: id, principal: BigInt(wal) * WAL, withdrawEpoch: epoch })
+
+  it('the venue says it can', () => {
+    expect(venueOver().venue.kinds).toContain('claim')
+  })
+
+  it('collects every finished withdrawal, whole, and pays only the person', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(5) * WAL, withdrawing(43)),
+        ownedObject(objectId(2), BigInt(7) * WAL, withdrawing(40)),
+      ],
+      simulated: paysBack('12300000000'),
+    })
+    const prepared = await venue.prepare(claim(), ME)
+    const tx = txs[0] as Transaction
+    expect(calls(tx)).toEqual(['staking::withdraw_stake', 'staking::withdraw_stake'])
+    expect(collectedObjects(tx).sort()).toEqual([objectId(1), objectId(2)])
+    expect(recipients(tx)).toEqual([normalizeSuiAddress(ME)])
+    expect(prepared).toMatchObject({
+      kind: 'claim',
+      pay: { amount: '12', symbol: 'WAL' },
+      receive: { amount: '12.3', symbol: 'WAL', approximate: true },
+    })
+    expect(() => venue.assertSafe(prepared.signing, ME)).not.toThrow()
+    expect(() => venue.assertSafe(prepared.signing, THIEF)).toThrow(ChainActionRefused)
+  })
+
+  it('leaves alone a stake that could leave in one step, which nobody asked to end', async () => {
+    const fresh = ownedObject(objectId(1), BigInt(9) * WAL, STAKED, NODE_A, 44)
+    const { venue, built: txs } = venueOver({
+      owned: [fresh, ownedObject(objectId(2), BigInt(2) * WAL, withdrawing(43))],
+      simulated: paysBack('2000000000'),
+    })
+    await venue.prepare(claim(), ME)
+    expect(collectedObjects(txs[0] as Transaction)).toEqual([objectId(2)])
+  })
+
+  it('refuses a fresh stake alone, rather than undo it', async () => {
+    const { venue, build } = venueOver({
+      owned: [ownedObject(objectId(1), BigInt(9) * WAL, STAKED, NODE_A, 44)],
+    })
+    await expect(venue.prepare(claim(), ME)).rejects.toThrow(/still staked.*unstake all WAL/)
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('says what else is still on its way', async () => {
+    const { venue } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(2) * WAL, withdrawing(43)),
+        ownedObject(objectId(2), BigInt(8) * WAL, withdrawing(44)),
+      ],
+      simulated: paysBack('2000000000'),
+    })
+    const { notes } = await venue.prepare(claim(), ME)
+    expect(notes.join(' ')).toMatch(/Another 8 WAL is on its way out/)
+  })
+
+  it('refuses with the time left when nothing is ready', () => {
+    const in3Days = EPOCH_44 - 3 * 86_400_000
+    expect(() => planClaim([waiting('0x1', 10)], STATE, in3Days)).toThrow(
+      /Your 10 WAL on its way out is ready in about 3 days, at epoch 44, about 17 Nov 2026.*Nothing was signed or sent/
+    )
+    expect(() => planClaim([waiting('0x1', 10)], STATE, EPOCH_44 - 5 * 3_600_000)).toThrow(
+      /in about 5 hours/
+    )
+    expect(() => planClaim([waiting('0x1', 10)], STATE, EPOCH_44 - 3_600_000)).toThrow(
+      /in about 1 hour,/
+    )
+  })
+
+  it('names the soonest when withdrawals finish at different times', () => {
+    expect(() =>
+      planClaim([waiting('0x1', 10, 45), waiting('0x2', 4, 44)], STATE, EPOCH_44 - 86_400_000)
+    ).toThrow(/You have 14 WAL on its way out, and the first 4 WAL is ready in about 24 hours/)
+  })
+
+  it('refuses plainly when there is nothing at all, and does not build', async () => {
+    const { venue, build } = venueOver()
+    await expect(venue.prepare(claim(), ME)).rejects.toThrow(
+      /nothing to collect from Walrus.*Nothing was signed or sent/
+    )
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('takes the largest first when one transaction cannot hold them all, and says so', async () => {
+    const many = Array.from({ length: MAX_POSITIONS_PER_TRANSACTION + 2 }, (_, i) =>
+      ownedObject(objectId(i), BigInt(i + 1) * WAL, withdrawing(43))
+    )
+    const { venue } = venueOver({ owned: many, simulated: paysBack('1000000000') })
+    const { notes, pay } = await venue.prepare(claim(), ME)
+    const text = notes.join(' ')
+    expect(text).toContain(
+      `covers ${MAX_POSITIONS_PER_TRANSACTION} of your ${MAX_POSITIONS_PER_TRANSACTION + 2} Walrus positions`
+    )
+    expect(text).toContain('The other 3 WAL is still waiting to be collected')
+    expect(Number(pay.amount)).toBeGreaterThan(3)
+    const plan = planClaim([ready('0x1', 1), ready('0x2', 9), ready('0x3', 4)], STATE)
+    expect(plan.pieces.map((p) => p.position.objectId)).toEqual(['0x2', '0x3', '0x1'])
+    expect(plan.pieces.every((p) => p.split === undefined)).toBe(true)
+  })
+
+  it('refuses when a dry run confirms nothing', async () => {
+    const { venue } = venueOver({
+      owned: [ownedObject(objectId(1), WAL, withdrawing(43))],
+      simulated: { FailedTransaction: {} },
+    })
+    await expect(venue.prepare(claim(), ME)).rejects.toThrow(/couldn't confirm how much WAL/)
+  })
+
+  it('refuses a set amount, since it takes everything ready', async () => {
+    const { venue, build } = venueOver({ owned: [ownedObject(objectId(1), WAL, withdrawing(43))] })
+    await expect(venue.prepare(claim('WAL', '1'), ME)).rejects.toThrow(/not a set amount/)
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('refuses another token, and says SUI from an unstake needs no claim', async () => {
+    const { venue } = venueOver()
+    await expect(venue.prepare(claim('USDC'), ME)).rejects.toThrow(/pays WAL, not USDC/)
+    await expect(venue.prepare(claim('SUI'), ME)).rejects.toThrow(/by itself.*nothing to claim/)
+  })
+
+  it('stays blocked on an upgrade', async () => {
+    const { venue, build } = venueOver({ staking: { ...STAKING_JSON, version: '5' } })
+    await expect(venue.prepare(claim(), ME)).rejects.toThrow(/stays blocked/)
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('still collects when asked to unstake again, as the first card once said', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [ownedObject(objectId(1), BigInt(10) * WAL, withdrawing(43))],
+      simulated: paysBack('10000000000'),
+    })
+    const prepared = await venue.prepare(unstake('10'), ME)
+    expect(prepared.kind).toBe('unstake')
+    expect(calls(txs[0] as Transaction)).toEqual(['staking::withdraw_stake'])
+  })
+})
+
+describe('unstaking all of it', () => {
+  const whole = (amount = '1'): ChainActionRequest => ({
+    kind: 'unstake',
+    amount,
+    wholePosition: true,
+    tokenIn: 'WAL',
+  })
+
+  it('starts a withdrawal of every stake in one transaction, splitting none', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(2) * WAL, STAKED),
+        ownedObject(objectId(2), BigInt(7) * WAL, STAKED),
+        ownedObject(objectId(3), BigInt(3) * WAL, STAKED),
+      ],
+    })
+    const prepared = await venue.prepare(whole('12'), ME)
+    expect(calls(txs[0] as Transaction)).toEqual([
+      'staking::request_withdraw_stake',
+      'staking::request_withdraw_stake',
+      'staking::request_withdraw_stake',
+    ])
+    expect(prepared.kind).toBe('unstake')
+    expect(prepared.pay).toEqual({ amount: '12', symbol: 'WAL' })
+    expect(prepared.receive).toBeUndefined()
+    expect(prepared.summary).toContain('Start unstaking 12 WAL')
+    expect(prepared.summary).toContain('epoch 44')
+    expect(prepared.notes.join(' ')).not.toContain('covers')
+    expect(() => venue.assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+
+  it('uses what it reads now, not the figure it was handed', async () => {
+    const { venue } = venueOver({ owned: [ownedObject(objectId(1), BigInt(5) * WAL, STAKED)] })
+    const prepared = await venue.prepare(whole('1'), ME)
+    expect(prepared.pay.amount).toBe('5')
+  })
+
+  it('does not stop at what is ready, as a plain amount would', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(60) * WAL, withdrawing(43)),
+        ownedObject(objectId(2), BigInt(50) * WAL, STAKED),
+      ],
+      simulated: paysBack('60000000000'),
+    })
+    const prepared = await venue.prepare(whole('50'), ME)
+    const tx = txs[0] as Transaction
+    expect(calls(tx)).toEqual(['staking::withdraw_stake', 'staking::request_withdraw_stake'])
+    expect(recipients(tx)).toEqual([normalizeSuiAddress(ME)])
+    expect(prepared.pay.amount).toBe('110')
+    expect(prepared.receive).toEqual({ amount: '60', symbol: 'WAL', approximate: true })
+    expect(prepared.summary).toMatch(/Collect 60 WAL.*now.*start unstaking 50 WAL/)
+    expect(() => venue.assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+
+  it('takes a stake that can leave in one step straight out', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [ownedObject(objectId(1), BigInt(9) * WAL, STAKED, NODE_A, 44)],
+      simulated: paysBack('9000000000'),
+    })
+    const prepared = await venue.prepare(whole('9'), ME)
+    expect(calls(txs[0] as Transaction)).toEqual(['staking::withdraw_stake'])
+    expect(prepared.receive?.amount).toBe('9')
+  })
+
+  it('leaves what is already on its way, and says so', async () => {
+    const { venue, built: txs } = venueOver({
+      owned: [
+        ownedObject(objectId(1), BigInt(5) * WAL, withdrawing(44)),
+        ownedObject(objectId(2), BigInt(50) * WAL, STAKED),
+      ],
+    })
+    const prepared = await venue.prepare(whole('50'), ME)
+    expect(calls(txs[0] as Transaction)).toEqual(['staking::request_withdraw_stake'])
+    expect(prepared.pay.amount).toBe('50')
+    expect(prepared.notes.join(' ')).toContain('5 WAL is already on its way out')
+  })
+
+  it('refuses when all of it is already on its way, and says when', async () => {
+    const { venue, build } = venueOver({ owned: [ownedObject(objectId(1), WAL, withdrawing(44))] })
+    await expect(venue.prepare(whole(), ME)).rejects.toThrow(/already on its way out.*epoch 44/)
+    expect(build).not.toHaveBeenCalled()
+  })
+
+  it('refuses when there is nothing', async () => {
+    const { venue } = venueOver()
+    await expect(venue.prepare(whole(), ME)).rejects.toThrow(/no WAL staked/)
+  })
+
+  it('says clearly what it covered when one transaction cannot hold them all', () => {
+    const many = Array.from({ length: MAX_POSITIONS_PER_TRANSACTION + 3 }, (_, i) =>
+      position({ objectId: objectId(i), principal: WAL + BigInt(i) })
+    )
+    const plan = planWholeUnstake(many, STATE)
+    expect(plan.start).toHaveLength(MAX_POSITIONS_PER_TRANSACTION)
+    expect(plan.left.count).toBe(3)
+    expect(plan.left.total).toBe(BigInt(3) * WAL + BigInt(3))
+  })
+
+  it('names the cover on the card', async () => {
+    const many = Array.from({ length: MAX_POSITIONS_PER_TRANSACTION + 1 }, (_, i) =>
+      ownedObject(objectId(i), WAL, STAKED)
+    )
+    const { venue } = venueOver({ owned: many })
+    const { notes } = await venue.prepare(whole(), ME)
+    expect(notes.join(' ')).toContain(
+      `covers ${MAX_POSITIONS_PER_TRANSACTION} of your ${MAX_POSITIONS_PER_TRANSACTION + 1} Walrus positions. The other 1 WAL is not touched by this`
+    )
+  })
+
+  it('keeps what is ready when not everything fits', () => {
+    const many = [
+      ...Array.from({ length: MAX_POSITIONS_PER_TRANSACTION }, (_, i) =>
+        position({ objectId: objectId(i), principal: BigInt(9) * WAL })
+      ),
+      position({ objectId: objectId(9000), principal: WAL, withdrawEpoch: 43 }),
+    ]
+    const plan = planWholeUnstake(many, STATE)
+    expect(plan.collect).toHaveLength(1)
+    expect(plan.start).toHaveLength(MAX_POSITIONS_PER_TRANSACTION - 1)
+  })
+
+  it('refuses a tampered copy that pays someone else', async () => {
+    const transaction = await built((tx) => {
+      tx.moveCall({ target: REQUEST, arguments: [stakingRef(tx), ownedRef(tx, '0x51')] })
+      const [coin] = tx.moveCall({
+        target: WITHDRAW,
+        arguments: [stakingRef(tx), ownedRef(tx, '0x52')],
+      })
+      tx.transferObjects([coin as never], THIEF)
+    })
+    expect(() => check(transaction)).toThrow(/send funds to another address/)
+  })
+})
+
+describe('through the same route the app uses', () => {
+  function moduleOver(chain: FakeChain): ChainModule {
+    const { venue } = venueOver(chain)
+    const stakingOnly = {
+      id: 'other',
+      name: 'Other',
+      kinds: ['stake', 'unstake'],
+      positions: async () => [],
+      prepare: async () => {
+        throw new Error('went to the wrong venue')
+      },
+      assertSafe: () => undefined,
+    } as unknown as ChainVenue
+    return {
+      chain: 'sui',
+      tokens: WALRUS_TOKENS,
+      venues: [stakingOnly, venue],
+      defaultVenue: { unstake: 'other' },
+      priceUsd: async () => 1,
+      submit: async () => ({ ok: true, hash: 'h', explorerUrl: 'u' }),
+      balances: async () => ({ tokens: [], complete: true }),
+    } as unknown as ChainModule
+  }
+
+  it('"claim my WAL" reaches Walrus and collects', async () => {
+    const asked = parseChainAction('claim my WAL') as ChainActionRequest
+    const prepared = await prepareChainAction(
+      moduleOver({
+        owned: [ownedObject(objectId(1), BigInt(3) * WAL, withdrawing(43))],
+        simulated: paysBack('3000000000'),
+      }),
+      asked,
+      ME
+    )
+    expect(prepared).toMatchObject({ venueId: 'walrus', kind: 'claim', pay: { amount: '3' } })
+  })
+
+  it('"unstake all WAL" finds Walrus and starts all of it', async () => {
+    const asked = parseChainAction('unstake all WAL') as ChainActionRequest
+    const prepared = await prepareChainAction(
+      moduleOver({
+        owned: [
+          ownedObject(objectId(1), BigInt(3) * WAL, STAKED),
+          ownedObject(objectId(2), BigInt(4) * WAL, STAKED),
+        ],
+      }),
+      asked,
+      ME
+    )
+    expect(prepared).toMatchObject({ venueId: 'walrus', kind: 'unstake', pay: { amount: '7' } })
+    expect(prepared.summary).toContain('Start unstaking 7 WAL')
+  })
+
+  it('"unstake 10 WAL" with a venue named still collects a finished withdrawal', async () => {
+    const asked = parseChainAction('unstake 10 WAL from Walrus') as ChainActionRequest
+    const prepared = await prepareChainAction(
+      moduleOver({
+        owned: [ownedObject(objectId(1), BigInt(10) * WAL, withdrawing(43))],
+        simulated: paysBack('10000000000'),
+      }),
+      asked,
+      ME
+    )
+    expect(prepared.summary).toContain('Collect 10 WAL')
   })
 })
 

@@ -1,6 +1,11 @@
+import { getAddressDecoder } from '@solana/kit'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { decodeSolanaTransaction, TOKEN_PROGRAM } from '../chains/solana/assert-safe'
+import {
+  associatedTokenAccount,
+  decodeSolanaTransaction,
+  TOKEN_PROGRAM,
+} from '../chains/solana/assert-safe'
 import {
   createStreamflowVenue,
   STREAMFLOW_FEE_ORACLE,
@@ -125,5 +130,155 @@ describe.skipIf(SKIP)('Streamflow on chain', () => {
       expect(action.notes[1]).toMatch(/takes [\d.]+ USDC and [\d.]+ SOL/)
     },
     SLOW_MS
+  )
+})
+
+/** The public node that takes the program-wide search, so these find real, running streams. */
+const INDEXED = 'https://api.mainnet-beta.solana.com'
+const USDC = SOLANA_TOKENS.find((t) => t.symbol === 'USDC')?.id as string
+const CANCEL_SLOW_MS = 240_000
+
+async function indexed(method: string, params: unknown[]): Promise<unknown> {
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  const response = await fetch(INDEXED, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  return ((await response.json()) as { result: unknown }).result
+}
+
+interface RunningStream {
+  id: string
+  sender: string
+  recipient: string
+  mint: string
+  escrow: string
+}
+
+/** Streams still running that their sender may cancel, with senders who are plain wallets. */
+async function runningStreams(): Promise<RunningStream[]> {
+  const listed = (await indexed('getProgramAccounts', [
+    STREAMFLOW_PROGRAM,
+    {
+      encoding: 'base64',
+      filters: [
+        { dataSize: 1104 },
+        { memcmp: { offset: 177, bytes: USDC } },
+        { memcmp: { offset: 671, bytes: '1' } },
+        { memcmp: { offset: 457, bytes: '2' } },
+      ],
+    },
+  ])) as { pubkey: string; account: { data: [string, string] } }[]
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000))
+  const decoder = getAddressDecoder()
+  return listed.flatMap(({ pubkey, account: held }) => {
+    const bytes = Buffer.from(held.data[0], 'base64')
+    const at = (offset: number): string => decoder.decode(bytes.subarray(offset, offset + 32))
+    return bytes.readBigUInt64LE(33) > nowSeconds + BigInt(86_400)
+      ? [{ id: pubkey, sender: at(49), recipient: at(113), mint: at(177), escrow: at(209) }]
+      : []
+  })
+}
+
+interface SimulatedToken {
+  data: [string, string]
+}
+
+const tokenAmountOf = (data: string | undefined): bigint => {
+  const bytes = Buffer.from(data ?? '', 'base64')
+  return bytes.length < 72 ? BigInt(0) : bytes.readBigUInt64LE(64)
+}
+
+describe.skipIf(SKIP)('cancelling a real Streamflow stream', () => {
+  beforeAll(() => {
+    vi.stubEnv('AUTH_SECRET', 'a-secret-long-enough-to-sign-with-here')
+  })
+
+  afterAll(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it(
+    'builds a cancel the program accepts, refunds the sender, and pays only who the stream names',
+    async () => {
+      const streams = await runningStreams()
+      expect(streams.length).toBeGreaterThan(0)
+      const venue = createStreamflowVenue()
+      let built = 0
+      for (const stream of streams.slice(0, 20)) {
+        if (built >= 3) break
+        const sender = await account(stream.sender).catch(() => undefined)
+        if (sender === undefined || sender?.owner !== SYSTEM_PROGRAM) continue
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        const action = await venue
+          .prepare(
+            { kind: 'cancel', amount: 'all', tokenIn: 'STREAM', streamId: stream.id },
+            stream.sender
+          )
+          .catch((e: Error) => {
+            console.info(stream.id, 'refused:', e.message)
+            return undefined
+          })
+        if (action === undefined) continue
+        built += 1
+        expect(() => venue.assertSafe(action.signing, stream.sender, action.context)).not.toThrow()
+        if (action.signing.family !== 'solana') throw new Error('Expected a Solana payload.')
+        expect(decodeSolanaTransaction(action.signing.transaction).feePayerSignature).toBeNull()
+
+        const senderTokens = associatedTokenAccount(stream.sender, stream.mint)
+        const recipientTokens = associatedTokenAccount(stream.recipient, stream.mint)
+        const treasuryTokens = associatedTokenAccount(STREAMFLOW_TREASURY, stream.mint)
+        const addresses = [senderTokens, recipientTokens, treasuryTokens, stream.escrow, stream.id]
+        const before = (await indexed('getMultipleAccounts', [
+          addresses,
+          { encoding: 'base64', commitment: 'confirmed' },
+        ])) as { value: (SimulatedToken | null)[] }
+        const simulated = (await indexed('simulateTransaction', [
+          action.signing.transaction,
+          {
+            encoding: 'base64',
+            sigVerify: false,
+            replaceRecentBlockhash: true,
+            commitment: 'confirmed',
+            accounts: { encoding: 'base64', addresses },
+          },
+        ])) as {
+          value: { err: unknown; unitsConsumed: number; accounts: (SimulatedToken | null)[] }
+        }
+        expect(simulated.value.err).toBeNull()
+        const delta = (position: number): string =>
+          (
+            tokenAmountOf(simulated.value.accounts[position]?.data[0]) -
+            tokenAmountOf(before.value[position]?.data[0])
+          ).toString()
+        console.info(stream.id, action.summary, {
+          units: simulated.value.unitsConsumed,
+          sender: delta(0),
+          recipient: delta(1),
+          treasury: delta(2),
+          escrow: delta(3),
+          escrowAfterExists: simulated.value.accounts[3] !== null,
+          streamAfterExists: simulated.value.accounts[4] !== null,
+        })
+        const gained = BigInt(delta(0))
+        expect(gained).toBeGreaterThan(BigInt(0))
+        expect(BigInt(delta(1)) >= BigInt(0)).toBe(true)
+      }
+      expect(built).toBeGreaterThan(0)
+    },
+    CANCEL_SLOW_MS
+  )
+
+  it(
+    'lists a real sender’s running streams through the default node’s refusal',
+    async () => {
+      const streams = await runningStreams()
+      const stream = streams[0] as RunningStream
+      const positions = await createStreamflowVenue().positions?.(stream.sender)
+      console.info(stream.sender, positions?.length)
+      expect(positions?.map((p) => p.id)).toContain(stream.id)
+    },
+    CANCEL_SLOW_MS
   )
 })

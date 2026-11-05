@@ -1,4 +1,5 @@
-import { fromBase64 } from '@mysten/sui/utils'
+import { bcs } from '@mysten/sui/bcs'
+import { deriveDynamicFieldID, fromBase64, normalizeSuiAddress } from '@mysten/sui/utils'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -13,6 +14,7 @@ import {
 } from '../chains/sui/aftermath'
 import { suiClient } from '../chains/sui/client'
 import { readU64 } from '../chains/sui/haedal'
+import { toBaseUnits } from '../chains/types'
 
 /**
  * Pinned ids, and real unsigned transactions against mainnet, read-only. Nothing here signs or
@@ -67,6 +69,64 @@ describe.skipIf(SKIP)('Aftermath against mainnet', () => {
     expect(Number(prepared.receive?.amount)).toBeGreaterThan(2)
     expect(prepared.notes.join(' ')).toMatch(/in about \d+ hours?/)
   }, 60_000)
+
+  it('reads afSUI in the wallet to the last unit, and "all" of it dry-runs clean', async () => {
+    const positions = await aftermathVenue.positions?.(AFSUI_HOLDER)
+    console.log(JSON.stringify(positions))
+    const staked = positions?.find((p) => p.slot === 'staked')
+    expect(staked?.symbol).toBe('afSUI')
+
+    const { balance } = await suiClient().core.getBalance({
+      owner: AFSUI_HOLDER,
+      coinType: AFSUI_TYPE,
+    })
+    expect(toBaseUnits(staked?.amount as string, 9)).toBe(balance.balance)
+
+    const prepared = await aftermathVenue.prepare(
+      {
+        kind: 'unstake',
+        amount: staked?.amount as string,
+        wholePosition: true,
+        tokenIn: 'afSUI',
+      },
+      AFSUI_HOLDER
+    )
+    if (prepared.signing.family !== 'sui') throw new Error('wrong family')
+    expect(() => aftermathVenue.assertSafe(prepared.signing, AFSUI_HOLDER)).not.toThrow()
+    expect(await simulateOk(prepared.signing.transaction)).toBe(true)
+  }, 60_000)
+
+  it('finds nothing for an empty wallet, and reads the real waiting list without error', async () => {
+    expect(await aftermathVenue.positions?.(normalizeSuiAddress('0x1234'))).toEqual([])
+  }, 30_000)
+
+  /**
+   * The evidence that the wait ends by itself: this delayed unstake was requested by 0x131b16cb on
+   * 28 Oct 2026, and its payout landed in a transaction sent by someone else, Aftermath's crank.
+   */
+  it('a real delayed payout was sent by someone other than the person paid', async () => {
+    const requester = '0x131b16cb8064cdc58665f7821aeee17d018011c0c176b669b93eb39496967d7c'
+    const { Transaction: payout } = await suiClient().core.getTransaction({
+      digest: 'FBktHVRjJWKKZfNGAYaqyg7d9AnU23vZ3Y6o6a38fao3',
+      include: { balanceChanges: true, transaction: true },
+    })
+    expect(payout?.transaction?.sender).not.toBe(requester)
+    const paid = payout?.balanceChanges?.find(
+      (c) => c.address === requester && c.coinType.endsWith('::sui::SUI')
+    )
+    expect(BigInt(paid?.amount ?? '0') > BigInt(0)).toBe(true)
+  }, 30_000)
+
+  it('the waiting list sits where the contract put a real request', () => {
+    // Created at key 0 by the request in transaction 8Fc1GZa4EVASV9uEgTpWKKkQ62RRKLn2p3BVYbSJsDPw.
+    expect(
+      deriveDynamicFieldID(
+        '0xac7ab1a584cf8e19b633d1c868b914080275ea87853eb716a949c778b75f00d9',
+        'u64',
+        bcs.u64().serialize(0).toBytes()
+      )
+    ).toBe('0x421de7c0d9405782fe95ff04911ffd1678ca82f84d75c54fc8bdc5eda19d10da')
+  })
 
   it("still matches Aftermath's published addresses, or the ids need a fresh look", async () => {
     const response = await fetch('https://aftermath.finance/api/addresses')

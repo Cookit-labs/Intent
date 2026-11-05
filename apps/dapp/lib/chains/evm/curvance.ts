@@ -1,4 +1,12 @@
-import { encodeFunctionData, erc20Abi, formatUnits, isAddress, parseAbi, type Address } from 'viem'
+import {
+  encodeFunctionData,
+  erc20Abi,
+  formatUnits,
+  isAddress,
+  maxUint256,
+  parseAbi,
+  type Address,
+} from 'viem'
 
 import {
   ChainActionRefused,
@@ -9,6 +17,7 @@ import {
   type ChainActionRequest,
   type ChainVenue,
   type PreparedAction,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
 import {
@@ -40,18 +49,22 @@ const SECONDS_PER_YEAR = 31_536_000
 const HOLD_SECONDS = BigInt(1200)
 /** The manager stores pause flags as 1 for off and 2 for on. */
 const NOT_PAUSED = 1
+const WAD = BigInt(10) ** BigInt(18)
 
 const CALL_ABI = parseAbi([
   'function deposit(uint256 assets, address receiver) returns (uint256 shares)',
   'function withdraw(uint256 assets, address receiver, address owner) returns (uint256 shares)',
+  'function redeem(uint256 shares, address receiver, address owner) returns (uint256 assets)',
 ])
 
 const CTOKEN_READ_ABI = parseAbi([
+  // Not marked view on chain, since it accrues first. Asked with eth_call, nothing is written, and
+  // it is the live rate: `convertToAssets` holds to the last accrual, which runs a little behind.
+  'function exchangeRateUpdated() view returns (uint256)',
   'function balanceOf(address account) view returns (uint256)',
   'function collateralPosted(address account) view returns (uint256)',
   'function previewDeposit(uint256 assets) view returns (uint256)',
   'function previewWithdraw(uint256 assets) view returns (uint256)',
-  'function convertToAssets(uint256 shares) view returns (uint256)',
   'function assetsHeld() view returns (uint256)',
   'function marketOutstandingDebt() view returns (uint256)',
   'function interestFee() view returns (uint16)',
@@ -93,11 +106,12 @@ function checkCall(call: DecodedCall, { account, approval }: CheckContext): void
     }
     return
   }
-  if (call.functionName === 'withdraw') {
-    const [assets, receiver, owner] = call.args as readonly [bigint, string, string]
+  if (call.functionName === 'withdraw' || call.functionName === 'redeem') {
+    const [amount, receiver, owner] = call.args as readonly [bigint, string, string]
     if (!sameAddress(receiver, account)) refuse('This withdrawal pays someone else.')
     if (!sameAddress(owner, account)) refuse("This withdrawal takes someone else's deposit.")
-    if (assets === BigInt(0)) refuse('This withdrawal is empty.')
+    if (amount === BigInt(0)) refuse('This withdrawal is empty.')
+    if (amount === maxUint256) refuse('This withdrawal doesn’t name an amount.')
     if (approval !== undefined) refuse('A withdrawal needs no approval.')
     return
   }
@@ -108,7 +122,11 @@ export const CURVANCE_POLICY: EvmCallPolicy = {
   venueName: NAME,
   chain: 'monad',
   contracts: {
-    [CURVANCE_CUSDC]: { abi: CALL_ABI, functions: ['deposit', 'withdraw'], check: checkCall },
+    [CURVANCE_CUSDC]: {
+      abi: CALL_ABI,
+      functions: ['deposit', 'withdraw', 'redeem'],
+      check: checkCall,
+    },
   },
   spenders: [CURVANCE_CUSDC],
   approvable: [CURVANCE_USDC],
@@ -289,8 +307,9 @@ async function prepareWithdraw(
 ): Promise<PreparedAction> {
   const units = usdcUnits(request, account)
   const owner = account as Address
+  const whole = request.wholePosition === true
 
-  const [listed, redeemPaused, cooldown, block, balance, posted, shares, liquidity] =
+  const [listed, redeemPaused, cooldown, block, balance, posted, shares, liquidity, rate] =
     await orRefuse(() =>
       Promise.all([
         reader.readContract({
@@ -330,11 +349,18 @@ async function prepareWithdraw(
           args: [units],
         }),
         readLiquidity(reader),
+        reader.readContract({
+          address: CURVANCE_CUSDC,
+          abi: CTOKEN_READ_ABI,
+          functionName: 'exchangeRateUpdated',
+        }),
       ])
     )
 
   if (!listed || redeemPaused !== NOT_PAUSED) {
-    refuse(`Withdrawals from ${NAME}'s ${MARKET} market are paused right now.`)
+    refuse(
+      `Withdrawals from ${NAME}'s ${MARKET} market are paused right now, so nothing can come out until they reopen. What you lent there is still yours.`
+    )
   }
   const holdEnds = cooldown + HOLD_SECONDS
   if (holdEnds > block.timestamp) {
@@ -347,22 +373,18 @@ async function prepareWithdraw(
 
   // Past the idle shares the contract takes posted collateral instead, which can weaken a loan.
   const idle = balance > posted ? balance - posted : BigInt(0)
-  if (shares > idle) {
-    const free = await orRefuse(() =>
-      reader.readContract({
-        address: CURVANCE_CUSDC,
-        abi: CTOKEN_READ_ABI,
-        functionName: 'convertToAssets',
-        args: [idle],
-      })
-    )
+  // A whole exit names the shares, so `shares`, worked out from the figure shown, plays no part.
+  if (whole ? posted > BigInt(0) : shares > idle) {
+    const free = (idle * rate) / WAD
     refuse(
       posted > BigInt(0)
         ? `About ${usdc(free)} USDC of yours can be withdrawn here without touching the collateral you posted. Try that amount or less, or remove the collateral in ${NAME}'s own app first.`
         : `You have about ${usdc(free)} USDC in ${NAME}'s ${MARKET} market. Try that amount or less.`
     )
   }
-  if (units > liquidity.held) {
+  const worth = (balance * rate) / WAD
+  const taken = whole ? worth : units
+  if (taken > liquidity.held) {
     refuse(
       `This market has only ${usdc(liquidity.held)} USDC free right now, because the rest is lent out. Try a smaller amount, or try later.`
     )
@@ -374,28 +396,68 @@ async function prepareWithdraw(
         chain: 'monad',
         account,
         to: CURVANCE_CUSDC,
-        data: encodeFunctionData({
-          abi: CALL_ABI,
-          functionName: 'withdraw',
-          args: [units, owner, owner],
-        }),
+        // Shares don't accrue, so redeeming all of them leaves nothing, whatever interest has added.
+        data: whole
+          ? encodeFunctionData({
+              abi: CALL_ABI,
+              functionName: 'redeem',
+              args: [balance, owner, owner],
+            })
+          : encodeFunctionData({
+              abi: CALL_ABI,
+              functionName: 'withdraw',
+              args: [units, owner, owner],
+            }),
       },
       reader
-    )
+    ).catch((error: unknown) => {
+      if (!(error instanceof ChainActionRefused)) throw error
+      return refuse(
+        `This would fail on the chain right now: ${NAME} wouldn't pay this out. What you lent there is still yours. Try a smaller amount or try later, and check you have enough for the network fee.`
+      )
+    })
   )
+  const shown = whole ? usdc(worth) : request.amount
   return {
     venueId: 'curvance',
     venueName: NAME,
     kind: 'withdraw',
-    summary: `Withdraw ${request.amount} USDC from ${NAME}'s ${MARKET} market.`,
-    pay: { amount: request.amount, symbol: 'USDC' },
+    summary: whole
+      ? `Withdraw all of your USDC, about ${shown}, from ${NAME}'s ${MARKET} market.`
+      : `Withdraw ${request.amount} USDC from ${NAME}'s ${MARKET} market.`,
+    pay: { amount: shown, symbol: 'USDC' },
+    ...(whole ? { receive: { amount: shown, symbol: 'USDC', approximate: true } } : {}),
     notes: [
       'This takes only what you lent. Anything you posted as collateral in this market stays posted.',
       freeNote(liquidity),
-      'Interest keeps adding to what you hold here, so a small amount can stay behind after you withdraw what you saw as your full balance.',
+      whole
+        ? 'This cashes in every share you hold, so nothing stays behind. What you get is what those shares are worth when this lands.'
+        : 'Interest keeps adding to what you hold here, so a small amount can stay behind after you withdraw what you saw as your full balance.',
     ],
     signing,
   }
+}
+
+/**
+ * Everything here, posted collateral included: it is the person's money, even if a withdraw has to
+ * wait for it to come off. A failed read throws, since empty would say nothing is here.
+ */
+async function readPositions(account: string, reader: EvmReaderClient): Promise<VenuePosition[]> {
+  if (!isAddress(account)) refuse('That is not a Monad address.')
+  const [shares, rate] = await reader.multicall({
+    allowFailure: false,
+    contracts: [
+      {
+        address: CURVANCE_CUSDC,
+        abi: CTOKEN_READ_ABI,
+        functionName: 'balanceOf',
+        args: [account],
+      },
+      { address: CURVANCE_CUSDC, abi: CTOKEN_READ_ABI, functionName: 'exchangeRateUpdated' },
+    ],
+  })
+  const worth = (shares * rate) / WAD
+  return worth === BigInt(0) ? [] : [{ slot: 'supplied', symbol: 'USDC', amount: usdc(worth) }]
 }
 
 /** Reads go through `getReader`, so a venue built at import doesn't open a client until it is used. */
@@ -428,6 +490,7 @@ export function createCurvanceVenue(
     assertCanFollow: takesOnly(NAME, ['USDC']),
     quote,
     prepare,
+    positions: (account) => readPositions(account, getReader()),
     ...evmCallVenueParts(CURVANCE_POLICY, client),
   }
 }

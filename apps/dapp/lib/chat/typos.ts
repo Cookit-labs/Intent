@@ -30,7 +30,19 @@ const VERBS = [
 ]
 
 /** Words one edit from a verb that are real words in their own right. */
-const KEEP = new Set(['sale', 'sand', 'bay', 'bus', 'bur', 'send', 'sent', 'lens', 'lent', 'end'])
+const KEEP = new Set([
+  'sale',
+  'sand',
+  'bay',
+  'bus',
+  'bur',
+  'send',
+  'sent',
+  'lens',
+  'lent',
+  'end',
+  'tell',
+])
 
 function withinOneEdit(a: string, b: string): boolean {
   if (a === b) return true

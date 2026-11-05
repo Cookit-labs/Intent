@@ -9,5 +9,6 @@ export const suilendListing: Venue = {
   url: 'https://suilend.fi',
   bestFor: 'Lending in the largest market on Sui, under new ownership since June 2026',
   integration: 'executes',
-  capability: 'Supplies and withdraws USDC and shows the base rate. Borrowing is not connected',
+  capability:
+    'Supplies USDC, withdraws, borrows and repays, and shows the base rate. Refuses a loan your supply cannot safely back',
 }

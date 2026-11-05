@@ -198,6 +198,21 @@ describe('marinade unstake', () => {
   })
 })
 
+describe('marinade unstake of everything', () => {
+  it('sells exactly the balance read, so nothing is left behind, and pays only the person', async () => {
+    const prepared = await venueWith().venue.prepare(
+      { ...unstake, amount: '4.410107252', wholePosition: true },
+      ME
+    )
+    if (prepared.signing.family !== 'solana') throw new Error('Expected Solana.')
+    const decoded = decodeSolanaTransaction(prepared.signing.transaction)
+    const sale = decoded.instructions.at(-1)!
+    expect(readU64(sale.data, 8)).toBe(BigInt('4410107252'))
+    expect(decoded.staticAccounts[sale.accounts[7]!]).toBe(ME)
+    expect(() => venueWith().venue.assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+})
+
 describe('marinade assertSafe', () => {
   const venue = venueWith().venue
 

@@ -1,4 +1,6 @@
+import { bcs } from '@mysten/sui/bcs'
 import { coinWithBalance, Transaction } from '@mysten/sui/transactions'
+import { deriveDynamicFieldID, normalizeSuiAddress } from '@mysten/sui/utils'
 
 import {
   ChainActionRefused,
@@ -8,6 +10,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
@@ -57,6 +60,9 @@ const AFSUI_DECIMALS = 9
 const FEE_ONE = BigInt('1000000000000000000')
 const SYSTEM_READ_TIMEOUT_MS = 10_000
 const MS_PER_HOUR = 3_600_000
+const PENDING_BATCH = 50
+/** Only a few unstakes wait in any one epoch on chain. Far more than that can't be read in time. */
+const PENDING_MAX_RECORDS = 500
 
 const REQUEST_STAKE = moveTarget(AFTERMATH_PACKAGE, 'staked_sui_vault', 'request_stake')
 const REQUEST_UNSTAKE = moveTarget(AFTERMATH_PACKAGE, 'staked_sui_vault', 'request_unstake')
@@ -101,8 +107,10 @@ function feePercent(vault: VaultReading): number {
   return (Number(vault.feeOnAmount) / Number(FEE_ONE)) * 100
 }
 
-/** Hours until the next epoch, rounded up, from the chain's own clock for the current one. */
-async function hoursToNextEpoch(now: number = Date.now()): Promise<number> {
+/** The chain's epoch, and the hours until the next one, rounded up, from its own clock. */
+async function readEpochClock(
+  now: number = Date.now()
+): Promise<{ epoch: string; hoursToNext: number }> {
   const { systemState } = await withTimeout(
     suiClient().core.getCurrentSystemState(),
     SYSTEM_READ_TIMEOUT_MS,
@@ -113,7 +121,105 @@ async function hoursToNextEpoch(now: number = Date.now()): Promise<number> {
   if (!Number.isFinite(started) || !Number.isFinite(length) || length <= 0) {
     fail("I couldn't read when this Sui epoch ends, so I stopped. Try again shortly.")
   }
-  return Math.max(1, Math.ceil((started + length - now) / MS_PER_HOUR))
+  return {
+    epoch: systemState.epoch,
+    hoursToNext: Math.max(1, Math.ceil((started + length - now) / MS_PER_HOUR)),
+  }
+}
+
+/**
+ * afSUI this account has asked to unstake and hasn't been paid for yet. `request_unstake` pushes a
+ * record naming the sender onto this `TableVec`, and the epoch step pops each one and pays it. Its
+ * entries sit at the keys 0 to size - 1, so exactly those are read, and any that can't be is a throw.
+ */
+async function readPendingAfsui(
+  records: Record<string, unknown> | undefined,
+  account: string
+): Promise<bigint> {
+  const tableId = records?.['id']
+  const size = u64Field(records?.['size'])
+  if (typeof tableId !== 'string' || size === undefined) {
+    throw new Error("Aftermath's waiting unstakes are unreadable")
+  }
+  if (size > BigInt(PENDING_MAX_RECORDS)) throw new Error('Too many waiting Aftermath unstakes')
+
+  const ids = Array.from({ length: Number(size) }, (_, index) =>
+    deriveDynamicFieldID(tableId, 'u64', bcs.u64().serialize(index).toBytes())
+  )
+  const batches = Array.from({ length: Math.ceil(ids.length / PENDING_BATCH) }, (_, batch) =>
+    ids.slice(batch * PENDING_BATCH, (batch + 1) * PENDING_BATCH)
+  )
+  const reads = await Promise.all(
+    batches.map((objectIds) =>
+      withTimeout(
+        suiClient().core.getObjects({ objectIds, include: { json: true } }),
+        SYSTEM_READ_TIMEOUT_MS,
+        "Reading Aftermath's waiting unstakes"
+      )
+    )
+  )
+
+  const me = normalizeSuiAddress(account)
+  let pending = BigInt(0)
+  for (const object of reads.flatMap((read) => read.objects)) {
+    if (object instanceof Error) throw object
+    const value = (object.json as Record<string, unknown> | null | undefined)?.['value'] as
+      | Record<string, unknown>
+      | undefined
+    const requester = value?.['requester']
+    const amount = u64Field(value?.['afsui_amount'])
+    // No requester is Aftermath's own bookkeeping for an instant unstake, and nobody's money.
+    if (amount === undefined || (requester !== null && typeof requester !== 'string')) {
+      throw new Error('An Aftermath waiting unstake is unreadable')
+    }
+    if (requester !== null && normalizeSuiAddress(requester) === me) pending += amount
+  }
+  return pending
+}
+
+/**
+ * afSUI in the wallet to the last unit, whose count doesn't grow, so an "all" using this figure
+ * leaves no dust. Also what is on its way: there is nothing to claim, the contract pays by itself.
+ */
+async function readPositions(account: string): Promise<VenuePosition[]> {
+  assertSuiAccount(account)
+  const [{ balance }, state] = await Promise.all([
+    withTimeout(
+      suiClient().core.getBalance({ owner: account, coinType: AFSUI_TYPE }),
+      SYSTEM_READ_TIMEOUT_MS,
+      'Reading your afSUI'
+    ),
+    readObjectJson(AFTERMATH_VAULT_STATE),
+  ])
+  const held = u64Field(balance.balance)
+  if (held === undefined) throw new Error('afSUI balance unreadable')
+  const records = state?.['pending_unstake_records'] as Record<string, unknown> | undefined
+  const pending = await readPendingAfsui(
+    records?.['contents'] as Record<string, unknown> | undefined,
+    account
+  )
+
+  const found: VenuePosition[] = []
+  if (held > BigInt(0)) {
+    found.push({
+      slot: 'staked',
+      symbol: 'afSUI',
+      amount: displayAmount(held.toString(), AFSUI_DECIMALS, AFSUI_DECIMALS),
+    })
+  }
+  if (pending > BigInt(0)) {
+    const { epoch, hoursToNext } = await readEpochClock()
+    // Requests are only taken in the epoch the vault is on, so if the chain has moved past it these
+    // are already due, and wait only on the epoch step being run.
+    const overdue = state?.['active_epoch'] !== epoch
+    found.push({
+      slot: 'cooling',
+      symbol: 'afSUI',
+      amount: displayAmount(pending.toString(), AFSUI_DECIMALS, AFSUI_DECIMALS),
+      readyInHours: overdue ? 1 : hoursToNext,
+    })
+  }
+  return found
 }
 
 async function checkedStake(request: ChainActionRequest, account: string) {
@@ -182,7 +288,7 @@ async function checkedUnstake(request: ChainActionRequest, account: string) {
   }
   if (value < vault.minimum) {
     fail(
-      `Aftermath unstakes at least ${displayAmount(String(vault.minimum), SUI_DECIMALS)} SUI worth of afSUI.`
+      `Aftermath unstakes at least ${displayAmount(String(vault.minimum), SUI_DECIMALS)} SUI worth of afSUI. To get out of less than that, swap it: "swap ${request.amount} afSUI to SUI".`
     )
   }
 
@@ -244,7 +350,7 @@ async function prepareUnstake(
   account: string
 ): Promise<PreparedAction> {
   const { transaction, receive, vault } = await checkedUnstake(request, account)
-  const hours = await hoursToNextEpoch()
+  const { hoursToNext: hours } = await readEpochClock()
   return {
     venueId: 'aftermath',
     venueName: 'Aftermath',
@@ -254,7 +360,7 @@ async function prepareUnstake(
     receive: { amount: receive, symbol: 'SUI', approximate: true },
     notes: [
       `The SUI does not come in this transaction. It comes at the start of the next Sui epoch, in about ${hours} ${hours === 1 ? 'hour' : 'hours'}, and can't be cancelled once sent.`,
-      `You sign nothing more. The contract pays this wallet when that epoch is processed. Aftermath runs a bot for that, and anyone else can run it too.`,
+      `You sign nothing more, and there is nothing to claim. The contract pays this wallet when that epoch is processed. Aftermath runs a bot for that, and anyone else can run it too. That is usually minutes into the epoch, but on 1 Nov 2026 it ran about 15 hours in, so the SUI can come later than the epoch alone.`,
       `The fee is about ${percentText(feePercent(vault))}% of the whole amount, already taken off the amount shown. The contract works it out from the rewards the whole pool has earned, not yours. The final amount can move slightly with the next epoch's rate.`,
       'Aftermath also has an instant unstake, with a different fee that depends on its reserves. This app does not use it.',
       ...SHARED_RISKS,
@@ -301,6 +407,7 @@ export const aftermathVenue: ChainVenue = {
   kinds: ['stake', 'unstake'],
   assertCanFollow: stakesAfterSwap('Aftermath'),
   quote,
+  positions: readPositions,
   prepare: (request, account) =>
     request.kind === 'unstake' ? prepareUnstake(request, account) : prepareStake(request, account),
   assertSafe: (payload: SigningPayload, account: string) => {

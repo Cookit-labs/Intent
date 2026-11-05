@@ -8,8 +8,9 @@ import {
   type ChainToken,
   type PreparedAction,
   type SigningPayload,
+  type VenuePosition,
 } from '../types'
-import { assertSuiAccount, buildUnsigned, suiClient } from './client'
+import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import {
   assertPinnedObjects,
   dryRun,
@@ -31,6 +32,7 @@ export const SPRINGSUI_TOKENS: ChainToken[] = [
 const SUI_DECIMALS = 9
 const SSUI_DECIMALS = 9
 const BPS_PER_PERCENT = 100
+const READ_TIMEOUT_MS = 5000
 
 /** springsui-sdk 4.1.0's `redeemAmountAndRebalanceAndSendToUser` makes these two calls, in this order. */
 const REDEEM = moveTarget(SPRINGSUI_PACKAGE, 'liquid_staking', 'redeem')
@@ -47,6 +49,29 @@ async function readRedeemFeeBps(): Promise<bigint> {
   const bps = u64Field(fees?.['redeem_fee_bps'])
   if (bps === undefined) fail("I couldn't read SpringSui's fee, so I stopped. Try again shortly.")
   return bps
+}
+
+/**
+ * sSUI in the wallet, to the last unit. Its count doesn't grow, only its worth does, so an "all" that
+ * uses this figure redeems the whole balance exactly and leaves no dust.
+ */
+export async function readSpringsuiPositions(account: string): Promise<VenuePosition[]> {
+  assertSuiAccount(account)
+  const { balance } = await withTimeout(
+    suiClient().core.getBalance({ owner: account, coinType: SSUI_TYPE }),
+    READ_TIMEOUT_MS,
+    'Reading your sSUI'
+  )
+  const held = u64Field(balance.balance)
+  if (held === undefined) throw new Error('sSUI balance unreadable')
+  if (held === BigInt(0)) return []
+  return [
+    {
+      slot: 'staked',
+      symbol: 'sSUI',
+      amount: displayAmount(held.toString(), SSUI_DECIMALS, SSUI_DECIMALS),
+    },
+  ]
 }
 
 export async function prepareSpringsuiUnstake(

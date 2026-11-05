@@ -1,7 +1,15 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { encodeFunctionData, erc20Abi, maxUint256, parseAbi, type Address } from 'viem'
+import {
+  encodeAbiParameters,
+  encodeFunctionData,
+  erc20Abi,
+  maxUint256,
+  parseAbi,
+  toFunctionSelector,
+  type Address,
+} from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -92,6 +100,11 @@ function payload(overrides: Partial<Extract<SigningPayload, { family: 'evm' }>> 
   }
 }
 
+/** How the older Aave code Neverland runs says why: Error(string), with a numbered code. */
+function errorString(code: string): string {
+  return `0x08c379a0${encodeAbiParameters([{ type: 'string' }], [code]).slice(2)}`
+}
+
 function refusesAvalanche(signing: SigningPayload, account: string = ACCOUNT) {
   expect(() => aaveAvalancheVenue.assertSafe(signing, account)).toThrow(ChainActionRefused)
 }
@@ -111,6 +124,10 @@ describe('Aave and Neverland assertSafe', () => {
     ['a supply for the person', payload()],
     ['a supply with an exact approval', payload({ approval: { to: USDC, data: approveData() } })],
     ['a withdraw to the person', payload({ data: withdrawData() })],
+    [
+      'a withdraw of everything, to the person',
+      payload({ data: withdrawData(ACCOUNT, maxUint256) }),
+    ],
     ['a variable borrow for the person', payload({ data: borrowData() })],
     ['a repay for the person', payload({ data: repayData() })],
     [
@@ -154,7 +171,19 @@ describe('Aave and Neverland assertSafe', () => {
     ['a referral code', payload({ data: supplyData(USDC, ACCOUNT, UNITS, 7) })],
     ['a zero amount', payload({ data: supplyData(USDC, ACCOUNT, BigInt(0)) })],
     ['a repay of everything owed', payload({ data: repayData(ACCOUNT, BigInt(2), maxUint256) })],
-    ['a withdraw of everything', payload({ data: withdrawData(ACCOUNT, maxUint256) })],
+    ['a supply of max-uint', payload({ data: supplyData(USDC, ACCOUNT, maxUint256) })],
+    ['a borrow of max-uint', payload({ data: borrowData(ACCOUNT, BigInt(2), maxUint256) })],
+    [
+      'a whole withdraw paid to someone else',
+      payload({ data: withdrawData(STRANGER, maxUint256) }),
+    ],
+    [
+      'an approval beside a whole withdraw',
+      payload({
+        data: withdrawData(ACCOUNT, maxUint256),
+        approval: { to: USDC, data: approveData() },
+      }),
+    ],
     [
       'an unlimited approval',
       payload({ approval: { to: USDC, data: approveData(POOL, maxUint256) } }),
@@ -236,6 +265,7 @@ interface Fixture {
   reserveThresholdBps?: bigint
   price?: bigint
   simulationFails?: boolean
+  revertData?: string
   failRead?: string
 }
 
@@ -340,8 +370,17 @@ function fakeReader(fixture: Fixture = {}) {
           throw new Error(`Unexpected read: ${functionName}`)
       }
     },
+    multicall: async ({
+      contracts,
+    }: {
+      contracts: { functionName: string }[]
+    }): Promise<unknown[]> =>
+      Promise.all(contracts.map((contract) => reader.readContract(contract))),
     call: async (call: { to: string; data: string }) => {
       calls.push(call)
+      if (f.revertData !== undefined) {
+        throw Object.assign(new Error('reverted'), { cause: { data: f.revertData } })
+      }
       if (f.simulationFails === true) throw new Error('reverted')
       return { data: '0x' }
     },
@@ -607,6 +646,193 @@ describe('withdraw', () => {
     const asked = venue.prepare(ask('withdraw', amount), ACCOUNT)
     await expect(asked).rejects.toBeInstanceOf(ChainActionRefused)
     await expect(asked).rejects.toThrow(words)
+  })
+})
+
+describe('where the money is', () => {
+  it('reads supplied and borrowed with interest, for every token this market lists', async () => {
+    const { venue } = venueWith({ aTokenBalance: BigInt(12_345_678), variableDebt: BigInt(5) })
+    const positions = await venue.positions!(ACCOUNT)
+    expect(positions).toContainEqual({ slot: 'supplied', symbol: 'USDC', amount: '12.345678' })
+    expect(positions).toContainEqual({ slot: 'borrowed', symbol: 'USDC', amount: '0.000005' })
+  })
+
+  it('shows nothing where nothing is there', async () => {
+    const { venue } = venueWith({ aTokenBalance: BigInt(0) })
+    await expect(venue.positions!(ACCOUNT)).resolves.toEqual([])
+  })
+
+  it('throws when it can not read, rather than saying nothing is there', async () => {
+    const { venue } = venueWith({ failRead: 'getUserReserveData' })
+    await expect(venue.positions!(ACCOUNT)).rejects.toThrow()
+  })
+
+  it('refuses an account that is not an address', async () => {
+    const { venue } = venueWith()
+    await expect(venue.positions!('nope')).rejects.toBeInstanceOf(ChainActionRefused)
+  })
+
+  it.each([AAVE_AVALANCHE_MARKET, AAVE_MONAD_MARKET, NEVERLAND_MARKET])(
+    'reads on every market',
+    async (market) => {
+      const { venue } = venueWith({}, market)
+      await expect(venue.positions!(ACCOUNT)).resolves.not.toEqual([])
+    }
+  )
+})
+
+describe('all of a supply', () => {
+  const whole = { ...ask('withdraw'), wholePosition: true }
+
+  it('uses the Pool’s own max, so interest leaves no dust, and pays only the person', async () => {
+    const { venue } = venueWith({ aTokenBalance: BigInt(100_000_123) })
+    const prepared = await venue.prepare(whole, ACCOUNT)
+    const signing = evmSigning(prepared.signing)
+    expect(signing.data).toBe(withdrawData(ACCOUNT, maxUint256))
+    expect(signing.approval).toBeUndefined()
+    expect(prepared.pay).toEqual({ amount: '100.000123', symbol: 'USDC' })
+    expect(prepared.summary).toMatch(/all of your USDC/)
+    expect(prepared.notes.join(' ')).toMatch(/nothing stays behind/)
+    expect(() => venue.assertSafe(signing, ACCOUNT)).not.toThrow()
+    expect(() => venue.assertSafe(signing, STRANGER)).toThrow(ChainActionRefused)
+  })
+
+  it('stays a number when only part is asked for', async () => {
+    const { venue } = venueWith()
+    const prepared = await venue.prepare(ask('withdraw'), ACCOUNT)
+    expect(evmSigning(prepared.signing).data).toBe(withdrawData())
+  })
+
+  it('stays open on a frozen reserve', async () => {
+    const { venue } = venueWith({ frozen: true })
+    await expect(venue.prepare(whole, ACCOUNT)).resolves.toMatchObject({ kind: 'withdraw' })
+  })
+
+  it.each<[string, Fixture, RegExp]>([
+    ['nothing there', { aTokenBalance: BigInt(0) }, /no USDC supplied/],
+    ['a paused reserve', { paused: true }, /paused.*stays yours/],
+    [
+      'less free in the pool than the position',
+      { totalAToken: BigInt(1_000), totalDebt: BigInt(0) },
+      /Only about 0.001 USDC is free/,
+    ],
+    [
+      'collateral a loan needs',
+      {
+        aTokenBalance: BigInt(1_000_000_000),
+        collateralBase: BigInt(100_000_000_000),
+        debtBase: BigInt(50_000_000_000),
+      },
+      /backs your loan.*Repay some of the loan first/,
+    ],
+    [
+      'a loan under E-Mode',
+      { debtBase: BigInt(1_000_000_000), eMode: BigInt(1) },
+      /Repay the loan/,
+    ],
+    ['an unreadable account', { failRead: 'getUserAccountData' }, /read/],
+  ])('refuses %s', async (_name, fixture, words) => {
+    const { venue } = venueWith(fixture)
+    const asked = venue.prepare(whole, ACCOUNT)
+    await expect(asked).rejects.toBeInstanceOf(ChainActionRefused)
+    await expect(asked).rejects.toThrow(words)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
+  })
+
+  it.each<[string, string, RegExp]>([
+    [
+      'Aave V3’s LTV error',
+      toFunctionSelector('LtvValidationFailed()'),
+      /withdraw that token first/,
+    ],
+    [
+      'Aave V3’s health error',
+      toFunctionSelector('HealthFactorLowerThanLiquidationThreshold()'),
+      /loan needs it/,
+    ],
+    ['Aave V3’s pause error', toFunctionSelector('ReservePaused()'), /paused/],
+    ['Neverland’s LTV code', errorString('57'), /withdraw that token first/],
+    ['Neverland’s health code', errorString('35'), /loan needs it/],
+    ['Neverland’s pause code', errorString('29'), /paused/],
+    ['a reason nobody knows', errorString('99'), /would fail on the chain/],
+  ])('says why the Pool turned it down, for %s', async (_name, revertData, words) => {
+    const { venue } = venueWith({ revertData })
+    const asked = venue.prepare(whole, ACCOUNT)
+    await expect(asked).rejects.toThrow(words)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
+  })
+})
+
+describe('all of a loan', () => {
+  const whole = { ...ask('repay'), wholePosition: true }
+  const OWED = BigInt(50_000_000)
+  const NAMED = OWED + OWED / BigInt(10_000) + BigInt(1)
+
+  it('names a little over the debt, with an approval of exactly that, never max-uint', async () => {
+    const { venue } = venueWith({ variableDebt: OWED })
+    const prepared = await venue.prepare(whole, ACCOUNT)
+    const signing = evmSigning(prepared.signing)
+    expect(signing.data).toBe(repayData(ACCOUNT, BigInt(2), NAMED))
+    expect(signing.approval).toEqual({ to: USDC, data: approveData(POOL, NAMED) })
+    expect(prepared.pay).toEqual({ amount: '50', symbol: 'USDC' })
+    expect(prepared.summary).toMatch(/all of your USDC loan/)
+    expect(() => venue.assertSafe(signing, ACCOUNT)).not.toThrow()
+  })
+
+  it('tells the person what the approval covers, and that only the debt is taken', async () => {
+    const { venue } = venueWith({ variableDebt: OWED })
+    const { notes } = await venue.prepare(whole, ACCOUNT)
+    const text = notes.join(' ')
+    expect(text).toContain('50.005001')
+    expect(text).toMatch(/Only what you owe is taken/)
+    expect(text).toMatch(/take exactly 50.005001 USDC/)
+  })
+
+  it('needs no approval where the allowance covers it, and tries the call', async () => {
+    const { venue, calls } = venueWith({ variableDebt: OWED, allowance: NAMED })
+    const prepared = await venue.prepare(whole, ACCOUNT)
+    expect(evmSigning(prepared.signing).approval).toBeUndefined()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('asks for a new approval where one is left short by an earlier repay', async () => {
+    const { venue } = venueWith({ variableDebt: OWED, allowance: BigInt(1_000) })
+    const prepared = await venue.prepare(whole, ACCOUNT)
+    expect(evmSigning(prepared.signing).approval).toEqual({
+      to: USDC,
+      data: approveData(POOL, NAMED),
+    })
+  })
+
+  it('passes a wallet holding what is owed and no more, and says it needs a little over', async () => {
+    const { venue } = venueWith({ variableDebt: OWED, balance: OWED })
+    const { notes } = await venue.prepare(whole, ACCOUNT)
+    expect(notes.join(' ')).toMatch(/needs a little more than the loan/)
+  })
+
+  it('still refuses a tampered margin: an approval above the amount named', () => {
+    const signing = payload({
+      data: repayData(ACCOUNT, BigInt(2), NAMED),
+      approval: { to: USDC, data: approveData(POOL, NAMED + BigInt(1)) },
+    })
+    expect(() => aaveAvalancheVenue.assertSafe(signing, ACCOUNT)).toThrow(ChainActionRefused)
+  })
+
+  it.each<[string, Fixture, RegExp]>([
+    ['nothing owed', { variableDebt: BigInt(0) }, /don't owe/],
+    ['a wallet short of the debt', { variableDebt: OWED, balance: OWED - BigInt(1) }, /hold/],
+    ['a paused reserve', { variableDebt: OWED, paused: true }, /paused/],
+    ['an unreadable debt', { failRead: 'getUserReserveData' }, /read/],
+  ])('refuses %s', async (_name, fixture, words) => {
+    const { venue } = venueWith(fixture)
+    const asked = venue.prepare(whole, ACCOUNT)
+    await expect(asked).rejects.toBeInstanceOf(ChainActionRefused)
+    await expect(asked).rejects.toThrow(words)
+  })
+
+  it('stays open on a frozen reserve', async () => {
+    const { venue } = venueWith({ variableDebt: OWED, frozen: true })
+    await expect(venue.prepare(whole, ACCOUNT)).resolves.toMatchObject({ kind: 'repay' })
   })
 })
 

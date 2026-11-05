@@ -34,6 +34,18 @@ export function withdrawData(receiver: string = ACCOUNT, owner: string = ACCOUNT
   })
 }
 
+export function redeemData(
+  shares: bigint = FIVE,
+  receiver: string = ACCOUNT,
+  owner: string = ACCOUNT
+): string {
+  return encodeFunctionData({
+    abi: ABI,
+    functionName: 'redeem',
+    args: [shares, receiver as Address, owner as Address],
+  })
+}
+
 export function approveData(spender: string, units: bigint = FIVE): string {
   return encodeFunctionData({
     abi: erc20Abi,
@@ -65,6 +77,13 @@ export function describeVaultRefusals(
       expect(() => venue.assertSafe(payload({ data: withdrawData() }), ACCOUNT)).not.toThrow()
     })
 
+    it('passes a redeem of the shares, to and from the person', () => {
+      expect(() => venue.assertSafe(payload({ data: redeemData() }), ACCOUNT)).not.toThrow()
+      expect(() => venue.assertSafe(payload({ data: redeemData() }), STRANGER)).toThrow(
+        ChainActionRefused
+      )
+    })
+
     it('passes a deposit with an exact approval of the vault', () => {
       const signing = approval(vault.asset.id, approveData(vault.address))
       expect(() => venue.assertSafe(signing, ACCOUNT)).not.toThrow()
@@ -80,14 +99,16 @@ export function describeVaultRefusals(
       ['a deposit of nothing', payload({ data: depositData(ACCOUNT, BigInt(0)) })],
       ['extra calldata', payload({ data: `${depositData()}00` })],
       ['calldata that decodes as nothing', payload({ data: '0xdeadbeef' })],
+      ['a redeem paying someone else', payload({ data: redeemData(FIVE, STRANGER) })],
+      ['a redeem from someone else', payload({ data: redeemData(FIVE, ACCOUNT, STRANGER) })],
+      ['a redeem of nothing', payload({ data: redeemData(BigInt(0)) })],
+      ['a redeem naming no amount', payload({ data: redeemData(maxUint256) })],
+      ['a redeem with extra data', payload({ data: `${redeemData()}00` })],
       [
-        'redeem, which is not allowed',
+        'an approval beside a redeem',
         payload({
-          data: encodeFunctionData({
-            abi: ABI,
-            functionName: 'redeem',
-            args: [FIVE, ACCOUNT as Address, ACCOUNT as Address],
-          }),
+          data: redeemData(),
+          approval: { to: vault.asset.id, data: approveData(vault.address) },
         }),
       ],
       [

@@ -26,6 +26,7 @@ import {
   readOnlyRpc,
   readU32,
   readU64,
+  stakedPositions,
   stakedTokenOrRefuse,
   type InstructionRule,
   type SolanaRpc,
@@ -411,6 +412,7 @@ export function createMarinadeVenue(options: MarinadeOptions = {}): ChainVenue {
     kinds: ['stake', 'unstake'],
     assertCanFollow: takesOnly('Marinade', ['SOL']),
     quote,
+    positions: (account) => stakedPositions(rpc, account, MSOL_MINT, 'mSOL', MSOL_DECIMALS),
     prepare: (request, account) =>
       request.kind === 'unstake'
         ? prepareUnstake(request, account)

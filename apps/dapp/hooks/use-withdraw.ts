@@ -39,8 +39,10 @@ export interface WithdrawState {
   amount?: string
   /** True when this closes the position rather than taking a named amount. */
   everything?: boolean
+  /** Which of the pool's two forms this takes from. */
+  from?: 'supply' | 'collateral' | 'both'
   /**
-   * What the position still holds afterwards, in bTokens.
+   * What stays behind in that form afterwards, in base units of the asset.
    *
    * Not the sum withdrawn. Zero here means the position will be emptied, which
    * is the clearest confirmation a simulation can give.
@@ -52,12 +54,14 @@ export interface WithdrawState {
 }
 
 export interface WithdrawRequest {
-  /** The reserve's asset, as a contract id. */
-  assetId: string
-  /** Ticker, for display only. */
+  /** The reserve's asset, as a contract id. Omitted, the ticker names it. */
+  assetId?: string
+  /** Ticker. Decides the asset only when no contract id is given. */
   symbol: string
   /** Base units, or omitted to withdraw the whole position. */
   amount?: string
+  /** Which form to take from. Omitted, the server reads the position and decides. */
+  from?: 'supply' | 'collateral'
 }
 
 export interface Withdraw extends WithdrawState {
@@ -93,14 +97,19 @@ export function useWithdraw(): Withdraw {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               account: signer,
-              asset: request.assetId,
+              ...(request.assetId !== undefined
+                ? { asset: request.assetId }
+                : { symbol: request.symbol }),
               ...(request.amount !== undefined ? { amount: request.amount } : {}),
+              ...(request.from !== undefined ? { from: request.from } : {}),
             }),
           })
           const built = (await res.json()) as {
             xdr?: string
             amount?: string
             everything?: boolean
+            from?: 'supply' | 'collateral' | 'both'
+            symbol?: string
             remaining?: string
             error?: string
           }
@@ -119,9 +128,10 @@ export function useWithdraw(): Withdraw {
           setState({
             phase: 'review',
             xdr: built.xdr,
-            asset: request.symbol,
+            asset: built.symbol ?? request.symbol,
             ...(built.amount !== undefined ? { amount: built.amount } : {}),
             ...(built.everything !== undefined ? { everything: built.everything } : {}),
+            ...(built.from !== undefined ? { from: built.from } : {}),
             ...(built.remaining !== undefined ? { remaining: built.remaining } : {}),
           })
         } catch {

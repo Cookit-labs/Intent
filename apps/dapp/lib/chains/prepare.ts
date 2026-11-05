@@ -15,7 +15,9 @@ import {
   type ChainVenue,
   type FollowOnStep,
   type PreparedAction,
+  type VenuePosition,
   type WalletBalances,
+  WHOLE_AMOUNT,
 } from './types'
 
 /** Keys only: each chain's name is its slug, and reading Stellar's descriptor at load would throw. */
@@ -101,8 +103,25 @@ export function assertKnownTokens(chainApi: ChainModule, request: ChainActionReq
   return tokenIn
 }
 
+const TAKES_WHOLE: ReadonlySet<ChainActionKind> = new Set([
+  'withdraw',
+  'unstake',
+  'repay',
+  'claim',
+  'cancel',
+])
+
 /** Refuses an amount that is not a positive number, in the same words on every route. */
-export function assertValidAmount(request: Pick<ChainActionRequest, 'amount'>): void {
+export function assertValidAmount(
+  request: Pick<ChainActionRequest, 'amount'> & Partial<Pick<ChainActionRequest, 'kind'>>
+): void {
+  if (
+    request.amount === WHOLE_AMOUNT &&
+    request.kind !== undefined &&
+    TAKES_WHOLE.has(request.kind)
+  ) {
+    return
+  }
   const amount = Number(request.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new ChainActionRefused(`"${request.amount}" is not an amount.`)
@@ -178,18 +197,177 @@ export async function prepareChainAction(
   typed: ChainActionRequest,
   account: string
 ): Promise<PreparedAction> {
+  // A cancel names a stream, and the venue reads its token from the chain.
+  if (typed.kind === 'cancel') {
+    const venue = pickVenue(chainApi, typed)
+    const prepared = await venue.prepare(typed, account)
+    venue.assertSafe(prepared.signing, account, prepared.context)
+    return prepared
+  }
+
   const tokenIn = assertKnownTokens(chainApi, typed)
   const named = await assertRecipientRule(chainApi, typed, tokenIn, account)
-  const request = named === undefined ? typed : { ...typed, recipient: named.address }
+  const asked = named === undefined ? typed : { ...typed, recipient: named.address }
 
-  assertValidAmount(request)
+  assertValidAmount(asked)
+  const exit = SLOT_OF[asked.kind] !== undefined
+  const exitVenue = exit ? await pickExitVenue(chainApi, asked, account) : undefined
+  const request = exitVenue === undefined ? asked : await withWholeAmount(exitVenue, asked, account)
+
   await assertNativeReserve(chainApi, request, account)
   await assertHeldForSend(chainApi, request, tokenIn, account)
 
-  const venue = pickVenue(chainApi, request)
+  const venue = exitVenue ?? pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
   venue.assertSafe(prepared.signing, account, prepared.context)
   return named === undefined ? prepared : withResolvedName(prepared, named)
+}
+
+/** A read of a position may not hold up an exit, and one that runs late counts as unread. */
+const POSITION_READ_MS = 6000
+
+const SLOT_OF: Partial<Record<ChainActionKind, VenuePosition['slot']>> = {
+  withdraw: 'supplied',
+  unstake: 'staked',
+  repay: 'borrowed',
+  claim: 'claimable',
+}
+
+/** This venue's positions, or nothing if it can't say. */
+export async function readPositionsBriefly(
+  venue: Pick<ChainVenue, 'positions'>,
+  account: string
+): Promise<VenuePosition[] | undefined> {
+  if (venue.positions === undefined) return undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      venue.positions(account),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('position read timed out')), POSITION_READ_MS)
+      }),
+    ])
+  } catch {
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** An exit already under way still belongs to the venue it started on, which can say how it stands. */
+const ALSO_ROUTES_ON: Partial<Record<ChainActionKind, readonly VenuePosition['slot'][]>> = {
+  unstake: ['claimable', 'cooling'],
+  claim: ['cooling'],
+}
+
+function inSlot(
+  positions: readonly VenuePosition[],
+  request: ChainActionRequest,
+  slot: VenuePosition['slot'] | undefined
+): VenuePosition | undefined {
+  const wanted = request.tokenIn.trim().toUpperCase()
+  return positions.find(
+    (p) => p.slot === slot && p.symbol.toUpperCase() === wanted && Number(p.amount) > 0
+  )
+}
+
+/** The figure a position shows for this request, or nothing if it holds none. */
+function heldFor(
+  positions: readonly VenuePosition[],
+  request: ChainActionRequest
+): string | undefined {
+  return inSlot(positions, request, SLOT_OF[request.kind])?.amount
+}
+
+/** Whether this request belongs at this venue, and the figure to tell the person it has. */
+function routedFor(
+  positions: readonly VenuePosition[],
+  request: ChainActionRequest
+): string | undefined {
+  const also = ALSO_ROUTES_ON[request.kind] ?? []
+  return (
+    heldFor(positions, request) ??
+    also.map((slot) => inSlot(positions, request, slot)?.amount).find((a) => a !== undefined)
+  )
+}
+
+/**
+ * Where an exit goes when no venue was named: wherever the money is. One venue holding it is that
+ * venue, and two is the person's choice. If a venue couldn't be read the money may be there, so
+ * this never says it is nowhere, and leaves it to the usual pick.
+ */
+async function pickExitVenue(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string
+): Promise<ChainVenue> {
+  const usable = chainApi.venues.filter((v) => v.kinds.includes(request.kind))
+  if (namedVenue(chainApi, request) !== undefined || usable.length < 2) {
+    return pickVenue(chainApi, request)
+  }
+  const readings = await Promise.all(usable.map((v) => readPositionsBriefly(v, account)))
+  const holding = usable
+    .map((venue, i) => ({ venue, held: routedFor(readings[i] ?? [], request) }))
+    .filter((entry) => entry.held !== undefined)
+
+  if (holding.length === 1) return (holding[0] as { venue: ChainVenue }).venue
+  const verb = request.kind.replace('_', ' ')
+  if (holding.length > 1) {
+    const where = holding.map(({ venue, held }) => `${held} on ${venue.name}`).join(' and ')
+    const first = (holding[0] as { venue: ChainVenue }).venue.name
+    const example =
+      request.kind === 'claim'
+        ? `claim my ${request.tokenIn} from ${first}`
+        : `${verb} ${request.amount} ${request.tokenIn} from ${first}`
+    throw new ChainActionRefused(
+      `You have ${request.tokenIn} in more than one place: ${where}. Say which, like "${example}". Nothing was signed or sent.`
+    )
+  }
+  if (readings.some((reading) => reading === undefined)) return pickVenue(chainApi, request)
+  throw new ChainActionRefused(
+    `I don't see any ${request.tokenIn} to ${verb} on ${usable.map((v) => v.name).join(', ')}. Nothing was signed or sent.`
+  )
+}
+
+/** "All" as the figure read from the chain now, so the card shows a number the person can check. */
+async function withWholeAmount(
+  venue: ChainVenue,
+  request: ChainActionRequest,
+  account: string
+): Promise<ChainActionRequest> {
+  if (request.amount !== WHOLE_AMOUNT || SLOT_OF[request.kind] === undefined) return request
+  if (request.kind === 'claim') return request
+  const positions = await readPositionsBriefly(venue, account)
+  if (positions === undefined) {
+    throw new ChainActionRefused(
+      `I couldn't read how much ${request.tokenIn} you have on ${venue.name} right now. Try again shortly, or say an amount. Nothing was signed or sent.`
+    )
+  }
+  const held = heldFor(positions, request)
+  if (held === undefined) {
+    const ready = inSlot(positions, request, 'claimable')
+    const cooling = inSlot(positions, request, 'cooling')
+    const under = [
+      ready === undefined
+        ? undefined
+        : `${ready.amount} ${ready.symbol} is ready, so say "claim my ${ready.symbol}".`,
+      cooling === undefined
+        ? undefined
+        : `${cooling.amount} ${cooling.symbol} is on its way${
+            cooling.readyInHours === undefined
+              ? ''
+              : `, ready in about ${Math.ceil(cooling.readyInHours)} hours`
+          }.`,
+    ].filter((line) => line !== undefined)
+    throw new ChainActionRefused(
+      [
+        `You have no ${request.tokenIn} to ${request.kind} on ${venue.name}.`,
+        ...under,
+        'Nothing was signed or sent.',
+      ].join(' ')
+    )
+  }
+  return { ...request, amount: held, wholePosition: true }
 }
 
 /** Native coin kept back for network fees, in display units: a trade may not spend into it. */

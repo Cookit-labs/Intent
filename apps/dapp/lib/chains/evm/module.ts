@@ -122,6 +122,7 @@ export const avalancheModule = evmModule('avalanche', {
   borrow: 'aave-avalanche',
   repay: 'aave-avalanche',
   stream: 'sablier-avalanche',
+  cancel: 'sablier-avalanche',
   invoice: 'bulla',
   pay_invoice: 'bulla',
 })
@@ -140,6 +141,7 @@ export const monadModule = evmModule(
     stake: 'fastlane',
     unstake: 'fastlane',
     stream: 'sablier-monad',
+    cancel: 'sablier-monad',
   },
   { USDT: 'On Monad, Tether’s dollar is called USDT0, so ask for USDT0.' }
 )

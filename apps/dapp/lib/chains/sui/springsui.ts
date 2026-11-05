@@ -25,6 +25,7 @@ import {
   assertSpringsuiUnstakeSafe,
   isSpringsuiRedeem,
   prepareSpringsuiUnstake,
+  readSpringsuiPositions,
 } from './springsui-unstake'
 import { displayAmount } from './tokens'
 
@@ -111,6 +112,7 @@ export const springsuiVenue: ChainVenue = {
   kinds: ['stake', 'unstake'],
   assertCanFollow: stakesAfterSwap('SpringSui'),
   quote,
+  positions: readSpringsuiPositions,
   prepare,
   // A redeem and a mint are never allowed in one transaction: each policy allows only its own.
   assertSafe: (payload: SigningPayload, account: string) =>

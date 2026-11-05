@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 
 import { reportError } from '../../../../lib/server/report'
-import { resolveAsset } from '../../../../lib/swap/assets'
+import { resolveAsset, type ClassicAsset } from '../../../../lib/swap/assets'
 import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { buildOfferTransaction } from '../../../../lib/swap/build-offer'
 import { fetchOrderBookTop, offerPriceFromUsd } from '../../../../lib/swap/limit-price'
+import { fetchOffer, type HorizonOfferRecord } from '../../../../lib/swap/offers'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -38,6 +39,11 @@ interface BuildOfferBody {
   offerId?: string
 }
 
+function ledgerAsset(asset: HorizonOfferRecord['selling']): ClassicAsset {
+  if (asset.asset_type === 'native') return { kind: 'classic', code: 'XLM' }
+  return { kind: 'classic', code: asset.asset_code ?? '', issuer: asset.asset_issuer ?? '' }
+}
+
 export async function POST(req: Request): Promise<NextResponse> {
   const limited = await enforceRateLimit(req, 'build')
   if (limited !== undefined) return limited
@@ -54,7 +60,57 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (account === undefined || account.trim() === '') {
     return NextResponse.json({ error: 'account_required' }, { status: 400 })
   }
-  if (sellSymbol === undefined || buySymbol === undefined || amount === undefined) {
+  if (amount === undefined) {
+    return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
+  }
+
+  // Cancelling is read from the ledger, not from the names a client sends. Getting an order back
+  // must not depend on this app's token list: one placed with a token that later left the list,
+  // or from another wallet app, would otherwise be listed here with no way to withdraw it.
+  if (Number(amount) === 0) {
+    if (offerId === undefined || offerId === '0') {
+      return NextResponse.json({ error: 'offer_id_required' }, { status: 400 })
+    }
+    try {
+      const offer = await fetchOffer(offerId)
+      if (offer === undefined) {
+        return NextResponse.json(
+          {
+            error: 'offer_gone',
+            detail: 'This order is no longer open, so there is nothing to withdraw.',
+          },
+          { status: 404 }
+        )
+      }
+      if (offer.seller !== account) {
+        return NextResponse.json(
+          {
+            error: 'not_your_offer',
+            detail: 'This order belongs to another account. Nothing was signed or sent.',
+          },
+          { status: 403 }
+        )
+      }
+      const built = await buildOfferTransaction({
+        account,
+        selling: ledgerAsset(offer.selling),
+        buying: ledgerAsset(offer.buying),
+        amount: '0',
+        // Any positive ratio serves; the operation is removing the order.
+        price: { n: 1, d: 1 },
+        offerId,
+      })
+      return NextResponse.json({ xdr: built.xdr, offerId: built.offerId, cancelling: true })
+    } catch (e) {
+      reportError('offers/build', e, { offerId })
+      return NextResponse.json(
+        { error: 'build_failed', detail: e instanceof Error ? e.message : undefined },
+        { status: 400 }
+      )
+    }
+  }
+
+  if (sellSymbol === undefined || buySymbol === undefined) {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
   }
 
@@ -66,33 +122,6 @@ export async function POST(req: Request): Promise<NextResponse> {
     // model, and an unknown symbol must fail here rather than resolve to
     // whatever issuer answers to the name.
     return NextResponse.json({ error: 'unknown_asset' }, { status: 400 })
-  }
-
-  // Cancelling needs no price: an offer at zero size is removed whatever it
-  // was priced at, and requiring a price would mean re-deriving one just to
-  // throw it away.
-  const cancelling = Number(amount) === 0
-  if (cancelling) {
-    if (offerId === undefined || offerId === '0') {
-      return NextResponse.json({ error: 'offer_id_required' }, { status: 400 })
-    }
-    try {
-      const built = await buildOfferTransaction({
-        account,
-        selling,
-        buying,
-        amount: '0',
-        // Any positive ratio serves; the operation is removing the order.
-        price: { n: 1, d: 1 },
-        offerId,
-      })
-      return NextResponse.json({ xdr: built.xdr, offerId: built.offerId, cancelling: true })
-    } catch (e) {
-      return NextResponse.json(
-        { error: 'build_failed', detail: e instanceof Error ? e.message : undefined },
-        { status: 400 }
-      )
-    }
   }
 
   if (typeof limitPriceUsd !== 'number' || !Number.isFinite(limitPriceUsd)) {

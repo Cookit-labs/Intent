@@ -1,9 +1,10 @@
-import { fromBase64 } from '@mysten/sui/utils'
+import { fromBase64, normalizeSuiAddress } from '@mysten/sui/utils'
 import { describe, expect, it } from 'vitest'
 
 import { suiClient } from '../chains/sui/client'
 import { SSUI_TYPE } from '../chains/sui/policies'
 import { springsuiVenue } from '../chains/sui/springsui'
+import { toBaseUnits } from '../chains/types'
 
 /**
  * A real unsigned transaction against mainnet, read-only. Nothing here signs or sends: it is only
@@ -30,6 +31,39 @@ describe.skipIf(SKIP)('SpringSui unstake against mainnet', () => {
     expect(prepared.receive?.symbol).toBe('SUI')
     expect(Number(prepared.receive?.amount)).toBeGreaterThan(2)
   }, 60_000)
+
+  it('reads sSUI in the wallet to the last unit, and "all" of it dry-runs clean', async () => {
+    const positions = await springsuiVenue.positions?.(SSUI_HOLDER)
+    expect(positions).toHaveLength(1)
+    const staked = positions?.[0]
+    expect(staked).toMatchObject({ slot: 'staked', symbol: 'sSUI' })
+
+    const { balance } = await suiClient().core.getBalance({
+      owner: SSUI_HOLDER,
+      coinType: SSUI_TYPE,
+    })
+    expect(toBaseUnits(staked?.amount as string, 9)).toBe(balance.balance)
+
+    const prepared = await springsuiVenue.prepare(
+      { kind: 'unstake', amount: staked?.amount as string, wholePosition: true, tokenIn: 'sSUI' },
+      SSUI_HOLDER
+    )
+    if (prepared.signing.family !== 'sui') throw new Error('wrong family')
+    expect(() => springsuiVenue.assertSafe(prepared.signing, SSUI_HOLDER)).not.toThrow()
+    const result = await suiClient().core.simulateTransaction({
+      transaction: fromBase64(prepared.signing.transaction),
+      include: { effects: true, balanceChanges: true },
+    })
+    expect(result.Transaction?.effects?.status.success).toBe(true)
+    const paid = result.Transaction?.balanceChanges?.find((c) =>
+      c.coinType.endsWith('::SPRING_SUI')
+    )
+    expect(paid?.amount).toBe(`-${balance.balance}`)
+  }, 60_000)
+
+  it('finds nothing for an empty wallet', async () => {
+    expect(await springsuiVenue.positions?.(normalizeSuiAddress('0x1234'))).toEqual([])
+  }, 30_000)
 
   it('sSUI still has the decimals in its token entry', async () => {
     const { coinMetadata } = await suiClient().core.getCoinMetadata({ coinType: SSUI_TYPE })

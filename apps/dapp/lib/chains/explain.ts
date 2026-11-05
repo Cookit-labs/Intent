@@ -13,6 +13,8 @@ const EXAMPLE: Record<ChainActionKind, (symbol: string, venue: string) => string
   stream: (symbol) => `stream 100 ${symbol} to an address over 30 days`,
   invoice: (symbol) => `invoice an address 100 ${symbol} due 2027-01-31`,
   pay_invoice: (symbol) => `pay invoice 12 with 100 ${symbol}`,
+  claim: (symbol) => `claim my ${symbol}`,
+  cancel: () => 'cancel stream 12',
 }
 
 /** What can come after a swap, in the words someone types. */

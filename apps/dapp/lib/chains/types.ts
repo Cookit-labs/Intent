@@ -20,16 +20,51 @@ export type ChainActionKind =
   | 'stream'
   | 'invoice'
   | 'pay_invoice'
+  /** Collecting what an earlier unstake left waiting, once it is ready. */
+  | 'claim'
+  /** Ending a stream the person started, for what hasn't streamed yet. */
+  | 'cancel'
+
+/**
+ * The amount of a request for the whole of something: a position, or what is ready to claim. A
+ * venue never sees it on a withdraw, unstake or repay, which reach it as a number and
+ * `wholePosition`. A claim and a cancel keep it, since the venue alone knows what they cover.
+ */
+export const WHOLE_AMOUNT = 'all'
+
+/** What a person holds at a venue, where it can be read. */
+export interface VenuePosition {
+  /**
+   * `supplied` comes back through a withdraw, `staked` through an unstake, `borrowed` is owed
+   * through a repay, `claimable` is ready for a claim, and `cooling` is an exit on its way.
+   */
+  slot: 'supplied' | 'staked' | 'borrowed' | 'claimable' | 'cooling'
+  symbol: string
+  /** Display units. */
+  amount: string
+  /** Roughly when a `cooling` exit can be claimed, in hours from now, where the chain says. */
+  readyInHours?: number | undefined
+  /** A stream's id, where this position is one. */
+  id?: string | undefined
+}
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
   kind: ChainActionKind
+  /** A number, or `WHOLE_AMOUNT` on the kinds that take it. */
   amount: string
   /**
    * `amount` is dollars, not tokens: "$5 of SOL". Only the chat's start of an action reads this,
    * and it is swapped for a count of tokens there, so nothing past that point ever sees it.
    */
   amountIsUsd?: true | undefined
+  /**
+   * The amount was read as all of the position. A venue that can empty it exactly, leaving no
+   * interest behind, should. One that can't still takes `amount`, which is what was read.
+   */
+  wholePosition?: boolean | undefined
+  /** Cancelling only: the stream's id on chain. */
+  streamId?: string | undefined
   tokenIn: string
   /** Swaps only. */
   tokenOut?: string | undefined
@@ -155,6 +190,12 @@ export interface ChainVenue {
    */
   quote?: ((request: ChainActionRequest, account: string) => Promise<VenueQuote>) | undefined
   prepare: (request: ChainActionRequest, account: string) => Promise<PreparedAction>
+  /**
+   * What this account holds here, read from the chain. Empty means nothing is there, so it must
+   * throw rather than return empty when it could not read. It decides where a withdraw goes when
+   * no venue was named, and what "all" means, so it reads the live figure, interest included.
+   */
+  positions?: ((account: string) => Promise<VenuePosition[]>) | undefined
   /**
    * Refuses a payload that does anything but what was asked: wrong signer, an
    * unexpected program, a transfer out. Runs on what the venue's API returned

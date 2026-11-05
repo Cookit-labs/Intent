@@ -1,4 +1,4 @@
-import type { ChainActionRequest } from './types'
+import { WHOLE_AMOUNT, type ChainActionRequest } from './types'
 
 /**
  * Commas only as thousands, 1,000 or 1,000.5. In "1,5" or "0,500" a comma is a decimal point, and
@@ -62,11 +62,38 @@ const PAY_INVOICE = new RegExp(
   'i'
 )
 
+/** All of a position: "withdraw all USDC", "withdraw all my USDC", "withdraw my USDC". */
+const WHOLE = String.raw`(?:all(?:\s+of)?(?:\s+my)?|everything\s+in|max|my(?:\s+entire)?)`
+const WITHDRAW_WHOLE = new RegExp(
+  String.raw`^(?:please\s+)?(?:withdraw|redeem|take\s+out)\s+${WHOLE}\s+${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+const UNSTAKE_WHOLE = new RegExp(
+  String.raw`^(?:please\s+)?unstake\s+${WHOLE}\s+${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+const REPAY_WHOLE = new RegExp(
+  String.raw`^(?:please\s+)?(?:repay|pay\s+back|pay\s+off)\s+${WHOLE}\s+${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+/** Collecting a finished unstake. It takes no amount: it is what the chain says is ready. */
+const CLAIM = new RegExp(
+  String.raw`^(?:please\s+)?(?:claim|collect)\s+(?:my\s+)?(?:unstaked\s+|cooled\s+)?${TOKEN}${FROM_VENUE}${END}`,
+  'i'
+)
+/** Case stays as typed, since an id can be an address. */
+const CANCEL_STREAM = new RegExp(
+  String.raw`^(?:please\s+)?cancel\s+(?:my\s+)?stream\s+#?([a-z0-9]{1,64})${FROM_VENUE}${END}`,
+  'i'
+)
+/** A stream's token is read from the chain, so nothing in the request should claim to know it. */
+const STREAM_TOKEN = 'STREAM'
+
 const DAYS_IN_A_MONTH = 30
 
 /** Sentences that ask to do something, so a miss gets told what works rather than a guess. */
 const ACTION_VERB =
-  /\b(swap|convert|exchange|trade|change|buy|sell|supply|lend|deposit|save|earn|stake|unstake|withdraw|redeem|borrow|repay|stream|invoice|cash out|send|bridge|long|short)\b/i
+  /\b(swap|convert|exchange|trade|change|buy|sell|supply|lend|deposit|save|earn|stake|unstake|withdraw|redeem|borrow|repay|stream|invoice|claim|cash out|send|bridge|long|short)\b/i
 
 /** People say the chain for its coin. `sui` and `near` are already their symbols. */
 const TOKEN_OF_CHAIN_NAME: ReadonlyMap<string, string> = new Map([
@@ -160,6 +187,33 @@ export function parseChainAction(text: string): ChainActionRequest | null {
 
 /** Taking out of a position, or borrowing against one: an amount, a token and maybe a venue. */
 function parsePositionAction(text: string): ChainActionRequest | null {
+  const wholes = [
+    ['withdraw', WITHDRAW_WHOLE],
+    ['unstake', UNSTAKE_WHOLE],
+    ['repay', REPAY_WHOLE],
+    ['claim', CLAIM],
+  ] as const
+  for (const [kind, shape] of wholes) {
+    const match = shape.exec(text)
+    if (match !== null) {
+      return {
+        kind,
+        amount: WHOLE_AMOUNT,
+        tokenIn: chainTokenWord(match[1] as string),
+        venue: match[2]?.trim(),
+      }
+    }
+  }
+  const cancel = CANCEL_STREAM.exec(text)
+  if (cancel !== null) {
+    return {
+      kind: 'cancel',
+      amount: WHOLE_AMOUNT,
+      tokenIn: STREAM_TOKEN,
+      streamId: cancel[1] as string,
+      venue: cancel[2]?.trim(),
+    }
+  }
   const shapes = [
     ['withdraw', WITHDRAW],
     ['unstake', UNSTAKE],

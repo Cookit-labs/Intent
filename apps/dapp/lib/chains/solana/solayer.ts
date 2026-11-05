@@ -19,7 +19,6 @@ import {
 } from './assert-safe'
 import {
   accountRoles,
-  addressWithSeed,
   anchorAmountData,
   assertStakeShape,
   compileForSigning,
@@ -39,13 +38,18 @@ import {
   poolWithdrawAuthority,
   rateText,
   readAccount,
+  readAccounts,
   readMinimumDelegation,
   readOnlyRpc,
   readStakeAccountRent,
   readStakePool,
   readU64,
-  STAKE_PROGRAM,
+  stakedPositions,
   stakedTokenOrRefuse,
+  STAKE_EXIT_SLOTS,
+  stakeExitAddress,
+  stakeExitAddresses,
+  stakeExitSeed,
   validatorStakeAccount,
   withdrawStake,
   withdrawStakeRule,
@@ -56,6 +60,12 @@ import {
   type StakePoolState,
   type StakeShape,
 } from './stake-pool'
+import {
+  prepareStakeClaim,
+  readStakeExits,
+  stakeClaimShapes,
+  stakeExitPositions,
+} from './stake-claim'
 import { fromBaseUnits } from './tokens'
 
 const { readonly, signer, writable } = accountRoles
@@ -151,6 +161,7 @@ export function solayerShapes(account: string): readonly StakeShape[] {
           ? undefined
           : 'This transaction’s unstake doesn’t fit together as one exit to your own stake account.',
     },
+    ...stakeClaimShapes(account),
   ]
 }
 
@@ -191,14 +202,11 @@ export function chooseValidator(
 export interface SolayerOptions {
   env?: Record<string, string | undefined>
   rpc?: SolanaRpc
-  /** Names the new stake account's seed. Tests fix it. */
-  now?: () => number
 }
 
 /** sSOL only: Solayer's sUSD, Pay, card and chain fail the wallet-only test or aren't on this chain. */
 export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
   const rpc = options.rpc ?? readOnlyRpc(options.env)
-  const now = options.now ?? Date.now
 
   async function readRestakingPoolOrRefuse(): Promise<void> {
     const account = await readAccount(rpc, SOLAYER_RESTAKING_POOL)
@@ -268,7 +276,7 @@ export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
       receive: { amount: receive, symbol: 'sSOL', approximate: true },
       notes: [
         `1 sSOL is worth about ${rateText(state.totalLamports, state.poolTokenSupply)} SOL, read from Solayer’s stake pool on chain just now. I’m not showing a yearly rate because the pool doesn’t state one, and rewards aren’t guaranteed.`,
-        `Leaving is slow. "unstake" here gives you a stake account of your own, which cools until the Solana epoch ends, about two days at most, and then you withdraw the SOL from it yourself.`,
+        `Leaving is slow. "unstake" here gives you a stake account of your own, which cools until the Solana epoch ends, about two days at most unless an unusual amount of the network is leaving, and then "claim" here pays the SOL to your wallet.`,
         `That way out needs at least ${fromBaseUnits(minimum.toString(), SOL_DECIMALS)} SOL worth of sSOL at once, Solana’s minimum for a stake account, read on chain. Below that, your only way out here is selling sSOL on the market, where the price can differ and depth may be thin.`,
         `Solayer has shrunk: its stake pool holds about ${poolSol} SOL on chain, about $10M in November 2026, against a peak of about $520.67M in January 2025. A small pool can mean thin markets for sSOL.`,
         'Solayer’s program can be upgraded by a 3-of-5 multisig. sSOL’s freeze authority is held by that program’s pool, so an upgrade could freeze it. A failure there could lose you money.',
@@ -291,12 +299,19 @@ export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
     )
     const poolTokens = BigInt(toBaseUnits(request.amount, SSOL_DECIMALS))
 
-    const [state, rent, minimum] = await Promise.all([
+    const [state, rent, minimum, slots] = await Promise.all([
       readStakePool(rpc, 'Solayer', SOLAYER_STAKE_POOL, SOLAYER_LP_MINT),
       readStakeAccountRent(rpc),
       readMinimumDelegation(rpc),
+      readAccounts(rpc, stakeExitAddresses(account)),
       readRestakingPoolOrRefuse(),
     ])
+    const slot = slots.findIndex((held) => held === undefined)
+    if (slot === -1) {
+      throw new ChainActionRefused(
+        `You already have ${STAKE_EXIT_SLOTS} stake accounts waiting from unstaking here. Say "claim SOL from Solayer" for those that are ready first. Nothing was signed or sent.`
+      )
+    }
     const list = await readAccount(rpc, state.validatorList)
     const validators = decodeValidatorList(list.data)
     const validator = validators === undefined ? undefined : chooseValidator(state, validators)
@@ -317,8 +332,8 @@ export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
       )
     }
 
-    const seed = `intent-${now()}`
-    const stakeAccount = addressWithSeed(account, seed, STAKE_PROGRAM)
+    const seed = stakeExitSeed(slot)
+    const stakeAccount = stakeExitAddress(account, slot)
     const transaction = await compileForSigning(rpc, account, [
       ...computeBudget(COMPUTE_UNITS),
       // Someone who bought sSOL on the market may never have held the LP token this passes through.
@@ -346,8 +361,8 @@ export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
       pay: { amount: request.amount, symbol: 'sSOL' },
       receive: { amount: receive, symbol: 'SOL', approximate: true },
       notes: [
-        `This exit is delayed. The SOL does not reach your balance now. It goes to a new stake account you control, ${stakeAccount}, which cools until the Solana epoch ends, about two days at most.`,
-        'After that you withdraw the SOL from that stake account yourself, using a wallet that manages stake accounts or the Solana command line. That last step isn’t wired here yet, and it needs nobody else’s signature.',
+        `This exit is delayed. The SOL does not reach your balance now. It goes to a new stake account you control, ${stakeAccount}, which cools until the Solana epoch ends, about two days at most unless an unusual amount of the network is leaving.`,
+        'After that, say "claim SOL from Solayer" here and the SOL comes to your wallet. That needs nobody else’s signature, and any wallet that manages stake accounts can do the same.',
         `The stake pool charges ${feePercentText(state.stakeWithdrawalFee)} on the way out, read on chain, and the amount above is after that fee. About ${fromBaseUnits(rent.toString(), SOL_DECIMALS)} SOL from your wallet funds the stake account, and comes back when you withdraw.`,
       ],
       signing: { family: 'solana', transaction },
@@ -357,19 +372,35 @@ export function createSolayerVenue(options: SolayerOptions = {}): ChainVenue {
   return {
     id: 'solayer',
     name: 'Solayer',
-    kinds: ['stake', 'unstake'],
+    kinds: ['stake', 'unstake', 'claim'],
     assertCanFollow: takesOnly('Solayer', ['SOL']),
     quote,
+    positions: async (account) => {
+      const [staked, exits] = await Promise.all([
+        stakedPositions(rpc, account, SSOL_MINT, 'sSOL', SSOL_DECIMALS),
+        readStakeExits(rpc, account),
+      ])
+      return [...staked, ...stakeExitPositions(exits)]
+    },
     prepare: (request, account) =>
       request.kind === 'unstake'
         ? prepareUnstake(request, account)
         : request.kind === 'stake'
           ? prepareStake(request, account)
-          : Promise.reject(
-              new ChainActionRefused(
-                `Solayer here can stake and unstake, not ${request.kind}. Nothing was signed or sent.`
-              )
-            ),
+          : request.kind === 'claim'
+            ? prepareStakeClaim({
+                rpc,
+                venueId: 'solayer',
+                venueName: 'Solayer',
+                stakedSymbol: 'sSOL',
+                request,
+                account,
+              })
+            : Promise.reject(
+                new ChainActionRefused(
+                  `Solayer here can stake, unstake and claim, not ${request.kind}. Nothing was signed or sent.`
+                )
+              ),
     assertSafe: (payload: SigningPayload, account: string) =>
       assertStakeShape(payload, account, 'Solayer', solayerShapes(account)),
   }

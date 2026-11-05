@@ -20,6 +20,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenuePosition,
 } from '../types'
 import {
   approvalNote,
@@ -98,7 +99,38 @@ export const SABLIER_LOCKUP_ABI = [
     ],
     outputs: [{ name: 'streamId', type: 'uint256' }],
   },
+  // Only the stream's sender may call it. It refunds the sender in the same transaction, leaves the
+  // recipient's part in the contract to withdraw, and has no fee check: only `_withdraw` asks the
+  // comptroller. evm-monorepo lockup/src/SablierLockup.sol, tried on both chains in the live test.
+  {
+    type: 'function',
+    name: 'cancel',
+    stateMutability: 'payable',
+    inputs: [{ name: 'streamId', type: 'uint256' }],
+    outputs: [{ name: 'refundedAmount', type: 'uint128' }],
+  },
 ] as const satisfies Abi
+
+const STREAM_READS = parseAbi([
+  'function nextStreamId() view returns (uint256)',
+  'function getSender(uint256 streamId) view returns (address)',
+  'function statusOf(uint256 streamId) view returns (uint8)',
+  'function isCancelable(uint256 streamId) view returns (bool)',
+  'function refundableAmountOf(uint256 streamId) view returns (uint128)',
+  'function withdrawableAmountOf(uint256 streamId) view returns (uint128)',
+  'function getUnderlyingToken(uint256 streamId) view returns (address)',
+  'function getRecipient(uint256 streamId) view returns (address)',
+])
+
+/** `Lockup.Status`, in order: PENDING, STREAMING, SETTLED, CANCELED, DEPLETED. */
+const STATUS_SETTLED = 2
+const STATUS_CANCELED = 3
+const STATUS_DEPLETED = 4
+
+/** Senders can't be looked up on chain, so every stream is read. Past this, it throws instead. */
+const MAX_STREAMS_READ = BigInt(5_000)
+const STREAMS_PER_CALL = 500
+const STREAM_ID = /^[1-9]\d{0,29}$/
 
 const FEE_READS = parseAbi([
   'function comptroller() view returns (address)',
@@ -176,6 +208,13 @@ function isSablierContract(chain: EvmChain, address: string): boolean {
 
 function checkStream(chain: EvmChain) {
   return (call: DecodedCall, { account, approval }: CheckContext): void => {
+    // A cancel names no address. The contract lets only the sender call it, and pays only the sender.
+    if (call.functionName === 'cancel') {
+      const [streamId] = call.args as readonly [bigint]
+      if (streamId === BigInt(0)) refuse('This cancels no stream.')
+      if (approval !== undefined) refuse('Canceling a stream needs no approval.')
+      return
+    }
     const stream = streamOf(call.args)
     if (!sameAddress(stream.sender, account)) {
       refuse('This stream is not from your wallet, so someone else could cancel it.')
@@ -227,7 +266,7 @@ export function sablierPolicy(chain: EvmChain): EvmCallPolicy {
     contracts: {
       [lockup]: {
         abi: SABLIER_LOCKUP_ABI,
-        functions: ['createWithDurationsLL'],
+        functions: ['createWithDurationsLL', 'cancel'],
         check: checkStream(chain),
       },
     },
@@ -336,10 +375,9 @@ function streamNotes(
   fee: WithdrawalFee | undefined
 ): string[] {
   const { nativeSymbol } = EVM_CHAINS[chain]
-  const lockup = SABLIER_LOCKUP[chain]
   return [
     `The full amount leaves your wallet now and sits in Sablier's contract. It unlocks evenly, second by second, for ${days} ${days === 1 ? 'day' : 'days'}, starting when this lands.`,
-    `You can cancel until it ends. The part not yet streamed comes back to you, and ${recipient} keeps what has already streamed, so they can't count on the rest. This app can't cancel for you yet: use ${SABLIER_APP}, or call cancel on ${lockup} from this wallet with the stream’s id, which is in this transaction's logs.`,
+    `You can cancel until it ends, by asking here to cancel the stream by its number, or at ${SABLIER_APP}. The part not yet streamed comes back to you, and ${recipient} keeps what has already streamed, so they can't count on the rest.`,
     `The money doesn't arrive by itself. ${recipient} has to withdraw what has streamed, at ${SABLIER_APP} or on the same contract, and needs ${nativeSymbol} for gas and the fee.`,
     feeNote(fee, chain),
     `Check that address is a wallet they can sign from. The stream stays with it and can't be moved to another address, and an exchange deposit address may not be able to claim it.`,
@@ -432,6 +470,167 @@ async function prepareStream(
   }
 }
 
+/**
+ * A token off this chain's list can't be trusted to name itself, and anyone can start a stream that
+ * names another wallet as its sender, so a stream in one proves nothing and is left alone.
+ */
+function listedToken(chain: EvmChain, address: string): ChainToken | undefined {
+  return EVM_CHAINS[chain].tokens.find((token) => sameAddress(token.id, address))
+}
+
+function readStream(chain: EvmChain, streamId: bigint, reader: EvmReaderClient) {
+  const contract = { address: SABLIER_LOCKUP[chain] as Address, abi: STREAM_READS }
+  const args = [streamId] as const
+  return reader.multicall({
+    allowFailure: false,
+    contracts: [
+      { ...contract, functionName: 'getSender', args },
+      { ...contract, functionName: 'statusOf', args },
+      { ...contract, functionName: 'isCancelable', args },
+      { ...contract, functionName: 'refundableAmountOf', args },
+      { ...contract, functionName: 'withdrawableAmountOf', args },
+      { ...contract, functionName: 'getUnderlyingToken', args },
+    ],
+  })
+}
+
+async function prepareCancel(
+  chain: EvmChain,
+  request: ChainActionRequest,
+  account: string,
+  reader: EvmReaderClient
+): Promise<PreparedAction> {
+  if (!isAddress(account, { strict: false })) refuse('That isn’t a wallet this can build for.')
+  const typed = request.streamId?.trim() ?? ''
+  if (!STREAM_ID.test(typed)) {
+    refuse(`"${typed}" isn't a stream number on Sablier. Try "cancel stream 12".`)
+  }
+  const streamId = BigInt(typed)
+  const lockup = SABLIER_LOCKUP[chain]
+  const contract = { address: lockup as Address, abi: STREAM_READS }
+  const stream = await (async () => {
+    const next = await reader.readContract({ ...contract, functionName: 'nextStreamId' })
+    return streamId >= next ? undefined : readStream(chain, streamId, reader)
+  })().catch(() =>
+    refuse(`I couldn't read stream ${typed} from Sablier just now, so this wasn't built.`)
+  )
+  if (stream === undefined) {
+    refuse(`There is no stream ${typed} on Sablier on ${EVM_CHAINS[chain].name}.`)
+  }
+  const [sender, status, cancelable, refundable, withdrawable, tokenAddress] = stream
+  if (!sameAddress(sender, account)) {
+    refuse(
+      `Stream ${typed} wasn't started by this wallet. Only the wallet that started a stream can cancel it.`
+    )
+  }
+  if (status === STATUS_CANCELED) {
+    refuse(`Stream ${typed} was already canceled, and what hadn't streamed has come back to you.`)
+  }
+  if (status === STATUS_SETTLED || status === STATUS_DEPLETED) {
+    refuse(`Stream ${typed} has finished streaming, so there is nothing left to get back.`)
+  }
+  if (!cancelable) {
+    refuse(`Stream ${typed} can't be canceled: it was set up that way, or that right was given up.`)
+  }
+  if (refundable === BigInt(0)) {
+    refuse(`Stream ${typed} has nothing left to get back.`)
+  }
+  const token = listedToken(chain, tokenAddress)
+  if (token === undefined) {
+    refuse(
+      `Stream ${typed} pays a token I haven't confirmed, so I won't cancel it here. If you started it, you can cancel it at ${SABLIER_APP}.`
+    )
+  }
+  const recipient = await reader
+    .readContract({ ...contract, functionName: 'getRecipient', args: [streamId] })
+    .catch(() => undefined)
+
+  const { signing } = await buildEvmCall(
+    {
+      chain,
+      account,
+      to: lockup,
+      data: encodeFunctionData({
+        abi: SABLIER_LOCKUP_ABI,
+        functionName: 'cancel',
+        args: [streamId],
+      }),
+    },
+    reader
+  ).catch((error: unknown) => {
+    if (!(error instanceof ChainActionRefused)) throw error
+    return refuse(
+      `This would fail on the chain right now: Sablier wouldn't cancel stream ${typed}. It keeps running as it was. Check you have enough for the network fee, or try again shortly.`
+    )
+  })
+
+  const back = formatUnits(refundable, token.decimals)
+  const theirs = formatUnits(withdrawable, token.decimals)
+  const who = recipient ?? 'the person being paid'
+  return {
+    venueId: `sablier-${chain}`,
+    venueName: 'Sablier',
+    kind: 'cancel',
+    summary: `End stream ${typed} to ${who}, and get back about ${back} ${token.symbol}.`,
+    pay: { amount: back, symbol: token.symbol },
+    receive: { amount: back, symbol: token.symbol, approximate: true },
+    notes: [
+      `What hasn't streamed comes back to your wallet in this same transaction, with no second step. It shrinks every second until this lands, so you get a little less than ${back}.`,
+      `${who} keeps what has already streamed. About ${theirs} ${token.symbol} is still waiting for them to withdraw from Sablier, and canceling doesn't send it to them.`,
+      'Sablier’s contract asks no fee to cancel, only gas. A cancel can’t be undone.',
+    ],
+    signing,
+  }
+}
+
+/**
+ * What this wallet's streams can still bring back, each with its id. The contract lists streams by
+ * recipient, not sender, and Monad's public RPC reads logs only 100 blocks at a time, so this asks
+ * every stream who sent it, with no company indexer. A failed read throws: empty says there are none.
+ */
+async function readStreamPositions(
+  chain: EvmChain,
+  account: string,
+  reader: EvmReaderClient
+): Promise<VenuePosition[]> {
+  if (!isAddress(account, { strict: false })) refuse('That isn’t a wallet this can read.')
+  const contract = { address: SABLIER_LOCKUP[chain] as Address, abi: STREAM_READS }
+  const next = await reader.readContract({ ...contract, functionName: 'nextStreamId' })
+  if (next > MAX_STREAMS_READ) throw new Error('Too many Sablier streams to read them all.')
+
+  const ids = Array.from({ length: Number(next) - 1 }, (_, index) => BigInt(index + 1))
+  const mine: bigint[] = []
+  for (let start = 0; start < ids.length; start += STREAMS_PER_CALL) {
+    const page = ids.slice(start, start + STREAMS_PER_CALL)
+    const senders = await reader.multicall({
+      allowFailure: false,
+      contracts: page.map((id) => ({
+        ...contract,
+        functionName: 'getSender' as const,
+        args: [id] as const,
+      })),
+    })
+    mine.push(...page.filter((_, index) => sameAddress(senders[index] as string, account)))
+  }
+
+  const streams = await Promise.all(mine.map((id) => readStream(chain, id, reader)))
+  return mine.flatMap((id, index): VenuePosition[] => {
+    const [, , cancelable, refundable, , tokenAddress] = streams[index] as Awaited<
+      ReturnType<typeof readStream>
+    >
+    const token = listedToken(chain, tokenAddress)
+    if (!cancelable || refundable === BigInt(0) || token === undefined) return []
+    return [
+      {
+        slot: 'supplied',
+        symbol: token.symbol,
+        amount: formatUnits(refundable, token.decimals),
+        id: id.toString(),
+      },
+    ]
+  })
+}
+
 /** `reader` and `client` are for tests. A chain's real ones are made when they are needed. */
 export function createSablierVenue(
   chain: EvmChain,
@@ -442,9 +641,12 @@ export function createSablierVenue(
   return {
     id: `sablier-${chain}`,
     name: 'Sablier',
-    kinds: ['stream'],
+    kinds: ['stream', 'cancel'],
     prepare: (request, account) =>
-      prepareStream(chain, policy, request, account, reader ?? evmReader(chain)),
+      request.kind === 'cancel'
+        ? prepareCancel(chain, request, account, reader ?? evmReader(chain))
+        : prepareStream(chain, policy, request, account, reader ?? evmReader(chain)),
+    positions: (account) => readStreamPositions(chain, account, reader ?? evmReader(chain)),
     ...evmCallVenueParts(policy, client),
   }
 }

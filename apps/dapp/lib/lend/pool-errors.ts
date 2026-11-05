@@ -33,7 +33,13 @@ const POOL_ERRORS: Record<number, PoolError> = {
     message: 'Not enough collateral for that borrow. Post more collateral, or borrow less.',
     transient: false,
   },
-  1206: { message: 'This pool is not currently active.', transient: true },
+  // A pool "on ice" or frozen refuses new loans, and a frozen one new deposits. Getting out never
+  // stops: Blend's mainnet pool sat on ice (status 3) on 2026-11-05 with withdrawals simulating fine.
+  1206: {
+    message:
+      'This pool is not taking new loans or deposits right now. Money already in it can still be withdrawn, and loans repaid.',
+    transient: true,
+  },
   1207: {
     // The one most likely to be met first, and the least self-explanatory.
     // wBTC sits within a percent of its ceiling, so a perfectly sound borrow
@@ -43,7 +49,7 @@ const POOL_ERRORS: Record<number, PoolError> = {
     transient: true,
   },
   1208: {
-    message: 'This pool allows at most 8 positions per account, and yours is full.',
+    message: 'This pool limits how many positions one account can hold, and yours is full.',
     transient: false,
   },
   1210: {
@@ -97,6 +103,30 @@ export function explainPoolError(reason: string): string {
   if (known === undefined) return reason
 
   return known.message
+}
+
+/**
+ * A refusal on the way out, where the same code means something else.
+ *
+ * #1205 on a borrow says to post more collateral, which is the wrong advice to
+ * someone taking theirs back. #10 comes from the token rather than the pool, and
+ * on a repayment means the wallet does not hold what was asked.
+ */
+export function explainExitError(reason: string, kind: 'withdraw' | 'repay'): string {
+  const code = poolErrorCode(reason)
+  if (kind === 'withdraw' && code === 1205) {
+    return 'This is backing a loan, and taking it out would leave the loan without enough behind it. Repay the loan first, or withdraw less. Nothing was signed or sent.'
+  }
+  // Reached only after the route has read a debt, so here it means an amount too small to count
+  // for anything: a wallet with one stroop left, on the mainnet borrower that showed this.
+  if (kind === 'repay' && code === 1219) {
+    return 'That is too small an amount for the pool to count against your loan. Repay more. Nothing was signed or sent.'
+  }
+  if (kind === 'repay' && code === 10) {
+    return 'Your wallet does not hold enough of this asset to repay that much. Repay less, or get more of it first. Nothing was signed or sent.'
+  }
+  const explained = explainPoolError(reason)
+  return explained === reason ? reason : `${explained} Nothing was signed or sent.`
 }
 
 /** Whether retrying later could plausibly work. Unknown codes are not assumed to be. */

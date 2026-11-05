@@ -160,6 +160,87 @@ function venueWith(options: FakeOptions = {}) {
   return { venue: createSablierVenue('avalanche', fake.reader), calls: fake.calls }
 }
 
+interface FakeStream {
+  sender?: Address
+  status?: number
+  cancelable?: boolean
+  refundable?: bigint
+  withdrawable?: bigint
+  token?: Address
+  recipient?: Address
+}
+
+const LIVE: Required<FakeStream> = {
+  sender: ME,
+  status: 1,
+  cancelable: true,
+  refundable: BigInt(300_000_000),
+  withdrawable: BigInt(200_000_000),
+  token: USDC,
+  recipient: THEM,
+}
+
+/** Stream ids run from 1, as they do on the chain. */
+function streamReader(
+  streams: FakeStream[],
+  options: { callFails?: boolean; readFails?: string; nextOverride?: bigint } = {}
+) {
+  const calls: { to: string; data: string; value?: bigint }[] = []
+  const readContract = async ({
+    functionName,
+    args,
+  }: {
+    functionName: string
+    args?: readonly unknown[]
+  }): Promise<unknown> => {
+    if (options.readFails === functionName) throw new Error('rpc down')
+    if (functionName === 'nextStreamId') {
+      return options.nextOverride ?? BigInt(streams.length + 1)
+    }
+    const stream = { ...LIVE, ...streams[Number(args?.[0]) - 1] }
+    switch (functionName) {
+      case 'getSender':
+        return stream.sender
+      case 'statusOf':
+        return stream.status
+      case 'isCancelable':
+        return stream.cancelable
+      case 'refundableAmountOf':
+        return stream.refundable
+      case 'withdrawableAmountOf':
+        return stream.withdrawable
+      case 'getUnderlyingToken':
+        return stream.token
+      case 'getRecipient':
+        return stream.recipient
+      default:
+        throw new Error(`unexpected read ${functionName}`)
+    }
+  }
+  const reader = {
+    readContract,
+    multicall: async ({ contracts }: { contracts: { functionName: string }[] }) =>
+      Promise.all(contracts.map(readContract)),
+    call: async (args: { to: string; data: string }) => {
+      calls.push(args)
+      if (options.callFails === true) throw new Error('reverted')
+      return { data: '0x' }
+    },
+  } as unknown as EvmReaderClient
+  return { venue: createSablierVenue('avalanche', reader), calls }
+}
+
+function cancelData(streamId: bigint = BigInt(1)): Hex {
+  return encodeFunctionData({ abi: SABLIER_LOCKUP_ABI, functionName: 'cancel', args: [streamId] })
+}
+
+const CANCEL: ChainActionRequest = {
+  kind: 'cancel',
+  amount: 'all',
+  tokenIn: 'STREAM',
+  streamId: '1',
+}
+
 function refusal(run: () => unknown): string {
   try {
     run()
@@ -249,14 +330,6 @@ describe('assertSafe', () => {
   })
 
   it.each([
-    [
-      'cancel',
-      encodeFunctionData({
-        abi: parseAbi(['function cancel(uint256 streamId)']),
-        functionName: 'cancel',
-        args: [BigInt(1)],
-      }),
-    ],
     [
       'withdraw',
       encodeFunctionData({
@@ -483,9 +556,8 @@ describe('what the card says', () => {
     const text = await notes()
     expect(text).toMatch(/You can cancel/)
     expect(text).toContain('not yet streamed comes back')
-    expect(text).toContain('cancel')
-    expect(text).toContain(LOCKUP)
-    expect(text).toContain('stream’s id')
+    expect(text).toMatch(/asking here to cancel the stream by its number/)
+    expect(text).toContain('app.sablier.com')
   })
 
   it('says the recipient must withdraw what has streamed', async () => {
@@ -579,10 +651,150 @@ describe('submit', () => {
   })
 })
 
+describe('ending a stream', () => {
+  it('builds a cancel from the sender, with nothing else in it', async () => {
+    const { venue, calls } = streamReader([{}])
+    const prepared = await venue.prepare(CANCEL, ME)
+    expect(prepared).toMatchObject({
+      kind: 'cancel',
+      pay: { amount: '300', symbol: 'USDC' },
+      receive: { amount: '300', symbol: 'USDC', approximate: true },
+      signing: { family: 'evm', to: LOCKUP, data: cancelData(), value: '0' },
+    })
+    expect(prepared.signing).not.toHaveProperty('approval')
+    expect(calls).toHaveLength(1)
+    expect(() => venue.assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+
+  it('says where the money goes, what the recipient keeps, and that there is no fee', async () => {
+    const { venue } = streamReader([{}])
+    const { notes, summary } = await venue.prepare(CANCEL, ME)
+    const text = notes.join(' ')
+    expect(summary).toContain(THEM)
+    expect(text).toMatch(/comes back to your wallet in this same transaction/)
+    expect(text).toMatch(new RegExp(`${THEM} keeps what has already streamed`))
+    expect(text).toContain('About 200 USDC')
+    expect(text).toMatch(/asks no fee to cancel/)
+  })
+
+  it.each<[string, FakeStream[], string, RegExp]>([
+    ['someone else’s stream', [{ sender: STRANGER }], '1', /wasn't started by this wallet/],
+    ['a stream already canceled', [{ status: 3 }], '1', /already canceled/],
+    ['a stream that has run its course', [{ status: 2 }], '1', /finished streaming/],
+    ['a stream fully paid out', [{ status: 4 }], '1', /finished streaming/],
+    ['a stream that can’t be canceled', [{ cancelable: false }], '1', /can't be canceled/],
+    ['a stream with nothing left', [{ refundable: BigInt(0) }], '1', /nothing left to get back/],
+    [
+      'a token nobody confirmed, which proves nothing about who started it',
+      [{ token: STRANGER }],
+      '1',
+      /a token I haven't confirmed/,
+    ],
+    ['a stream that does not exist', [{}], '2', /There is no stream 2/],
+    ['a stream id of nothing', [{}], '0', /isn't a stream number/],
+    ['a stream id that is not a number', [{}], 'AbC123', /isn't a stream number/],
+  ])('refuses %s', async (_label, streams, streamId, words) => {
+    const { venue } = streamReader(streams)
+    const asked = venue.prepare({ ...CANCEL, streamId }, ME)
+    await expect(asked).rejects.toThrow(ChainActionRefused)
+    await expect(asked).rejects.toThrow(words)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
+  })
+
+  it('refuses with no stream id at all', async () => {
+    const { venue } = streamReader([{}])
+    const { streamId: _none, ...noId } = CANCEL
+    await expect(venue.prepare(noId, ME)).rejects.toThrow(/isn't a stream number/)
+  })
+
+  it('refuses when the stream can not be read, or would fail', async () => {
+    await expect(
+      streamReader([{}], { readFails: 'getSender' }).venue.prepare(CANCEL, ME)
+    ).rejects.toThrow(/couldn't read stream 1/)
+    await expect(streamReader([{}], { callFails: true }).venue.prepare(CANCEL, ME)).rejects.toThrow(
+      /keeps running as it was/
+    )
+  })
+
+  it('still builds when only the recipient can not be read', async () => {
+    const { venue } = streamReader([{}], { readFails: 'getRecipient' })
+    const { summary } = await venue.prepare(CANCEL, ME)
+    expect(summary).toContain('the person being paid')
+  })
+
+  it('assertSafe passes the cancel and nothing wider', () => {
+    const { venue } = streamReader([{}])
+    expect(() => venue.assertSafe(payload({ data: cancelData() }), ME)).not.toThrow()
+    expect(() => venue.assertSafe(payload({ data: cancelData(BigInt(0)) }), ME)).toThrow(
+      ChainActionRefused
+    )
+    expect(() => venue.assertSafe(payload({ data: `${cancelData()}00` as Hex }), ME)).toThrow(
+      ChainActionRefused
+    )
+    expect(() => venue.assertSafe(payload({ data: cancelData(), value: '1' }), ME)).toThrow(
+      ChainActionRefused
+    )
+    expect(() => venue.assertSafe(payload({ data: cancelData(), to: STRANGER }), ME)).toThrow(
+      ChainActionRefused
+    )
+    expect(() =>
+      venue.assertSafe(payload({ data: cancelData(), approval: { to: USDC, data: approve() } }), ME)
+    ).toThrow(ChainActionRefused)
+  })
+})
+
+describe('streams this wallet started', () => {
+  it('lists what each can still bring back, with its id', async () => {
+    const { venue } = streamReader([
+      {},
+      { sender: STRANGER },
+      { token: USDT, refundable: BigInt(1_500_000) },
+    ])
+    await expect(venue.positions?.(ME)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '300', id: '1' },
+      { slot: 'supplied', symbol: 'USDT', amount: '1.5', id: '3' },
+    ])
+  })
+
+  it('leaves out ended streams, and a token anyone could have named this wallet on', async () => {
+    const { venue } = streamReader([
+      { status: 3, cancelable: false, refundable: BigInt(0) },
+      { status: 4, cancelable: false, refundable: BigInt(0) },
+      { token: STRANGER },
+    ])
+    await expect(venue.positions?.(ME)).resolves.toEqual([])
+  })
+
+  it('finds a stream past the first page of reads', async () => {
+    const streams: FakeStream[] = Array.from({ length: 501 }, () => ({ sender: STRANGER }))
+    streams[500] = {}
+    const { venue } = streamReader(streams)
+    await expect(venue.positions?.(ME)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '300', id: '501' },
+    ])
+  })
+
+  it.each(['nextStreamId', 'getSender', 'refundableAmountOf'])(
+    'throws when %s can not be read, rather than saying there are none',
+    async (readFails) => {
+      await expect(streamReader([{}], { readFails }).venue.positions?.(ME)).rejects.toThrow()
+    }
+  )
+
+  it('throws rather than read only some of too many streams', async () => {
+    const { venue } = streamReader([], { nextOverride: BigInt(5_001) })
+    await expect(venue.positions?.(ME)).rejects.toThrow(/Too many/)
+  })
+
+  it('reads only ids that exist, starting from 1', async () => {
+    await expect(streamReader([]).venue.positions?.(ME)).resolves.toEqual([])
+  })
+})
+
 describe('the venues and their listing', () => {
-  it('offers only streams, and joins no race', () => {
+  it('offers streams and ending them, and joins no race', () => {
     for (const venue of [sablierAvalancheVenue, sablierMonadVenue]) {
-      expect(venue.kinds).toEqual(['stream'])
+      expect(venue.kinds).toEqual(['stream', 'cancel'])
       expect(venue.quote).toBeUndefined()
     }
   })

@@ -71,6 +71,10 @@ interface ChainState {
   paused: boolean
   callFails: boolean
   readFails: string | undefined
+  aaveActive: boolean
+  aavePaused: boolean
+  aaveSupplied: bigint
+  aaveLent: bigint
 }
 
 /** One share to 1.02 USDC, so shares and USDC differ as they do live. */
@@ -86,6 +90,10 @@ const HEALTHY: ChainState = {
   paused: false,
   callFails: false,
   readFails: undefined,
+  aaveActive: true,
+  aavePaused: false,
+  aaveSupplied: BigInt(1_000_000_000_000),
+  aaveLent: BigInt(500_000_000_000),
 }
 
 interface FakeRead {
@@ -105,15 +113,47 @@ function fakeReader(overrides: Partial<ChainState> = {}): EvmReaderClient & { ca
     balance: () => state.vaultBalance,
     totalSupply: () => state.totalSupply,
     paused: () => state.paused,
+    // Aave's market, which this vault lends into. Each stops being readable with `aaveUnread`.
+    getReserveConfigurationData: () => [
+      BigInt(6),
+      BigInt(0),
+      BigInt(7800),
+      BigInt(10500),
+      BigInt(1000),
+      true,
+      true,
+      false,
+      state.aaveActive,
+      false,
+    ],
+    getReserveData: () => [
+      BigInt(0),
+      BigInt(0),
+      state.aaveSupplied,
+      BigInt(0),
+      state.aaveLent,
+      BigInt(0),
+      BigInt(0),
+      BigInt(0),
+      BigInt(0),
+      BigInt(0),
+      BigInt(0),
+      0,
+    ],
+    getPaused: () => state.aavePaused,
+    getReserveCaps: () => [BigInt(0), BigInt(0)],
+  }
+  const readContract = async ({ address, functionName }: FakeRead) => {
+    if (state.readFails === functionName) throw new Error('rpc down')
+    const read = reads[functionName]
+    if (read === undefined) throw new Error(`unexpected read ${functionName}`)
+    return read(address)
   }
   return {
     calls,
-    readContract: async ({ address, functionName }: FakeRead) => {
-      if (state.readFails === functionName) throw new Error('rpc down')
-      const read = reads[functionName]
-      if (read === undefined) throw new Error(`unexpected read ${functionName}`)
-      return read(address)
-    },
+    readContract,
+    multicall: async ({ contracts }: { contracts: FakeRead[] }) =>
+      Promise.all(contracts.map(readContract)),
     call: async (request: unknown) => {
       calls.push(request)
       if (state.callFails) throw new Error('reverted')
@@ -177,6 +217,10 @@ describe('assertSafe', () => {
       payload({ approval: { to: BEEFY_MONAD_USDC, data: approve() } }),
     ],
     ['a withdrawal', payload({ data: withdraw() })],
+    [
+      'withdrawAll, which names no one and pays only the sender',
+      payload({ data: encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' }) }),
+    ],
   ])('passes %s', (_label, signing) => {
     expect(() => assertSafe(signing, ACCOUNT)).not.toThrow()
   })
@@ -192,8 +236,15 @@ describe('assertSafe', () => {
       payload({ data: encodeFunctionData({ abi: CALLS, functionName: 'depositAll' }) }),
     ],
     [
-      'withdrawAll',
-      payload({ data: encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' }) }),
+      'withdrawAll with an approval beside it',
+      payload({
+        data: encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' }),
+        approval: { to: BEEFY_MONAD_USDC, data: approve() },
+      }),
+    ],
+    [
+      'withdrawAll with extra data',
+      payload({ data: `${encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' })}00` }),
     ],
     ['earn', payload({ data: encodeFunctionData({ abi: CALLS, functionName: 'earn' }) })],
     [
@@ -488,6 +539,72 @@ describe('following a swap', () => {
   })
 })
 
+describe('exits', () => {
+  const WHOLE_DATA = encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' })
+  const whole = takeOut({ wholePosition: true })
+
+  it('shows what the shares are worth now, in USDC', async () => {
+    await expect(venueWith().positions?.(ACCOUNT)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '51' },
+    ])
+  })
+
+  it('shows nothing with no shares', async () => {
+    await expect(venueWith({ shares: BigInt(0) }).positions?.(ACCOUNT)).resolves.toEqual([])
+  })
+
+  it.each(['balanceOf', 'balance', 'totalSupply'])(
+    'throws when %s can not be read, rather than saying nothing is there',
+    async (readFails) => {
+      await expect(venueWith({ readFails }).positions?.(ACCOUNT)).rejects.toThrow()
+    }
+  )
+
+  it('uses withdrawAll for all of it, with no approval', async () => {
+    const venue = venueWith()
+    const prepared = await venue.prepare(whole, ACCOUNT)
+    const signing = evm(prepared.signing)
+    expect(signing.data).toBe(WHOLE_DATA)
+    expect(signing.approval).toBeUndefined()
+    expect(prepared.pay).toEqual({ amount: '51', symbol: 'USDC' })
+    expect(prepared.receive).toEqual({ amount: '51', symbol: 'USDC', approximate: true })
+    expect(() => venue.assertSafe(signing, ACCOUNT)).not.toThrow()
+  })
+
+  it('leaves a part as a part', async () => {
+    const prepared = await venueWith().prepare(takeOut(), ACCOUNT)
+    expect(evm(prepared.signing).data).not.toBe(WHOLE_DATA)
+  })
+
+  it.each<[string, Partial<ChainState>, RegExp]>([
+    ['no shares', { shares: BigInt(0) }, /You have no USDC/],
+    ['Aave having paused USDC', { aavePaused: true }, /has paused USDC/],
+    ['Aave having closed the reserve', { aaveActive: false }, /has paused USDC/],
+    [
+      'too little free on Aave',
+      { aaveSupplied: BigInt(20_000_000), aaveLent: BigInt(10_000_000) },
+      /only about 10 USDC free/,
+    ],
+    ['a call that would fail', { callFails: true }, /shares are still yours/],
+  ])('refuses all of it with %s', async (_label, state, words) => {
+    const asked = venueWith(state).prepare(whole, ACCOUNT)
+    await expect(asked).rejects.toThrow(ChainActionRefused)
+    await expect(asked).rejects.toThrow(words)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
+  })
+
+  it('still lets the chain decide when Aave can not be read', async () => {
+    const prepared = await venueWith({ readFails: 'getReserveData' }).prepare(whole, ACCOUNT)
+    expect(evm(prepared.signing).data).toBe(WHOLE_DATA)
+  })
+
+  it('does not stop for a paused strategy, which only blocks deposits', async () => {
+    await expect(venueWith({ paused: true }).prepare(whole, ACCOUNT)).resolves.toMatchObject({
+      kind: 'withdraw',
+    })
+  })
+})
+
 function fakeClient(
   receipt: Partial<EvmReceipt>,
   sent: { input: string; value: bigint } = { input: deposit(), value: BigInt(0) }
@@ -535,7 +652,7 @@ describe('submit', () => {
       'a call to something else on the vault',
       fakeClient(
         {},
-        { input: encodeFunctionData({ abi: CALLS, functionName: 'withdrawAll' }), value: BigInt(0) }
+        { input: encodeFunctionData({ abi: CALLS, functionName: 'earn' }), value: BigInt(0) }
       ),
     ],
   ])('stays pending for %s, since the money may have moved', async (_label, client) => {

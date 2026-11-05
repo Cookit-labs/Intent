@@ -21,7 +21,7 @@ import {
   toPublic,
 } from '../../../../lib/weave/orders'
 import { nextStatus } from '../../../../lib/weave/status'
-import { isCashoutChain } from '../../../../lib/weave/types'
+import { closedCashoutReply, isCashoutChain } from '../../../../lib/weave/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -94,6 +94,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!isCashoutChain(chain)) {
     return refusal('unknown_chain', 'Cash-outs are not available on this chain.')
   }
+  // The chat refuses this before any form opens. A page left open from before it did can still post.
+  const closed = closedCashoutReply(chain)
+  if (closed !== undefined) return refusal('chain_closed', closed, 422)
   const onThisNetwork = chainRefusal(chain)
   if (onThisNetwork !== undefined) return onThisNetwork
 

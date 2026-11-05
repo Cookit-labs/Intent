@@ -1,3 +1,4 @@
+import { zeroAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import type { EvmReaderClient } from '../chains/evm/call'
@@ -12,7 +13,7 @@ import {
 import { eulerAvalancheListing, eulerMonadListing } from '../chains/evm/euler-listing'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from '../chains/evm/tokens'
 import type { ChainActionRequest } from '../chains/types'
-import { ACCOUNT, describeVaultRefusals } from './erc4626-refusals'
+import { ACCOUNT, describeVaultRefusals, redeemData, STRANGER } from './erc4626-refusals'
 
 const SUPPLY: ChainActionRequest = { kind: 'supply', amount: '100', tokenIn: 'USDC' }
 const WITHDRAW: ChainActionRequest = { kind: 'withdraw', amount: '100', tokenIn: 'USDC' }
@@ -30,11 +31,17 @@ interface Scene {
   collateral?: readonly string[]
   rateFails?: boolean
   cashFails?: boolean
+  hookTarget?: string
+  hookedOps?: number
+  simulationFails?: boolean
 }
 
 function fakeReader(scene: Scene, collateral: readonly string[]) {
   const reader = {
-    call: async () => ({}),
+    call: async () => {
+      if (scene.simulationFails) throw new Error('reverted')
+      return {}
+    },
     readContract: async ({
       address,
       functionName,
@@ -71,6 +78,8 @@ function fakeReader(scene: Scene, collateral: readonly string[]) {
           return (args?.[0] as bigint) - BigInt(1)
         case 'convertToAssets':
           return args?.[0] as bigint
+        case 'hookConfig':
+          return [scene.hookTarget ?? zeroAddress, scene.hookedOps ?? 0]
         default:
           throw new Error(`Unexpected read: ${functionName}`)
       }
@@ -192,5 +201,45 @@ describe('Euler vaults', () => {
   it('leaves a way out when the cash cannot be read', async () => {
     const venue = monadWith({ shares: units(500), cashFails: true })
     await expect(venue.prepare(WITHDRAW, ACCOUNT)).resolves.toMatchObject({ kind: 'withdraw' })
+  })
+})
+
+describe('Euler exits', () => {
+  const WHOLE = { ...WITHDRAW, wholePosition: true }
+
+  it('shows the position in the asset, and nothing when there is none', async () => {
+    await expect(monadWith({ shares: units(500) }).positions?.(ACCOUNT)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '500' },
+    ])
+    await expect(monadWith().positions?.(ACCOUNT)).resolves.toEqual([])
+  })
+
+  it('redeems every share for all of it, not max-uint', async () => {
+    const venue = monadWith({ shares: units(500) })
+    const prepared = await venue.prepare(WHOLE, ACCOUNT)
+    expect(prepared.signing).toMatchObject({ data: redeemData(units(500)) })
+    expect(() => venue.assertSafe(prepared.signing, ACCOUNT)).not.toThrow()
+  })
+
+  it('says plainly when the vault can not pay all of it now', async () => {
+    const venue = avalancheWith({ shares: units(500), cash: units(40) })
+    await expect(venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/can pay out about 40 USDC/)
+  })
+
+  it('says so when the curator has switched off withdrawals', async () => {
+    const venue = monadWith({ shares: units(500), hookedOps: 1 << 3 })
+    await expect(venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/switched off withdrawals/)
+  })
+
+  it('leaves a hook contract to the chain, and what a deposit alone is hooked for', async () => {
+    const hooked = monadWith({ shares: units(500), hookedOps: 1 << 3, hookTarget: STRANGER })
+    await expect(hooked.prepare(WHOLE, ACCOUNT)).resolves.toMatchObject({ kind: 'withdraw' })
+    const deposits = monadWith({ shares: units(500), hookedOps: 1 })
+    await expect(deposits.prepare(WHOLE, ACCOUNT)).resolves.toMatchObject({ kind: 'withdraw' })
+  })
+
+  it('points at a loan when the chain turns the exit down', async () => {
+    const venue = monadWith({ shares: units(500), simulationFails: true })
+    await expect(venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/borrowed against it/)
   })
 })

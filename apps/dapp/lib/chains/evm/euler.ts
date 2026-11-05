@@ -1,4 +1,4 @@
-import { parseAbi, type Address } from 'viem'
+import { parseAbi, zeroAddress, type Address } from 'viem'
 
 import { ChainActionRefused, type ChainToken, type PreparedAction } from '../types'
 import type { EvmReaderClient } from './call'
@@ -90,7 +90,11 @@ const EVK_ABI = parseAbi([
   'function interestFee() view returns (uint16)',
   'function maxDeposit(address account) view returns (uint256)',
   'function LTVList() view returns (address[])',
+  'function hookConfig() view returns (address hookTarget, uint32 hookedOps)',
 ])
+
+/** OP_WITHDRAW and OP_REDEEM, in euler-vault-kit src/EVault/shared/Constants.sol. */
+const EXIT_OPS = (1 << 2) | (1 << 3)
 
 /** `interestRate` is a per-second rate scaled by 1e27, and `interestFee` is in hundredths of a percent. */
 const RATE_SCALE = 1e27
@@ -157,6 +161,18 @@ function eulerConfig(
         functionName: 'maxDeposit',
         args: [account],
       }),
+    // A hooked operation with no hook contract is switched off. One with a hook is that hook's to
+    // decide, which only trying the call can show.
+    readExitBlock: async (reader) => {
+      const [target, ops] = await reader.readContract({
+        address,
+        abi: EVK_ABI,
+        functionName: 'hookConfig',
+      })
+      return target === zeroAddress && (ops & EXIT_OPS) !== 0
+        ? `${vault.curator} has switched off withdrawals from ${vault.name}.`
+        : undefined
+    },
   }
 }
 

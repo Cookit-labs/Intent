@@ -160,9 +160,9 @@ describe('Noether, the perps venue', () => {
     expect(noether?.integration).toBe('quotes')
   })
 
-  it('says the protocol is unaudited and testnet-only', () => {
+  it('says its mainnet contracts wait on an audit, and that it runs on testnet only', () => {
     const capability = byId('noether')?.capability ?? ''
-    expect(capability).toMatch(/unaudited/i)
+    expect(capability).toMatch(/paused until its audit/i)
     expect(capability).toMatch(/testnet/i)
     expect(capability).toMatch(/0\.0\.0-dev/)
     expect(capability).toMatch(/closed beta/i)

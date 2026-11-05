@@ -53,7 +53,8 @@ export const suiVenues: Venue[] = [
     url: 'https://app.naviprotocol.io',
     bestFor: 'Earning on USDC, at a variable rate that can move quickly',
     integration: 'executes',
-    capability: 'Supplies and withdraws USDC and shows the current rate',
+    capability:
+      'Supplies USDC, withdraws, borrows and repays, shows the current rate, and refuses a loan your supply cannot safely back',
   },
   listed(
     'bluefin-aggregator',

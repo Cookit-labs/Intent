@@ -66,6 +66,8 @@ const VAULT_V2_ABI = parseAbi([
   'function liquidityAdapter() view returns (address)',
   'function liquidityData() view returns (bytes)',
   'function convertToAssets(uint256 shares) view returns (uint256)',
+  'function canSendShares(address account) view returns (bool)',
+  'function canReceiveAssets(address account) view returns (bool)',
 ])
 
 const ADAPTER_ABI = parseAbi([
@@ -226,6 +228,33 @@ export async function assertMorphoAsReviewed(reader: EvmReaderClient): Promise<v
   if (!markets.every(reviewed)) drifted('added a market')
 }
 
+/** VaultV2's `exit` checks these two gates, which have no gate set today but can be set on notice. */
+export async function readMorphoExitBlock(
+  reader: EvmReaderClient,
+  account: Address
+): Promise<string | undefined> {
+  const [canSend, canReceive] = await reader.multicall({
+    allowFailure: false,
+    contracts: [
+      {
+        address: vaultAddress,
+        abi: VAULT_V2_ABI,
+        functionName: 'canSendShares',
+        args: [account],
+      },
+      {
+        address: vaultAddress,
+        abi: VAULT_V2_ABI,
+        functionName: 'canReceiveAssets',
+        args: [account],
+      },
+    ],
+  })
+  return canSend && canReceive
+    ? undefined
+    : `${MORPHO_VAULT.curator} has closed withdrawals from ${MORPHO_VAULT.name} for this wallet.`
+}
+
 const NOTES: readonly string[] = [
   'Curated by Steakhouse Financial. This vault lends your USDC to borrowers against XAUt0, WMON, WETH and WBTC. If a price falls too fast or an oracle fails, bad debt falls on everyone in the vault.',
   'Steakhouse must give 7 days’ notice to add a way of lending, raise a limit or block withdrawals, so there is time to leave first. It can move money between these markets, and raise its fee on interest (10% today), at once.',
@@ -242,6 +271,7 @@ export const MORPHO_CONFIG: VaultVenueConfig = {
   readLiquidity: readMorphoLiquidity,
   readApy: readMorphoApy,
   assertAsReviewed: assertMorphoAsReviewed,
+  readExitBlock: readMorphoExitBlock,
 }
 
 export function createMorphoVenue(deps: VaultVenueDeps = {}) {

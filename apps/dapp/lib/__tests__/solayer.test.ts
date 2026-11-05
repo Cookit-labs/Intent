@@ -100,7 +100,7 @@ function venueWith(
       [LIST]: { owner: STAKE_POOL_PROGRAM, lamports: BigInt(1), data: options.list ?? LIST_BYTES },
     },
   })
-  return { venue: createSolayerVenue({ rpc, now: () => 1793830450018 }), rpc }
+  return { venue: createSolayerVenue({ rpc }), rpc }
 }
 
 const stake = { kind: 'stake', amount: '1', tokenIn: 'SOL' } as const
@@ -180,9 +180,9 @@ describe('solayer unstake', () => {
     const notes = prepared.notes.join(' ')
     expect(notes).toMatch(/This exit is delayed/)
     expect(notes).toMatch(/does not reach your balance now/)
-    expect(notes).toMatch(/withdraw the SOL from that stake account yourself/)
+    expect(notes).toMatch(/say "claim SOL from Solayer"/)
     expect(notes).toMatch(/0\.08%/)
-    expect(notes).toContain(addressWithSeed(ME, 'intent-1793830450018', STAKE_PROGRAM))
+    expect(notes).toContain(addressWithSeed(ME, 'intent-stake-0', STAKE_PROGRAM))
   })
 
   it('needs only the person: the stake account comes from a seed, not a new keypair', async () => {
@@ -190,7 +190,7 @@ describe('solayer unstake', () => {
     if (prepared.signing.family !== 'solana') throw new Error('Expected Solana.')
     const decoded = decodeSolanaTransaction(prepared.signing.transaction)
     expect(decoded.signerCount).toBe(1)
-    const stakeAccount = addressWithSeed(ME, 'intent-1793830450018', STAKE_PROGRAM)
+    const stakeAccount = addressWithSeed(ME, 'intent-stake-0', STAKE_PROGRAM)
     const [unrestake, create, withdraw, deactivate] = decoded.instructions.slice(-4)
     expect(readU64(unrestake!.data, 8)).toBe(BigInt('1000000000'))
     expect(decoded.staticAccounts[create!.accounts[1]!]).toBe(stakeAccount)
@@ -233,6 +233,18 @@ describe('solayer unstake', () => {
     expect(
       chooseValidator({ preferredWithdrawValidator: SOMEONE_ELSE }, validators)
     ).toBeUndefined()
+  })
+
+  it('leaves the stake of an unstake of everything under the person alone, for exactly the balance', async () => {
+    const prepared = await venueWith().venue.prepare(
+      { ...unstake, amount: '2.500000001', wholePosition: true },
+      ME
+    )
+    if (prepared.signing.family !== 'solana') throw new Error('Expected Solana.')
+    const decoded = decodeSolanaTransaction(prepared.signing.transaction)
+    const [unrestake, , withdraw] = decoded.instructions.slice(-4)
+    expect(readU64(unrestake!.data, 8)).toBe(BigInt('2500000001'))
+    expect(readU64(withdraw!.data, 1)).toBe(BigInt('2500000001'))
   })
 
   it('refuses less than Solana lets a stake account hold, and names the market instead', async () => {
@@ -368,7 +380,7 @@ describe('solayer assertSafe', () => {
         ),
       /isn’t what Solayer should get/
     )
-    const costly = createStakeAccountWithSeed(ME, 'intent-1793830450018', BigInt('5000000001'))
+    const costly = createStakeAccountWithSeed(ME, 'intent-stake-0', BigInt('5000000001'))
     refuses(
       () => venue.assertSafe(payload(ME, [...rest.slice(0, -3), costly, ...rest.slice(-2)]), ME),
       /isn’t what Solayer should get/
@@ -377,7 +389,7 @@ describe('solayer assertSafe', () => {
 
   it('refuses an exit that withdraws to a different stake account than it creates', async () => {
     const rest = rebuilt(await preparedUnstake(), ME)
-    const other = addressWithSeed(ME, 'intent-2', STAKE_PROGRAM)
+    const other = addressWithSeed(ME, 'intent-stake-1', STAKE_PROGRAM)
     refuses(
       () =>
         venue.assertSafe(

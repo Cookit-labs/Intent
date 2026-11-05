@@ -6,6 +6,7 @@ import { createJitoVenue } from './jito'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
 import { createKaminoVenue } from './kamino'
+import { createKaminoLendVenue } from './kamino-lend'
 import { createLuloVenue } from './lulo'
 import { createMarinadeVenue } from './marinade'
 import { createPriceSource } from './price'
@@ -27,7 +28,9 @@ export function buildSolanaVenues(
     createJupiterSwapVenue({ priceUsd, env }),
     ...(canIssueOneClick(env) ? [oneClickOriginVenue('solana')] : []),
     createJupiterLendVenue({ env }),
+    // After Earn, so "supply on Kamino" stays the vault it has always meant.
     createKaminoVenue(),
+    createKaminoLendVenue({ env }),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),
     createJitoVenue({ env }),
     createMarinadeVenue({ env }),
@@ -44,9 +47,14 @@ export const solanaModule: ChainModule = {
   defaultVenue: {
     swap: 'jupiter',
     supply: 'jupiter-lend',
+    withdraw: 'jupiter-lend',
+    borrow: 'kamino-lend',
+    repay: 'kamino-lend',
     stake: 'jito',
     unstake: 'jito',
+    claim: 'solayer',
     stream: 'streamflow',
+    cancel: 'streamflow',
     send: SEND_VENUE_ID,
   },
   venueForToken: { unstake: { MSOL: 'marinade', JITOSOL: 'jito', SSOL: 'solayer' } },

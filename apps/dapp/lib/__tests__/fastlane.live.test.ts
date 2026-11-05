@@ -167,7 +167,9 @@ describe.skipIf(SKIP)('FastLane on Monad', () => {
         }),
         reader.call({ account, to: shmon, data, value: amount }),
       ])
-      expect(BigInt(dry.data ?? '0x0')).toBe(preview)
+      // The two reads can land a block apart, and the rate moves a little between blocks.
+      const gap = BigInt(dry.data ?? '0x0') - preview
+      expect(gap < BigInt(0) ? -gap : gap).toBeLessThan(preview / BigInt(100_000))
       await expect(
         reader.call({ account, to: shmon, data, value: amount - BigInt(1) })
       ).rejects.toThrow()

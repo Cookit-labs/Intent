@@ -490,8 +490,9 @@ describe('what 1Click can refuse', () => {
 })
 
 describe('the whole prepare path for NEAR', () => {
-  it('defaults swaps to 1Click', async () => {
-    const prepared = await prepareChainAction(nearModule, swap(), ME)
+  it('defaults swaps to Rhea, and reaches 1Click when named', async () => {
+    expect(nearModule.defaultVenue.swap).toBe('rhea-dex')
+    const prepared = await prepareChainAction(nearModule, swap({ venue: '1click' }), ME)
     expect(prepared.venueId).toBe('1click')
   })
 

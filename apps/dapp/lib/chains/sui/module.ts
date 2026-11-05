@@ -41,6 +41,8 @@ export const suiModule: ChainModule = {
     swap: 'cetus',
     supply: 'navi',
     withdraw: 'navi',
+    borrow: 'navi',
+    repay: 'navi',
     stake: 'springsui',
     unstake: 'springsui',
     send: SEND_VENUE_ID,

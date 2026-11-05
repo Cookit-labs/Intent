@@ -84,6 +84,27 @@ export async function fetchOpenOffers(
   }))
 }
 
+/**
+ * One open order, by id, with the exact assets the ledger holds it in.
+ *
+ * Undefined means the network says it is gone, filled or withdrawn. Anything else
+ * unreadable throws, so a failed read is never reported as an order that no longer exists.
+ */
+export async function fetchOffer(
+  offerId: string,
+  options: OffersOptions = {}
+): Promise<HorizonOfferRecord | undefined> {
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
+  const doFetch = options.fetchImpl ?? fetch
+
+  const res = await doFetch(`${horizonUrl}/offers/${encodeURIComponent(offerId)}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (res.status === 404) return undefined
+  if (!res.ok) throw new Error(`Horizon ${res.status}`)
+  return (await res.json()) as HorizonOfferRecord
+}
+
 export interface FillProgress {
   /** How much has traded, in display units. */
   filled: string

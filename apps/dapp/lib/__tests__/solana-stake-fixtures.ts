@@ -161,26 +161,36 @@ export function fakeRpc(options: {
   accounts: Record<string, FakeAccount>
   epoch: number
   rent?: number
+  slotIndex?: number
+  simulationError?: unknown
+  /** Methods that fail, as an unreachable node would. */
+  unreadable?: readonly string[]
 }): SolanaRpc & { calls: string[] } {
   const calls: string[] = []
+  const reply = (address: string) => {
+    const account = options.accounts[address]
+    return account === undefined
+      ? null
+      : {
+          owner: account.owner,
+          lamports: Number(account.lamports),
+          data: [Buffer.from(account.data).toString('base64'), 'base64'],
+        }
+  }
   const rpc = async (method: string, params: unknown[]): Promise<unknown> => {
     calls.push(method)
+    if (options.unreadable?.includes(method) === true) throw new Error(`${method} is down.`)
     switch (method) {
-      case 'getAccountInfo': {
-        const account = options.accounts[params[0] as string]
-        return {
-          value:
-            account === undefined
-              ? null
-              : {
-                  owner: account.owner,
-                  lamports: Number(account.lamports),
-                  data: [Buffer.from(account.data).toString('base64'), 'base64'],
-                },
-        }
-      }
+      case 'getAccountInfo':
+        return { value: reply(params[0] as string) }
+      case 'getMultipleAccounts':
+        // publicnode, the default node, allows no more than this.
+        if ((params[0] as string[]).length > 10) throw new Error('Too many accounts in one read.')
+        return { value: (params[0] as string[]).map(reply) }
+      case 'simulateTransaction':
+        return { value: { err: options.simulationError ?? null } }
       case 'getEpochInfo':
-        return { epoch: options.epoch }
+        return { epoch: options.epoch, slotIndex: options.slotIndex ?? 0, slotsInEpoch: 432_000 }
       case 'getLatestBlockhash':
         return { value: { blockhash: BLOCKHASH, lastValidBlockHeight: 1 } }
       case 'getMinimumBalanceForRentExemption':
@@ -192,6 +202,62 @@ export function fakeRpc(options: {
     }
   }
   return Object.assign(rpc, { calls })
+}
+
+export interface StakeAccountFixture {
+  tag?: number
+  staker?: string
+  withdrawer: string
+  lockupTimestamp?: bigint
+  lockupEpoch?: bigint
+  custodian?: string
+  voter?: string
+  delegated?: bigint
+  activationEpoch?: bigint
+  deactivationEpoch?: bigint
+}
+
+export const NEVER_DEACTIVATED = BigInt('18446744073709551615')
+
+/** A stake account in the stake program's own layout, field by field: `StakeStateV2`. */
+export function encodeStakeAccount(fixture: StakeAccountFixture): Uint8Array {
+  const zero = addressBytes(SYSTEM_PROGRAM)
+  return Uint8Array.from([
+    ...u32Bytes(fixture.tag ?? 2),
+    ...u64Bytes(BigInt(2_282_880)),
+    ...addressBytes(fixture.staker ?? fixture.withdrawer),
+    ...addressBytes(fixture.withdrawer),
+    ...u64Bytes(fixture.lockupTimestamp ?? BigInt(0)),
+    ...u64Bytes(fixture.lockupEpoch ?? BigInt(0)),
+    ...(fixture.custodian === undefined ? zero : addressBytes(fixture.custodian)),
+    ...(fixture.voter === undefined ? zero : addressBytes(fixture.voter)),
+    ...u64Bytes(fixture.delegated ?? BigInt(0)),
+    ...u64Bytes(fixture.activationEpoch ?? BigInt(695)),
+    ...u64Bytes(fixture.deactivationEpoch ?? NEVER_DEACTIVATED),
+    ...u64Bytes(BigInt(0)),
+    ...u64Bytes(BigInt(0)),
+    ...u32Bytes(0),
+  ])
+}
+
+export interface HistoryEntry {
+  epoch: bigint
+  effective: bigint
+  activating: bigint
+  deactivating: bigint
+}
+
+/** The stake history sysvar's layout, newest first, as read from mainnet on 5 November 2026. */
+export function encodeStakeHistory(entries: readonly HistoryEntry[]): Uint8Array {
+  return Uint8Array.from([
+    ...u64Bytes(BigInt(entries.length)),
+    ...entries.flatMap((entry) => [
+      ...u64Bytes(entry.epoch),
+      ...u64Bytes(entry.effective),
+      ...u64Bytes(entry.activating),
+      ...u64Bytes(entry.deactivating),
+    ]),
+  ])
 }
 
 export interface PoolFixture {

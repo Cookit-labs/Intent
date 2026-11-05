@@ -23,7 +23,7 @@ import {
 import { z } from 'zod'
 
 import { bytesFromBase64 } from '../base64'
-import { ChainActionRefused, type SigningPayload } from '../types'
+import { ChainActionRefused, type SigningPayload, type VenuePosition } from '../types'
 import {
   ASSOCIATED_TOKEN_PROGRAM,
   associatedTokenAccount,
@@ -31,6 +31,7 @@ import {
   SYSTEM_PROGRAM,
   TOKEN_PROGRAM,
 } from './assert-safe'
+import { fromBaseUnits } from './tokens'
 
 /**
  * What the staking venues share: reading the chain, the SPL stake pool's instructions, and a check
@@ -49,8 +50,8 @@ import {
 export const STAKE_POOL_PROGRAM = 'SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy'
 export const STAKE_PROGRAM = 'Stake11111111111111111111111111111111111111'
 const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111'
-const CLOCK_SYSVAR = 'SysvarC1ock11111111111111111111111111111111'
-const STAKE_HISTORY_SYSVAR = 'SysvarStakeHistory1111111111111111111111111'
+export const CLOCK_SYSVAR = 'SysvarC1ock11111111111111111111111111111111'
+export const STAKE_HISTORY_SYSVAR = 'SysvarStakeHistory1111111111111111111111111'
 
 const DEFAULT_RPC_URL = 'https://solana-rpc.publicnode.com'
 const RPC_TIMEOUT_MS = 15_000
@@ -76,9 +77,20 @@ const VALIDATOR_ENTRY_BYTES = 73
 const VALIDATOR_LIST_HEADER_BYTES = 9
 const VALIDATOR_ACTIVE = 0
 
+/**
+ * How many stake accounts one wallet can have waiting. Each lives at an address worked out from the
+ * wallet and its slot, so finding them takes plain account reads and no account index. publicnode,
+ * the default here, refused `getProgramAccounts` on 5 November 2026, so a search by owner can't be
+ * what an exit rests on. Each holds at least 1 SOL and is claimable in about two days, so this is
+ * ample, and an unstake with none free refuses rather than make an account nothing could find.
+ */
+export const STAKE_EXIT_SLOTS = 20
+/** publicnode's limit for one `getMultipleAccounts`, seen on 5 November 2026. Others allow 100. */
+const ACCOUNTS_PER_READ = 10
+
 export type SolanaRpc = (method: string, params: unknown[]) => Promise<unknown>
 
-function unreadable(): never {
+export function unreadable(): never {
   throw new ChainActionRefused(
     'Solana’s network could not be read just now. Nothing was signed or sent, so try again in a moment.'
   )
@@ -107,15 +119,14 @@ export function readOnlyRpc(env: Record<string, string | undefined> = process.en
   }
 }
 
-const AccountReply = z.object({
-  value: z
-    .object({
-      owner: z.string(),
-      lamports: z.number().int().nonnegative(),
-      data: z.tuple([z.string(), z.literal('base64')]),
-    })
-    .nullable(),
+const AccountValue = z.object({
+  owner: z.string(),
+  lamports: z.number().int().nonnegative(),
+  data: z.tuple([z.string(), z.literal('base64')]),
 })
+
+const AccountReply = z.object({ value: AccountValue.nullable() })
+const AccountsReply = z.object({ value: z.array(AccountValue.nullable()) })
 
 export interface ChainAccount {
   owner: string
@@ -123,13 +134,62 @@ export interface ChainAccount {
   data: Uint8Array
 }
 
+function chainAccount({ owner, lamports, data }: z.infer<typeof AccountValue>): ChainAccount {
+  return { owner, lamports: BigInt(lamports), data: bytesFromBase64(data[0]) }
+}
+
 export async function readAccount(rpc: SolanaRpc, address: string): Promise<ChainAccount> {
   const reply = AccountReply.safeParse(
     await rpc('getAccountInfo', [address, { encoding: 'base64', commitment: 'confirmed' }])
   )
   if (!reply.success || reply.data.value === null) return unreadable()
-  const { owner, lamports, data } = reply.data.value
-  return { owner, lamports: BigInt(lamports), data: bytesFromBase64(data[0]) }
+  return chainAccount(reply.data.value)
+}
+
+/** Several accounts in one read. Nothing at an address comes back as undefined, and isn't a failure. */
+export async function readAccounts(
+  rpc: SolanaRpc,
+  addresses: readonly string[]
+): Promise<(ChainAccount | undefined)[]> {
+  const batches: (readonly string[])[] = []
+  for (let at = 0; at < addresses.length; at += ACCOUNTS_PER_READ) {
+    batches.push(addresses.slice(at, at + ACCOUNTS_PER_READ))
+  }
+  const read = await Promise.all(
+    batches.map(async (batch) => {
+      const reply = AccountsReply.safeParse(
+        await rpc('getMultipleAccounts', [batch, { encoding: 'base64', commitment: 'confirmed' }])
+      )
+      if (!reply.success || reply.data.value.length !== batch.length) return unreadable()
+      return reply.data.value.map((value) => (value === null ? undefined : chainAccount(value)))
+    })
+  )
+  return read.flat()
+}
+
+/** A staking token in the wallet's own account, which is the only one an unstake here spends. */
+export async function stakedPositions(
+  rpc: SolanaRpc,
+  account: string,
+  mint: string,
+  symbol: string,
+  decimals: number
+): Promise<VenuePosition[]> {
+  if (!isAddress(account)) throw new ChainActionRefused('That is not a Solana wallet address.')
+  const [own] = await readAccounts(rpc, [associatedTokenAccount(account, mint)])
+  if (own === undefined) return []
+  if (
+    own.owner !== TOKEN_PROGRAM ||
+    own.data.length < 72 ||
+    readAddress(own.data, 0) !== mint ||
+    readAddress(own.data, 32) !== account
+  ) {
+    return unreadable()
+  }
+  const units = readU64(own.data, 64)
+  return units === BigInt(0)
+    ? []
+    : [{ slot: 'staked', symbol, amount: fromBaseUnits(units.toString(), decimals) }]
 }
 
 const EpochReply = z.object({ epoch: z.number().int().nonnegative() })
@@ -400,6 +460,18 @@ export function addressWithSeed(base: string, seed: string, owner: string): stri
   hash.update(addressBytes(owner))
   return getAddressDecoder().decode(hash.digest())
 }
+
+export const stakeExitSeed = (slot: number): string => `intent-stake-${slot}`
+
+export const stakeExitAddress = (account: string, slot: number): string =>
+  addressWithSeed(account, stakeExitSeed(slot), STAKE_PROGRAM)
+
+export const stakeExitAddresses = (account: string): string[] =>
+  Array.from({ length: STAKE_EXIT_SLOTS }, (_, slot) => stakeExitAddress(account, slot))
+
+const STAKE_EXIT_SEEDS: ReadonlySet<string> = new Set(
+  Array.from({ length: STAKE_EXIT_SLOTS }, (_, slot) => stakeExitSeed(slot))
+)
 
 const readonly = (address: string): { address: Address; role: AccountRole } => ({
   address: address as Address,
@@ -711,7 +783,10 @@ export const withdrawStakeRule = (
   also: ({ data }) => readU64(data, 1) > BigInt(0) && readU64(data, 9) > BigInt(0),
 })
 
-/** Only `base = the person`, a stake account, a bounded amount of their own SOL, and a plain seed. */
+/**
+ * Only `base = the person`, a stake account, a bounded amount of their own SOL, and a slot's seed.
+ * Any other seed would make an account nothing here could find again to pay out.
+ */
 export const createStakeAccountRule = (account: string): InstructionRule => {
   const prefix = hex(
     Uint8Array.from([...getU32Encoder().encode(CREATE_ACCOUNT_WITH_SEED), ...addressBytes(account)])
@@ -727,7 +802,7 @@ export const createStakeAccountRule = (account: string): InstructionRule => {
       const seed = new TextDecoder().decode(data.subarray(44, 44 + seedLength))
       const end = 44 + seedLength
       return (
-        /^[A-Za-z0-9-]+$/.test(seed) &&
+        STAKE_EXIT_SEEDS.has(seed) &&
         accounts[1] === addressWithSeed(account, seed, STAKE_PROGRAM) &&
         readU64(data, end) <= MAX_STAKE_ACCOUNT_LAMPORTS &&
         readU64(data, end + 8) === STAKE_ACCOUNT_SPACE &&

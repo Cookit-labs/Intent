@@ -379,6 +379,51 @@ describe('unstaking', () => {
     )
   })
 
+  describe('all of it', () => {
+    const WHOLE: ChainActionRequest = { ...UNSTAKE, wholePosition: true }
+
+    it('shows shMON in the wallet as staked, in shMON', async () => {
+      await expect(venueWith().positions?.(ACCOUNT)).resolves.toEqual([
+        { slot: 'staked', symbol: 'shMON', amount: '2' },
+      ])
+      await expect(venueWith({ shares: BigInt(0) }).positions?.(ACCOUNT)).resolves.toEqual([])
+    })
+
+    it('throws when it can not read, rather than saying nothing is there', async () => {
+      const failing = createFastlaneVenue(
+        {
+          readContract: async () => {
+            throw new Error('rpc')
+          },
+        } as unknown as EvmReaderClient,
+        fakeClient('success', { input: deposit(), value: ONE })
+      )
+      await expect(failing.positions?.(ACCOUNT)).rejects.toThrow()
+    })
+
+    it('exits every share the wallet holds now, whatever figure came in', async () => {
+      const venue = venueWith()
+      const prepared = await venue.prepare(WHOLE, ACCOUNT)
+      const minOut = (BigInt(16) * E18 * BigInt(99)) / BigInt(1000)
+      expect(evm(prepared.signing).data).toBe(redeem(ACCOUNT, ACCOUNT, minOut, TWO))
+      expect(prepared.pay).toEqual({ amount: '2', symbol: 'shMON' })
+      expect(prepared.summary).toMatch(/all of your shMON/)
+      expect(() => venue.assertSafe(prepared.signing, ACCOUNT)).not.toThrow()
+      expect(() => venue.assertSafe(prepared.signing, STRANGER)).toThrow(ChainActionRefused)
+    })
+
+    it.each<[string, Chain, RegExp]>([
+      ['nothing there', { shares: BigInt(0) }, /hold no shMON/],
+      ['less in the pool than the wallet holds', { redeemable: ONE }, /queue with no fee/],
+      ['no gas', { coin: BigInt(1) }, /network fee/],
+      ['a call that would fail', { callFails: true }, /would fail/],
+    ])('refuses it with %s', async (_label, chain, words) => {
+      const asked = venueWith(chain).prepare(WHOLE, ACCOUNT)
+      await expect(asked).rejects.toThrow(ChainActionRefused)
+      await expect(asked).rejects.toThrow(words)
+    })
+  })
+
   it('has nothing to quote, since an unstake does not race', async () => {
     await expect(venueWith().quote?.(UNSTAKE, ACCOUNT)).rejects.toThrow(ChainActionRefused)
   })

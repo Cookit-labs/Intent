@@ -26,10 +26,12 @@ const Body = z.object({
       'stream',
       'invoice',
       'pay_invoice',
+      'claim',
+      'cancel',
     ]),
     amount: z
       .string()
-      .regex(/^\d+(\.\d+)?$/)
+      .regex(/^(\d+(\.\d+)?|all)$/)
       .max(40),
     tokenIn: z.string().min(1).max(16),
     tokenOut: z.string().min(1).max(16).optional(),
@@ -46,6 +48,10 @@ const Body = z.object({
     invoiceId: z
       .string()
       .regex(/^\d{1,78}$/)
+      .optional(),
+    streamId: z
+      .string()
+      .regex(/^[A-Za-z0-9]{1,64}$/)
       .optional(),
   }),
 })
@@ -68,8 +74,18 @@ export async function POST(
   }
 
   try {
-    const { kind, amount, tokenIn, tokenOut, venue, recipient, durationDays, dueDate, invoiceId } =
-      parsed.data.request
+    const {
+      kind,
+      amount,
+      tokenIn,
+      tokenOut,
+      venue,
+      recipient,
+      durationDays,
+      dueDate,
+      invoiceId,
+      streamId,
+    } = parsed.data.request
     const prepared = await prepareChainAction(
       chainApi,
       {
@@ -82,6 +98,7 @@ export async function POST(
         ...(durationDays !== undefined ? { durationDays } : {}),
         ...(dueDate !== undefined ? { dueDate } : {}),
         ...(invoiceId !== undefined ? { invoiceId } : {}),
+        ...(streamId !== undefined ? { streamId } : {}),
       },
       parsed.data.account
     )

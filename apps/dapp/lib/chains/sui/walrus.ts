@@ -16,7 +16,9 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenuePosition,
   type VenueQuote,
+  WHOLE_AMOUNT,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import { assertPtbSafe, moveTarget, type ParsedCall, type PtbPolicy, type ReadPure } from './safety'
@@ -76,10 +78,17 @@ const BPS_PER_PERCENT = 100
 /** A node's name is whatever its operator typed, and it goes on the card. */
 const SAFE_NODE_NAME = /^[\p{L}\p{N} .,|()&'_-]{1,64}$/u
 const DAY_MS = 86_400_000
+const HOUR_MS = 3_600_000
+const HOURS_SHOWN_AS_HOURS = 48
 const READ_TIMEOUT_MS = 10_000
 const DRY_RUN_TIMEOUT_MS = 15_000
-const OWNED_PAGE_SIZE = 50
-const OWNED_MAX_PAGES = 10
+const OWNED_PAGE_SIZE = 200
+const OWNED_MAX_PAGES = 5
+/**
+ * Whole positions one transaction may move. A dry run of 488 on mainnet passed at 72 KB of the chain's
+ * 128 KB limit and 0.17 SUI of computation, so this leaves room, and the rest is a second ask.
+ */
+export const MAX_POSITIONS_PER_TRANSACTION = 500
 
 const NOTHING_SENT = 'Nothing was signed or sent.'
 
@@ -213,9 +222,12 @@ export function stakingStateFrom(json: unknown): StakingState {
   return { epoch, epochDurationMs, firstEpochStartMs, shardCount, committee, nextCommittee }
 }
 
+function epochStart(state: StakingState, epoch: number): number {
+  return state.firstEpochStartMs + (epoch - 1) * state.epochDurationMs
+}
+
 function epochDate(state: StakingState, epoch: number): string {
-  const startsAt = state.firstEpochStartMs + (epoch - 1) * state.epochDurationMs
-  return new Date(startsAt).toLocaleDateString('en-GB', {
+  return new Date(epochStart(state, epoch)).toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -351,6 +363,63 @@ function wal(base: bigint): string {
   return displayAmount(base.toString(), WAL_DECIMALS, WAL_DECIMALS)
 }
 
+/** Never under an hour: an epoch can run a little past its date, and it still hasn't turned. */
+function hoursUntil(state: StakingState, epoch: number, now: number): number {
+  return Math.max(1, Math.ceil((epochStart(state, epoch) - now) / HOUR_MS))
+}
+
+function timeLeft(hours: number): string {
+  if (hours >= HOURS_SHOWN_AS_HOURS) return `about ${Math.ceil(hours / 24)} days`
+  return `about ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+}
+
+function isCollectable(position: Position, state: StakingState): boolean {
+  return position.withdrawEpoch !== undefined && phaseOf(position, state).name === 'ready'
+}
+
+/** Exits on their way, soonest first, each with what it will free up. */
+function coolingByEpoch(
+  positions: readonly Position[],
+  state: StakingState
+): { epoch: number; total: bigint }[] {
+  const totals = new Map<number, bigint>()
+  for (const position of positions) {
+    const phase = phaseOf(position, state)
+    if (phase.name !== 'waiting') continue
+    totals.set(phase.epoch, (totals.get(phase.epoch) ?? BigInt(0)) + position.principal)
+  }
+  return [...totals].map(([epoch, total]) => ({ epoch, total })).sort((a, b) => a.epoch - b.epoch)
+}
+
+/**
+ * Only a withdrawal someone asked for is `claimable`. A stake that could leave in one step, because
+ * it hasn't started earning or its node has left, stays `staked`: nobody asked to end it, and it
+ * comes out through an unstake. Amounts are principal, since rewards are only worked out on
+ * collecting, where a dry run shows them.
+ */
+export function venuePositionsFrom(
+  positions: readonly Position[],
+  state: StakingState,
+  now: number = Date.now()
+): VenuePosition[] {
+  const staked = sum(positions.filter((p) => p.withdrawEpoch === undefined))
+  const claimable = sum(positions.filter((p) => isCollectable(p, state)))
+  const found: VenuePosition[] = []
+  if (staked > BigInt(0)) found.push({ slot: 'staked', symbol: 'WAL', amount: wal(staked) })
+  if (claimable > BigInt(0)) {
+    found.push({ slot: 'claimable', symbol: 'WAL', amount: wal(claimable) })
+  }
+  for (const { epoch, total } of coolingByEpoch(positions, state)) {
+    found.push({
+      slot: 'cooling',
+      symbol: 'WAL',
+      amount: wal(total),
+      readyInHours: hoursUntil(state, epoch, now),
+    })
+  }
+  return found
+}
+
 interface Piece {
   position: Position
   /** Set when only part of the position is taken. */
@@ -361,18 +430,25 @@ function sum(positions: readonly Position[]): bigint {
   return positions.reduce((total, p) => total + p.principal, BigInt(0))
 }
 
-/** Largest first, so the fewest objects move and the last one is split as little as possible. */
-function takePieces(positions: readonly Position[], target: bigint): Piece[] {
-  const pieces: Piece[] = []
-  let remaining = target
-  const ordered = [...positions].sort((a, b) =>
+function largestFirst(positions: readonly Position[]): Position[] {
+  return [...positions].sort((a, b) =>
     a.principal === b.principal
       ? a.objectId.localeCompare(b.objectId)
       : a.principal > b.principal
         ? -1
         : 1
   )
-  for (const position of ordered) {
+}
+
+function wholePieces(positions: readonly Position[]): Piece[] {
+  return positions.map((position) => ({ position, split: undefined }))
+}
+
+/** Largest first, so the fewest objects move and the last one is split as little as possible. */
+function takePieces(positions: readonly Position[], target: bigint): Piece[] {
+  const pieces: Piece[] = []
+  let remaining = target
+  for (const position of largestFirst(positions)) {
     if (remaining === BigInt(0)) break
     if (position.principal <= remaining) {
       pieces.push({ position, split: undefined })
@@ -390,20 +466,7 @@ function takePieces(positions: readonly Position[], target: bigint): Piece[] {
   return pieces
 }
 
-export type UnstakePlan =
-  | { step: 'collect'; pieces: Piece[]; total: bigint }
-  | { step: 'start'; pieces: Piece[]; total: bigint; waiting: bigint; collectEpoch: number }
-
-/**
- * An unstake takes two transactions, a wait apart. So what a request means depends on what the
- * person already holds: asking again after the wait must collect, and asking again during it must
- * not start a second withdrawal of the same money.
- */
-export function planUnstake(
-  positions: readonly Position[],
-  state: StakingState,
-  amount: bigint
-): UnstakePlan {
+function sortedByPhase(positions: readonly Position[], state: StakingState) {
   const ready: Position[] = []
   const waiting: Position[] = []
   const active: Position[] = []
@@ -422,7 +485,24 @@ export function planUnstake(
   }
   const latestEpoch = (held: readonly Position[]): number =>
     Math.max(...held.map((p) => collectEpochs.get(p) ?? state.epoch))
+  return { ready, waiting, active, latestEpoch }
+}
 
+export type UnstakePlan =
+  | { step: 'collect'; pieces: Piece[]; total: bigint }
+  | { step: 'start'; pieces: Piece[]; total: bigint; waiting: bigint; collectEpoch: number }
+
+/**
+ * An unstake takes two transactions, a wait apart. So what a request means depends on what the
+ * person already holds: asking again after the wait must collect, and asking again during it must
+ * not start a second withdrawal of the same money.
+ */
+export function planUnstake(
+  positions: readonly Position[],
+  state: StakingState,
+  amount: bigint
+): UnstakePlan {
+  const { ready, waiting, active, latestEpoch } = sortedByPhase(positions, state)
   const readyTotal = sum(ready)
   const waitingTotal = sum(waiting)
   const activeTotal = sum(active)
@@ -435,7 +515,7 @@ export function planUnstake(
   }
   if (readyTotal > BigInt(0)) {
     return refuse(
-      `${wal(readyTotal)} WAL is ready to collect now, which is less than you asked for. Try "unstake ${wal(readyTotal)} WAL" first.`
+      `${wal(readyTotal)} WAL is ready to collect now, which is less than you asked for. Say "claim my WAL" first.`
     )
   }
   if (amount <= waitingTotal) {
@@ -457,6 +537,93 @@ export function planUnstake(
     total: toStart,
     waiting: waitingTotal,
     collectEpoch: latestEpoch(pieces.map((p) => p.position)),
+  }
+}
+
+export interface WholeUnstakePlan {
+  /** Pays out in this transaction: withdrawals that are ready, and stake that can leave in one step. */
+  collect: Piece[]
+  /** Starts a withdrawal, to collect later. */
+  start: Piece[]
+  collectTotal: bigint
+  startTotal: bigint
+  /** The epoch all of `start` can be collected by. */
+  collectEpoch: number | undefined
+  /** Already on its way out, so nothing here can speed it up. */
+  waiting: bigint
+  /** What one transaction couldn't hold, and stays as it is. */
+  left: { count: number; total: bigint }
+}
+
+/**
+ * All of it, whatever state each piece is in. Money that is ready goes first if not everything fits,
+ * since it is the part that can actually reach the wallet now.
+ */
+export function planWholeUnstake(
+  positions: readonly Position[],
+  state: StakingState
+): WholeUnstakePlan {
+  const { ready, waiting, active, latestEpoch } = sortedByPhase(positions, state)
+  const waitingTotal = sum(waiting)
+  if (ready.length + active.length === 0) {
+    if (waitingTotal === BigInt(0)) return refuse('This wallet has no WAL staked with Walrus.')
+    const epoch = latestEpoch(waiting)
+    return refuse(
+      `${wal(waitingTotal)} WAL is already on its way out. You can collect it from epoch ${epoch}, about ${epochDate(state, epoch)}.`
+    )
+  }
+  const collect = largestFirst(ready).slice(0, MAX_POSITIONS_PER_TRANSACTION)
+  const start = largestFirst(active).slice(0, MAX_POSITIONS_PER_TRANSACTION - collect.length)
+  const taken = new Set([...collect, ...start])
+  const notTaken = [...ready, ...active].filter((p) => !taken.has(p))
+  return {
+    collect: wholePieces(collect),
+    start: wholePieces(start),
+    collectTotal: sum(collect),
+    startTotal: sum(start),
+    collectEpoch: start.length === 0 ? undefined : latestEpoch(start),
+    waiting: waitingTotal,
+    left: { count: notTaken.length, total: sum(notTaken) },
+  }
+}
+
+export interface ClaimPlan {
+  pieces: Piece[]
+  total: bigint
+  left: { count: number; total: bigint }
+}
+
+/** Everything ready that one transaction holds, and a refusal saying how long if nothing is. */
+export function planClaim(
+  positions: readonly Position[],
+  state: StakingState,
+  now: number = Date.now()
+): ClaimPlan {
+  const ready = largestFirst(positions.filter((p) => isCollectable(p, state)))
+  if (ready.length === 0) {
+    const cooling = coolingByEpoch(positions, state)
+    const first = cooling[0]
+    if (first !== undefined) {
+      const when = `in ${timeLeft(hoursUntil(state, first.epoch, now))}, at epoch ${first.epoch}, about ${epochDate(state, first.epoch)}`
+      return refuse(
+        cooling.length === 1
+          ? `Nothing is ready to collect yet. Your ${wal(first.total)} WAL on its way out is ready ${when}.`
+          : `Nothing is ready to collect yet. You have ${wal(cooling.reduce((all, c) => all + c.total, BigInt(0)))} WAL on its way out, and the first ${wal(first.total)} WAL is ready ${when}.`
+      )
+    }
+    const staked = sum(positions)
+    return refuse(
+      staked > BigInt(0)
+        ? `Nothing is ready to collect. Your ${wal(staked)} WAL is still staked, so it has to be unstaked first. Say "unstake all WAL" to start that.`
+        : 'This wallet has nothing to collect from Walrus.'
+    )
+  }
+  const taken = ready.slice(0, MAX_POSITIONS_PER_TRANSACTION)
+  const notTaken = ready.slice(MAX_POSITIONS_PER_TRANSACTION)
+  return {
+    pieces: wholePieces(taken),
+    total: sum(taken),
+    left: { count: notTaken.length, total: sum(notTaken) },
   }
 }
 
@@ -556,6 +723,17 @@ function assertTakesWal(tokenIn: string): void {
   }
 }
 
+/** Aftermath's and SpringSui's SUI arrives unasked, so someone may well try to claim it here. */
+function assertClaimsWal(tokenIn: string): void {
+  const token = tokenIn.trim().toUpperCase()
+  if (token === 'WAL') return
+  const paidByItself =
+    token === 'SUI' || token === 'AFSUI' || token === 'SSUI'
+      ? ' SUI from unstaking with Aftermath or SpringSui comes to your wallet by itself, so there is nothing to claim.'
+      : ''
+  refuse(`Only Walrus has something to claim here, and it pays WAL, not ${tokenIn}.${paidByItself}`)
+}
+
 function stakingArgument(tx: Transaction) {
   return tx.sharedObjectRef({
     objectId: WALRUS_STAKING,
@@ -596,9 +774,7 @@ function buildStake(amount: string, nodeId: string, account: string): Transactio
   return tx
 }
 
-function buildCollect(pieces: readonly Piece[], account: string): Transaction {
-  const tx = new Transaction()
-  tx.setSender(account)
+function addCollect(tx: Transaction, pieces: readonly Piece[], account: string): void {
   const coins = pieces.map(({ position, split }) => {
     const stake =
       split === undefined ? positionArgument(tx, position) : splitOff(tx, position, split)
@@ -607,12 +783,9 @@ function buildCollect(pieces: readonly Piece[], account: string): Transaction {
     return coin
   })
   tx.transferObjects(coins, account)
-  return tx
 }
 
-function buildStart(pieces: readonly Piece[], account: string): Transaction {
-  const tx = new Transaction()
-  tx.setSender(account)
+function addStart(tx: Transaction, pieces: readonly Piece[], account: string): void {
   for (const { position, split } of pieces) {
     const stake =
       split === undefined ? positionArgument(tx, position) : splitOff(tx, position, split)
@@ -620,7 +793,46 @@ function buildStart(pieces: readonly Piece[], account: string): Transaction {
     // A whole position stays where it is. A part split off is new, so it must go to its owner.
     if (split !== undefined) tx.transferObjects([stake], account)
   }
+}
+
+function buildExit(
+  collect: readonly Piece[],
+  start: readonly Piece[],
+  account: string
+): Transaction {
+  const tx = new Transaction()
+  tx.setSender(account)
+  if (collect.length > 0) addCollect(tx, collect, account)
+  addStart(tx, start, account)
   return tx
+}
+
+function startNotes(state: StakingState, collectEpoch: number, total: bigint): string[] {
+  const date = epochDate(state, collectEpoch)
+  return [
+    `This only starts the withdrawal of ${wal(total)} WAL. None of that arrives yet, and it can't be cancelled. It earns until epoch ${collectEpoch}.`,
+    `From epoch ${collectEpoch}, about ${date}, say "claim my WAL" to collect it with its rewards. An epoch lasts ${state.epochDurationMs / DAY_MS} days. Dates can slip a little, since an epoch ends when the network moves on.`,
+  ]
+}
+
+function waitingNote(waiting: bigint, started: bigint): string[] {
+  return waiting > BigInt(0)
+    ? [
+        `${wal(waiting)} WAL is already on its way out, so this starts only the other ${wal(started)}.`,
+      ]
+    : []
+}
+
+function leftNote(
+  left: { count: number; total: bigint },
+  covered: number,
+  state: string
+): string[] {
+  return left.count > 0
+    ? [
+        `One transaction can only hold so much, so this covers ${covered} of your ${covered + left.count} Walrus positions. The other ${wal(left.total)} WAL is ${state}. Ask again after this lands to do the rest.`,
+      ]
+    : []
 }
 
 const UPGRADE_NOTE =
@@ -661,11 +873,34 @@ export function createWalrusVenue(
         'Rewards are not guaranteed. I am not showing a rate because I do not read one from Walrus here.',
         `It starts earning at epoch ${activation}, about ${epochDate(state, activation)}. An epoch lasts ${epochDays} days.`,
         `You get a StakedWAL object in your wallet, not a coin, so it can't be swapped. Whoever holds it can collect the WAL, so don't send it to anyone.`,
-        `To get out, ask to unstake. That starts a withdrawal, which takes one to two epochs (up to ${epochDays * 2} days) and can't be cancelled. Then ask again to collect your WAL and rewards.`,
+        `To get out, ask to unstake. That starts a withdrawal, which takes one to two epochs (up to ${epochDays * 2} days) and can't be cancelled. Then say "claim my WAL" to collect your WAL and rewards.`,
         UPGRADE_NOTE,
       ],
       signing: { family: 'sui', transaction },
     }
+  }
+
+  /** What a dry run says comes back. A transaction that pays out is never shown without this. */
+  async function confirmedPayout(
+    client: Client,
+    transaction: string,
+    account: string
+  ): Promise<string> {
+    const simulated = await withTimeout(
+      client.core.simulateTransaction({
+        transaction: fromBase64(transaction),
+        include: { balanceChanges: true },
+      }),
+      DRY_RUN_TIMEOUT_MS,
+      'Checking the withdrawal'
+    )
+    const received = walPaid(simulated.Transaction?.balanceChanges, account)
+    if (received === undefined) {
+      return refuse(
+        "I couldn't confirm how much WAL this would return, so I stopped. Try again shortly."
+      )
+    }
+    return displayAmount(received, WAL_DECIMALS)
   }
 
   async function prepareUnstake(
@@ -674,38 +909,22 @@ export function createWalrusVenue(
   ): Promise<PreparedAction> {
     assertSuiAccount(account)
     assertTakesWal(request.tokenIn)
+    if (request.wholePosition === true) return prepareWholeUnstake(account)
     const amount = BigInt(toBaseUnits(request.amount, WAL_DECIMALS))
     const client = deps.client()
     const state = await readStakingState(client)
     const plan = planUnstake(await readPositions(client, account), state, amount)
 
     if (plan.step === 'collect') {
-      const transaction = await deps.build(buildCollect(plan.pieces, account), client, 'WAL')
-      const simulated = await withTimeout(
-        client.core.simulateTransaction({
-          transaction: fromBase64(transaction),
-          include: { balanceChanges: true },
-        }),
-        DRY_RUN_TIMEOUT_MS,
-        'Checking the withdrawal'
-      )
-      const received = walPaid(simulated.Transaction?.balanceChanges, account)
-      if (received === undefined) {
-        return refuse(
-          "I couldn't confirm how much WAL this would return, so I stopped. Try again shortly."
-        )
-      }
+      const transaction = await deps.build(buildExit(plan.pieces, [], account), client, 'WAL')
+      const received = await confirmedPayout(client, transaction, account)
       return {
         venueId: 'walrus',
         venueName: 'Walrus',
         kind: 'unstake',
         summary: `Collect ${wal(plan.total)} WAL from Walrus, with any rewards it earned.`,
         pay: { amount: wal(plan.total), symbol: 'WAL' },
-        receive: {
-          amount: displayAmount(received, WAL_DECIMALS),
-          symbol: 'WAL',
-          approximate: true,
-        },
+        receive: { amount: received, symbol: 'WAL', approximate: true },
         notes: [
           'This takes your WAL out now, with no further wait.',
           'Stake taken out before it started earning comes back with no rewards.',
@@ -715,26 +934,109 @@ export function createWalrusVenue(
       }
     }
 
-    const transaction = await deps.build(buildStart(plan.pieces, account), client, 'WAL')
-    const date = epochDate(state, plan.collectEpoch)
+    const transaction = await deps.build(buildExit([], plan.pieces, account), client, 'WAL')
     return {
       venueId: 'walrus',
       venueName: 'Walrus',
       kind: 'unstake',
-      summary: `Start unstaking ${wal(plan.total)} WAL from Walrus. You can collect it from epoch ${plan.collectEpoch}, about ${date}.`,
+      summary: `Start unstaking ${wal(plan.total)} WAL from Walrus. You can collect it from epoch ${plan.collectEpoch}, about ${epochDate(state, plan.collectEpoch)}.`,
       pay: { amount: wal(plan.total), symbol: 'WAL' },
       notes: [
-        `This only starts the withdrawal. No WAL arrives yet, and it can't be cancelled. It earns until epoch ${plan.collectEpoch}.`,
-        `From epoch ${plan.collectEpoch}, about ${date}, ask to unstake ${wal(plan.total)} WAL again to collect it with its rewards. An epoch lasts ${state.epochDurationMs / DAY_MS} days. Dates can slip a little, since an epoch ends when the network moves on.`,
-        ...(plan.waiting > BigInt(0)
-          ? [
-              `${wal(plan.waiting)} WAL is already on its way out, so this starts only the other ${wal(plan.total)}.`,
-            ]
-          : []),
+        ...startNotes(state, plan.collectEpoch, plan.total),
+        ...waitingNote(plan.waiting, plan.total),
         UPGRADE_NOTE,
       ],
       signing: { family: 'sui', transaction },
     }
+  }
+
+  async function prepareWholeUnstake(account: string): Promise<PreparedAction> {
+    const client = deps.client()
+    const state = await readStakingState(client)
+    const plan = planWholeUnstake(await readPositions(client, account), state)
+    const { collect, start, collectTotal, startTotal, collectEpoch } = plan
+    const transaction = await deps.build(buildExit(collect, start, account), client, 'WAL')
+    const received =
+      collect.length === 0 ? undefined : await confirmedPayout(client, transaction, account)
+    const startText =
+      collectEpoch === undefined
+        ? ''
+        : `You can collect it from epoch ${collectEpoch}, about ${epochDate(state, collectEpoch)}.`
+    return {
+      venueId: 'walrus',
+      venueName: 'Walrus',
+      kind: 'unstake',
+      summary:
+        start.length === 0
+          ? `Collect ${wal(collectTotal)} WAL from Walrus, with any rewards it earned.`
+          : collect.length === 0
+            ? `Start unstaking ${wal(startTotal)} WAL from Walrus. ${startText}`
+            : `Collect ${wal(collectTotal)} WAL from Walrus now, with any rewards it earned, and start unstaking ${wal(startTotal)} WAL. ${startText}`,
+      pay: { amount: wal(collectTotal + startTotal), symbol: 'WAL' },
+      ...(received === undefined
+        ? {}
+        : { receive: { amount: received, symbol: 'WAL', approximate: true } }),
+      notes: [
+        ...(collect.length === 0
+          ? []
+          : [
+              `${wal(collectTotal)} WAL comes to your wallet in this transaction. Stake taken out before it started earning comes back with no rewards.`,
+            ]),
+        ...(collectEpoch === undefined ? [] : startNotes(state, collectEpoch, startTotal)),
+        ...waitingNote(plan.waiting, startTotal),
+        ...leftNote(plan.left, collect.length + start.length, 'not touched by this'),
+        UPGRADE_NOTE,
+      ],
+      signing: { family: 'sui', transaction },
+    }
+  }
+
+  async function prepareClaim(
+    request: ChainActionRequest,
+    account: string
+  ): Promise<PreparedAction> {
+    assertSuiAccount(account)
+    assertClaimsWal(request.tokenIn)
+    if (request.amount !== WHOLE_AMOUNT) {
+      refuse('A claim collects everything that is ready, not a set amount. Say "claim my WAL".')
+    }
+    const client = deps.client()
+    const state = await readStakingState(client)
+    const held = await readPositions(client, account)
+    const plan = planClaim(held, state)
+    const transaction = await deps.build(buildExit(plan.pieces, [], account), client, 'WAL')
+    const received = await confirmedPayout(client, transaction, account)
+    const cooling = coolingByEpoch(held, state)
+    const soonest = cooling[0]
+    return {
+      venueId: 'walrus',
+      venueName: 'Walrus',
+      kind: 'claim',
+      summary: `Collect ${wal(plan.total)} WAL from Walrus, with any rewards it earned.`,
+      pay: { amount: wal(plan.total), symbol: 'WAL' },
+      receive: { amount: received, symbol: 'WAL', approximate: true },
+      notes: [
+        'This takes your WAL out now, with no further wait. Stake you have not asked to unstake is left alone.',
+        ...(soonest === undefined
+          ? []
+          : [
+              `Another ${wal(cooling.reduce((all, c) => all + c.total, BigInt(0)))} WAL is on its way out and isn't part of this. The first of it is ready in ${timeLeft(hoursUntil(state, soonest.epoch, Date.now()))}.`,
+            ]),
+        ...leftNote(plan.left, plan.pieces.length, 'still waiting to be collected'),
+        UPGRADE_NOTE,
+      ],
+      signing: { family: 'sui', transaction },
+    }
+  }
+
+  async function positions(account: string): Promise<VenuePosition[]> {
+    assertSuiAccount(account)
+    const client = deps.client()
+    const [state, held] = await Promise.all([
+      readStakingState(client),
+      readPositions(client, account),
+    ])
+    return venuePositionsFrom(held, state)
   }
 
   /** No apyPercent: no rate is read from Walrus here, and a rate is never invented. */
@@ -746,13 +1048,16 @@ export function createWalrusVenue(
   return {
     id: 'walrus',
     name: 'Walrus',
-    kinds: ['stake', 'unstake'],
+    kinds: ['stake', 'unstake', 'claim'],
     assertCanFollow: takesOnly('Walrus', ['WAL']),
     quote,
-    prepare: (request, account) =>
-      request.kind === 'unstake'
+    positions,
+    prepare: (request, account) => {
+      if (request.kind === 'claim') return prepareClaim(request, account)
+      return request.kind === 'unstake'
         ? prepareUnstake(request, account)
-        : prepareStake(request, account),
+        : prepareStake(request, account)
+    },
     assertSafe: (payload: SigningPayload, account: string) => assertWalrusSafe(payload, account),
   }
 }

@@ -194,6 +194,21 @@ describe('jito unstake', () => {
   })
 })
 
+describe('jito unstake of everything', () => {
+  it('burns exactly the balance read, so nothing is left behind, and pays only the person', async () => {
+    const prepared = await venueWith().venue.prepare(
+      { ...unstake, amount: '151.268371658', wholePosition: true },
+      ME
+    )
+    if (prepared.signing.family !== 'solana') throw new Error('Expected Solana.')
+    const decoded = decodeSolanaTransaction(prepared.signing.transaction)
+    const burn = decoded.instructions.at(-1)!
+    expect(readU64(burn.data, 1)).toBe(BigInt('151268371658'))
+    expect(decoded.staticAccounts[burn.accounts[5]!]).toBe(ME)
+    expect(() => venueWith().venue.assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+})
+
 describe('jito assertSafe', () => {
   const venue = venueWith().venue
 

@@ -53,6 +53,18 @@ function withdraw(
   })
 }
 
+function redeem(
+  shares = BigInt(5_000_000),
+  receiver: string = ACCOUNT,
+  owner: string = ACCOUNT
+): string {
+  return encodeFunctionData({
+    abi: CALLS,
+    functionName: 'redeem',
+    args: [shares, receiver as Address, owner as Address],
+  })
+}
+
 function approve(spender: string = CURVANCE_CUSDC, units = BigInt(5_000_000)): string {
   return encodeFunctionData({
     abi: erc20Abi,
@@ -121,7 +133,7 @@ function fakeReader(overrides: Partial<ChainState> = {}): EvmReaderClient & { ca
     collateralPosted: () => state.posted,
     previewDeposit: ([assets]) => ((assets as bigint) * BigInt(100)) / BigInt(104),
     previewWithdraw: ([assets]) => ((assets as bigint) * BigInt(100)) / BigInt(104) + BigInt(1),
-    convertToAssets: ([shares]) => ((shares as bigint) * BigInt(104)) / BigInt(100),
+    exchangeRateUpdated: () => BigInt('1040000000000000000'),
     assetsHeld: () => state.held,
     marketOutstandingDebt: () => state.debt,
     interestFee: () => 1000,
@@ -135,14 +147,17 @@ function fakeReader(overrides: Partial<ChainState> = {}): EvmReaderClient & { ca
       return state.rate
     },
   }
+  const readContract = async ({ address, functionName, args = [] }: FakeRead) => {
+    if (state.readFails === functionName) throw new Error('rpc down')
+    const read = reads[functionName]
+    if (read === undefined) throw new Error(`unexpected read ${functionName}`)
+    return read(args, address)
+  }
   return {
     calls,
-    readContract: async ({ address, functionName, args = [] }: FakeRead) => {
-      if (state.readFails === functionName) throw new Error('rpc down')
-      const read = reads[functionName]
-      if (read === undefined) throw new Error(`unexpected read ${functionName}`)
-      return read(args, address)
-    },
+    readContract,
+    multicall: async ({ contracts }: { contracts: FakeRead[] }) =>
+      Promise.all(contracts.map(readContract)),
     call: async (request: unknown) => {
       calls.push(request)
       if (state.callFails) throw new Error('reverted')
@@ -276,15 +291,27 @@ describe('assertSafe', () => {
     expect(() => safe.assertSafe(signing, ACCOUNT)).toThrow(ChainActionRefused)
   })
 
+  it('passes a redeem of the shares, to and from the person', () => {
+    expect(() => safe.assertSafe(payload({ data: redeem() }), ACCOUNT)).not.toThrow()
+    expect(() => safe.assertSafe(payload({ data: redeem() }), STRANGER)).toThrow(ChainActionRefused)
+  })
+
   it.each<[string, string]>([
-    [
-      'redeem',
-      encodeFunctionData({
-        abi: CALLS,
-        functionName: 'redeem',
-        args: [BigInt(5), ACCOUNT as Address, ACCOUNT as Address],
-      }),
-    ],
+    ['paying someone else', redeem(BigInt(5), STRANGER)],
+    ['from someone else', redeem(BigInt(5), ACCOUNT, STRANGER)],
+    ['of nothing', redeem(BigInt(0))],
+    ['naming no amount', redeem(maxUint256)],
+    ['with extra data', `${redeem()}00`],
+  ])('refuses a redeem %s', (_label, data) => {
+    expect(() => safe.assertSafe(payload({ data }), ACCOUNT)).toThrow(ChainActionRefused)
+  })
+
+  it('refuses an approval beside a redeem', () => {
+    const signing = payload({ data: redeem(), approval: { to: CURVANCE_USDC, data: approve() } })
+    expect(() => safe.assertSafe(signing, ACCOUNT)).toThrow(ChainActionRefused)
+  })
+
+  it.each<[string, string]>([
     [
       'depositAsCollateral',
       encodeFunctionData({
@@ -480,6 +507,61 @@ describe('withdraw', () => {
   it('refuses the kinds it does not offer', async () => {
     const borrow: ChainActionRequest = { kind: 'borrow', amount: '5', tokenIn: 'USDC' }
     await expect(venue().prepare(borrow, ACCOUNT)).rejects.toThrow(ChainActionRefused)
+  })
+})
+
+describe('exits', () => {
+  const whole: ChainActionRequest = { ...takeOut(), wholePosition: true }
+
+  it('shows everything here at the live rate, posted collateral included', async () => {
+    const state = { shares: BigInt(10_000_000), posted: BigInt(8_000_000) }
+    await expect(venue(state).positions?.(ACCOUNT)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '10.4' },
+    ])
+  })
+
+  it('shows nothing with no shares', async () => {
+    await expect(venue({ shares: BigInt(0) }).positions?.(ACCOUNT)).resolves.toEqual([])
+  })
+
+  it.each(['balanceOf', 'exchangeRateUpdated'])(
+    'throws when %s can not be read, rather than saying nothing is there',
+    async (readFails) => {
+      await expect(venue({ readFails }).positions?.(ACCOUNT)).rejects.toThrow()
+    }
+  )
+
+  it('redeems every share for all of it, to and from the person', async () => {
+    const safe = venue()
+    const prepared = await safe.prepare(whole, ACCOUNT)
+    const signing = evmSigning(prepared.signing)
+    expect(signing.data).toBe(redeem(BigInt(50_000_000)))
+    expect(signing.approval).toBeUndefined()
+    expect(prepared.pay).toEqual({ amount: '52', symbol: 'USDC' })
+    expect(() => safe.assertSafe(signing, ACCOUNT)).not.toThrow()
+  })
+
+  it('does not mistake interest since the figure was read for asking too much', async () => {
+    const prepared = await venue().prepare({ ...whole, amount: '52.000001' }, ACCOUNT)
+    expect(evmSigning(prepared.signing).data).toBe(redeem(BigInt(50_000_000)))
+  })
+
+  it.each<[string, Partial<ChainState>, RegExp]>([
+    ['nothing there', { shares: BigInt(0) }, /no USDC lent/],
+    ['withdrawals paused', { redeemPaused: 2 }, /paused.*still yours/],
+    ['a hold running', { cooldown: NOW }, /holding this account/],
+    [
+      'collateral posted',
+      { shares: BigInt(10_000_000), posted: BigInt(8_000_000) },
+      /2.08 USDC of yours.*remove the collateral/,
+    ],
+    ['too little free', { held: BigInt(4_000_000) }, /only 4 USDC free/],
+    ['a call that would fail', { callFails: true }, /still yours/],
+  ])('refuses all of it with %s', async (_label, state, words) => {
+    const asked = venue(state).prepare(whole, ACCOUNT)
+    await expect(asked).rejects.toThrow(ChainActionRefused)
+    await expect(asked).rejects.toThrow(words)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
   })
 })
 

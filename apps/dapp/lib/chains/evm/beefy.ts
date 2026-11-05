@@ -17,8 +17,10 @@ import {
   type ChainActionRequest,
   type ChainVenue,
   type PreparedAction,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
+import { AAVE_MONAD_MARKET, readReserve } from './aave'
 import {
   approvalNote,
   buildEvmCall,
@@ -48,7 +50,11 @@ const RATE_URL = 'https://api.beefy.finance/apy/breakdown'
 const RATE_VAULT_ID = 'aavev3-monad-usdc'
 const RATE_TIMEOUT_MS = 5_000
 
-const CALL_ABI = parseAbi(['function deposit(uint256 amount)', 'function withdraw(uint256 shares)'])
+const CALL_ABI = parseAbi([
+  'function deposit(uint256 amount)',
+  'function withdraw(uint256 shares)',
+  'function withdrawAll()',
+])
 
 const VAULT_READ_ABI = parseAbi([
   'function want() view returns (address)',
@@ -75,9 +81,13 @@ async function orRefuse<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Neither call names an address: the vault takes from, credits and pays only whoever sends it. */
+/** No call names an address: the vault takes from, credits and pays only whoever sends it. */
 function checkCall(call: DecodedCall, { account, approval }: CheckContext): void {
   if (!isAddress(account)) refuse('That is not a Monad address.')
+  if (call.functionName === 'withdrawAll') {
+    if (approval !== undefined) refuse('A withdrawal needs no approval.')
+    return
+  }
   const [amount] = call.args as readonly [bigint]
   if (call.functionName === 'deposit') {
     if (amount === BigInt(0)) refuse('This deposit is empty.')
@@ -98,7 +108,11 @@ export const BEEFY_MONAD_POLICY: EvmCallPolicy = {
   venueName: NAME,
   chain: 'monad',
   contracts: {
-    [BEEFY_MONAD_VAULT]: { abi: CALL_ABI, functions: ['deposit', 'withdraw'], check: checkCall },
+    [BEEFY_MONAD_VAULT]: {
+      abi: CALL_ABI,
+      functions: ['deposit', 'withdraw', 'withdrawAll'],
+      check: checkCall,
+    },
   },
   spenders: [BEEFY_MONAD_VAULT],
   approvable: [BEEFY_MONAD_USDC],
@@ -254,6 +268,7 @@ async function prepareWithdraw(
   reader: EvmReaderClient
 ): Promise<PreparedAction> {
   const units = usdcUnits(request, account)
+  const whole = request.wholePosition === true
 
   const [want, vaultBalance, totalSupply, shares] = await orRefuse(() =>
     Promise.all([
@@ -273,12 +288,15 @@ async function prepareWithdraw(
     refuse(`You have no USDC in ${VAULT_NAME}.`)
   }
   const worth = (shares * vaultBalance) / totalSupply
-  if (units > worth) {
+  if (!whole && units > worth) {
     refuse(`You have about ${usdc(worth)} USDC in ${VAULT_NAME}. Try that amount or less.`)
   }
 
   // Rounded up, so the shares pay at least what was typed. Since units <= worth, this can't pass shares.
-  const burn = (units * totalSupply + vaultBalance - BigInt(1)) / vaultBalance
+  const burn = whole ? shares : (units * totalSupply + vaultBalance - BigInt(1)) / vaultBalance
+  const paid = (burn * vaultBalance) / totalSupply
+
+  await assertAaveCanPay(paid, reader)
 
   const { signing } = await orRefuse(() =>
     buildEvmCall(
@@ -286,29 +304,75 @@ async function prepareWithdraw(
         chain: 'monad',
         account,
         to: BEEFY_MONAD_VAULT,
-        data: encodeFunctionData({ abi: CALL_ABI, functionName: 'withdraw', args: [burn] }),
+        data: whole
+          ? encodeFunctionData({ abi: CALL_ABI, functionName: 'withdrawAll' })
+          : encodeFunctionData({ abi: CALL_ABI, functionName: 'withdraw', args: [burn] }),
       },
       reader
-    )
+    ).catch((error: unknown) => {
+      if (!(error instanceof ChainActionRefused)) throw error
+      return refuse(
+        `This would fail on the chain right now: ${VAULT_NAME} wouldn't pay this out. Your shares are still yours. Try a smaller amount or try later, and check you have enough for the network fee.`
+      )
+    })
   )
+  const shown = whole ? usdc(worth) : request.amount
   return {
     venueId: 'beefy-monad',
     venueName: NAME,
     kind: 'withdraw',
-    summary: `Withdraw ${request.amount} USDC from ${VAULT_NAME}.`,
-    pay: { amount: request.amount, symbol: 'USDC' },
-    receive: {
-      amount: usdc((burn * vaultBalance) / totalSupply),
-      symbol: 'USDC',
-      approximate: true,
-    },
+    summary: whole
+      ? `Withdraw all of your USDC, about ${shown}, from ${VAULT_NAME}.`
+      : `Withdraw ${request.amount} USDC from ${VAULT_NAME}.`,
+    pay: { amount: shown, symbol: 'USDC' },
+    receive: { amount: usdc(paid), symbol: 'USDC', approximate: true },
     notes: [
       PAYS_WHAT_IT_RETURNS,
       AAVE_LIQUIDITY,
-      'Earnings keep adding to what you hold here, so a small amount can stay behind after you withdraw what you saw as your full balance.',
+      whole
+        ? 'This cashes in every share you hold, so nothing stays behind.'
+        : 'Earnings keep adding to what you hold here, so a small amount can stay behind after you withdraw what you saw as your full balance.',
     ],
     signing,
   }
+}
+
+/**
+ * This vault pays by taking USDC back out of Aave, so Aave pausing it or running short stops the
+ * exit here too. A way out must not depend on these reads: if one fails, trying the call decides.
+ */
+async function assertAaveCanPay(paid: bigint, reader: EvmReaderClient): Promise<void> {
+  const token = AAVE_MONAD_MARKET.tokens.find((t) => sameAddress(t.id, BEEFY_MONAD_USDC))
+  if (token === undefined) return
+  const reserve = await readReserve(AAVE_MONAD_MARKET, token, reader).catch(() => undefined)
+  if (reserve === undefined) return
+  if (reserve.paused || !reserve.active) {
+    refuse(
+      `Aave, where ${VAULT_NAME} lends, has paused USDC right now, so nothing can come out until it reopens. Your shares are still yours.`
+    )
+  }
+  if (paid > reserve.free) {
+    refuse(
+      `Aave, where ${VAULT_NAME} lends, has only about ${usdc(reserve.free)} USDC free right now, because the rest is lent out. Your shares are still yours. Try a smaller amount, or try later.`
+    )
+  }
+}
+
+/** All three from one block. A failed read throws, since empty would say nothing is here. */
+async function readPositions(account: string, reader: EvmReaderClient): Promise<VenuePosition[]> {
+  if (!isAddress(account)) refuse('That is not a Monad address.')
+  const vault = { address: BEEFY_MONAD_VAULT, abi: VAULT_READ_ABI } as const
+  const [shares, vaultBalance, totalSupply] = await reader.multicall({
+    allowFailure: false,
+    contracts: [
+      { ...vault, functionName: 'balanceOf', args: [account] },
+      { ...vault, functionName: 'balance' },
+      { ...vault, functionName: 'totalSupply' },
+    ],
+  })
+  if (shares === BigInt(0) || totalSupply === BigInt(0)) return []
+  const worth = (shares * vaultBalance) / totalSupply
+  return worth === BigInt(0) ? [] : [{ slot: 'supplied', symbol: 'USDC', amount: usdc(worth) }]
 }
 
 /** Reads go through `getReader`, so a venue built at import doesn't open a client until it is used. */
@@ -341,6 +405,7 @@ export function createBeefyMonadVenue(
     assertCanFollow: takesOnly(NAME, ['USDC']),
     quote,
     prepare,
+    positions: (account) => readPositions(account, getReader()),
     ...evmCallVenueParts(BEEFY_MONAD_POLICY, client),
   }
 }

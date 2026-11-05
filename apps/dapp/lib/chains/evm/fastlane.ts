@@ -11,6 +11,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenuePosition,
   type VenueQuote,
 } from '../types'
 import {
@@ -253,21 +254,25 @@ export function createFastlaneVenue(
         `${VENUE_NAME} unstakes shMON, not ${request.tokenIn}. Try "unstake 1 shMON from FastLane".`
       )
     }
-    const shares = unitsOf(request.amount)
+    const asked = unitsOf(request.amount)
+    const whole = request.wholePosition === true
     const owner = account as Address
+    let shares = asked
     let holding: bigint
     let redeemable: bigint
     let fee: bigint
     let net: bigint
     let held: bigint
     try {
-      const [balance, max, preview, coin] = await Promise.all([
-        reader.readContract({
-          address: SHMON,
-          abi: SHMON_ABI,
-          functionName: 'balanceOf',
-          args: [owner],
-        }),
+      const balance = await reader.readContract({
+        address: SHMON,
+        abi: SHMON_ABI,
+        functionName: 'balanceOf',
+        args: [owner],
+      })
+      // shMON doesn't grow in number, so all of it is what the wallet holds now.
+      if (whole && balance > ZERO) shares = balance
+      const [max, preview, coin] = await Promise.all([
         reader.readContract({
           address: SHMON,
           abi: SHMON_ABI,
@@ -290,6 +295,7 @@ export function createFastlaneVenue(
     } catch {
       return refuse(`I could not read from ${VENUE_NAME} what this unstake would return.`)
     }
+    if (whole && holding === ZERO) refuse('You hold no shMON to unstake.')
     if (holding < shares) {
       refuse(`You hold ${display(holding)} shMON, which is less than ${request.amount}.`)
     }
@@ -318,12 +324,13 @@ export function createFastlaneVenue(
       reader
     )
     const receive = display(net)
+    const shown = whole ? display(shares) : request.amount
     return {
       venueId: 'fastlane',
       venueName: VENUE_NAME,
       kind: 'unstake',
-      summary: `Unstake ${request.amount} shMON from ${VENUE_NAME} for about ${receive} MON, straight away.`,
-      pay: { amount: request.amount, symbol: 'shMON' },
+      summary: `Unstake ${whole ? `all of your shMON, ${shown},` : `${shown} shMON`} from ${VENUE_NAME} for about ${receive} MON, straight away.`,
+      pay: { amount: shown, symbol: 'shMON' },
       receive: { amount: receive, symbol: 'MON', approximate: true },
       notes: [
         `This is the instant exit through FastLane’s pool. Its fee right now is about ${display(fee)} MON, already taken off what you receive, and goes to the remaining shMON holders. The rate runs from 0.005% to 1.005% depending on how much of the pool is in use.`,
@@ -336,10 +343,23 @@ export function createFastlaneVenue(
     }
   }
 
+  /** shMON in the wallet, in shMON, since that is what an unstake takes. A failed read throws. */
+  async function positions(account: string): Promise<VenuePosition[]> {
+    assertAccount(account)
+    const shares = await reader.readContract({
+      address: SHMON,
+      abi: SHMON_ABI,
+      functionName: 'balanceOf',
+      args: [account as Address],
+    })
+    return shares === ZERO ? [] : [{ slot: 'staked', symbol: 'shMON', amount: display(shares) }]
+  }
+
   return {
     id: 'fastlane',
     name: VENUE_NAME,
     kinds: ['stake', 'unstake'],
+    positions,
     assertCanFollow: async (step, account) => {
       if (step.kind !== 'stake') refuse(`${VENUE_NAME} can only stake after a swap.`)
       await takesOnly(VENUE_NAME, ['MON'])(step, account)

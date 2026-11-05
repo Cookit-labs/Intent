@@ -130,7 +130,7 @@ describe('capabilitySheet multi-step forms', () => {
     expect(monad).toMatch(/Swap then send:/)
     expect(monad).toMatch(/Swap then deposit:/)
     expect(monad).not.toMatch(/Swap then cash out:/)
-    expect(monad).toMatch(/Cash out after a swap does not run on Monad/)
+    expect(monad).toMatch(/Cash out does not run from Monad/)
   }, 60_000)
 
   it('says which native coins cannot be sent yet', async () => {
@@ -181,9 +181,9 @@ describe('the orchestrator prompt', () => {
   it('is byte for byte what it was on Stellar', async () => {
     vi.stubEnv('WEAVE_SECRET_KEY', '')
     const system = await systemFor('stellar')
-    expect(system.length).toBe(6227)
+    expect(system.length).toBe(6452)
     expect(createHash('sha256').update(system).digest('hex')).toBe(
-      '6cead16754955621290de2860fcd3356f1456c9e7a70472f09972e5c748fbe69'
+      'a6ed692eb9f9ebc325842f13f0b6417c6b4ee970922535a1fa9c8c497c63edfc'
     )
   })
 

@@ -315,17 +315,19 @@ describe('the module', () => {
       ['cetus', ['swap']],
       ['deepbook', ['swap']],
       ['momentum', ['swap']],
-      ['navi', ['supply', 'withdraw']],
-      ['suilend', ['supply', 'withdraw']],
-      ['scallop', ['supply', 'withdraw']],
+      ['navi', ['supply', 'withdraw', 'borrow', 'repay']],
+      ['suilend', ['supply', 'withdraw', 'borrow', 'repay']],
+      ['scallop', ['supply', 'withdraw', 'borrow', 'repay']],
       ['springsui', ['stake', 'unstake']],
       ['aftermath', ['stake', 'unstake']],
-      ['walrus', ['stake', 'unstake']],
+      ['walrus', ['stake', 'unstake', 'claim']],
     ])
     expect(suiModule.defaultVenue).toEqual({
       swap: 'cetus',
       supply: 'navi',
       withdraw: 'navi',
+      borrow: 'navi',
+      repay: 'navi',
       stake: 'springsui',
       unstake: 'springsui',
       send: 'send',
@@ -337,8 +339,11 @@ describe('the module', () => {
       { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'withdraw', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'borrow', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'repay', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
       { kind: 'unstake', venue: 'SpringSui', symbol: 'sSUI' },
+      { kind: 'claim', venue: 'Walrus', symbol: 'WAL' },
     ])
   })
 })

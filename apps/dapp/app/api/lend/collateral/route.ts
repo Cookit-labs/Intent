@@ -31,7 +31,7 @@ interface CollateralBody {
   asset?: string
   /** Base units. Required to post; omit when reclaiming everything. */
   amount?: string
-  /** 'post' adds collateral, 'reclaim' returns it to a plain supply balance. */
+  /** 'post' moves it from the wallet into the pool, 'reclaim' pays it back to the wallet. */
   direction?: 'post' | 'reclaim'
 }
 

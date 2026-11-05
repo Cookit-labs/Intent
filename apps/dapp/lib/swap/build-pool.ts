@@ -12,8 +12,9 @@ import {
 } from '@stellar/stellar-sdk'
 
 import type { ClassicAsset } from './assets'
-import { isNative } from './assets'
+import { fromBaseUnits, isNative, toBaseUnits } from './assets'
 import { resolveVerifiedAsset } from './asset-registry'
+import { fetchPool, type HorizonPool } from './liquidity-pools'
 import { resolveTradableAsset } from './testnet-assets'
 import type { PriceFraction } from './limit-price'
 import { assertVenueOn } from '../venues'
@@ -242,6 +243,142 @@ export async function buildPoolWithdraw(
     minAmountA,
     minAmountB,
     networkPassphrase: stellarNetwork.networkPassphrase,
+  }
+}
+
+/** How far a pool's reserves may move, on each side, between building a withdrawal and settling it. */
+const EXIT_TOLERANCE_BPS = BigInt(100)
+
+export interface BuildPoolExitOptions {
+  account: string
+  poolId: string
+  horizonUrl?: string
+  fetchImpl?: typeof fetch
+}
+
+export interface BuiltPoolExit extends BuiltPoolOp {
+  shares: string
+  /** The least of each asset this accepts, in the pool's own order. */
+  floors: { code: string; amount: string }[]
+}
+
+function reserveAsset(name: string): Asset {
+  if (name === 'native') return Asset.native()
+  const [code = '', issuer = ''] = name.split(':')
+  return new Asset(code, issuer)
+}
+
+/**
+ * Burns every share an account holds in a pool, by the pool's id.
+ *
+ * No asset allowlist, unlike a deposit. Getting out must work for any share a
+ * person holds, and the operation can only pay the account that signs it. What is
+ * checked is that the assets read from the network really are this pool's: their
+ * derived id has to equal the pool id.
+ *
+ * The two floors are the account's share of the reserves read now, less 1%. A
+ * pool that has moved further than that refuses, the shares stay put, and the
+ * person can try again at the new figures.
+ */
+export async function buildPoolExit(options: BuildPoolExitOptions): Promise<BuiltPoolExit> {
+  assertVenueOn('stellar-pools')
+  const { account, poolId } = options
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
+  const fetchImpl = options.fetchImpl ?? fetch
+
+  const res = await fetchImpl(`${horizonUrl}/accounts/${account}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (res.status === 404) {
+    throw new Error('This account is not funded yet, so it holds no pool shares.')
+  }
+  if (!res.ok) throw new Error(`Horizon ${res.status}`)
+  const body = (await res.json()) as {
+    sequence?: string
+    balances?: { asset_type: string; balance: string; liquidity_pool_id?: string }[]
+  }
+  if (body.sequence === undefined) throw new Error('Horizon returned no sequence number')
+
+  const held = body.balances?.find(
+    (b) => b.asset_type === 'liquidity_pool_shares' && b.liquidity_pool_id === poolId
+  )
+  if (held === undefined || BigInt(toBaseUnits(held.balance)) <= BigInt(0)) {
+    throw new Error('You hold no shares in this pool. Nothing was signed or sent.')
+  }
+
+  const pool = await fetchPool(poolId, { horizonUrl, fetchImpl })
+  if (pool === undefined || pool.reserves.length !== 2) {
+    throw new Error('This pool could not be read. Nothing was signed or sent.')
+  }
+
+  const [first, second] = pool.reserves as [HorizonPool['reserves'][0], HorizonPool['reserves'][0]]
+  const assets = [reserveAsset(first.asset), reserveAsset(second.asset)] as [Asset, Asset]
+  const ordered = Asset.compare(assets[0], assets[1]) <= 0
+  const derived = Buffer.from(
+    getLiquidityPoolId(
+      'constant_product',
+      new LiquidityPoolAsset(
+        ordered ? assets[0] : assets[1],
+        ordered ? assets[1] : assets[0],
+        pool.fee_bp
+      )
+    )
+  ).toString('hex')
+  if (derived !== poolId) {
+    throw new Error('This pool did not match its own assets. Nothing was signed or sent.')
+  }
+
+  const shares = BigInt(toBaseUnits(held.balance))
+  const total = BigInt(toBaseUnits(pool.total_shares))
+  const floor = (reserve: string): string => {
+    const share = (shares * BigInt(toBaseUnits(reserve))) / total
+    return fromBaseUnits(
+      ((share * (BigInt(10_000) - EXIT_TOLERANCE_BPS)) / BigInt(10_000)).toString()
+    )
+  }
+  // Reserves as Horizon lists them, put in the pool's own order for the operation.
+  const [low, high] = ordered ? [first, second] : [second, first]
+
+  const tx = new TransactionBuilder(new Account(account, body.sequence), {
+    fee: BASE_FEE,
+    networkPassphrase: stellarNetwork.networkPassphrase,
+  })
+    .addOperation(
+      Operation.liquidityPoolWithdraw({
+        liquidityPoolId: poolId,
+        amount: fromBaseUnits(shares.toString()),
+        minAmountA: floor(low.amount),
+        minAmountB: floor(high.amount),
+      })
+    )
+    .addMemo(Memo.text(POOL_MEMO))
+    .setTimeout(TIMEOUT_SECONDS)
+    .build()
+
+  const xdr = tx.toXDR()
+  assertSelfPoolWithdraw(xdr, account)
+
+  return {
+    xdr,
+    poolId,
+    shares: fromBaseUnits(shares.toString()),
+    floors: [low, high].map((r) => ({
+      code: r.asset === 'native' ? 'XLM' : (r.asset.split(':')[0] ?? ''),
+      amount: floor(r.amount),
+    })),
+    networkPassphrase: stellarNetwork.networkPassphrase,
+  }
+}
+
+/** A lone withdrawal from a pool, by this account. A deposit is refused here. */
+export function assertSelfPoolWithdraw(xdr: string, account: string): void {
+  assertSelfPoolOp(xdr, account)
+  const decoded = TransactionBuilder.fromXDR(xdr, stellarNetwork.networkPassphrase)
+  if (
+    decoded instanceof FeeBumpTransaction ||
+    decoded.operations[0]?.type !== 'liquidityPoolWithdraw'
+  ) {
+    throw new Error('refusing to sign: this is not a withdrawal from a pool.')
   }
 }
 

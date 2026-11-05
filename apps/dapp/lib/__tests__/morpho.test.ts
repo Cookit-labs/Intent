@@ -12,7 +12,7 @@ import {
 import { morphoListing } from '../chains/evm/morpho-listing'
 import { MONAD_TOKENS } from '../chains/evm/tokens'
 import { ChainActionRefused, type ChainActionRequest } from '../chains/types'
-import { ACCOUNT, describeVaultRefusals, STRANGER } from './erc4626-refusals'
+import { ACCOUNT, describeVaultRefusals, redeemData, STRANGER } from './erc4626-refusals'
 
 const MONAD_ID = 143
 const SUPPLY: ChainActionRequest = { kind: 'supply', amount: '100', tokenIn: 'USDC' }
@@ -47,6 +47,8 @@ interface Scene {
   adapters?: bigint
   liquidityFails?: boolean
   simulationFails?: boolean
+  gated?: boolean
+  sharesFail?: boolean
 }
 
 const WEEK = 604_800
@@ -82,6 +84,7 @@ function fakeReader(scene: Scene = {}) {
       const isVault = address.toLowerCase() === MORPHO_VAULT.address.toLowerCase()
       switch (functionName) {
         case 'balanceOf':
+          if (isVault && scene.sharesFail) throw new Error('no reading')
           if (isVault) return scene.shares ?? BigInt(0)
           return (args?.[0] as string).toLowerCase() === MORPHO_VAULT.address.toLowerCase()
             ? (scene.idle ?? units(50_000))
@@ -122,10 +125,20 @@ function fakeReader(scene: Scene = {}) {
           ]
         case 'position':
           return [units(30_000), BigInt(0), BigInt(0)]
+        case 'canSendShares':
+          return scene.gated !== true
+        case 'canReceiveAssets':
+          return true
         default:
           throw new Error(`Unexpected read: ${functionName}`)
       }
     },
+    multicall: async ({
+      contracts,
+    }: {
+      contracts: { address: string; functionName: string; args?: readonly unknown[] }[]
+    }): Promise<unknown[]> =>
+      Promise.all(contracts.map((contract) => reader.readContract(contract))),
   }
   return { reader: reader as unknown as EvmReaderClient, calls }
 }
@@ -285,5 +298,62 @@ describe('Morpho on Monad', () => {
   it('refuses a withdrawal that fails on the chain', async () => {
     const { venue } = venueWith({ shares: units(500), simulationFails: true })
     await expect(venue.prepare(WITHDRAW, ACCOUNT)).rejects.toThrow(/would fail on the chain/)
+  })
+})
+
+describe('Morpho exits', () => {
+  const WHOLE: ChainActionRequest = { ...WITHDRAW, wholePosition: true }
+
+  it('shows what the shares are worth now, in the asset', async () => {
+    const { venue } = venueWith({ shares: units(500) })
+    await expect(venue.positions?.(ACCOUNT)).resolves.toEqual([
+      { slot: 'supplied', symbol: 'USDC', amount: '500' },
+    ])
+  })
+
+  it('shows nothing when there are no shares', async () => {
+    await expect(venueWith().venue.positions?.(ACCOUNT)).resolves.toEqual([])
+  })
+
+  it('throws when it can not read, rather than saying nothing is there', async () => {
+    const { venue } = venueWith({ sharesFail: true })
+    await expect(venue.positions?.(ACCOUNT)).rejects.toThrow()
+  })
+
+  it('redeems every share for all of it, to and from the person', async () => {
+    const { venue } = venueWith({ shares: units(500) })
+    const prepared = await venue.prepare(WHOLE, ACCOUNT)
+    expect(prepared.signing).toMatchObject({ data: redeemData(units(500)) })
+    expect(prepared.pay).toEqual({ amount: '500', symbol: 'USDC' })
+    expect(prepared.signing).not.toHaveProperty('approval')
+    expect(() => venue.assertSafe(prepared.signing, ACCOUNT)).not.toThrow()
+    expect(() => venue.assertSafe(prepared.signing, STRANGER)).toThrow(ChainActionRefused)
+  })
+
+  it('takes all of it even where interest has passed the figure read', async () => {
+    const { venue } = venueWith({ shares: units(100) + BigInt(7) })
+    const prepared = await venue.prepare(WHOLE, ACCOUNT)
+    expect(prepared.signing).toMatchObject({ data: redeemData(units(100) + BigInt(7)) })
+  })
+
+  it('refuses all of it when the vault can not pay that much now', async () => {
+    const { venue } = venueWith({ shares: units(50_000), idle: units(10), marketFree: units(20) })
+    await expect(venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/can pay out about 30 USDC/)
+  })
+
+  it('refuses all of it when there is nothing there', async () => {
+    await expect(venueWith().venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/You have no USDC/)
+  })
+
+  it('says so when the curator has closed the gate', async () => {
+    const { venue } = venueWith({ shares: units(500), gated: true })
+    const asked = venue.prepare(WHOLE, ACCOUNT)
+    await expect(asked).rejects.toThrow(/closed withdrawals/)
+    await expect(asked).rejects.toThrow(/Nothing was signed or sent\.$/)
+  })
+
+  it('tells a failed exit apart from a missing fee, in plain words', async () => {
+    const { venue } = venueWith({ shares: units(500), simulationFails: true })
+    await expect(venue.prepare(WHOLE, ACCOUNT)).rejects.toThrow(/position is still there/)
   })
 })

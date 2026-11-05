@@ -11,5 +11,5 @@ export const solayerListing: Venue = {
   url: 'https://solayer.org',
   integration: 'executes',
   capability:
-    'Restakes SOL for sSOL. Unstaking sSOL gives you a stake account of your own that cools down first, and withdrawing from it isn’t wired here. sSOL only, not sUSD, Pay, the card or the chain.',
+    'Restakes SOL for sSOL. Unstaking sSOL gives you a stake account of your own that cools down first, then "claim my SOL" pays the SOL to your wallet. sSOL only, not sUSD, Pay, the card or the chain.',
 }

@@ -23,6 +23,10 @@ function cardLine({ kind, pay, venueName }: PreparedAction): string {
       return `This commits ${what} from your wallet to a stream on ${venueName}`
     case 'invoice':
       return `This bills ${what} on ${venueName}, and moves nothing from your wallet`
+    case 'claim':
+      return `You collect ${what} from ${venueName}`
+    case 'cancel':
+      return `You end this stream on ${venueName}, and get back ${what} that hasn't streamed`
     default:
       return `You pay ${what} on ${venueName}`
   }

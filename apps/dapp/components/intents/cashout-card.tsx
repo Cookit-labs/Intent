@@ -298,7 +298,7 @@ function BeforeYouSign({
           <span className="text-muted-foreground text-xs">
             {expired
               ? 'This payout will be cancelled. Use Edit to start a new one.'
-              : 'Unpaid orders are cancelled. Nothing is taken.'}
+              : 'Unpaid orders are cancelled. Nothing is taken. Weave has not yet paid out a real order in this app.'}
           </span>
         </div>
         <span
