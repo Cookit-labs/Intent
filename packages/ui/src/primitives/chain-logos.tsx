@@ -14,13 +14,41 @@ import { useId } from 'react'
  * Invented marks stood here before. A wrong mark is a claim about identity,
  * which is worse than no mark at all.
  */
-export type ChainLogoId = 'arc' | 'stellar' | 'solana' | 'avalanche'
+export type ChainLogoId = 'arc' | 'stellar' | 'solana' | 'avalanche' | 'sui' | 'monad' | 'near'
 
 export const CHAIN_LOGO_NAMES: Record<ChainLogoId, string> = {
   arc: 'Arc',
   stellar: 'Stellar',
   solana: 'Solana',
   avalanche: 'Avalanche',
+  sui: 'Sui',
+  monad: 'Monad',
+  near: 'NEAR',
+}
+
+/** Sui, Monad and NEAR marks come from the MIT-licensed `@web3icons/core` set, on a 24 unit box. */
+const SUI_MARK_D =
+  'M16.128 10.508a5.44 5.44 0 0 1 1.15 3.356 5.47 5.47 0 0 1-1.182 3.4l-.063.079-.016-.107a5 5 0 0 0-.053-.26c-.37-1.656-1.566-3.08-3.546-4.233-1.334-.774-2.102-1.705-2.304-2.765a4.1 4.1 0 0 1 .16-1.969c.15-.494.385-.961.693-1.376l.773-.963a.332.332 0 0 1 .518 0zm1.218-.964L12.19 3.092a.244.244 0 0 0-.38 0L6.653 9.549l-.016.016a7.1 7.1 0 0 0-1.52 4.405C5.118 17.85 8.199 21 12 21s6.883-3.15 6.883-7.03a7.1 7.1 0 0 0-1.52-4.405zm-9.46.943.46-.577.017.105.037.255c.301 1.604 1.366 2.938 3.15 3.97 1.551.905 2.45 1.943 2.71 3.081.1.443.128.898.079 1.35v.027l-.021.01a5.2 5.2 0 0 1-2.319.544c-2.911 0-5.278-2.412-5.278-5.388a5.44 5.44 0 0 1 1.165-3.377'
+const MONAD_MARK_D =
+  'M12 3c-2.599 0-9 6.4-9 9s6.401 9 9 9 9-6.401 9-9-6.401-9-9-9m-1.402 14.146c-1.097-.298-4.043-5.453-3.744-6.549s5.453-4.042 6.549-3.743c1.095.298 4.042 5.453 3.743 6.549-.298 1.095-5.453 4.042-6.549 3.743'
+const NEAR_MARK_D =
+  'm17.425 3.92-3.76 5.58c-.257.385.244.835.604.52l3.28-3.214c.095-.083.236-.026.236.115v10.062c0 .135-.18.192-.256.096L6.754 3.681a1.85 1.85 0 0 0-1.459-.68C4.138 3 3 3.584 3 4.922V19.07a1.922 1.922 0 0 0 3.555 1.003l3.754-5.58c.257-.385-.238-.835-.598-.52l-3.26 3.279c-.096.083-.237.026-.237-.117V7.101c0-.14.18-.192.257-.096L17.226 20.32c.36.444.9.681 1.46.681C19.848 21 21 20.421 21 19.078V4.93a1.93 1.93 0 0 0-3.575-1.003z'
+
+/** A mark on the shared 24 unit box. NEAR's is `currentColor`, so it reads on light and dark grounds. */
+function Mark24({
+  d,
+  fill,
+  className,
+}: {
+  d: string
+  fill: string
+  className?: string | undefined
+}): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
+      <path fill={fill} d={d} />
+    </svg>
+  )
 }
 
 export interface ChainLogoProps {
@@ -117,6 +145,12 @@ export function ChainMark({ chain, className }: ChainLogoProps): JSX.Element {
           ))}
         </svg>
       )
+    case 'sui':
+      return <Mark24 d={SUI_MARK_D} fill="#4BA2FF" className={className} />
+    case 'monad':
+      return <Mark24 d={MONAD_MARK_D} fill="#836EF9" className={className} />
+    case 'near':
+      return <Mark24 d={NEAR_MARK_D} fill="currentColor" className={className} />
   }
 }
 
@@ -124,6 +158,15 @@ export function ChainMark({ chain, className }: ChainLogoProps): JSX.Element {
 export function ChainWordmark({ chain, className }: ChainLogoProps): JSX.Element {
   const id = gradientId(useId())
   switch (chain) {
+    case 'sui':
+    case 'monad':
+    case 'near':
+      return (
+        <span className={className}>
+          <ChainMark chain={chain} className="mr-1 inline h-[1em] w-[1em] align-[-0.125em]" />
+          <span className="font-semibold">{CHAIN_LOGO_NAMES[chain]}</span>
+        </span>
+      )
     case 'arc':
       return <img src={ARC_WORDMARK} alt="Arc" width={291} height={100} className={className} />
     case 'stellar':

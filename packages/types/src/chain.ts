@@ -19,20 +19,28 @@ export interface ContractAddresses {
   usdc: `0x${string}`
 }
 
-export type SupportedNetwork =
+/** Networks with an RPC config and contract addresses in `@intent/config`. */
+export type DeployedNetwork =
   | 'arc-testnet'
   | 'arc-mainnet'
   | 'local'
   | 'stellar-testnet'
   | 'stellar-mainnet'
 
+export type SupportedNetwork =
+  | DeployedNetwork
+  | 'solana-mainnet'
+  | 'avalanche-mainnet'
+  | 'sui-mainnet'
+  | 'monad-mainnet'
+  | 'near-mainnet'
+
 /**
- * Which execution environment a chain belongs to. This is not cosmetic: EVM
- * chains are reachable through wagmi/viem and use `0x` addresses, while Stellar
- * uses Horizon/Soroban, `G...` addresses and a different wallet entirely. Code
- * that must branch on the two worlds branches on this, never on chain name.
+ * Which execution environment a chain belongs to. This is not cosmetic: each
+ * family has its own wallets, address shape and signing rules. Code that must
+ * branch on those worlds branches on this, never on chain name.
  */
-export type ChainFamily = 'evm' | 'stellar'
+export type ChainFamily = 'evm' | 'stellar' | 'solana' | 'sui' | 'near'
 
 /**
  * The chain slug as it appears in dApp URLs (`/arc/intents`, `/stellar/vault`).
@@ -40,7 +48,7 @@ export type ChainFamily = 'evm' | 'stellar'
  * picked, while a network names a specific deployment of it (testnet vs
  * mainnet). One slug maps to different networks across environments.
  */
-export type ChainSlug = 'arc' | 'stellar'
+export type ChainSlug = 'arc' | 'stellar' | 'solana' | 'avalanche' | 'sui' | 'monad' | 'near'
 
 /**
  * Chain-agnostic descriptor the UI renders from. `ChainConfig` above stays

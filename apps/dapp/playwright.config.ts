@@ -47,6 +47,23 @@ export default defineConfig({
     // A retried run records the attempt, so a flake that passes on retry still
     // leaves evidence of the first failure.
     trace: 'on-first-retry',
+    // Past the wallet gate: these specs check what pages render without a wallet.
+    // `connect-gate.spec.ts` clears this to test the gate itself.
+    storageState: {
+      cookies: [
+        {
+          name: 'e2e-no-wallet-gate',
+          value: '1',
+          domain: 'localhost',
+          path: '/',
+          expires: -1,
+          httpOnly: false,
+          secure: false,
+          sameSite: 'Lax',
+        },
+      ],
+      origins: [],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
@@ -57,6 +74,7 @@ export default defineConfig({
     timeout: 10 * 60 * 1000,
     env: {
       AGENT_BRAIN: 'mock',
+      E2E_WALLET_GATE_BYPASS: '1',
       SKIP_LIVE: '1',
       NEXT_TELEMETRY_DISABLED: '1',
       // Blank rather than unset: Next only fills a variable from `.env.local`

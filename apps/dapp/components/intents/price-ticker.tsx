@@ -4,6 +4,7 @@ import { activeNetwork } from '@intent/config'
 import { useQuery } from '@tanstack/react-query'
 
 import type { MarketPrice } from '../../lib/swap/price-types'
+import { CoinStat } from './coin-stat'
 
 /**
  * What XLM trades for, on the network this app actually executes against.
@@ -63,35 +64,34 @@ export function PriceTicker({
         ? 'XLM on the Stellar mainnet order book. Reflector could not be read, so this single venue stands in for it.'
         : 'Neither Reflector nor the mainnet order book could be read, so this is a fallback figure rather than a live quote.'
 
-  return (
-    <span className="text-muted-foreground flex items-center gap-2 text-xs tabular-nums">
-      {testnet != null ? (
-        <span
-          className="flex items-center gap-1.5"
-          title={`XLM mid price from the Stellar ${here} order book — the venue this app signs against, so this is the rate your swaps actually fill near.`}
-        >
-          <span className="bg-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
-          <span className="text-foreground font-medium">XLM ${testnet.usd.toFixed(4)}</span>
-          <span className="opacity-60">{here}</span>
-        </span>
-      ) : (
-        <span
-          className="flex items-center gap-1.5"
-          title={`The ${here} XLM/USDC order book could not be read, or has no offers resting on it right now.`}
-        >
-          <span className="bg-muted-foreground h-1.5 w-1.5 rounded-full" aria-hidden />
-          <span className="opacity-60">{here} book unavailable</span>
-        </span>
-      )}
+  const bookTitle =
+    testnet != null
+      ? `XLM mid price from the Stellar ${here} order book — the venue this app signs against, so this is the rate your swaps actually fill near.`
+      : `The ${here} XLM/USDC order book could not be read, or has no offers resting on it right now.`
 
-      {/* The real market, kept visible but subordinate. Dollar amounts typed
-          into an intent are sized against this, and the agents compare routes
-          with it, so hiding it would make those numbers unaccountable. */}
-      {worth !== undefined ? (
-        <span className="hidden opacity-60 lg:inline" title={worthTitle}>
-          · {worthLabel} ${worth.usd.toFixed(4)}
-        </span>
-      ) : null}
-    </span>
+  return (
+    <CoinStat
+      figure={testnet != null ? `$${testnet.usd.toFixed(4)}` : 'XLM'}
+      title={worth !== undefined ? `${bookTitle} ${worthTitle}` : bookTitle}
+      label={
+        <>
+          {here === 'mainnet'
+            ? testnet != null
+              ? 'XLM price'
+              : 'Price unavailable'
+            : testnet != null
+              ? `XLM on ${here}`
+              : `${here} book unavailable`}
+          {/* The real market, kept visible but subordinate. Dollar amounts typed
+              into an intent are sized against this, and the agents compare routes
+              with it, so hiding it would make those numbers unaccountable. */}
+          {worth !== undefined ? (
+            <span className="hidden lg:inline">
+              , {worthLabel} ${worth.usd.toFixed(4)}
+            </span>
+          ) : null}
+        </>
+      }
+    />
   )
 }

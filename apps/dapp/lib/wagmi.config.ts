@@ -1,13 +1,9 @@
 import { connectorsForWallets } from '@rainbow-me/rainbowkit'
-import {
-  injectedWallet,
-  metaMaskWallet,
-  rainbowWallet,
-  walletConnectWallet,
-} from '@rainbow-me/rainbowkit/wallets'
+import { injectedWallet, walletConnectWallet } from '@rainbow-me/rainbowkit/wallets'
 import { arcTestnet as arcTestnetConfig } from '@intent/config'
 import { createConfig, http } from 'wagmi'
 import { defineChain } from 'viem'
+import { avalanche, monad } from 'viem/chains'
 
 /**
  * The viem chain, derived from the shared config rather than redeclared, so
@@ -39,20 +35,16 @@ const hasProjectId = projectId !== '' && projectId !== 'your-project-id'
  * WalletConnect id requires an external signup at cloud.reown.com, and without
  * this the app cannot even build for anyone who has not done it.
  *
- * The subtlety that matters: `metaMaskWallet` decides between the extension and
- * WalletConnect via `!isMetaMaskInjected && !isMobile()`, evaluated at build
- * time. During SSR prerender there is no `window`, so it always chooses
- * WalletConnect and throws. `injectedWallet` is the only one that never reaches
- * `getWalletConnectConnector`, so it is the only safe entry without an id.
+ * Browser wallets are discovered by name through EIP-6963, so only the generic
+ * injected wallet and WalletConnect are declared. WalletConnect is the way in
+ * for mobile wallets, and shows its own QR code.
  */
-const wallets = hasProjectId
-  ? [injectedWallet, metaMaskWallet, rainbowWallet, walletConnectWallet]
-  : [injectedWallet]
+const wallets = hasProjectId ? [injectedWallet, walletConnectWallet] : [injectedWallet]
 
 if (!hasProjectId && typeof window !== 'undefined') {
   console.warn(
     '[wallet] NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is unset. ' +
-      'Browser-extension wallets work; WalletConnect, Rainbow and mobile wallets are unavailable. ' +
+      'Browser-extension wallets work; WalletConnect and mobile wallets are unavailable. ' +
       'Get an id at https://cloud.reown.com'
   )
 }
@@ -64,9 +56,11 @@ const connectors = connectorsForWallets([{ groupName: 'Wallets', wallets }], {
 
 export const wagmiConfig = createConfig({
   connectors,
-  chains: [arcTestnet],
+  chains: [arcTestnet, avalanche, monad],
   transports: {
     [arcTestnet.id]: http(arcTestnetConfig.rpcUrl),
+    [avalanche.id]: http(),
+    [monad.id]: http(),
   },
   ssr: true,
 })

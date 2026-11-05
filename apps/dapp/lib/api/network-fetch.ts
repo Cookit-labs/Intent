@@ -56,6 +56,17 @@ export function networkFetch(
   }
 }
 
+/**
+ * For calls that need the requester named on every deployment. `networkFetch` is
+ * only installed where several networks are served, so a single-network page would
+ * otherwise send no wallet at all.
+ */
+export function walletFetch(input: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  if (connectedWallet !== undefined) headers.set(WALLET_HEADER, connectedWallet)
+  return fetch(input, { ...init, headers })
+}
+
 const BASE_KEY = '__intentBaseFetch'
 
 /** Browser only. Safe to call again with another network; it wraps the original, never the wrapper. */

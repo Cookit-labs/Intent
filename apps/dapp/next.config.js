@@ -21,6 +21,9 @@ const config = {
   // this, and the matching audit ignore in the root package.json, once the
   // app is on a patched line.
   images: { unoptimized: true },
+  // Dev only. The defaults (60s, 5 entries) count every polled API route as an
+  // entry, so pages kept being dropped and recompiled, about 20s per click.
+  onDemandEntries: { maxInactiveAge: 60 * 60 * 1000, pagesBufferLength: 200 },
 }
 
 /**

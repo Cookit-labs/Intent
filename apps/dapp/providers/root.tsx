@@ -1,14 +1,17 @@
 'use client'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { RainbowKitProvider, lightTheme } from '@rainbow-me/rainbowkit'
 import { WagmiProvider } from 'wagmi'
 import { ThemeProvider } from 'next-themes'
 import { useState } from 'react'
 
+import { quietExtensionErrors } from '../lib/extension-console'
 import { wagmiConfig } from '../lib/wagmi.config'
 
-import '@rainbow-me/rainbowkit/styles.css'
+// At module load, so it wraps the dev overlay's console hook, which is already in place.
+if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+  quietExtensionErrors(console)
+}
 
 export function RootProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -23,23 +26,14 @@ export function RootProviders({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider
-          theme={lightTheme({
-            accentColor: '#6366f1',
-            accentColorForeground: '#ffffff',
-            borderRadius: 'small',
-            fontStack: 'system',
-          })}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem={false}
+          disableTransitionOnChange
         >
-          <ThemeProvider
-            attribute="class"
-            defaultTheme="light"
-            enableSystem={false}
-            disableTransitionOnChange
-          >
-            {children}
-          </ThemeProvider>
-        </RainbowKitProvider>
+          {children}
+        </ThemeProvider>
       </QueryClientProvider>
     </WagmiProvider>
   )

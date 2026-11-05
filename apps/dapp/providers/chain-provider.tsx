@@ -12,13 +12,12 @@ import { createContext, useContext, useMemo } from 'react'
 
 import { installNetworkFetch } from '../lib/api/network-fetch'
 import type { ChainAdapter } from '../lib/chain-adapter'
-import { arcAdapter } from '../lib/adapters/arc-adapter'
-import { stellarAdapterFor } from '../lib/adapters/stellar-adapter'
+import { adapterFor } from '../lib/adapters'
 
 interface ChainContextValue {
-  /** The chain family: `arc` or `stellar`. Never carries the network. */
+  /** The chain, such as `near` or `stellar`. Never carries the network. */
   slug: ChainSlug
-  /** The Stellar network of this page. Absent on Arc. */
+  /** The Stellar network of this page. Absent on every other chain. */
   network: StellarNetworkName | undefined
   /** The path segment this page is under, to build links that stay on it. */
   segment: string
@@ -51,8 +50,7 @@ export function ChainProvider({
   }
 
   const value = useMemo<ChainContextValue>(() => {
-    const adapter =
-      route.slug === 'arc' ? arcAdapter : stellarAdapterFor(network as StellarNetworkName)
+    const adapter = adapterFor(route.slug, network)
     return { slug: route.slug, network, segment, descriptor: adapter.descriptor, adapter }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segment])

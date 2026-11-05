@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { networkFetch, setAttributedRace, setConnectedWallet } from '../api/network-fetch'
+import {
+  networkFetch,
+  setAttributedRace,
+  setConnectedWallet,
+  walletFetch,
+} from '../api/network-fetch'
 
 const ORIGIN = 'https://app.test'
 
@@ -83,5 +88,27 @@ describe('networkFetch wallet header', () => {
     await f(`${ORIGIN}/api/naira/rate`)
 
     expect(calls.map((c) => c.headers.get('x-intent-wallet'))).toEqual(['GWALLET', null, null])
+  })
+
+  it('walletFetch names the wallet without the wrapper installed, and keeps other headers', async () => {
+    const seen: Headers[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers))
+      return new Response('{}')
+    }) as typeof fetch
+
+    try {
+      setConnectedWallet('GWALLET')
+      await walletFetch('/api/cashout/verify', { headers: { 'Content-Type': 'application/json' } })
+      setConnectedWallet(undefined)
+      await walletFetch('/api/cashout/options')
+    } finally {
+      globalThis.fetch = original
+    }
+
+    expect(seen[0]?.get('x-intent-wallet')).toBe('GWALLET')
+    expect(seen[0]?.get('content-type')).toBe('application/json')
+    expect(seen[1]?.get('x-intent-wallet')).toBeNull()
   })
 })

@@ -6,7 +6,7 @@ import { Search, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { useChain } from '../../providers/chain-provider'
-import { notOnNetworkLabel, venues } from '../../lib/venues'
+import { isListedOn, notOnNetworkLabel, venueDetail, venues } from '../../lib/venues'
 import { categoryLabel, VenueCard, VenueLogo, VerifiedTick } from './venue-card'
 
 /** Integrated first, then quoted, then merely listed. */
@@ -42,7 +42,7 @@ export function VenueGrid({
   const rows = useMemo<Row[]>(
     () =>
       venues
-        .filter((v) => v.family === descriptor.family)
+        .filter((v) => v.family === descriptor.family && isListedOn(v))
         // Venues the app can actually use come first. Alphabetical order put
         // Aquarius — then only priced, never signed — above Soroswap, which
         // intents routed through, so the most useful thing was buried.
@@ -66,13 +66,13 @@ export function VenueGrid({
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return rows.filter(({ venue: v }) => {
+    return rows.filter(({ venue: v, notHere }) => {
       if (category !== 'all' && v.category !== category) return false
       // Capability is searchable too: someone looking for "treasuries" or
       // "lending" is describing what they want done, not naming a venue.
       return (
         q === '' ||
-        [v.name, categoryLabel[v.category], v.bestFor, v.capability ?? ''].some((f) =>
+        [v.name, categoryLabel[v.category], v.bestFor, venueDetail(v, notHere)].some((f) =>
           f.toLowerCase().includes(q)
         )
       )
@@ -104,7 +104,9 @@ export function VenueGrid({
               {liveRows.length} live venues <VerifiedTick />
             </span>
             <span className="text-muted-foreground text-xs">
-              Agents compete across all of them on every intent. You never pick one yourself.
+              {descriptor.family === 'stellar'
+                ? 'Agents compete across all of them on every intent. You never pick one yourself.'
+                : 'Ask in chat and Intent uses the right one, or name the one you want.'}
             </span>
           </div>
           {rows.length > liveRows.length ? (

@@ -37,15 +37,16 @@ test('mainnet shows only the venues that are on mainnet, and testnet shows them 
   await expect(page.getByText('Not on mainnet yet')).toHaveCount(0)
 })
 
-test('the root opens on Stellar mainnet, and the menu still reaches the other chains', async ({
+test('old addresses open on Stellar mainnet, and the menu still reaches the other chains', async ({
   page,
 }) => {
-  await page.goto('/')
+  await page.goto('/intents')
   await expect(page).toHaveURL(/\/stellar-mainnet\/intents$/)
   await expect(page.getByRole('button', { name: /^Chain: Stellar mainnet/ })).toBeVisible()
 
   await page.getByRole('button', { name: /^Chain: / }).click()
-  await expect(page.getByRole('menuitem', { name: /^Arc\b/ })).toBeEnabled()
+  await expect(page.getByRole('menuitem', { name: /^NEAR mainnet$/ })).toBeEnabled()
+  await expect(page.getByRole('menuitem', { name: /^Arc\b/ })).toHaveCount(0)
   await expect(page.getByRole('menuitem', { name: /Stellar testnet/ })).toBeEnabled()
   await expect(page.getByRole('menuitem', { name: /Stellar mainnet/ })).toBeEnabled()
 })

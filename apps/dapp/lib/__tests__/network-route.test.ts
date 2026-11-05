@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { gateEnabled } from '../server/access-gate'
 import {
   bareRedirect,
+  homeFor,
+  rememberedChain,
   isGateFree,
   legacyStellarRedirect,
   segmentNetwork,
@@ -35,15 +37,12 @@ describe('legacyStellarRedirect', () => {
 })
 
 describe('bareRedirect', () => {
-  it('sends the bare root to the home chain, keeping the query', () => {
-    expect(bareRedirect('/', '', 'stellar-mainnet')).toBe('/stellar-mainnet/intents')
-    expect(bareRedirect('/', '?rule=r3', 'stellar')).toBe('/stellar/intents?rule=r3')
-  })
-
   it('sends the old unprefixed screens to the same screen on the home chain', () => {
-    expect(bareRedirect('/apps', '?x=1', 'stellar-mainnet')).toBe('/stellar-mainnet/apps?x=1')
-    expect(bareRedirect('/history', '', 'stellar')).toBe('/stellar/history')
-    expect(bareRedirect('/competitions/abc', '', 'stellar-mainnet')).toBe(
+    expect(bareRedirect('/apps', '?x=1', 'stellar-mainnet', undefined)).toBe(
+      '/stellar-mainnet/apps?x=1'
+    )
+    expect(bareRedirect('/history', '', 'stellar', undefined)).toBe('/stellar/history')
+    expect(bareRedirect('/competitions/abc', '', 'stellar-mainnet', undefined)).toBe(
       '/stellar-mainnet/competitions/abc'
     )
   })
@@ -59,7 +58,7 @@ describe('bareRedirect', () => {
       '/intentsx/1',
       '/api/health',
     ]) {
-      expect(bareRedirect(path, '', 'stellar-mainnet')).toBeUndefined()
+      expect(bareRedirect(path, '', 'stellar-mainnet', undefined)).toBeUndefined()
     }
   })
 })
@@ -93,5 +92,33 @@ describe('gateEnabled for a network', () => {
 
   it('treats a typo in the flag like unset: off', () => {
     expect(gateEnabled({ ACCESS_GATE: 'maybe' }, 'mainnet')).toBe(false)
+  })
+})
+
+describe('homeFor', () => {
+  it('opens on the chain last connected to', () => {
+    expect(homeFor('near', ['mainnet'])).toBe('near')
+  })
+
+  it('falls back to the home chain with no cookie, or one naming no chain', () => {
+    expect(homeFor(undefined, ['mainnet'])).toBe('stellar')
+    expect(homeFor('../evil', ['mainnet'])).toBe('stellar')
+    expect(homeFor('stellar-testnet', ['mainnet'])).toBe('stellar')
+  })
+})
+
+describe('the bare root', () => {
+  it('is the connect page, with no chain in the address', () => {
+    expect(bareRedirect('/', '', 'stellar', undefined)).toBeUndefined()
+  })
+
+  it('opens on the chain remembered from an earlier visit', () => {
+    expect(bareRedirect('/', '?a=1', 'stellar', 'near')).toBe('/near/intents?a=1')
+  })
+
+  it('ignores a remembered value that names no chain', () => {
+    expect(rememberedChain('../evil', ['mainnet'])).toBeUndefined()
+    expect(rememberedChain('near', ['mainnet'])).toBe('near')
+    expect(rememberedChain(undefined, ['mainnet'])).toBeUndefined()
   })
 })

@@ -97,7 +97,19 @@ export const ANALYTICS_DDL: readonly string[] = [
   `ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS reasoning TEXT`,
 ]
 
-export type ExecutionKind = 'swap' | 'plan' | 'offer' | 'send' | 'lend' | 'offramp' | 'perp'
+export type ExecutionKind =
+  | 'swap'
+  | 'plan'
+  | 'offer'
+  | 'send'
+  | 'lend'
+  | 'offramp'
+  | 'perp'
+  // Actions on other chains, by chain: the row's network column is a Stellar
+  // network, so the kind is what keeps these apart from Stellar's numbers.
+  | 'solana'
+  | 'sui'
+  | 'near'
 
 export interface ExecutionRecord {
   network: StellarNetworkName
@@ -507,6 +519,8 @@ export interface LogExecutionInput {
   result: SubmitLike
   /** The signed envelope that was sent, so what it moved can be recorded. */
   signedXdr?: string
+  /** Set for actions on other chains, which only run on mainnet. Defaults to the page's Stellar network. */
+  network?: StellarNetworkName
 }
 
 export const RACE_HEADER = 'x-intent-race'
@@ -546,7 +560,7 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
     const flow = await readFlowSafely(input)
     const raceId = await raceFromRequest()
     await repo.recordExecution({
-      network: activeNetwork(),
+      network: input.network ?? activeNetwork(),
       account: input.account,
       kind: input.kind,
       feeSponsored: input.feeSponsored,

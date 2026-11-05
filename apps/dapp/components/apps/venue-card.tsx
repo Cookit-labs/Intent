@@ -6,7 +6,13 @@ import { ArrowUpRight, BadgeCheck } from 'lucide-react'
 import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 
+import { chainMarkFor } from '../../lib/chain-mark'
+import { venueDetail } from '../../lib/venues'
+
 export const categoryLabel: Record<VenueCategory, string> = {
+  savings: 'Savings',
+  staking: 'Staking',
+  payments: 'Payments',
   swap: 'Swap',
   aggregator: 'Aggregator',
   orderbook: 'Order book',
@@ -17,13 +23,6 @@ export const categoryLabel: Record<VenueCategory, string> = {
   perps: 'Perpetuals',
   names: 'Names',
   infrastructure: 'Network',
-}
-
-function chainSlug(chain: string): string {
-  return chain
-    .toLowerCase()
-    .replace(/\s*chain$/, '')
-    .trim()
 }
 
 /**
@@ -153,7 +152,7 @@ export function VenueCard({
       target="_blank"
       rel="noopener noreferrer"
       // What the app can actually do here, for anyone who wants the detail.
-      title={venue.capability ?? venue.bestFor}
+      title={venueDetail(venue, notHere)}
       className={cn(
         'bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border group relative isolate flex flex-col justify-between gap-4 overflow-hidden rounded-3xl border p-4 transition-all duration-200 sm:aspect-square',
         live
@@ -170,27 +169,26 @@ export function VenueCard({
         <div className="flex items-center gap-1.5">
           {showChains ? (
             <div className="flex -space-x-1.5">
-              {venue.chains
-                .slice(0, 3)
-                .map((chain) =>
-                  chainSlug(chain) === 'arc' ? (
-                    <ChainMark
-                      key={chain}
-                      chain="arc"
-                      className="ring-bubble-agent h-5 w-5 rounded-full ring-2"
-                    />
-                  ) : (
-                    <Image
-                      key={chain}
-                      src={`/images/chains/${chainSlug(chain)}.webp`}
-                      alt={chain}
-                      title={chain}
-                      width={20}
-                      height={20}
-                      className="ring-bubble-agent h-5 w-5 rounded-full ring-2"
-                    />
-                  )
-                )}
+              {venue.chains.slice(0, 3).map((chain) => {
+                const badge = chainMarkFor(chain)
+                return badge.kind === 'mark' ? (
+                  <ChainMark
+                    key={chain}
+                    chain={badge.chain}
+                    className="ring-bubble-agent h-5 w-5 rounded-full ring-2"
+                  />
+                ) : (
+                  <Image
+                    key={chain}
+                    src={`/images/chains/${badge.slug}.webp`}
+                    alt={chain}
+                    title={chain}
+                    width={20}
+                    height={20}
+                    className="ring-bubble-agent h-5 w-5 rounded-full ring-2"
+                  />
+                )
+              })}
             </div>
           ) : null}
           <span className="text-muted-foreground group-hover:bg-brand group-hover:text-brand-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors">
@@ -226,7 +224,13 @@ export function VenueCard({
                 <span className="bg-success absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:animate-none" />
                 <span className="bg-success relative inline-flex h-2 w-2 rounded-full" />
               </span>
-              <span>{integration === 'quotes' ? 'Prices live' : 'Agents trade here'}</span>
+              <span>
+                {integration === 'quotes'
+                  ? 'Prices live'
+                  : venue.family === 'stellar'
+                    ? 'Agents trade here'
+                    : 'Works from chat'}
+              </span>
             </>
           ) : (
             <>

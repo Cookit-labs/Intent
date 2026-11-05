@@ -108,20 +108,37 @@ describe('chain segments', () => {
   it('rejects a network the deployment does not serve, and anything unknown', async () => {
     const { parseChainSegment } = await load()
     expect(parseChainSegment('stellar-mainnet', ['testnet'])).toBeUndefined()
-    expect(parseChainSegment('solana', ['testnet', 'mainnet'])).toBeUndefined()
+    expect(parseChainSegment('ethereum', ['testnet', 'mainnet'])).toBeUndefined()
     expect(parseChainSegment('stellar-pubnet', ['testnet', 'mainnet'])).toBeUndefined()
   })
 
   it('keeps /stellar as the address when one network is served, and names the network when several are', async () => {
     const single = await load()
     expect(single.chainSegment('stellar', 'testnet')).toBe('stellar')
-    expect(single.chainSegments()).toEqual(['arc', 'stellar'])
+    expect(single.chainSegments()).toEqual([
+      'arc',
+      'solana',
+      'avalanche',
+      'sui',
+      'monad',
+      'near',
+      'stellar',
+    ])
 
     const multi = await load({ NEXT_PUBLIC_STELLAR_NETWORKS: 'testnet,mainnet' })
     expect(multi.chainSegment('stellar', 'mainnet')).toBe('stellar-mainnet')
     expect(multi.chainSegment('stellar')).toBe('stellar-testnet')
     expect(multi.chainSegment('arc')).toBe('arc')
-    expect(multi.chainSegments()).toEqual(['arc', 'stellar-testnet', 'stellar-mainnet'])
+    expect(multi.chainSegments()).toEqual([
+      'arc',
+      'solana',
+      'avalanche',
+      'sui',
+      'monad',
+      'near',
+      'stellar-testnet',
+      'stellar-mainnet',
+    ])
   })
 })
 

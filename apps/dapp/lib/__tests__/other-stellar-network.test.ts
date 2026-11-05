@@ -15,21 +15,27 @@ describe('otherStellarNetwork', () => {
 
   it('keeps the user on the same screen of the other deployment', () => {
     expect(
-      otherStellarNetwork('mainnet', 'https://testnet.example.com', '/stellar/apps').href
-    ).toBe('https://testnet.example.com/stellar/apps')
+      otherStellarNetwork('testnet', 'https://mainnet.example.com', '/stellar/apps').href
+    ).toBe('https://mainnet.example.com/stellar/apps')
     expect(
-      otherStellarNetwork('mainnet', 'https://testnet.example.com/', '/stellar/apps').href
-    ).toBe('https://testnet.example.com/stellar/apps')
+      otherStellarNetwork('testnet', 'https://mainnet.example.com/', '/stellar/apps').href
+    ).toBe('https://mainnet.example.com/stellar/apps')
+  })
+
+  it('never links a mainnet deployment to testnet, even when an address is configured', () => {
+    expect(
+      otherStellarNetwork('mainnet', 'https://testnet.example.com', '/stellar/apps').href
+    ).toBeUndefined()
   })
 
   it('refuses a configured address that is not http or https', () => {
     for (const bad of [
       'javascript:alert(1)',
       'data:text/html,x',
-      'testnet.example.com',
+      'mainnet.example.com',
       '//evil.test',
     ]) {
-      expect(otherStellarNetwork('mainnet', bad, '/stellar/apps').href, bad).toBeUndefined()
+      expect(otherStellarNetwork('testnet', bad, '/stellar/apps').href, bad).toBeUndefined()
     }
   })
 })

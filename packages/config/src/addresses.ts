@@ -1,6 +1,6 @@
-import type { ContractAddresses, SupportedNetwork } from '@intent/types'
+import type { ContractAddresses, DeployedNetwork } from '@intent/types'
 
-export const CONTRACT_ADDRESSES: Record<SupportedNetwork, ContractAddresses> = {
+export const CONTRACT_ADDRESSES: Record<DeployedNetwork, ContractAddresses> = {
   local: {
     intentEscrow: '0x0000000000000000000000000000000000000000',
     reputationRegistry: '0x0000000000000000000000000000000000000000',

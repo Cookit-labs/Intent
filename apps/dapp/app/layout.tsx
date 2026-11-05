@@ -32,7 +32,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      {/* Browser extensions such as ColorZilla add attributes to <body> before React loads. */}
       <body
+        suppressHydrationWarning
         className={`${inter.variable} ${playfair.variable} ${cormorant.variable} ${geistMono.variable} bg-background text-foreground antialiased`}
       >
         <RootProviders>{children}</RootProviders>

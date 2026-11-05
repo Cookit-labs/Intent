@@ -104,7 +104,7 @@ export function NetworkStatus({
             {FAUCET_LABEL[slug]}
           </a>
         )
-      ) : isMainnet() ? (
+      ) : isMainnet() || (slug !== 'stellar' && slug !== 'arc') ? (
         tradeCapUsd !== undefined && slug === 'stellar' ? (
           <span className="text-muted-foreground text-[11px] leading-none">
             Trades up to ${tradeCapUsd}

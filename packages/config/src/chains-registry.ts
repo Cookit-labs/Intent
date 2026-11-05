@@ -14,29 +14,112 @@ export const arcDescriptor: ChainDescriptor = {
   enabled: true,
 }
 
+export const solanaDescriptor: ChainDescriptor = {
+  slug: 'solana',
+  family: 'solana',
+  name: 'Solana',
+  network: 'solana-mainnet',
+  networkLabel: 'Solana mainnet',
+  nativeCurrency: { name: 'Solana', symbol: 'SOL', decimals: 9 },
+  blockExplorerUrl: 'https://solscan.io',
+  enabled: true,
+}
+
+export const avalancheDescriptor: ChainDescriptor = {
+  slug: 'avalanche',
+  family: 'evm',
+  name: 'Avalanche',
+  network: 'avalanche-mainnet',
+  networkLabel: 'Avalanche mainnet',
+  nativeCurrency: { name: 'Avalanche', symbol: 'AVAX', decimals: 18 },
+  blockExplorerUrl: 'https://snowtrace.io',
+  enabled: true,
+}
+
+export const suiDescriptor: ChainDescriptor = {
+  slug: 'sui',
+  family: 'sui',
+  name: 'Sui',
+  network: 'sui-mainnet',
+  networkLabel: 'Sui mainnet',
+  nativeCurrency: { name: 'Sui', symbol: 'SUI', decimals: 9 },
+  blockExplorerUrl: 'https://suiscan.xyz/mainnet',
+  enabled: true,
+}
+
+export const monadDescriptor: ChainDescriptor = {
+  slug: 'monad',
+  family: 'evm',
+  name: 'Monad',
+  network: 'monad-mainnet',
+  networkLabel: 'Monad mainnet',
+  nativeCurrency: { name: 'Monad', symbol: 'MON', decimals: 18 },
+  blockExplorerUrl: 'https://monadvision.com',
+  enabled: true,
+}
+
+export const nearDescriptor: ChainDescriptor = {
+  slug: 'near',
+  family: 'near',
+  name: 'NEAR',
+  network: 'near-mainnet',
+  networkLabel: 'NEAR mainnet',
+  nativeCurrency: { name: 'NEAR', symbol: 'NEAR', decimals: 24 },
+  blockExplorerUrl: 'https://nearblocks.io',
+  enabled: true,
+}
+
 export const CHAIN_DESCRIPTORS: Record<ChainSlug, ChainDescriptor> = {
   arc: arcDescriptor,
   stellar: stellarDescriptor,
+  solana: solanaDescriptor,
+  avalanche: avalancheDescriptor,
+  sui: suiDescriptor,
+  monad: monadDescriptor,
+  near: nearDescriptor,
 }
 
-/** Display order for switchers and menus. */
-export const CHAIN_ORDER: readonly ChainSlug[] = ['arc', 'stellar']
+/** Every chain the app has an address for. */
+export const CHAIN_ORDER: readonly ChainSlug[] = [
+  'arc',
+  'stellar',
+  'solana',
+  'avalanche',
+  'sui',
+  'monad',
+  'near',
+]
+
+/** The chains a person can connect to, in the order the picker shows them. Arc is not offered. */
+export const CONNECT_CHAINS: readonly ChainSlug[] = [
+  'stellar',
+  'solana',
+  'avalanche',
+  'sui',
+  'monad',
+  'near',
+]
 
 export const DEFAULT_CHAIN: ChainSlug = 'stellar'
 
 export function isChainSlug(value: string): value is ChainSlug {
-  return value === 'arc' || value === 'stellar'
+  return (CHAIN_ORDER as readonly string[]).includes(value)
 }
 
 export function getChainDescriptor(slug: ChainSlug): ChainDescriptor {
   return CHAIN_DESCRIPTORS[slug]
 }
 
+/** Explorers that say `account` where the rest say `address`. */
+const ACCOUNT_PATH_CHAINS: readonly ChainSlug[] = ['stellar', 'solana', 'sui']
+
 /**
- * Explorer URL for an account. The two chains disagree on both path and address
- * shape, so callers must not build these by hand.
+ * Explorer URL for an account. Chains disagree on both path and address shape,
+ * so callers must not build these by hand.
  */
 export function accountExplorerUrl(slug: ChainSlug, address: string): string {
   const base = CHAIN_DESCRIPTORS[slug].blockExplorerUrl
-  return slug === 'stellar' ? `${base}/account/${address}` : `${base}/address/${address}`
+  return ACCOUNT_PATH_CHAINS.includes(slug)
+    ? `${base}/account/${address}`
+    : `${base}/address/${address}`
 }
