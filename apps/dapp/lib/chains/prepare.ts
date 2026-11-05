@@ -309,11 +309,25 @@ async function assertHeldForSend(
   )
 }
 
-function limitCostOf(chainApi: ChainModule, request: ChainActionRequest): ChainVenue['limitCost'] {
+async function limitCostOf(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string
+): Promise<ChainVenue['limitCost']> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    return pickVenue(chainApi, request).limitCost
+    const venue = pickVenue(chainApi, request)
+    if (venue.limitCostNow === undefined) return venue.limitCost
+    return await Promise.race([
+      venue.limitCostNow(request, account),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), RESERVE_READ_MS)
+      }),
+    ])
   } catch {
     return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -333,7 +347,7 @@ export async function assertNativeReserve(
 ): Promise<void> {
   const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
   if (tokenIn === undefined) return
-  const cost = request.kind === 'limit' ? limitCostOf(chainApi, request) : undefined
+  const cost = request.kind === 'limit' ? await limitCostOf(chainApi, request, account) : undefined
   const costed = cost !== undefined && cost.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]
   const sellsNative = tokenIn.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]
   if (!sellsNative && !costed) return

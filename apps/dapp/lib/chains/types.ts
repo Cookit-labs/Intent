@@ -158,6 +158,16 @@ export interface ChainVenue {
   assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
   /** A limit order's one-off setup cost in the native coin, kept back on top of the fee reserve. */
   limitCost?: { amount: string; symbol: string } | undefined
+  /**
+   * For a venue whose setup is paid once per account: what this one still owes, or nothing. Takes the
+   * place of `limitCost` in the reserve, which there is only the most it can come to.
+   */
+  limitCostNow?:
+    | ((
+        request: ChainActionRequest,
+        account: string
+      ) => Promise<{ amount: string; symbol: string } | undefined>)
+    | undefined
 }
 
 /** A step that would follow a swap. The amount isn't known until the swap has delivered it. */

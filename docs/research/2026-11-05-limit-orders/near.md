@@ -1,5 +1,20 @@
 # NEAR limit orders on Rhea/Ref DCL (dclv2.ref-labs.near) - research, 2026-11-05
 
+## Corrections from the build, 2026-11-05
+
+Read off mainnet with nothing signed (`near-rhea-dcl.live.test.ts`, plus real transactions on this pool read through `EXPERIMENTAL_tx_status`). Where this differs from the report below, this section is right.
+
+- **No sign flip on the pool's axis.** The UI's `-point` only turns its helper's "B per A" price into the pool's y-per-x, so what goes in `msg` is one axis either way: USDC per NEAR = 1e18 / 1.0001^point, whichever token is sold. Selling NEAR rests below `current_point`, buying NEAR above it. Real resting orders agree: #8665 sells USDC at 415439 (0.9091 USDC per NEAR) against a market at about 401300, and the book near the market has only sell-NEAR orders below the point and sell-USDC above it. A fill matched the point to 8 digits: order #16180, 130.344448 NEAR at 401041 bought 500.004597 USDC, or 3.8360253 per NEAR against 3.8360253 at the point, so no maker fee shows.
+- **A purchase pays out in native NEAR, not wNEAR.** `cancel_order {order_id, amount}` makes the contract call `wrap.near.near_withdraw` and transfer native NEAR. Seen on this pool with `amount: "0"` in `3b2gaLoDMLtDhR6YvjWeCGo2jN7r2XNXnXbo3PkxD5nL` (500 NEAR bought) and `9ToL4GV74Z3oggetFvHb6LdogxSRd2QFDR1yZf1S1tK4`. A cancel returning sold wNEAR does the same (`23U4s6vFXWTf47HzR6QwqgddmyMDpKrHL7adGkYBuzUJ`, on another pool). There is an undocumented `skip_unwrap_near: true` to keep wNEAR, which market makers pass. This app doesn't, and refuses it. So the section 3 note, "proceeds come back as wNEAR", is wrong for this call.
+- **Collect and cancel pay the wallet.** USDC bought arrives by `ft_transfer` in the same transaction (`4MAGH8AXzcMgPjU5nC8ZDXRo6AjAVdF5SUady6LZD9oh`). The SDK's comment about an "inner account" doesn't describe what happens here.
+- **An `amount` above what is left is cut.** In that same transaction, a request to cancel 72.4 NEAR of an order already filled logs `actual_cancel_amount: "0"`, succeeds, and pays out the fill.
+- **`bought_amount` includes `unclaimed_amount`**, and a filled order stays in `list_active_orders` with `remain_amount: "0"` until collected (#15820: 999 USDC at 400927, both 257.47 NEAR). `get_order` answers `null` once an order has closed. `unclaimed_amount` is `null` in history rows.
+- **`find_order` answers `null` when nothing rests at that point.** Whether a second order at the same point merges or fails is still unknown, so the app refuses it first.
+- **Gas.** Storage 30 + `near_deposit` 30 + `ft_transfer_call` 250 is 310 TGas, over the 300 limit the report said it fit in. Storage goes in its own transaction anyway.
+- **Several transactions don't carry a first use safely.** NEAR Connect hands the array to the wallet, which promises neither order nor stopping after a failure, and throws with no hashes if it fails partway. Rhea's own interface does send one array, but an order landing without its storage has an outcome nobody here could read in the contract's source. The app pays for storage alone, with `thenPrepareAgain`, then builds the order once the chain shows the storage.
+- **An order's own status doesn't say it rested.** If `ft_on_transfer` refuses, NEP-141 refunds and the transaction still succeeds. Submit looks for the order with `find_order`, and reads a miss as pending.
+- **Still unverified:** whether the 0.5 NEAR storage comes back; what happens to an order sent with no storage record; and the contract's source, which remains unpublished. No order has been signed through this app.
+
 Verdict: BUILDABLE for USDC/wNEAR (and a few other pairs), with a larger safety.ts change than any current NEAR venue (it refuses ft_transfer_call today). Not run end to end; no tx was sent.
 
 ## Sources

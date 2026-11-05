@@ -4,6 +4,7 @@ import type { ChainModule, ChainVenue } from '../types'
 import { readNearBalances } from './balances'
 import { EARN_VENUE_ID, earnVenue } from './earn'
 import { assetIdOf, oneClickPrice } from './oneclick'
+import { RHEA_VENUE_ID, rheaBook, rheaVenue } from './rhea-dcl'
 import { confirmStake, metapoolVenue, METAPOOL_VENUE_ID, rnearVenue } from './stake'
 import { ONECLICK_VENUE_ID, oneClickVenue } from './swap'
 import { nearTokens } from './tokens'
@@ -16,6 +17,7 @@ export function buildNearVenues(
     metapoolVenue,
     rnearVenue,
     earnVenue,
+    rheaVenue,
     ...(canIssueOneClick(env) ? [createSendVenue('near')] : []),
   ]
 }
@@ -34,8 +36,10 @@ export const nearModule: ChainModule = {
      */
     stake: METAPOOL_VENUE_ID,
     send: SEND_VENUE_ID,
+    limit: RHEA_VENUE_ID,
   },
   priceUsd: (token) => oneClickPrice(assetIdOf(token), token.decimals),
   submit: confirmStake,
   balances: readNearBalances,
+  limitBook: rheaBook(),
 }
