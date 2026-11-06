@@ -1,13 +1,15 @@
 import { oneClickPrice } from '../near/oneclick'
 import { canIssueOneClick, oneClickAssetId, oneClickOriginVenue } from '../oneclick-origin'
+import { createSendVenue, SEND_VENUE_ID } from '../send'
 import type { ChainModule, ChainToken, ChainVenue } from '../types'
+import { readEvmBalances } from './balances'
 import { EVM_CHAINS, type EvmChain } from './tokens'
 
 export function buildEvmVenues(
   chain: EvmChain,
   env: Record<string, string | undefined> = process.env
 ): ChainVenue[] {
-  return canIssueOneClick(env) ? [oneClickOriginVenue(chain)] : []
+  return canIssueOneClick(env) ? [oneClickOriginVenue(chain), createSendVenue(chain)] : []
 }
 
 /**
@@ -28,7 +30,7 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
     chain,
     tokens: EVM_CHAINS[chain].tokens,
     venues: buildEvmVenues(chain),
-    defaultVenue: { swap: `1click-${chain}` },
+    defaultVenue: { swap: `1click-${chain}`, send: SEND_VENUE_ID },
     priceUsd: (token) => priceFromOneClick(chain, token),
     // Every venue here lands its own transactions, and no venue means no submit gets this far.
     submit: async () => ({
@@ -37,6 +39,7 @@ function evmModule(chain: EvmChain, tokenHints?: Record<string, string>): ChainM
       error:
         "This app can't follow that from here. Check your wallet's activity before trying again.",
     }),
+    balances: (account, signal) => readEvmBalances(chain, account, undefined, signal),
     ...(tokenHints !== undefined ? { tokenHints } : {}),
   }
 }

@@ -98,11 +98,25 @@ describe('createRateLimiter', () => {
 
 describe('limitFor', () => {
   it('has a default for every family', () => {
-    for (const family of ['build', 'submit', 'compete', 'resolve', 'standing', 'auth'] as const) {
+    for (const family of [
+      'build',
+      'read',
+      'submit',
+      'compete',
+      'resolve',
+      'standing',
+      'auth',
+    ] as const) {
       expect(limitFor(family, {})).toEqual(RATE_LIMIT_DEFAULTS[family])
       expect(RATE_LIMIT_DEFAULTS[family].limit).toBeGreaterThan(0)
       expect(RATE_LIMIT_DEFAULTS[family].windowSeconds).toBeGreaterThan(0)
     }
+  })
+
+  it('gives balance reads their own, wider family, apart from what builds', () => {
+    expect(RATE_LIMIT_DEFAULTS.read).toEqual({ limit: 120, windowSeconds: 60 })
+    expect(limitFor('read', { RATE_LIMIT_READ: '5/10' })).toEqual({ limit: 5, windowSeconds: 10 })
+    expect(limitFor('build', { RATE_LIMIT_READ: '5/10' })).toEqual(RATE_LIMIT_DEFAULTS.build)
   })
 
   it('reads RATE_LIMIT_<FAMILY> as count/seconds', () => {
@@ -124,7 +138,7 @@ describe('limitFor', () => {
 describe('dailyLimitFor', () => {
   it('has a daily cap only for compete', () => {
     expect(dailyLimitFor('compete', {})).toEqual(RATE_LIMIT_DAILY.compete)
-    for (const family of ['build', 'submit', 'resolve', 'standing', 'auth'] as const) {
+    for (const family of ['build', 'read', 'submit', 'resolve', 'standing', 'auth'] as const) {
       expect(dailyLimitFor(family, {})).toBeUndefined()
     }
   })

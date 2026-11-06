@@ -11,6 +11,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import { assertDepositAmount, solanaAssertSafe } from './assert-safe'
 import { venueFetch } from './http'
@@ -117,6 +118,7 @@ export function createLuloVenue(options: LuloOptions): ChainVenue {
     id: 'lulo',
     name: 'Lulo Protected',
     kinds: ['supply'],
+    assertCanFollow: takesOnly('Lulo', ['USDC']),
     quote,
     prepare,
     assertSafe: solanaAssertSafe(LULO_POLICY),

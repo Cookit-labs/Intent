@@ -1,5 +1,8 @@
+import { SENDABLE } from '../chains/recipient'
 import { chainModule } from '../chains/registry'
-import type { ChainActionKind } from '../chains/types'
+import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
+import type { ChainActionKind, ChainWithActions } from '../chains/types'
+import { cashOutPrompt } from '../weave/corridors'
 
 /**
  * What Intent does, written down once.
@@ -34,6 +37,28 @@ const STELLAR_ONLY = [
   'Each trade is capped at $500 on mainnet.',
 ]
 
+const NATIVE_NOT_SENT: Record<string, string> = {
+  solana: "Native SOL can't be sent yet; USDC and the listed tokens can.",
+  sui: "Native SUI can't be sent yet; USDC and the listed tokens can.",
+  near: "Native NEAR can't be sent yet; USDC and the listed tokens can.",
+}
+
+export const OWN_TOKEN: Record<string, string> = {
+  solana: 'SOL',
+  sui: 'SUI',
+  near: 'NEAR',
+  avalanche: 'AVAX',
+  monad: 'MON',
+}
+
+/** Solana, Sui and NEAR list every token a wallet holds. Avalanche and Monad can only read the ones Intent knows. */
+function balanceLine(chain: string): string {
+  const readsAll = chain === 'solana' || chain === 'sui' || chain === 'near'
+  return readsAll
+    ? 'Balance: ask what you hold and the wallet is listed token by token, every token it holds.'
+    : 'Balance: ask what you hold and the wallet is listed token by token, the tokens Intent knows on this chain.'
+}
+
 const NOTHING_RUNS = 'Nothing can be swapped, supplied or staked on this chain right now.'
 
 function bullets(lines: string[]): string {
@@ -48,8 +73,8 @@ export function capabilitySheet(chain: string): string {
   const venues = chainModule(chain)?.venues
   if (venues === undefined) return `- ${SWAP_DIRECT}`
 
-  // Off Stellar only what the chain's own venues can do is claimed: accumulate,
-  // hedge and send are Stellar's, and the chat reads only swap, supply and stake.
+  // Off Stellar only what the chain's own venues can do is claimed: accumulate and hedge are
+  // Stellar's, and the chat reads swap, supply, stake, send and a swap followed by one of them.
   // A race needs a venue that can quote, so a kind with none is never promised one.
   const offered = (kind: ChainActionKind): boolean => venues.some((v) => v.kinds.includes(kind))
   const raced = (kind: ChainActionKind): boolean =>
@@ -66,5 +91,41 @@ export function capabilitySheet(chain: string): string {
       `Stake: stake an asset for a staking token. ${raced('stake') ? 'Agents compete to propose the best venue; you' : 'You'} review it and sign in your wallet.`
     )
   }
-  return bullets(lines.length > 0 ? lines : [NOTHING_RUNS])
+  const sendable = SENDABLE[chain as ChainWithActions]
+  if (offered('send') && sendable !== undefined) {
+    lines.push(
+      `Send: send ${sendable.join(', ')} to an address on this chain. You review it and sign in your wallet. ${NATIVE_NOT_SENT[chain] ?? ''}`.trim()
+    )
+  }
+  if (lines.length === 0) return bullets([NOTHING_RUNS])
+
+  if (offered('swap')) {
+    const own = OWN_TOKEN[chain] ?? 'SOL'
+    const cashesOut =
+      (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain) && cashOutPrompt(chain) !== ''
+    if (cashesOut) {
+      lines.push(
+        `Swap then cash out: swap into USDC and pay it to a bank or mobile money account as one request, for example "swap 5 ${own} to USDC then cash out". You sign the swap, then start the cash-out yourself.`
+      )
+    }
+    if (offered('supply')) {
+      lines.push(
+        `Swap then deposit: after a swap, put what arrived into a lending or earn venue, for example "swap 5 ${own} to USDC then deposit". You sign the swap, then the deposit.`
+      )
+    }
+    if (offered('send')) {
+      lines.push(
+        `Swap then send: after a swap, send what arrived to an address you type, for example "swap 5 ${own} to USDC then send to an address". The address must be typed by you in full.`
+      )
+    }
+    if (chain === 'near') {
+      lines.push(
+        "Cash out does not run from NEAR: Weave's NEAR deposits aren't working yet. Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request."
+      )
+    } else if (chain === 'monad') {
+      lines.push('Cash out and deposit after a swap do not run on Monad.')
+    }
+  }
+  lines.push('Limit orders are not available off Stellar.', balanceLine(chain))
+  return bullets(lines)
 }

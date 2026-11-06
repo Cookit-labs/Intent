@@ -1,3 +1,4 @@
+import { QUOTE_EXPIRED, START_AGAIN } from '../chains/signing-flow'
 import type { ChainActionRequest } from '../chains/types'
 import type { CompetitionErrorCode } from './competition'
 import type { ChainRouteQuote } from './chain-routes'
@@ -95,9 +96,25 @@ export function chainReviewClosed(phase: ChainActionPhaseName, signed: boolean):
   return signed || chainSigning(phase) || phase === 'settled' || phase === 'pending'
 }
 
-/** The direct-route note is true only while nothing has been signed. */
-export function showDirectNote(direct: boolean, phase: ChainActionPhaseName): boolean {
-  return direct && (phase === 'building' || phase === 'review')
+/**
+ * Whether the race is over for choosing. A signature closes it, and so does a sequence whose swap
+ * settled: step 2's press lifts the latch for step 2's own card, and the race on screen is still
+ * the swap's, so one more Review there would build that swap a second time.
+ */
+export function raceClosed(signed: boolean, sequenceSettled: boolean): boolean {
+  return signed || sequenceSettled
+}
+
+/**
+ * The direct-route note is true only while nothing has been signed. Step 2's card follows a swap
+ * that has been, whichever route that swap took.
+ */
+export function showDirectNote(
+  direct: boolean,
+  phase: ChainActionPhaseName,
+  sequenceSettled: boolean = false
+): boolean {
+  return direct && !sequenceSettled && (phase === 'building' || phase === 'review')
 }
 
 /** The agent that is shown as selected holds only while a build or its aftermath is live. */
@@ -220,6 +237,68 @@ export function recommendationLine(
       ? 'best measured fill'
       : `${figures.headline.charAt(0).toLowerCase()}${figures.headline.slice(1)}`
   return `Recommended: ${name}, ${why}. You pick who executes.`
+}
+
+const UNANSWERED_REASON: Readonly<Record<string, string>> = {
+  rate_limited: 'rate limited',
+  timeout: 'too slow',
+  upstream_error: 'provider error',
+  invalid_schema: 'unusable answer',
+  refused: 'declined',
+  no_api_key: 'not set up',
+}
+
+/** Who left the race and why, so a short race explains itself. Nothing if everyone answered. */
+export function unansweredLine(
+  agents: readonly { name: string; failed?: string | undefined }[]
+): string | undefined {
+  const gone = agents.filter((a) => a.failed !== undefined)
+  if (gone.length === 0) return undefined
+  const names = gone
+    .map((a) => `${a.name} (${UNANSWERED_REASON[a.failed as string] ?? 'no answer'})`)
+    .join(', ')
+  return `${gone.length} ${gone.length === 1 ? 'agent' : 'agents'} didn't answer: ${names}.`
+}
+
+export const STEP_NOT_STARTED =
+  'This step did not start. The swap stands, and what arrived stays in your wallet.'
+
+/** An expired card proved nothing moved, so the sequence is back at `ready` with its button. */
+export const STEP_CARD_EXPIRED =
+  "This step's card expired. Press the button above for a fresh one. The swap stands, so don't send your request again."
+
+/** A wallet that gave no answer may have sent step 2, so there is no button at this point. */
+const STEP_UNCONFIRMED =
+  "The swap stands, so don't send your request again. If this step did not go out, what arrived stays in your wallet."
+
+function stepUnconfirmed(typedStep: string | undefined): string {
+  return typedStep === undefined
+    ? STEP_UNCONFIRMED
+    : `The swap stands, so don't send your request again. Check your wallet. If nothing went out, you can type the step on its own, for example "${typedStep}".`
+}
+
+/**
+ * A refusal of step 2, once the swap before it was signed. The server words its refusals as if
+ * nothing had been, which is true of step 2 and false of the sequence. Sending the request again
+ * would offer the swap a second time, so nothing here tells the person to. `typedStep` is step 2 as
+ * a request of its own, which is what they can type instead.
+ */
+export function stepErrorMessage(
+  message: string | undefined,
+  sequenceSettled: boolean,
+  typedStep?: string | undefined
+): string | undefined {
+  if (message === undefined || !sequenceSettled) return message
+  if (message === QUOTE_EXPIRED) return STEP_CARD_EXPIRED
+  if (message.endsWith(START_AGAIN)) {
+    return `${message.slice(0, -START_AGAIN.length)}${stepUnconfirmed(typedStep)}`
+  }
+  if (!/nothing was signed or sent/i.test(message)) return message
+  const rest = message
+    .replace(/,\s*so nothing was signed or sent(?:,\s*so try again[^.]*)?\.?/gi, '.')
+    .replace(/\s*Nothing was signed or sent(?:,\s*so try again[^.]*)?\.?/g, '')
+    .trim()
+  return `${rest} ${STEP_NOT_STARTED}`
 }
 
 /**

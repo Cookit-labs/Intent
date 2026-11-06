@@ -5,7 +5,12 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
-import { panelErrorMessage, recommendationLine, singleRouteNote } from '../../lib/agents/chain-race'
+import {
+  panelErrorMessage,
+  recommendationLine,
+  singleRouteNote,
+  unansweredLine,
+} from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
@@ -148,6 +153,10 @@ export function CompetitionPanel({
   const revealedAgents = agents.filter((a) => revealed[a.key] && answered(a.key))
   const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key] && answered(a.key))
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
+  // No card for one, but a line says who left, so a short race doesn't look like the whole field.
+  const unanswered = unansweredLine(
+    agents.map((a) => ({ name: a.name, failed: proposals[a.key]?.failed }))
+  )
 
   const routeNote =
     chainName !== undefined ? singleRouteNote(state.routeCount, chainName) : undefined
@@ -339,6 +348,8 @@ export function CompetitionPanel({
             : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
         </motion.div>
       ) : null}
+
+      {decided && unanswered !== undefined ? <div className={systemPill}>{unanswered}</div> : null}
     </div>
   )
 }

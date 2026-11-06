@@ -3,13 +3,17 @@ import { z } from 'zod'
 
 import {
   LENDABLE_ONLY,
+  chainReadPolicy,
+  tokenHintIn,
   OFFRAMP_ANCHORS,
   lendingVenuesOn,
   unknownTickers,
 } from '../../../../lib/intent-read-policy'
+import { SEQUENCE_CASHOUT_CHAINS } from '../../../../lib/chains/sequence'
 import { orchestrateWithLlm } from '../../../../lib/orchestrate/orchestrate'
 import { isLlmParseConfigured } from '../../../../lib/parse-intent-llm'
 import { logIntentRead } from '../../../../lib/server/analytics'
+import { cashOutPrompt } from '../../../../lib/weave/corridors'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { resolveVerifiedAsset, tradeableSymbols } from '../../../../lib/swap/asset-registry'
 import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
@@ -74,9 +78,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   // The latest thing the user typed is what names a token for the first time.
   const latest = [...turns].reverse().find((t) => t.role === 'user')?.content ?? ''
 
+  // Off Stellar a reading is held to the chain's own tokens and venues, not Stellar's registry.
+  const onChain = chainReadPolicy(chain)
+
   // A token named in the sentence that the app does not hold by hand is looked
   // up and, only if its issuer proves itself, admitted for this request.
-  await ensureLiveAssets(tickersIn(latest))
+  if (onChain === undefined) await ensureLiveAssets(tickersIn(latest))
 
   const result = await orchestrateWithLlm(turns, {
     chain,
@@ -85,15 +92,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     // The model may only name assets this app can actually trade. Checked here
     // rather than trusted, because a hallucinated ticker reaching the quoter as
     // a real instruction is a trap this codebase has hit once already.
-    allowedSymbols: [...tradeableSymbols(), ...(LENDABLE_ONLY[chain] ?? [])],
-    allowedVenues: lendingVenuesOn(chain),
-    allowedAnchors: OFFRAMP_ANCHORS[chain] ?? [],
+    allowedSymbols: onChain?.symbols ?? [...tradeableSymbols(), ...(LENDABLE_ONLY[chain] ?? [])],
+    allowedVenues: onChain?.venues ?? lendingVenuesOn(chain),
+    // The only payout off Stellar is Weave's, and only on a chain whose swaps can end in one.
+    allowedAnchors:
+      onChain === undefined
+        ? (OFFRAMP_ANCHORS[chain] ?? [])
+        : (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain) &&
+            cashOutPrompt(chain) !== ''
+          ? ['weave']
+          : [],
+    // Off Stellar a follow-on that can't be honoured is refused before the swap, not dropped.
+    ...(onChain !== undefined ? { reportRefusedFollowOn: true } : {}),
   })
 
   if (result === null) {
     // A ticker typed in capitals that nothing here recognises is most likely
     // the reason. Saying so lets the chat ask which token was meant.
-    const unknown = unknownTickers(latest)
+    const hint = onChain === undefined ? undefined : tokenHintIn(chain, latest)
+    if (hint !== undefined) {
+      await logIntentRead({ understood: false, reason: 'unclear' })
+      return NextResponse.json({ outcome: 'unclear', reply: hint })
+    }
+    const unknown = onChain === undefined ? unknownTickers(latest) : []
     if (unknown.length > 0) {
       await logIntentRead({ understood: false, reason: 'unknown_token' })
       return NextResponse.json({ outcome: 'unavailable', reason: 'unknown_token', tokens: unknown })
@@ -164,16 +185,22 @@ export async function POST(request: Request): Promise<NextResponse> {
         // Null rather than omitted, so the client distinguishes "no follow-on"
         // from a field that failed to serialise.
         followOn: reading.followOn,
+        ...(reading.followOnRefused !== undefined
+          ? { followOnRefused: reading.followOnRefused }
+          : {}),
         style: result.style,
         ...(result.amountOf !== undefined ? { amountOf: result.amountOf } : {}),
         ...(result.limitPriceUsd !== undefined ? { limitPriceUsd: result.limitPriceUsd } : {}),
         instruction: result.instruction,
         context: result.context,
         // Tokens admitted live, so the page can trade them without a second lookup.
-        liveAssets: [reading.tokenIn, reading.tokenOut].flatMap((symbol) => {
-          const asset = resolveVerifiedAsset(symbol)
-          return asset !== undefined && asset.category === 'token' ? [asset] : []
-        }),
+        liveAssets:
+          onChain !== undefined
+            ? []
+            : [reading.tokenIn, reading.tokenOut].flatMap((symbol) => {
+                const asset = resolveVerifiedAsset(symbol)
+                return asset !== undefined && asset.category === 'token' ? [asset] : []
+              }),
       })
     }
   }

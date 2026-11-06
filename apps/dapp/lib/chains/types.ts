@@ -8,17 +8,24 @@ import type { ChainSlug } from '@intent/types'
 
 export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake'
+export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
   kind: ChainActionKind
   amount: string
+  /**
+   * `amount` is dollars, not tokens: "$5 of SOL". Only the chat's start of an action reads this,
+   * and it is swapped for a count of tokens there, so nothing past that point ever sees it.
+   */
+  amountIsUsd?: true | undefined
   tokenIn: string
   /** Swaps only. */
   tokenOut?: string | undefined
   /** A venue the user named. Absent means the chain's default for this kind. */
   venue?: string | undefined
+  /** Sends only, exactly as typed. Where the money goes, so it is checked and never changed. */
+  recipient?: string | undefined
 }
 
 export interface NearTransaction {
@@ -136,7 +143,62 @@ export interface ChainVenue {
   ) => void
   /** Overrides the module's submit where a venue lands its own transactions. */
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
+  /**
+   * Refuses a step this venue could not run after a swap, while the swap is still unsigned. Reads
+   * only: nothing is built. A venue without this can't follow a swap.
+   */
+  assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
 }
+
+/** A step that would follow a swap. The amount isn't known until the swap has delivered it. */
+export interface FollowOnStep {
+  kind: ChainActionKind
+  tokenIn: string
+  venue?: string | undefined
+  recipient?: string | undefined
+}
+
+/** `assertCanFollow` for a venue that takes only these tokens. */
+export function takesOnly(
+  venueName: string,
+  symbols: readonly string[]
+): NonNullable<ChainVenue['assertCanFollow']> {
+  return async ({ tokenIn }) => {
+    const wanted = tokenIn.trim().toUpperCase()
+    if (symbols.some((symbol) => symbol.toUpperCase() === wanted)) return
+    throw new ChainActionRefused(
+      `${venueName} takes ${symbols.join(' or ')} here, not ${tokenIn}. Nothing was signed or sent.`
+    )
+  }
+}
+
+/**
+ * One token a wallet holds. Anything that measures a change in a holding must match on `id`, never
+ * on `symbol`: an unlisted token's symbol comes from its coin type or its contract, which anyone
+ * can name to copy a real one.
+ */
+export interface TokenBalance {
+  symbol: string
+  id: string
+  amount: string
+  decimals: number
+  native: boolean
+  /** In this chain's token table. An unlisted token can't be traded here yet. */
+  listed: boolean
+}
+
+export interface WalletBalances {
+  tokens: TokenBalance[]
+  /** False when some token the wallet may hold is missing from `tokens`. */
+  complete: boolean
+  /** Only known tokens can be read on this chain, so an unlisted one is never shown. */
+  knownOnly?: boolean | undefined
+  /** Symbols of listed tokens that could not be read, and so are left out rather than shown as zero. */
+  unread?: string[] | undefined
+}
+
+/** Longest a balance read may take, all calls together. */
+export const BALANCE_DEADLINE_MS = 15_000
 
 export interface ChainModule {
   chain: ChainWithActions
@@ -147,6 +209,8 @@ export interface ChainModule {
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+  /** Every token the account holds, read now. Throws on a malformed account (a refusal) or an unreadable chain. */
+  balances: (account: string, signal?: AbortSignal) => Promise<WalletBalances>
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
 }

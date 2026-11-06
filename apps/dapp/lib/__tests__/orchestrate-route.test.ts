@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const orchestrateWithLlm = vi.fn()
 const isLlmParseConfigured = vi.fn()
@@ -15,8 +15,9 @@ vi.mock('../server/analytics', () => ({
   logIntentRead: (...args: unknown[]) => logIntentRead(...args),
 }))
 vi.mock('../lend/venues', () => ({ configuredLendingVenues: () => ['blend'] }))
+const ensureLiveAssets = vi.fn(async () => undefined)
 vi.mock('../swap/live-assets', () => ({
-  ensureLiveAssets: async () => undefined,
+  ensureLiveAssets: (...args: unknown[]) => ensureLiveAssets(...(args as [])),
   tickersIn: () => [],
 }))
 vi.mock('../swap/asset-registry', () => ({
@@ -47,6 +48,11 @@ const turns = (content: string) => [{ role: 'user', content }]
 async function route() {
   return import('../../app/api/intent/orchestrate/route')
 }
+
+// The route now loads the chain modules, which takes a few seconds the first time.
+beforeAll(async () => {
+  await route()
+}, 60_000)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -179,5 +185,50 @@ describe('POST /api/intent/orchestrate', () => {
     expect((await POST(post({ turns: [] }))).status).toBe(400)
     expect((await POST(post({ turns: turns('x'.repeat(501)) }))).status).toBe(400)
     expect(orchestrateWithLlm).not.toHaveBeenCalled()
+  })
+})
+
+describe('the vocabulary a reading is held to', () => {
+  const act = { status: 'act', reading, style: 'market', instruction: 'x', context: [] }
+  const optionsOf = (): Record<string, string[]> =>
+    orchestrateWithLlm.mock.calls[0]?.[1] as Record<string, string[]>
+
+  it('keeps Stellar on its own registry, venues and anchors', async () => {
+    orchestrateWithLlm.mockResolvedValue(act)
+    const { POST } = await route()
+    await POST(post({ turns: turns('swap 5 xlm to usdc'), chain: 'stellar' }))
+    expect(optionsOf()).toMatchObject({
+      allowedSymbols: ['XLM', 'USDC', 'WBTC', 'WETH'],
+      allowedVenues: ['blend'],
+      allowedAnchors: ['testanchor', 'moneygram'],
+    })
+    expect(ensureLiveAssets).toHaveBeenCalled()
+    expect(optionsOf()).not.toHaveProperty('reportRefusedFollowOn')
+  })
+
+  it('asks to be told of a refused follow-on off Stellar, and passes it on', async () => {
+    const followOnRefused = { kind: 'lend', venue: 'aave' }
+    orchestrateWithLlm.mockResolvedValue({
+      ...act,
+      reading: { ...reading, tokenIn: 'SOL', amountIsUsd: false, followOnRefused },
+    })
+    const { POST } = await route()
+    const res = await POST(post({ turns: turns('x'), chain: 'solana' }))
+    expect(optionsOf()['reportRefusedFollowOn']).toBe(true)
+    expect(await res.json()).toMatchObject({ followOn: null, followOnRefused })
+  })
+
+  it("uses the chain's tokens off Stellar and never asks the Stellar registry", async () => {
+    orchestrateWithLlm.mockResolvedValue({
+      ...act,
+      reading: { ...reading, tokenIn: 'SOL', amountIsUsd: false },
+    })
+    const { POST } = await route()
+    const res = await POST(post({ turns: turns('change my 5 sol into kes'), chain: 'solana' }))
+    expect(optionsOf()['allowedSymbols']).toEqual(expect.arrayContaining(['SOL', 'USDC']))
+    expect(optionsOf()['allowedSymbols']).not.toContain('XLM')
+    expect(optionsOf()['allowedVenues']).not.toContain('blend')
+    expect(ensureLiveAssets).not.toHaveBeenCalled()
+    expect(await res.json()).toMatchObject({ outcome: 'act', tokenIn: 'SOL', liveAssets: [] })
   })
 })

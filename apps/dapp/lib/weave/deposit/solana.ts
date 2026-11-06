@@ -73,7 +73,9 @@ function notOneTransfer(token: ChainToken): string {
 }
 
 const RpcAccount = z.object({
-  result: z.object({ value: z.object({ owner: z.string() }).nullable() }),
+  result: z.object({
+    value: z.object({ owner: z.string(), executable: z.boolean().optional() }).nullable(),
+  }),
 })
 
 const RpcBlockhash = z.object({
@@ -290,14 +292,19 @@ async function usdcBalance(account: string): Promise<bigint> {
  * Funds sent to a token account's own token account can't be moved by anyone, since a
  * token account has no key to sign with. A missing account is fine: it is a fresh wallet.
  */
-async function assertDepositIsNotTokenAccount(
+export async function assertDepositIsNotTokenAccount(
   depositAddress: string,
-  token: ChainToken
+  token: ChainToken,
+  /** For an address a person typed. A program holds no key either, so what it is sent is stranded. */
+  options: { refusePrograms?: boolean } = {}
 ): Promise<void> {
   const reply = RpcAccount.safeParse(
     await rpc('getAccountInfo', [depositAddress, { encoding: 'base64', commitment: 'confirmed' }])
   )
   if (!reply.success) refuse('Solana’s network could not be read just now.')
+  if (options.refusePrograms === true && reply.data.result.value?.executable === true) {
+    refuse(`That address is a program, and ${token.symbol} sent there would be stuck.`)
+  }
   const owner = reply.data.result.value?.owner
   if (owner === TOKEN_PROGRAM || owner === TOKEN_2022_PROGRAM) {
     refuse(

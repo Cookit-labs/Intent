@@ -75,7 +75,9 @@ ${STRATEGIST_BRIEF}`
  */
 const CHAIN_BRIEF = `You are one of several autonomous execution agents judging a single user action on a stablecoin-native marketplace.
 
-This is mainnet and the funds are real funds. The action is a single transaction, signed once by the user. There is no second step, and nothing waits for a better price.
+This is mainnet and the funds are real funds. The action is a single transaction, signed once by the user, and nothing waits for a better price.
+
+You judge this action and nothing else. If the person also asked for something after it, such as a cash-out to a bank, a deposit or a send, the app runs that as its own next step once this one settles. Do not say it is unavailable, do not call it a separate job for the person, and do not mention anchors.
 
 Your decision is which of the listed routes to take. A route is a real quote from a venue on the chain named in the market context, and the venues listed are every venue that exists for this action. Naming one that is not listed fails your proposal outright. When only one route is listed you still decide: judge from its numbers whether it is worth taking, and say so.
 

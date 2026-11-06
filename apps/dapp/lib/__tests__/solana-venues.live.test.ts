@@ -37,6 +37,7 @@ function moduleWith(venue: ChainVenue): ChainModule {
     submit: async () => {
       throw new Error('This test must never send anything.')
     },
+    balances: async () => ({ tokens: [], complete: true }),
   }
 }
 

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
 
 import { WalletGate } from '../../components/connect/wallet-gate'
+import { ChatHost } from '../../components/intents/chat-host'
 import { AppShell } from '../../components/layout/app-shell'
 import { tradeCapUsd } from '../../lib/server/trade-cap'
 import { ChainProvider } from '../../providers/chain-provider'
@@ -46,7 +47,9 @@ export default async function ChainLayout({
   return (
     <ChainProvider segment={chain}>
       <WalletGate bypass={bypass}>
-        <AppShell tradeCapUsd={cap}>{children}</AppShell>
+        <AppShell tradeCapUsd={cap}>
+          <ChatHost key={chain}>{children}</ChatHost>
+        </AppShell>
       </WalletGate>
     </ChainProvider>
   )

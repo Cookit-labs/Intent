@@ -12,6 +12,7 @@ import {
   type PreparedAction,
   type SigningPayload,
   type VenueQuote,
+  takesOnly,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import { naviApy, poolNotes } from './navi-rules'
@@ -93,6 +94,7 @@ export const naviVenue: ChainVenue = {
   id: 'navi',
   name: 'NAVI',
   kinds: ['supply'],
+  assertCanFollow: takesOnly('NAVI', ['USDC']),
   quote,
   prepare,
   assertSafe: (payload: SigningPayload, account: string) =>

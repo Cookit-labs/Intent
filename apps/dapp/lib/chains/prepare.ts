@@ -1,14 +1,21 @@
 import { CHAIN_DESCRIPTORS } from '@intent/config'
 
 import { assertWithinCap, tradeCapUsd, TradeCapExceeded } from '../server/trade-cap'
+import { WRAP_NEAR } from './near/tokens'
+import { sendRefusal } from './recipient'
+import { fromBase, toBase } from './sequence'
+import { holdingOf } from './sequence-flow'
 import {
   ChainActionRefused,
   tokenBySymbol,
   type ChainActionRequest,
   type ChainModule,
   type ChainToken,
+  type ChainWithActions,
   type ChainVenue,
+  type FollowOnStep,
   type PreparedAction,
+  type WalletBalances,
 } from './types'
 
 /** Keys only: each chain's name is its slug, and reading Stellar's descriptor at load would throw. */
@@ -113,16 +120,58 @@ export async function assertAmountWithinCap(
   }
   // The cap's own wording is for whoever runs the deployment, so a person gets this instead.
   const usd = price === undefined ? Number.NaN : amount * price
+  const noun = request.kind === 'send' ? 'transfer' : 'trade'
   try {
     assertWithinCap(usd, env, 'mainnet')
   } catch (e) {
     if (!(e instanceof TradeCapExceeded)) throw e
     throw new ChainActionRefused(
       Number.isFinite(usd)
-        ? `This app caps each trade at ${tradeCapUsd(env, 'mainnet')}, and this one is about ${usd.toFixed(2)}. Try a smaller amount.`
-        : 'This trade could not be valued in dollars right now, so it was not built. Try again shortly.'
+        ? `This app caps each ${noun} at ${tradeCapUsd(env, 'mainnet')}, and this one is about ${usd.toFixed(2)}. Try a smaller amount.`
+        : `This ${noun} could not be valued in dollars right now, so it was not built. Try again shortly.`
     )
   }
+}
+
+/** A send names who it pays and nothing else does. Refused before anything is priced or read. */
+function assertRecipientRule(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  tokenIn: ChainToken,
+  account: string
+): void {
+  if (request.kind !== 'send') {
+    if (request.recipient !== undefined) {
+      throw new ChainActionRefused(
+        'Only a send takes an address, so this was not built. Nothing was signed or sent.'
+      )
+    }
+    return
+  }
+  if (request.recipient === undefined) {
+    throw new ChainActionRefused('A send needs an address to go to. Nothing was signed or sent.')
+  }
+  const refusal = sendRefusal(chainApi.chain, tokenIn.symbol, request.recipient, account)
+  if (refusal !== undefined) throw new ChainActionRefused(refusal)
+}
+
+/**
+ * Whether a step could run after a swap, asked while the swap is unsigned: what the chat alone
+ * can't know, such as the venues this deployment offers and whether a receiver can take the token.
+ * The amount isn't known yet, so the dollar cap and the reserve are asked again at the step itself.
+ */
+export async function assertFollowOnCanRun(
+  chainApi: ChainModule,
+  step: FollowOnStep,
+  account: string
+): Promise<void> {
+  const request: ChainActionRequest = { ...step, amount: '0' }
+  assertKnownTokens(chainApi, request)
+  const venue = pickVenue(chainApi, request)
+  if (venue.assertCanFollow === undefined) {
+    throw new ChainActionRefused(`${venue.name} can't follow a swap yet.`)
+  }
+  await venue.assertCanFollow(step, account)
 }
 
 /**
@@ -140,11 +189,127 @@ export async function prepareChainAction(
   env: Record<string, string | undefined> = process.env
 ): Promise<PreparedAction> {
   const tokenIn = assertKnownTokens(chainApi, request)
+  assertRecipientRule(chainApi, request, tokenIn, account)
 
   await assertAmountWithinCap(chainApi, request, tokenIn, env)
+  await assertNativeReserve(chainApi, request, account)
+  await assertHeldForSend(chainApi, request, tokenIn, account)
 
   const venue = pickVenue(chainApi, request)
   const prepared = await venue.prepare(request, account)
   venue.assertSafe(prepared.signing, account, prepared.context)
   return prepared
+}
+
+/** Native coin kept back for network fees, in display units: a trade may not spend into it. */
+export const NATIVE_FEE_RESERVE: Record<ChainWithActions, string> = {
+  solana: '0.005',
+  sui: '0.05',
+  near: '0.05',
+  avalanche: '0.01',
+  monad: '0.05',
+}
+
+const NATIVE_SYMBOL: Record<ChainWithActions, string> = {
+  solana: 'SOL',
+  sui: 'SUI',
+  near: 'NEAR',
+  avalanche: 'AVAX',
+  monad: 'MON',
+}
+
+/** The balance read may wait on the chain's own deadline, which is far longer than a trade should. */
+const RESERVE_READ_MS = 3000
+
+/**
+ * The wallet's balances, or nothing if the read fails or runs late. What this guards is a doomed
+ * transaction, and it must never be what blocks a good one.
+ */
+async function readBalancesBriefly(
+  chainApi: ChainModule,
+  account: string
+): Promise<WalletBalances | undefined> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      chainApi.balances(account, controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error('balance read timed out'))
+        }, RESERVE_READ_MS)
+      }),
+    ])
+  } catch {
+    return undefined
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * Refuses a send of more than the wallet is known to hold, matched on the token's id. A send a
+ * wallet signs and the chain then fails costs the fee, and on NEAR reads as maybe having gone out.
+ * The native coin is left to `assertNativeReserve`, which has already read it.
+ */
+async function assertHeldForSend(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  tokenIn: ChainToken,
+  account: string
+): Promise<void> {
+  if (request.kind !== 'send') return
+  if (tokenIn.symbol.toUpperCase() === NATIVE_SYMBOL[chainApi.chain]) return
+  const reading = await readBalancesBriefly(chainApi, account)
+  if (reading === undefined) return
+  const amount = holdingOf(reading, tokenIn)
+  if (amount === undefined) return
+  const held = toBase(amount, tokenIn.decimals)
+  const asked = toBase(request.amount, tokenIn.decimals)
+  if (held === undefined || asked === undefined || asked <= held) return
+  throw new ChainActionRefused(
+    `You hold ${amount} ${tokenIn.symbol}, which is less than ${request.amount}. Nothing was signed or sent.`
+  )
+}
+
+/**
+ * Refuses spending a wallet's whole native balance, which would leave nothing for the fee.
+ * Reads the balance once and compares in base units. A read that fails or runs late passes:
+ * this guards a doomed trade, and must never be what blocks a good one.
+ *
+ * The native token is the one the reading marks native; the request counts as spending it when
+ * the module's own table entry for the symbol has that id. NEAR is held natively as "near" but its
+ * table names the wrapped form `wrap.near`, so there that table entry stands for the native coin.
+ */
+export async function assertNativeReserve(
+  chainApi: ChainModule,
+  request: ChainActionRequest,
+  account: string
+): Promise<void> {
+  const tokenIn = tokenBySymbol(chainApi.tokens, request.tokenIn)
+  if (tokenIn === undefined) return
+  if (tokenIn.symbol.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return
+
+  const reading = await readBalancesBriefly(chainApi, account)
+  if (reading === undefined) return
+
+  const native = reading.tokens.find((t) => t.native)
+  if (native === undefined) return
+  const isNative =
+    tokenIn.id === native.id || (chainApi.chain === 'near' && tokenIn.id === WRAP_NEAR)
+  if (!isNative) return
+
+  const held = toBase(native.amount, native.decimals)
+  const reserve = toBase(NATIVE_FEE_RESERVE[chainApi.chain], native.decimals)
+  const asked = toBase(request.amount, native.decimals)
+  if (held === undefined || reserve === undefined || asked === undefined) return
+  if (asked <= held - reserve) return
+
+  const spendable = held > reserve ? held - reserve : BigInt(0)
+  throw new ChainActionRefused(
+    `Keep about ${NATIVE_FEE_RESERVE[chainApi.chain]} ${native.symbol} for network fees. ` +
+      `You can spend up to ${fromBase(spendable, native.decimals)} ${native.symbol} here. ` +
+      'Nothing was signed or sent.'
+  )
 }

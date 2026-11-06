@@ -326,13 +326,13 @@ describe('the chain modules', () => {
     expect(EVM_CHAINS.avalanche.chain.id).toBe(43114)
   })
 
-  it('finds a module for both, each with its own venue only', () => {
+  it('finds a module for both, each with its own swap venue and a wallet transfer only', () => {
     const avalancheModule = chainModule('avalanche')
     const monadModule = chainModule('monad')
     expect(avalancheModule?.chain).toBe('avalanche')
     expect(monadModule?.chain).toBe('monad')
-    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche'])
-    expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad'])
+    expect(avalancheModule?.venues.map((v) => v.id)).toEqual(['1click-avalanche', 'send'])
+    expect(monadModule?.venues.map((v) => v.id)).toEqual(['1click-monad', 'send'])
     expect(avalancheModule?.defaultVenue.swap).toBe('1click-avalanche')
     expect(monadModule?.defaultVenue.swap).toBe('1click-monad')
     expect(chainModule('arc')).toBeUndefined()
@@ -354,6 +354,7 @@ describe('the chain modules', () => {
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'short' })).toEqual([])
     expect(buildEvmVenues('monad', { AUTH_SECRET: 'x'.repeat(32) }).map((v) => v.id)).toEqual([
       '1click-monad',
+      'send',
     ])
   })
 
@@ -437,7 +438,7 @@ describe('the race on these chains', () => {
     })
     expect(capabilitySheet('avalanche')).toContain('Agents compete')
     expect(capabilitySheet('monad')).toContain('Agents compete')
-    expect(capabilitySheet('monad')).not.toMatch(/Supply:|Stake:|Send:|limit order/)
+    expect(capabilitySheet('monad')).not.toMatch(/Supply:|Stake:|limit order/)
     expect(capabilitySheet('arc')).not.toContain('Agents compete')
   })
 
@@ -503,6 +504,7 @@ describe('naming the chain you are on', () => {
       defaultVenue: { swap: 'beta' },
       priceUsd: async () => 1,
       submit: async () => ({ ok: false, error: 'unused here' }),
+      balances: async () => ({ tokens: [], complete: true }),
     }
   }
   const ab = (venue: string): ChainActionRequest => ({
@@ -1728,8 +1730,13 @@ describe('a stale card, before the wallet opens', () => {
     expect(QUOTE_EXPIRED).not.toMatch(/Review/)
   })
 
-  it('is left to the server on chains whose bytes it sends, and to NEAR as it was', () => {
-    for (const family of ['solana', 'sui', 'near'] as const) {
+  it('is stopped on NEAR too, whose wallet also sends for itself', () => {
+    expect(quoteExpiredBeforeSigning(card('near', '2020-01-01T00:00:00.000Z'), NOW)).toBe(true)
+    expect(quoteExpiredBeforeSigning(card('near'), NOW)).toBe(false)
+  })
+
+  it('is left to the server on chains whose bytes it sends', () => {
+    for (const family of ['solana', 'sui'] as const) {
       expect(quoteExpiredBeforeSigning(card(family, '2020-01-01T00:00:00.000Z'), NOW)).toBe(false)
     }
   })

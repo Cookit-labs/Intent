@@ -9,6 +9,7 @@ import {
   type SubmitInput,
   type SubmitResult,
   type VenueQuote,
+  type FollowOnStep,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import { isRegistered, viewCall, waitForTransaction } from './rpc'
@@ -36,6 +37,16 @@ export const METAPOOL_VENUE_ID = 'metapool'
 const RHEA_APY_URL = 'https://api.rhea.finance/get-rnear-apy'
 const APY_TIMEOUT_MS = 5_000
 const CONFIRM_WAIT_MS = 25_000
+
+/**
+ * A swap to NEAR can arrive as NEAR or as wNEAR, and only the wrapped form can be measured by its
+ * token, while a stake spends the native coin. So a stake can't be shown to spend what arrived.
+ */
+async function refuseStakeAfterSwap(_step: FollowOnStep): Promise<void> {
+  throw new ChainActionRefused(
+    "A swap to NEAR can arrive as NEAR or wNEAR, so a stake can't follow it here. Swap first, then stake what arrives. Nothing was signed or sent."
+  )
+}
 
 function cannotRead(venue: string): ChainActionRefused {
   return new ChainActionRefused(
@@ -223,6 +234,7 @@ export const rnearVenue: ChainVenue = {
   id: RNEAR_VENUE_ID,
   name: 'rNEAR',
   kinds: ['stake'],
+  assertCanFollow: refuseStakeAfterSwap,
   quote: quoteRnear,
   prepare: prepareRnear,
   assertSafe: assertRnearSafe,
@@ -232,6 +244,7 @@ export const metapoolVenue: ChainVenue = {
   id: METAPOOL_VENUE_ID,
   name: 'Meta Pool',
   kinds: ['stake'],
+  assertCanFollow: refuseStakeAfterSwap,
   quote: quoteMetapool,
   prepare: prepareMetapool,
   assertSafe: assertMetapoolSafe,

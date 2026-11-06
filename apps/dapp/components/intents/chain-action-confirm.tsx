@@ -4,10 +4,22 @@ import { Button, Card } from '@intent/ui'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
+import { stepErrorMessage } from '../../lib/agents/chain-race'
 
 /** Review, sign and result for an action on a chain other than Stellar. */
-export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Element {
-  const { phase, prepared, error, hash, explorerUrl, earlier } = action
+export function ChainActionConfirm({
+  action,
+  sequenceSettled = false,
+  typedStep,
+}: {
+  action: ChainAction
+  /** This card is step 2, after a swap that was signed and settled. */
+  sequenceSettled?: boolean
+  /** That step as a request of its own, for when it can't go on from here. */
+  typedStep?: string | undefined
+}): JSX.Element {
+  const { phase, prepared, hash, explorerUrl, earlier } = action
+  const error = stepErrorMessage(action.error, sequenceSettled, typedStep)
   const busy = phase === 'signing' || phase === 'submitting'
 
   return (
@@ -15,7 +27,7 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {phase === 'building' ? (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
-          Getting a live price
+          {action.building === 'send' ? 'Building this transfer' : 'Getting a live price'}
         </p>
       ) : null}
 
@@ -48,9 +60,11 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {prepared !== undefined && phase !== 'failed' && phase !== 'pending' ? (
         <>
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{prepared.summary}</span>
+            <span className="text-sm font-medium [overflow-wrap:anywhere]">{prepared.summary}</span>
             <span className="text-muted-foreground text-xs">
-              You pay {prepared.pay.amount} {prepared.pay.symbol} on {prepared.venueName}
+              {prepared.kind === 'send'
+                ? `This moves ${prepared.pay.amount} ${prepared.pay.symbol} from your wallet`
+                : `You pay ${prepared.pay.amount} ${prepared.pay.symbol} on ${prepared.venueName}`}
               {prepared.receive !== undefined
                 ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
                 : ''}

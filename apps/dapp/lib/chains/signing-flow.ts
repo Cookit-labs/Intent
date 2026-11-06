@@ -27,10 +27,13 @@ export function latchBeforeSign(family: Family): boolean {
 export const QUOTE_EXPIRED =
   'This quote expired before you signed, so your wallet was not asked and nothing was sent. Send your request again for a fresh one.'
 
+/** The end of what `afterSigning` says on a wallet that gave no answer. */
+export const START_AGAIN = 'If it did not go out, send a new message to start again.'
+
 /**
  * Whether a card has outlived its quote, on a chain where this is the last chance to say so. The
- * server checks the deadline before it sends signed bytes, but an EVM wallet sends for itself, and
- * a late deposit may be refunded instead of swapped. NEAR's wallet sends too, and is left as it was.
+ * server checks the deadline before it sends signed bytes, but an EVM or NEAR wallet sends for
+ * itself, and a late deposit may be refunded instead of swapped.
  */
 export function quoteExpiredBeforeSigning(
   prepared: Pick<PreparedAction, 'signing' | 'context'>,
@@ -38,7 +41,7 @@ export function quoteExpiredBeforeSigning(
 ): boolean {
   const deadline = prepared.context?.['deadline']
   return (
-    prepared.signing.family === 'evm' && deadline !== undefined && !(Date.parse(deadline) > now)
+    walletSends(prepared.signing.family) && deadline !== undefined && !(Date.parse(deadline) > now)
   )
 }
 
@@ -56,7 +59,7 @@ export function afterSigning(outcome: SignedOutcome, family: Family): AfterSigni
   if (step.next === 'check') {
     return {
       next: 'unknown',
-      error: `${CHECK_WALLET} If it did not go out, send a new message to start again.`,
+      error: `${CHECK_WALLET} ${START_AGAIN}`,
     }
   }
   return step
@@ -260,6 +263,14 @@ export function noteSubmitAnswer(
   }
 }
 
+/** A retyped "$5 of SOL" comes to a slightly different count once the price moves. */
+const SAME_AMOUNT_WITHIN = 0.03
+
+function sameAmount(a: string, b: string): boolean {
+  const [x, y] = [Number(a), Number(b)]
+  return Math.abs(x - y) <= SAME_AMOUNT_WITHIN * Math.max(x, y)
+}
+
 /** The newest attempt at this same action inside the window, if there is one. */
 export function earlierAttempt(
   storage: AttemptStorage | undefined,
@@ -271,7 +282,7 @@ export function earlierAttempt(
       a.chain === asked.chain &&
       accountMismatch(a.account, asked.account) === undefined &&
       a.tokenIn.toUpperCase() === asked.tokenIn.toUpperCase() &&
-      Number(a.amount) === Number(asked.amount)
+      sameAmount(a.amount, asked.amount)
   )
   return matches[matches.length - 1]
 }

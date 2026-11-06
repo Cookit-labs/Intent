@@ -670,6 +670,7 @@ describe('module', () => {
       '1click-solana',
       'jupiter-lend',
       'kamino',
+      'send',
     ])
   })
 

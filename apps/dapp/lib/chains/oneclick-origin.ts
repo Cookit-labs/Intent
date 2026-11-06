@@ -216,7 +216,8 @@ export async function oneClickAssetId(
   return matching.length === 1 ? matching[0]?.assetId : undefined
 }
 
-function secret(env: Record<string, string | undefined> = process.env): string | undefined {
+/** The key proofs are signed with, or nothing where this deployment has none long enough. */
+export function secret(env: Record<string, string | undefined> = process.env): string | undefined {
   const value = env['AUTH_SECRET']
   return value !== undefined && value.length >= 32 ? value : undefined
 }
@@ -262,7 +263,7 @@ function proofOf(venueId: string, account: string, issued: Issued, key: string):
   return createHmac('sha256', key).update(`oneclick-origin:${message}`).digest('base64url')
 }
 
-function sameProof(given: string, expected: string): boolean {
+export function sameProof(given: string, expected: string): boolean {
   const a = Buffer.from(given)
   const b = Buffer.from(expected)
   return a.length === b.length && timingSafeEqual(a, b)

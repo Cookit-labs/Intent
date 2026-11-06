@@ -43,7 +43,9 @@ describe('the NEAR venue list', () => {
 
   it('claims execution exactly for the venues the module wires', () => {
     const claimed = nearVenues.filter((v) => v.integration === 'executes').map((v) => v.id)
-    expect(claimed.sort()).toEqual(nearModule.venues.map((v) => v.id).sort())
+    // A wallet transfer is not an app, so the Apps list has no entry for it.
+    const wired = nearModule.venues.map((v) => v.id).filter((id) => id !== 'send')
+    expect(claimed.sort()).toEqual(wired.sort())
     for (const venue of nearVenues) {
       if (venue.integration === 'executes') expect(venue.capability).toBeTruthy()
       else expect(venue.capability).toBeUndefined()

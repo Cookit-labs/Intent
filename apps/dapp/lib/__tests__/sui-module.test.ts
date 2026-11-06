@@ -289,6 +289,7 @@ describe('the module', () => {
       '1click-sui',
       'navi',
       'springsui',
+      'send',
     ])
   })
 
@@ -298,12 +299,17 @@ describe('the module', () => {
       ['navi', ['supply']],
       ['springsui', ['stake']],
     ])
-    expect(suiModule.defaultVenue).toEqual({ swap: 'cetus', supply: 'navi', stake: 'springsui' })
+    expect(suiModule.defaultVenue).toEqual({
+      swap: 'cetus',
+      supply: 'navi',
+      stake: 'springsui',
+      send: 'send',
+    })
   })
 
   it('offers one capability per wired kind', () => {
     expect(suiCapabilities).toEqual([
-      { kind: 'swap', venue: 'Cetus', symbol: 'SUI' },
+      { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
     ])

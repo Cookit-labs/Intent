@@ -181,6 +181,11 @@ export interface LlmReadIntent {
    */
   amountIsUsd: boolean
   followOn: FollowOnAction | null
+  /**
+   * A follow-on the model read that this chain can't honour, when the caller asked to be told.
+   * `venue` is what the model named, or empty.
+   */
+  followOnRefused?: { kind: 'lend' | 'offramp'; venue: string }
 }
 
 export interface ReadIntentOptions {
@@ -195,6 +200,11 @@ export interface ReadIntentOptions {
   allowedVenues?: string[]
   /** Anchors that withdraw to fiat on this chain. Empty means none. */
   allowedAnchors?: string[]
+  /**
+   * Off Stellar: say which follow-on could not be honoured rather than dropping it, since a swap
+   * must not start without it, and read a venue's name whatever its spaces and hyphens.
+   */
+  reportRefusedFollowOn?: boolean
 }
 
 export interface ToolArguments {
@@ -342,6 +352,10 @@ export function readingFromArguments(
   // trading on it would size the trade wrong rather than not at all.
   if (amountStated && amountUsd <= 0) return null
 
+  const report = options.reportRefusedFollowOn === true
+  const followOn = followOnOf(args, options.allowedVenues, options.allowedAnchors, report)
+  const refused = report && followOn === null ? refusedFollowOn(args) : undefined
+
   return {
     action,
     tokenIn,
@@ -349,8 +363,16 @@ export function readingFromArguments(
     amountUsd: amountStated ? amountUsd : 0,
     amountStated,
     amountIsUsd: args.amountIsUsd === true,
-    followOn: followOnOf(args, options.allowedVenues, options.allowedAnchors),
+    followOn,
+    ...(refused !== undefined ? { followOnRefused: refused } : {}),
   }
+}
+
+/** The follow-on asked for, once `followOnOf` found it can't be honoured. */
+function refusedFollowOn(args: ToolArguments): LlmReadIntent['followOnRefused'] {
+  if (args.followOn !== 'lend' && args.followOn !== 'offramp') return undefined
+  const venue = typeof args.followOnVenue === 'string' ? args.followOnVenue.trim() : ''
+  return { kind: args.followOn, venue }
 }
 
 function toolArgumentsOf(payload: unknown): ToolArguments | null {
@@ -393,10 +415,14 @@ function symbolOf(value: unknown, allowed: string[] | undefined): string | undef
 function followOnOf(
   args: ToolArguments,
   allowedVenues: string[] | undefined,
-  allowedAnchors: string[] | undefined
+  allowedAnchors: string[] | undefined,
+  anySpacing: boolean
 ): FollowOnAction | null {
   const named =
     typeof args.followOnVenue === 'string' ? args.followOnVenue.trim().toLowerCase() : ''
+  const plain = (name: string): string => name.replace(/[\s-]/g, '')
+  const listed = (list: string[]): string | undefined =>
+    anySpacing ? list.find((id) => plain(id) === plain(named)) : list.find((id) => id === named)
 
   if (args.followOn === 'offramp') {
     const anchors = allowedAnchors ?? []
@@ -405,7 +431,8 @@ function followOnOf(
       const first = anchors[0]
       return first === undefined ? null : { kind: 'offramp', venue: first }
     }
-    return anchors.includes(named) ? { kind: 'offramp', venue: named } : null
+    const anchor = listed(anchors)
+    return anchor !== undefined ? { kind: 'offramp', venue: anchor } : null
   }
 
   if (args.followOn !== 'lend') return null
@@ -420,5 +447,6 @@ function followOnOf(
     return only === undefined ? null : { kind: 'lend', venue: only }
   }
 
-  return venues.includes(named) ? { kind: 'lend', venue: named, venueNamed: true } : null
+  const venue = listed(venues)
+  return venue !== undefined ? { kind: 'lend', venue, venueNamed: true } : null
 }
