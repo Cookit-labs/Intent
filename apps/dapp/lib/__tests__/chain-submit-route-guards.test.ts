@@ -5,8 +5,10 @@ import {
   CAPTURE_ACCOUNT,
   JUPITER_SOL_TO_USDC,
 } from '../chains/solana/__fixtures__/captured-transactions'
+import type { SubmitInput, SubmitResult } from '../chains/types'
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }))
+const restore: (() => void)[] = []
 
 vi.mock('../server/analytics', () => ({ logExecution: async () => undefined }))
 vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
@@ -17,10 +19,14 @@ async function submit(signedTransaction: string): Promise<Response> {
   const { chainModule } = await import('../chains/registry')
   const jupiter = chainModule('solana')?.venues.find((v) => v.id === 'jupiter')
   if (jupiter === undefined) throw new Error('no jupiter venue')
-  vi.spyOn(jupiter, 'submit').mockImplementation(async (input) => {
-    if (input.signed.family === 'solana') state.sent.push(input.signed.signedTransaction)
-    return { ok: true, txHash: 'sig' }
+  const original = jupiter.submit
+  restore.push(() => {
+    jupiter.submit = original
   })
+  jupiter.submit = async (input: SubmitInput): Promise<SubmitResult> => {
+    if (input.signed.family === 'solana') state.sent.push(input.signed.signedTransaction)
+    return { ok: true, hash: 'sig', explorerUrl: 'https://solscan.io/tx/sig' }
+  }
   return POST(
     new Request('http://localhost/api/chain/solana/submit', {
       method: 'POST',
@@ -37,7 +43,7 @@ async function submit(signedTransaction: string): Promise<Response> {
 
 afterEach(() => {
   state.sent = []
-  vi.restoreAllMocks()
+  restore.splice(0).forEach((undo) => undo())
   vi.resetModules()
 })
 

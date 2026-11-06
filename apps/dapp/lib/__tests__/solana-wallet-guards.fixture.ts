@@ -14,6 +14,7 @@ type Message = ReturnType<ReturnType<typeof getCompiledTransactionMessageDecoder
 export function guarded(base64: string, program: string, data: number[] = [5]): string {
   const { messageBytes } = getTransactionDecoder().decode(Buffer.from(base64, 'base64'))
   const message = getCompiledTransactionMessageDecoder().decode(messageBytes) as Message
+  if (message.version !== 'legacy' && message.version !== 0) throw new Error('not a v0 capture')
   const old = message.staticAccounts.length
   const shift = (i: number): number => (i >= old ? i + 1 : i)
   const next = {

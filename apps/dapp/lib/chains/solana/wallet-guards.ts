@@ -31,7 +31,8 @@ export function withoutWalletGuards(base64: string): string {
     const exact =
       encoded.length === transaction.messageBytes.length &&
       encoded.every((byte, i) => byte === transaction.messageBytes[i])
-    if (!exact) return base64
+    // Only the forms the venue checks read: a v1 message is refused there, untouched here.
+    if (!exact || (message.version !== 'legacy' && message.version !== 0)) return base64
 
     const guard = message.staticAccounts.indexOf(LIGHTHOUSE_PROGRAM as Address)
     if (guard === -1) return base64
