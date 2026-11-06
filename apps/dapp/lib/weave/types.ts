@@ -104,6 +104,12 @@ export interface DepositChain {
   /** USDC this account holds, in base units. Throws when the chain can't be read. */
   usdcBalance: (account: string) => Promise<bigint>
   build: (expectation: DepositExpectation) => Promise<SigningPayload>
+  /**
+   * Refuses, in words, a cash-out the account can't pay: too little of the token, or of the coin
+   * its network fee and any account it opens cost. Otherwise the wallet says only "insufficient
+   * balance". A read that fails doesn't refuse. Chains whose build already checks leave it out.
+   */
+  assertCanPay?: (expectation: DepositExpectation) => Promise<void>
   assertSafe: (payload: SigningPayload, expectation: DepositExpectation) => void
   /**
    * Checks what came back against `expectation` again, then sends it, or for wallets
