@@ -14,7 +14,8 @@ import { decodeFrame } from '../lib/agents/events'
 import type { ChainActionRequest } from '../lib/chains/types'
 import { routeFigures, routeSource } from '../lib/agents/chain-race'
 import { setAttributedRace } from '../lib/api/network-fetch'
-import { planDecision, planReveal } from '../lib/agents/pacing'
+import { planDecision, planFinalReveal, planReveal, planTalkReveal } from '../lib/agents/pacing'
+import type { ThreadItem } from '../lib/agents/talk-lines'
 import type { ParsedIntent } from '../lib/parse-intent'
 
 /**
@@ -97,6 +98,8 @@ export function useCompetition(
   const [agents, setAgents] = useState<CompetingAgent[]>([])
   const [routeCount, setRouteCount] = useState<number | undefined>(undefined)
   const [competitionId, setCompetitionId] = useState<string | undefined>(undefined)
+  const [thread, setThread] = useState<ThreadItem[]>([])
+  const [takes, setTakes] = useState<Record<string, AgentProposalView>>({})
   // The same list, readable inside the stream loop's closures without a
   // stale render's copy.
   const agentsRef = useRef<CompetingAgent[]>([])
@@ -116,6 +119,8 @@ export function useCompetition(
       setRoute(undefined)
       setRoutesByAgent({})
       setAgents([])
+      setThread([])
+      setTakes({})
       agentsRef.current = []
       return
     }
@@ -132,6 +137,20 @@ export function useCompetition(
           if (!cancelled) fn()
         }, ms)
       )
+    }
+
+    // Set by the first first-take frame: this race talks, so its cards wait
+    // their turn behind what the agents say.
+    let talking = false
+    const showInThread = (item: ThreadItem): void => {
+      const elapsed = Date.now() - startedAt
+      // Starting a turn says nothing on screen, so it takes no gap of its own.
+      const silent = item.type === 'line' && item.line.kind === 'turn'
+      const at = silent
+        ? Math.max(lastRevealRef.current, elapsed)
+        : planTalkReveal(lastRevealRef.current, elapsed)
+      lastRevealRef.current = at
+      schedule(() => setThread((prev) => [...prev, item]), at - elapsed)
     }
 
     /** An agent that produced nothing gets a card saying so, never a placeholder. */
@@ -190,6 +209,8 @@ export function useCompetition(
     setRoutesByAgent({})
     setAgents([])
     setRouteCount(undefined)
+    setThread([])
+    setTakes({})
     agentsRef.current = []
 
     // A stream that stalls without erroring would leave the panel waiting on
@@ -226,6 +247,8 @@ export function useCompetition(
             ...(chainRace !== undefined ? { chainAction: chainRace.request } : {}),
             ...(parsed?.reading !== undefined ? { reading: parsed.reading } : {}),
             chain,
+            // This client can show a race that talks, held plans included.
+            talk: true,
             ...(contextRef.current.length > 0 ? { context: contextRef.current } : {}),
             ...(accountRef.current !== undefined && accountRef.current !== ''
               ? { account: accountRef.current }
@@ -280,12 +303,52 @@ export function useCompetition(
               continue
             }
 
+            if (frame.type === 'competition:take') {
+              talking = true
+              const key = frame.proposal.agent
+              const agent = agentsRef.current.find((a) => a.key === key)
+              setTakes((prev) => ({
+                ...prev,
+                [key]: {
+                  key,
+                  name: agent?.name ?? key,
+                  ...(agent !== undefined ? { model: agent.model } : {}),
+                  avgPriceUsd: frame.proposal.projectedAvgPriceUsd,
+                  vsOraclePct: frame.proposal.projectedSlippagePct,
+                  score: 0,
+                  reasoning: frame.proposal.reasoning,
+                  ...(frame.source !== undefined ? { source: frame.source } : {}),
+                  executionMode: frame.proposal.executionMode,
+                  ...(frame.proposal.restPriceUsd !== undefined
+                    ? { restPriceUsd: frame.proposal.restPriceUsd }
+                    : {}),
+                  ...(frame.proposal.splitPct !== undefined
+                    ? { splitPct: frame.proposal.splitPct }
+                    : {}),
+                },
+              }))
+              showInThread({ type: 'take', agent: key })
+              continue
+            }
+
+            if (frame.type === 'competition:talk') {
+              talking = true
+              showInThread({ type: 'line', line: frame.line })
+              continue
+            }
+
             if (frame.type === 'competition:proposal') {
               const key = frame.proposal.agent
               const agent = agentsRef.current.find((a) => a.key === key)
               const index = agentsRef.current.findIndex((a) => a.key === key)
               const floor = revealFloor(Math.max(0, index))
-              const { revealAtMs, delayMs } = planReveal(floor, Date.now() - startedAt)
+              const elapsed = Date.now() - startedAt
+              const { revealAtMs, delayMs } = talking
+                ? (() => {
+                    const at = planFinalReveal(lastRevealRef.current, elapsed)
+                    return { revealAtMs: at, delayMs: at - elapsed }
+                  })()
+                : planReveal(floor, elapsed)
               lastRevealRef.current = Math.max(lastRevealRef.current, revealAtMs)
 
               if (frame.route !== undefined) {
@@ -323,6 +386,7 @@ export function useCompetition(
                   ...(frame.proposal.thenVenue !== undefined
                     ? { thenVenue: frame.proposal.thenVenue }
                     : {}),
+                  ...(frame.proposal.held === true ? { held: true as const } : {}),
                 },
               }))
               schedule(() => setRevealed((prev) => ({ ...prev, [key]: true })), delayMs)
@@ -366,8 +430,15 @@ export function useCompetition(
         // The stream ended without a winner or an error frame — every agent
         // failed and the server said nothing further, or the connection was
         // cut. Either way, whatever has not answered is marked and the race
-        // ends rather than waiting on nothing.
-        if (!cancelled) settle()
+        // ends rather than waiting on nothing. A race that talked ends once what
+        // is queued has been shown, so its cards never land ahead of the talk.
+        if (!cancelled) {
+          if (talking) {
+            schedule(settle, Math.max(0, lastRevealRef.current + 400 - (Date.now() - startedAt)))
+          } else {
+            settle()
+          }
+        }
       } catch {
         if (cancelled) return
         settle()
@@ -396,6 +467,8 @@ export function useCompetition(
     routesByAgent,
     ...(competitionId !== undefined ? { competitionId } : {}),
     ...(routeCount !== undefined ? { routeCount } : {}),
+    thread,
+    takes,
     ...(error !== undefined ? { error } : {}),
     ...(route !== undefined ? { route } : {}),
   }

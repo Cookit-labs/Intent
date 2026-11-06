@@ -1,5 +1,6 @@
 import type { AgentKey, BrainErrorCode } from './brain'
 import { agentGradient } from './identity'
+import type { ThreadItem } from './talk-lines'
 
 /**
  * What a competition looks like from the client's side.
@@ -71,6 +72,8 @@ export interface AgentProposalView {
   figures?: { headline: string }
   /** Set when the agent produced no proposal: timed out, refused, or was rejected. */
   failed?: BrainErrorCode
+  /** The agent ended on not doing this now. There is nothing to sign from it. */
+  held?: true
 }
 
 export interface CompetitionState {
@@ -95,6 +98,10 @@ export interface CompetitionState {
   error?: CompetitionError
   /** How many routes the agents are choosing between. Sent only for chains other than Stellar. */
   routeCount?: number
+  /** What the agents said to each other, in order, as far as it has been shown. */
+  thread?: ThreadItem[]
+  /** Each agent's first take, keyed by agent, for the thread to show. */
+  takes?: Record<string, AgentProposalView>
 }
 
 /**
@@ -162,9 +169,11 @@ export function describePlan(
     | 'thenAction'
     | 'thenVenue'
     | 'failed'
+    | 'held'
   >
 ): string {
   if (view.failed !== undefined) return 'did not respond'
+  if (view.held === true) return 'would not do this now'
 
   const parts: string[] = []
 

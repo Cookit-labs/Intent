@@ -7,6 +7,8 @@ import type {
   ProposalOutcome,
   ProposalRequest,
   QuotedRoute,
+  TalkCall,
+  TalkOutcome,
 } from '../brain'
 import { configuredLendingVenues } from '../../lend/venues'
 import { anchorOn, anchorsOn } from '../../offramp/anchors'
@@ -67,6 +69,9 @@ export const MAX_OUTPUT_TOKENS = 16_000
  * wild.
  */
 const TEMPERATURE = 0.4
+
+/** A talk turn's reply is one short tool call, so this holds it with reasoning off. */
+const TALK_OUTPUT_TOKENS = 400
 
 export interface BrainOptions {
   /** Which provider's defaults to start from. DeepSeek when unset. */
@@ -460,6 +465,99 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
     (config.id === 'deepseek' && !strictTools ? 'https://api.deepseek.com' : config.baseUrl)
   const doFetch = options.fetchImpl ?? fetch
 
+  /**
+   * One chat completion that must come back as a tool call. Everything that can
+   * go wrong is returned as a value, so one agent's failure stays its own.
+   */
+  async function chat(
+    body: Record<string, unknown>,
+    agent: string,
+    signal: AbortSignal | undefined
+  ): Promise<TalkOutcome> {
+    const startedAt = Date.now()
+
+    let res: Response
+    try {
+      res = await doFetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        ...(signal !== undefined ? { signal } : {}),
+      })
+    } catch (e) {
+      // An aborted request is the timeout the caller asked for, not a fault.
+      const aborted = e instanceof Error && e.name === 'AbortError'
+      return {
+        ok: false,
+        error: aborted ? 'timeout' : 'upstream_error',
+        meta: meta(config, model, Date.now() - startedAt, undefined),
+      }
+    }
+
+    if (!res.ok) {
+      // The provider's own words, so a model that left the catalogue or a
+      // spent key is told apart from a busy one in the logs. Never the key.
+      const reason = await res.text().catch(() => '')
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[agents] ${agent}: HTTP ${res.status} from ${config.id} for ${model}: ${reason.slice(0, 300)}`
+      )
+      const retryAfterMs = res.status === 429 ? retryAfter(res.headers) : undefined
+      return {
+        ok: false,
+        error: classifyStatus(res.status),
+        meta: meta(config, model, Date.now() - startedAt, undefined),
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+      }
+    }
+
+    let reply: ChatCompletionResponse
+    try {
+      reply = (await res.json()) as ChatCompletionResponse
+    } catch {
+      return {
+        ok: false,
+        error: 'invalid_schema',
+        meta: meta(config, model, Date.now() - startedAt, undefined),
+      }
+    }
+
+    const choice = reply.choices?.[0]
+    const call = choice?.message?.tool_calls?.[0]?.function
+    if (call?.arguments === undefined) {
+      // Two very different causes land here, and telling them apart matters:
+      // 'length' means the token budget cut the reply off mid-thought, while
+      // anything else means the model answered in prose. The first is a
+      // configuration problem and the second is a prompting one, so the
+      // reason is logged rather than collapsed into a bare schema failure.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[agents] ${agent}: no tool call (finish_reason=${choice?.finish_reason ?? 'unknown'}, completion_tokens=${reply.usage?.completion_tokens ?? 0})`
+      )
+      return {
+        ok: false,
+        error: 'invalid_schema',
+        meta: meta(config, model, Date.now() - startedAt, reply.usage),
+      }
+    }
+
+    let args: unknown
+    try {
+      args = JSON.parse(call.arguments)
+    } catch {
+      return {
+        ok: false,
+        error: 'invalid_schema',
+        meta: meta(config, model, Date.now() - startedAt, reply.usage),
+      }
+    }
+
+    return { ok: true, args, meta: meta(config, model, Date.now() - startedAt, reply.usage) }
+  }
+
   return {
     id: config.id,
     displayName: `${config.displayName} (${model})`,
@@ -467,8 +565,6 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
     isConfigured: () => apiKey !== undefined && apiKey !== '',
 
     async propose(req: ProposalRequest): Promise<ProposalOutcome> {
-      const startedAt = Date.now()
-
       if (apiKey === undefined || apiKey === '') {
         return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
       }
@@ -480,99 +576,48 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
             function: { ...SUBMIT_PROPOSAL_TOOL.function, strict: false },
           }
 
-      let res: Response
-      try {
-        res = await doFetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: buildMessages(req),
-            tools: [tool],
-            // 'auto' for every provider today. DeepSeek's models reason in
-            // thinking mode, which rejects a forced tool_choice outright:
-            // "Thinking mode does not support this tool_choice"; Ollama ignores
-            // the field entirely. The brief already instructs the
-            // model to answer by calling the tool, and a reply that arrives as
-            // prose anyway is caught below — so forcing buys nothing.
-            tool_choice: config.toolChoice,
-            temperature: TEMPERATURE,
-            max_tokens: MAX_OUTPUT_TOKENS,
-          }),
-          ...(req.signal !== undefined ? { signal: req.signal } : {}),
-        })
-      } catch (e) {
-        // An aborted request is the timeout the caller asked for, not a fault.
-        const aborted = e instanceof Error && e.name === 'AbortError'
-        return {
-          ok: false,
-          error: aborted ? 'timeout' : 'upstream_error',
-          meta: meta(config, model, Date.now() - startedAt, undefined),
-        }
-      }
+      const out = await chat(
+        {
+          model,
+          messages: buildMessages(req),
+          tools: [tool],
+          // 'auto' for every provider today. DeepSeek's models reason in
+          // thinking mode, which rejects a forced tool_choice outright:
+          // "Thinking mode does not support this tool_choice"; Ollama ignores
+          // the field entirely. The brief already instructs the
+          // model to answer by calling the tool, and a reply that arrives as
+          // prose anyway is caught below — so forcing buys nothing.
+          tool_choice: config.toolChoice,
+          temperature: TEMPERATURE,
+          max_tokens: MAX_OUTPUT_TOKENS,
+        },
+        req.agent,
+        req.signal
+      )
+      if (!out.ok) return out
+      return toOutcome(req, out.args, out.meta)
+    },
 
-      if (!res.ok) {
-        // The provider's own words, so a model that left the catalogue or a
-        // spent key is told apart from a busy one in the logs. Never the key.
-        const reason = await res.text().catch(() => '')
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[agents] ${req.agent}: HTTP ${res.status} from ${config.id} for ${model}: ${reason.slice(0, 300)}`
-        )
-        const retryAfterMs = res.status === 429 ? retryAfter(res.headers) : undefined
-        return {
-          ok: false,
-          error: classifyStatus(res.status),
-          meta: meta(config, model, Date.now() - startedAt, undefined),
-          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-        }
+    async talk(call: TalkCall): Promise<TalkOutcome> {
+      if (apiKey === undefined || apiKey === '') {
+        return { ok: false, error: 'no_api_key', meta: meta(config, model, 0, undefined) }
       }
-
-      let body: ChatCompletionResponse
-      try {
-        body = (await res.json()) as ChatCompletionResponse
-      } catch {
-        return {
-          ok: false,
-          error: 'invalid_schema',
-          meta: meta(config, model, Date.now() - startedAt, undefined),
-        }
-      }
-
-      const choice = body.choices?.[0]
-      const call = choice?.message?.tool_calls?.[0]?.function
-      if (call?.arguments === undefined) {
-        // Two very different causes land here, and telling them apart matters:
-        // 'length' means the token budget cut the reply off mid-thought, while
-        // anything else means the model answered in prose. The first is a
-        // configuration problem and the second is a prompting one, so the
-        // reason is logged rather than collapsed into a bare schema failure.
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[agents] ${req.agent}: no tool call (finish_reason=${choice?.finish_reason ?? 'unknown'}, completion_tokens=${body.usage?.completion_tokens ?? 0})`
-        )
-        return {
-          ok: false,
-          error: 'invalid_schema',
-          meta: meta(config, model, Date.now() - startedAt, body.usage),
-        }
-      }
-
-      let raw: unknown
-      try {
-        raw = JSON.parse(call.arguments)
-      } catch {
-        return {
-          ok: false,
-          error: 'invalid_schema',
-          meta: meta(config, model, Date.now() - startedAt, body.usage),
-        }
-      }
-
-      return toOutcome(req, raw, meta(config, model, Date.now() - startedAt, body.usage))
+      return chat(
+        {
+          model,
+          messages: [
+            { role: 'system', content: call.system },
+            { role: 'user', content: call.user },
+          ],
+          tools: [{ type: 'function', function: { ...call.tool, strict: false } }],
+          tool_choice: config.toolChoice,
+          temperature: TEMPERATURE,
+          max_tokens: config.talk?.maxTokens ?? TALK_OUTPUT_TOKENS,
+          ...config.talk?.body,
+        },
+        call.agent,
+        call.signal
+      )
     },
   }
 }

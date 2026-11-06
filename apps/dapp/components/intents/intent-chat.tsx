@@ -44,6 +44,7 @@ import {
   stepErrorMessage,
   chainSigning,
   isChainRoute,
+  canReview,
   needsDirectRoute,
   reviewChainRoute,
   routeForSwap,
@@ -584,6 +585,9 @@ export function IntentChat({
           phase: 'decided' as const,
           secondsLeft: 0,
           winner: restored.winner,
+          ...(restored.talk !== undefined
+            ? { thread: restored.talk.thread, takes: restored.talk.takes }
+            : {}),
         }
       : liveCompetition
 
@@ -902,6 +906,9 @@ export function IntentChat({
       proposals: liveCompetition.proposals,
       winner: liveCompetition.winner,
       routesByAgent: live.routesByAgent,
+      ...((live.thread ?? []).some((i) => i.type === 'line' && i.line.kind !== 'turn')
+        ? { talk: { thread: live.thread ?? [], takes: live.takes ?? {} } }
+        : {}),
     })
     setTurns(loadTurns(slug))
     // Keyed on the decision, not on the proposals object, which is rebuilt on
@@ -2643,6 +2650,7 @@ export function IntentChat({
   }
 
   function handleExecute(key: string): void {
+    if (!canReview(competition.proposals[key], routesByAgent[key], restored !== null)) return
     // Selecting an agent is not a commitment, so it must stay changeable.
     // Guarding on `executingKey` — set by the first Review click — meant the
     // first pick was final: every other card became unclickable before the
@@ -3354,6 +3362,9 @@ export function IntentChat({
                   )
                 }
                 directRoute={directFallback}
+                reviewable={(key) =>
+                  canReview(competition.proposals[key], routesByAgent[key], restored !== null)
+                }
                 signed={raceClosed(chainAction.requested, chainSequence.settled)}
                 {...(slug !== 'stellar' ? { chainName: descriptor.name } : {})}
               />

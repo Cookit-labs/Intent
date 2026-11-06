@@ -2,6 +2,7 @@
 
 import { cn } from '@intent/ui'
 import { AnimatePresence, motion } from 'framer-motion'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Crown, Loader2, Radio, TriangleAlert, WifiOff } from 'lucide-react'
 
 import type { CompetitionState } from '../../lib/agents/competition'
@@ -12,6 +13,14 @@ import {
   unansweredLine,
 } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
+import {
+  ALL_HELD_LINE,
+  allHeld,
+  showTakes,
+  talkPill,
+  talkSpeaker,
+  waitingAgents,
+} from '../../lib/agents/talk-lines'
 import { AgentAvatar } from '../agents/agent-avatar'
 import { agentBubble, systemPill } from './bubble'
 
@@ -85,6 +94,44 @@ function failureText(code: string): string {
   }
 }
 
+/**
+ * One agent speaking in the thread: the same name line, avatar and bubble as its
+ * final card, without the figures or the Review button.
+ */
+function ThreadMessage({
+  seed,
+  name,
+  speaker,
+  model,
+  children,
+}: {
+  seed: string
+  name: string
+  speaker: string
+  model?: string | undefined
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="flex flex-col gap-1"
+    >
+      <div className="text-muted-foreground ml-[50px] flex flex-wrap items-center gap-x-1.5 text-xs">
+        <span className="text-foreground font-semibold">{speaker}</span>
+        {shortModel(model) !== '' ? (
+          <span className="opacity-70">· {shortModel(model)}</span>
+        ) : null}
+      </div>
+      <div className="flex items-end gap-2.5">
+        <AgentAvatar seed={seed} name={name} className="h-10 w-10" />
+        <div className={agentBubble}>{children}</div>
+      </div>
+    </motion.div>
+  )
+}
+
 export function CompetitionPanel({
   state,
   onExecute,
@@ -93,6 +140,7 @@ export function CompetitionPanel({
   chainName,
   directRoute = false,
   signed = false,
+  reviewable,
 }: {
   state: CompetitionState
   onExecute: (key: string) => void
@@ -110,9 +158,26 @@ export function CompetitionPanel({
   directRoute?: boolean
   /** Something may have been signed, so "nothing was signed" must not be said. */
   signed?: boolean
+  /** Whether an agent's card may offer Review. Every card may when absent. */
+  reviewable?: (key: string) => boolean
 }): JSX.Element | null {
   const { proposals, revealed, agents, phase, winner, error } = state
   const unanimous = state.unanimous === true
+  const thread = state.thread ?? []
+  const threadLength = thread.length
+  const threadEnd = useRef<HTMLDivElement | null>(null)
+  const racing = phase === 'competing'
+  const shownCards = Object.values(revealed).filter(Boolean).length
+  const followed = useRef(false)
+  if (racing) followed.current = true
+
+  // The talk and the cards after it grow below the fold while someone watches,
+  // so they stay in view. A reopened conversation never ran here, so it isn't moved.
+  useEffect(() => {
+    if (threadLength === 0 || !followed.current) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    threadEnd.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' })
+  }, [threadLength, shownCards, phase])
 
   // Nothing to show until something is running. The panel used to paint
   // "Broadcasting…" and four "thinking…" placeholders whenever the phase was
@@ -151,7 +216,19 @@ export function CompetitionPanel({
   // that answered; a row of failures says nothing the user can act on.
   const answered = (key: string): boolean => proposals[key]?.failed === undefined
   const revealedAgents = agents.filter((a) => revealed[a.key] && answered(a.key))
-  const pendingAgents = decided ? [] : agents.filter((a) => !revealed[a.key] && answered(a.key))
+  const waiting = waitingAgents(
+    agents.map((a) => a.key),
+    thread,
+    (key) => revealed[key] === true || !answered(key)
+  )
+  const pendingAgents = decided
+    ? []
+    : thread.length > 0
+      ? agents.filter((a) => waiting.includes(a.key))
+      : agents.filter((a) => !revealed[a.key] && answered(a.key))
+  const nameOf = (key: string): string => agents.find((a) => a.key === key)?.name ?? key
+  const modelOf = (key: string): string | undefined => agents.find((a) => a.key === key)?.model
+  const everyoneHeld = allHeld(Object.values(proposals))
   const anyAnswered = Object.values(proposals).some((p) => p.failed === undefined)
   // No card for one, but a line says who left, so a short race doesn't look like the whole field.
   const unanswered = unansweredLine(
@@ -164,7 +241,64 @@ export function CompetitionPanel({
   return (
     <div className="flex flex-col gap-4">
       {routeNote !== undefined ? <div className={systemPill}>{routeNote}</div> : null}
-      {revealedAgents.length === 0 && !decided ? (
+      {showTakes(thread, phase)
+        ? thread.map((item, i) => {
+            if (item.type === 'take') {
+              const take = state.takes?.[item.agent]
+              if (take === undefined) return null
+              const tag = describePlan(take)
+              return (
+                <ThreadMessage
+                  key={`take-${item.agent}`}
+                  seed={item.agent}
+                  name={take.name}
+                  speaker={take.name}
+                  model={take.model}
+                >
+                  {tag !== '' ? (
+                    <p className="mb-1 text-[11px] font-medium uppercase tracking-wide opacity-55">
+                      {tag}
+                    </p>
+                  ) : null}
+                  <p className="leading-relaxed">{take.reasoning}</p>
+                </ThreadMessage>
+              )
+            }
+            const { line } = item
+            const pill = talkPill(line, nameOf)
+            if (pill !== undefined) {
+              return (
+                <motion.div
+                  key={`line-${i}`}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={systemPill}
+                >
+                  {line.kind === 'reading' && racing ? (
+                    <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
+                  ) : null}
+                  {pill}
+                </motion.div>
+              )
+            }
+            const speaker = talkSpeaker(line, nameOf)
+            if (speaker === undefined || (line.kind !== 'asked' && line.kind !== 'answered')) {
+              return null
+            }
+            return (
+              <ThreadMessage
+                key={`line-${i}`}
+                seed={line.agent}
+                name={nameOf(line.agent)}
+                speaker={speaker}
+                model={modelOf(line.agent)}
+              >
+                <p className="leading-relaxed">{line.text}</p>
+              </ThreadMessage>
+            )
+          })
+        : null}
+      {revealedAgents.length === 0 && !decided && thread.length === 0 ? (
         <div className={systemPill}>
           <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
           Broadcasting to the agent network…
@@ -180,7 +314,9 @@ export function CompetitionPanel({
           // that makes the same name look favoured race after race.
           const isWinner = decided && !unanimous && winner === agent.key
           const isExecuting = executingKey === agent.key
-          const dimmed = decided && !unanimous && !isWinner && !isExecuting
+          const dimmed = decided && !unanimous && !isWinner && !isExecuting && !everyoneHeld
+          const held = proposal?.held === true
+          const canOpen = !held && (reviewable === undefined || reviewable(agent.key))
           const tag = proposal !== undefined ? describePlan(proposal) : ''
 
           return (
@@ -264,45 +400,51 @@ export function CompetitionPanel({
                       </ul>
                     ) : null}
 
-                    <div className="border-bubble-agent-foreground/10 mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-                      {/* Measured from the route, not reported by the agent:
+                    {held ? null : (
+                      <div className="border-bubble-agent-foreground/10 mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                        {/* Measured from the route, not reported by the agent:
                           what a unit cost, and how that compares with the
                           oracle's fair value. */}
-                      <div className="flex flex-col text-xs tabular-nums">
-                        <span className="font-semibold">
-                          {proposal?.figures?.headline ??
-                            `${money(proposal?.avgPriceUsd ?? 0)} avg`}
-                        </span>
-                        <span className="opacity-60">
-                          {[
-                            proposal?.figures !== undefined ? '' : vsOracle(proposal?.vsOraclePct),
-                            proposal?.executionMode === 'rest' &&
-                            proposal.horizonMinutes !== undefined &&
-                            proposal.horizonMinutes > 0
-                              ? `over ${proposal.horizonMinutes}m`
-                              : '',
-                          ]
-                            .filter((s) => s !== '')
-                            .join(' · ')}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onExecute(agent.key)}
-                        disabled={locked}
-                        className={cn(
-                          'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
-                          isExecuting || isWinner
-                            ? 'bg-brand text-brand-foreground hover:bg-brand/90'
-                            : 'border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 border'
-                        )}
-                      >
-                        {locked && isExecuting ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <div className="flex flex-col text-xs tabular-nums">
+                          <span className="font-semibold">
+                            {proposal?.figures?.headline ??
+                              `${money(proposal?.avgPriceUsd ?? 0)} avg`}
+                          </span>
+                          <span className="opacity-60">
+                            {[
+                              proposal?.figures !== undefined
+                                ? ''
+                                : vsOracle(proposal?.vsOraclePct),
+                              proposal?.executionMode === 'rest' &&
+                              proposal.horizonMinutes !== undefined &&
+                              proposal.horizonMinutes > 0
+                                ? `over ${proposal.horizonMinutes}m`
+                                : '',
+                            ]
+                              .filter((s) => s !== '')
+                              .join(' · ')}
+                          </span>
+                        </div>
+                        {canOpen ? (
+                          <button
+                            type="button"
+                            onClick={() => onExecute(agent.key)}
+                            disabled={locked}
+                            className={cn(
+                              'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50',
+                              isExecuting || isWinner
+                                ? 'bg-brand text-brand-foreground hover:bg-brand/90'
+                                : 'border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 border'
+                            )}
+                          >
+                            {locked && isExecuting ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            {isExecuting ? 'Selected' : 'Review'}
+                          </button>
                         ) : null}
-                        {isExecuting ? 'Selected' : 'Review'}
-                      </button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -344,12 +486,15 @@ export function CompetitionPanel({
               by a draw the agents cannot influence. A supply or a stake is
               ranked on its rate instead, and the line says that rate. */}
           {unanimous
-            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
+            ? `All ${Object.values(proposals).filter((p) => p.failed === undefined && p.held !== true).length} agents agree: ${describePlan(proposals[winner] ?? {})}. Pick any to execute.`
             : recommendationLine(proposals[winner]?.name, proposals[winner]?.figures)}
         </motion.div>
       ) : null}
 
+      {decided && everyoneHeld ? <div className={systemPill}>{ALL_HELD_LINE}</div> : null}
+
       {decided && unanswered !== undefined ? <div className={systemPill}>{unanswered}</div> : null}
+      {thread.length > 0 ? <div ref={threadEnd} aria-hidden /> : null}
     </div>
   )
 }
