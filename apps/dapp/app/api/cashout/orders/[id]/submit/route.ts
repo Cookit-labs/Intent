@@ -5,6 +5,7 @@ import { ChainActionRefused, type SignedPayload } from '../../../../../../lib/ch
 import { logExecution } from '../../../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
 import { reportError } from '../../../../../../lib/server/report'
+import { createLinqClient } from '../../../../../../lib/linq/client'
 import { createWeaveClient } from '../../../../../../lib/weave/client'
 import { depositChain } from '../../../../../../lib/weave/deposit'
 import { chainRefusal, guardCashout } from '../../../../../../lib/weave/guard'
@@ -113,7 +114,7 @@ export async function POST(
   }
 
   const sentAlready = walletSent(signed)
-  const synced = await syncOrder(repo, row, createWeaveClient())
+  const synced = await syncOrder(repo, row, createWeaveClient(), createLinqClient())
   // A wallet that sends for itself has already moved the money, and Weave may have
   // seen it by now, so this only confirms and records it whatever the order's status.
   const refused = !sentAlready || row.depositHash !== undefined ? payRefusal(synced) : undefined

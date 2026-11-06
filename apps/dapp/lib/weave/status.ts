@@ -1,3 +1,5 @@
+import { normaliseStatus } from '../naira/status'
+
 export type WeaveStatus = 'waiting' | 'processing' | 'paid' | 'failed' | 'expired' | 'refunded'
 
 const FROM_PROVIDER: Readonly<Record<string, WeaveStatus>> = {
@@ -32,5 +34,24 @@ export function nextStatus(current: WeaveStatus, provider: string): WeaveStatus 
   const mapped = mapProviderStatus(provider)
   if (mapped === undefined) return current
   if (mapped === 'waiting' && current !== 'waiting') return current
+  return mapped
+}
+
+/**
+ * The same, for an order Linq holds, read with the Stellar naira flow's own reading of Linq's
+ * free-text statuses. Linq reports no refund of its own, so a failure is where it ends.
+ *
+ * That reading takes any text it doesn't know as "processing". Before this app has sent the
+ * deposit, nothing can be processing, and reading it so would refuse the deposit the order waits for.
+ */
+export function nextLinqStatus(
+  current: WeaveStatus,
+  provider: string,
+  deposited: boolean
+): WeaveStatus {
+  if (isFinal(current)) return current
+  const mapped = normaliseStatus(provider)
+  if (mapped === 'waiting' && current !== 'waiting') return current
+  if (mapped === 'processing' && !deposited) return current
   return mapped
 }
