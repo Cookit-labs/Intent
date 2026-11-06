@@ -656,6 +656,7 @@ describe('the Apps page rows', () => {
 
   it('shows each chain its own row and no venue that does not name it', () => {
     expect(on('avalanche')).toEqual([
+      'weave-avalanche',
       '1click-avalanche',
       'cow-limit',
       'uniswap-avalanche',

@@ -748,8 +748,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(22)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(22)
+    expect(solanaVenues).toHaveLength(23)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(23)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])
@@ -764,6 +764,8 @@ describe('venues page', () => {
     for (const v of executes) {
       expect(v.capability).toBeTruthy()
       // OnRe has no venue of its own: it is bought through the Jupiter swap venue.
+      // A cash-out runs through its own route, not a chain venue.
+      if (v.id.startsWith('weave-')) continue
       expect(v.id === 'onre' ? wired.includes('jupiter') : wired.includes(v.id)).toBe(true)
     }
     for (const id of wired) expect(executes.map((v) => v.id)).toContain(id)

@@ -18,6 +18,18 @@ const ONECLICK_DOCS =
 // Listed, as Lulo is on Solana: whether this runs depends on a secret this client-safe file can't read.
 export const evmVenues: Venue[] = [
   {
+    id: 'weave-avalanche',
+    name: 'Weave',
+    family: 'evm',
+    category: 'offramp',
+    chains: ['Avalanche'],
+    bestFor: 'Cashing out USDC to a bank or mobile money in naira, shillings and more',
+    url: 'https://paywithweave.com',
+    integration: 'executes',
+    capability:
+      'Cash out USDC to a bank or mobile money account in Nigeria, Kenya, Uganda or Tanzania. Weave bridges the USDC to Base and pays out through Paycrest, and the receipt shows what it actually paid. Every deposit is checked before you sign.',
+  },
+  {
     id: '1click-avalanche',
     family: 'evm',
     name: 'NEAR Intents 1Click',

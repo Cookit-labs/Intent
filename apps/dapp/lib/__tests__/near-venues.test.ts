@@ -26,7 +26,7 @@ const CATEGORIES: readonly VenueCategory[] = [
 
 describe('the NEAR venue list', () => {
   it('has every row of the report, with the fields filled in', () => {
-    expect(nearVenues).toHaveLength(15)
+    expect(nearVenues).toHaveLength(16)
     for (const venue of nearVenues) {
       expect(venue.family).toBe('near')
       expect(venue.chains).toEqual(['NEAR'])
@@ -42,7 +42,10 @@ describe('the NEAR venue list', () => {
   })
 
   it('claims execution exactly for the venues the module wires', () => {
-    const claimed = nearVenues.filter((v) => v.integration === 'executes').map((v) => v.id)
+    // A cash-out runs through its own route, not a chain venue, so Weave's row is left out here.
+    const claimed = nearVenues
+      .filter((v) => v.integration === 'executes' && !v.id.startsWith('weave-'))
+      .map((v) => v.id)
     // A wallet transfer is not an app, so the Apps list has no entry for it.
     const wired = nearModule.venues.map((v) => v.id).filter((id) => id !== 'send')
     expect(claimed.sort()).toEqual(wired.sort())

@@ -18,6 +18,18 @@ function listed(
 }
 
 export const suiVenues: Venue[] = [
+  {
+    id: 'weave-sui',
+    name: 'Weave',
+    family: 'sui',
+    category: 'offramp',
+    chains: ['Sui'],
+    bestFor: 'Cashing out USDC to a bank or mobile money in naira, shillings and more',
+    url: 'https://paywithweave.com',
+    integration: 'executes',
+    capability:
+      'Cash out USDC to a bank or mobile money account in Nigeria, Kenya, Uganda or Tanzania. Weave bridges the USDC to Base and pays out through Paycrest, and the receipt shows what it actually paid. Every deposit is checked before you sign.',
+  },
   listed(
     'linq-sui',
     'Linq (Sui USDC, USDsui)',
