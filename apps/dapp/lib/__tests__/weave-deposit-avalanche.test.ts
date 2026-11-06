@@ -381,9 +381,26 @@ describe('avalancheDeposit.submit', () => {
   })
 
   it.each<[string, DepositReceipt]>([
-    ['another sender', receipt({ from: OTHER as `0x${string}` })],
-    ['a call to another contract', receipt({ to: OTHER_TOKEN as `0x${string}` })],
-    ['a contract creation', receipt({ to: null })],
+    // A smart account, or MetaMask paying gas in a token, sends through a relayer or EntryPoint.
+    ['a relayer as the sender', receipt({ from: OTHER as `0x${string}` })],
+    [
+      'a smart account or EntryPoint as the contract called',
+      receipt({ to: OTHER_TOKEN as `0x${string}` }),
+    ],
+  ])('confirms %s when USDC’s own Transfer log shows this order paid', async (_name, r) => {
+    await expect(withReceipt(r).submit(signed, plain)).resolves.toMatchObject({
+      ok: true,
+      hash: HASH,
+    })
+  })
+
+  it.each<[string, DepositReceipt]>([
+    ['another sender, and no transfer', receipt({ from: OTHER as `0x${string}`, logs: [] })],
+    [
+      'a call to another contract, and no transfer',
+      receipt({ to: OTHER_TOKEN as `0x${string}`, logs: [] }),
+    ],
+    ['a contract creation, and no transfer', receipt({ to: null, logs: [] })],
     ['no logs', receipt({ logs: [] })],
     ['a log from another token', receipt({ logs: [transferLog({ address: OTHER_TOKEN })] })],
     ['a transfer to someone else', receipt({ logs: [transferLog({ to: OTHER })] })],
