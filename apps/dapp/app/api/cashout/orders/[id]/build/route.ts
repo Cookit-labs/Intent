@@ -54,6 +54,7 @@ export async function POST(
   const deposit = depositChain(row.chain)
   const expectation = depositExpectation(row)
   try {
+    await deposit.assertCanPay?.(expectation)
     const signing = await deposit.build(expectation)
     deposit.assertSafe(signing, expectation)
     return NextResponse.json({ signing })

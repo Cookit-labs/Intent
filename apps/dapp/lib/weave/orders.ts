@@ -44,6 +44,8 @@ export const WEAVE_DDL: readonly string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS weave_orders_email_idx ON weave_orders (email, created_at)`,
   `CREATE INDEX IF NOT EXISTS weave_orders_account_idx ON weave_orders (account, created_at)`,
+  // What a paid order actually paid out, which can differ from the estimate it was made with.
+  `ALTER TABLE weave_orders ADD COLUMN IF NOT EXISTS paid_dest TEXT`,
 ]
 
 /** Said wherever a deposit may already be on its way, so nobody pays twice. */
@@ -67,6 +69,8 @@ export interface WeaveOrderRow {
   /** USDC to deposit, display units. Decimal text, because this becomes a payment amount. */
   amount: string
   estimatedDest: string
+  /** What it actually paid out, once Weave says so. */
+  paidDest?: string | undefined
   expiresAt: string | undefined
   status: WeaveStatus
   providerStatus: string
@@ -88,6 +92,8 @@ export interface WeaveOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** What it actually paid out, once Weave says so. */
+  paidDest?: string | undefined
   institutionName: string
   accountName: string
   accountMask: string
@@ -107,6 +113,7 @@ export function toPublic(row: WeaveOrderRow): WeaveOrderView {
     currency: row.currency,
     amount: row.amount,
     estimatedDest: row.estimatedDest,
+    ...(row.paidDest !== undefined ? { paidDest: row.paidDest } : {}),
     institutionName: row.institutionName,
     accountName: row.accountName,
     accountMask: `••••${identifier.length > 4 ? identifier.slice(-4) : ''}`,
@@ -148,6 +155,7 @@ function fromDb(r: Record<string, unknown>): WeaveOrderRow {
     depositMemo: cleanMemo(r['deposit_memo']),
     amount: String(r['amount']),
     estimatedDest: String(r['estimated_dest']),
+    paidDest: optional(r['paid_dest']),
     expiresAt:
       expires === null || expires === undefined
         ? undefined
@@ -184,6 +192,8 @@ export interface WeaveOrderRepo {
   /** Not scoped, because the webhook has no requester. Its signature is what admits it. */
   getByProviderOrder: (providerOrder: string) => Promise<WeaveOrderRow | undefined>
   setStatus: (providerOrder: string, status: WeaveStatus, providerStatus: string) => Promise<void>
+  /** Records what a paid order paid out, once. */
+  setPaid: (providerOrder: string, paidDest: string) => Promise<void>
   /**
    * `reused` when another order holds this hash, or this order holds a different
    * one. A wallet that sends for itself only hands over a hash, and an old one that
@@ -286,6 +296,14 @@ export function createWeaveOrderRepo(query: QueryFn): WeaveOrderRepo {
       ])
       const row = rows[0]
       return row === undefined ? undefined : fromDb(row)
+    },
+
+    async setPaid(providerOrder, paidDest) {
+      await query(
+        `UPDATE weave_orders SET paid_dest = $2, updated_at = now()
+          WHERE provider_order = $1 AND status = 'paid' AND paid_dest IS NULL`,
+        [providerOrder, paidDest]
+      )
     },
 
     async setStatus(providerOrder, status, providerStatus) {
@@ -452,22 +470,37 @@ export interface SyncedOrder {
 
 /**
  * Asks Weave where an order stands and records it. The stored status is only the
- * last thing this app was told, and a webhook can be missed. Amounts are never
- * written back: what an order expects is what it was made for.
+ * last thing this app was told, and a webhook can be missed. What an order expects is never
+ * written back: it is what it was made for. What a paid order paid out is kept beside it.
  */
 export async function syncOrder(
-  repo: Pick<WeaveOrderRepo, 'setStatus'>,
+  repo: Pick<WeaveOrderRepo, 'setStatus' | 'setPaid'>,
   row: WeaveOrderRow,
   weave: Pick<WeaveClient, 'getOrder'>
 ): Promise<SyncedOrder> {
-  if (isFinal(row.status)) return { row, reached: true }
+  // A paid order is asked once more for what it paid out, which a webhook does not carry.
+  const paidUnread = row.status === 'paid' && row.paidDest === undefined
+  if (isFinal(row.status) && !paidUnread) return { row, reached: true }
   const live = await weave.getOrder(row.providerOrder)
   if (!live.ok) return { row, reached: false }
   const status = nextStatus(row.status, live.value.status)
   if (status !== row.status || live.value.status !== row.providerStatus) {
     await repo.setStatus(row.providerOrder, status, live.value.status)
   }
-  return { row: { ...row, status, providerStatus: live.value.status }, reached: true }
+  const paid =
+    status === 'paid' && live.value.destAmount !== undefined && row.paidDest === undefined
+      ? String(live.value.destAmount)
+      : undefined
+  if (paid !== undefined) await repo.setPaid(row.providerOrder, paid)
+  return {
+    row: {
+      ...row,
+      status,
+      providerStatus: live.value.status,
+      ...(paid !== undefined ? { paidDest: paid } : {}),
+    },
+    reached: true,
+  }
 }
 
 export function isPastExpiry(row: WeaveOrderRow, now: number = Date.now()): boolean {

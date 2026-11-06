@@ -170,7 +170,10 @@ describe('orderMismatch', () => {
 })
 
 describe('syncOrder', () => {
-  const repo = () => ({ setStatus: vi.fn(async () => undefined) })
+  const repo = () => ({
+    setStatus: vi.fn(async () => undefined),
+    setPaid: vi.fn(async () => undefined),
+  })
 
   it('records what Weave says and returns the moved row', async () => {
     const r = repo()
@@ -199,12 +202,50 @@ describe('syncOrder', () => {
     expect(r.setStatus).not.toHaveBeenCalled()
   })
 
-  it('does not ask about an order that has ended', async () => {
+  it('keeps what a paid order actually paid out, which can be below the estimate', async () => {
     const r = repo()
-    const getOrder = vi.fn()
+    const synced = await syncOrder(r, row(), {
+      getOrder: async () => ({
+        ok: true,
+        value: { id: 'ord_1', status: 'completed', destAmount: 877.0797924000001 },
+      }),
+    })
+    expect(r.setPaid).toHaveBeenCalledWith('ord_1', '877.0797924000001')
+    expect(synced.row).toMatchObject({ status: 'paid', paidDest: '877.0797924000001' })
+  })
+
+  it('asks a paid order once more for what it paid, when a webhook marked it paid', async () => {
+    const r = repo()
+    const getOrder = vi.fn(async () => ({
+      ok: true as const,
+      value: { id: 'ord_1', status: 'completed', destAmount: 877.08 },
+    }))
     const synced = await syncOrder(r, row({ status: 'paid', providerStatus: 'completed' }), {
       getOrder,
     })
+    expect(getOrder).toHaveBeenCalledTimes(1)
+    expect(synced.row.paidDest).toBe('877.08')
+  })
+
+  it('does not keep a figure before the order is paid', async () => {
+    const r = repo()
+    await syncOrder(r, row(), {
+      getOrder: async () => ({
+        ok: true,
+        value: { id: 'ord_1', status: 'processing', destAmount: 900 },
+      }),
+    })
+    expect(r.setPaid).not.toHaveBeenCalled()
+  })
+
+  it('does not ask about an order that has ended', async () => {
+    const r = repo()
+    const getOrder = vi.fn()
+    const synced = await syncOrder(
+      r,
+      row({ status: 'paid', providerStatus: 'completed', paidDest: '877.08' }),
+      { getOrder }
+    )
     expect(getOrder).not.toHaveBeenCalled()
     expect(synced.reached).toBe(true)
   })

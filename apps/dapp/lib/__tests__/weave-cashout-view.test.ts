@@ -20,6 +20,7 @@ import {
   nextAttempt,
   orderPhase,
   shouldPoll,
+  awaitsPaidAmount,
   statusText,
   unsupportedCurrencyReply,
   unsupportedTokenReply,
@@ -393,5 +394,14 @@ describe('words', () => {
     expect(depositExplorerUrl('sui', 'h')).toBe('https://suiscan.xyz/mainnet/tx/h')
     expect(depositExplorerUrl('avalanche', 'h')).toBe('https://snowtrace.io/tx/h')
     expect(depositExplorerUrl('stellar', 'h')).toBe('https://stellar.expert/explorer/public/tx/h')
+  })
+})
+
+describe('awaitsPaidAmount', () => {
+  it('is true only for a paid order whose amount Weave has not given yet', () => {
+    expect(awaitsPaidAmount({ status: 'paid' })).toBe(true)
+    expect(awaitsPaidAmount({ status: 'paid', paidDest: '877.08' })).toBe(false)
+    expect(awaitsPaidAmount({ status: 'processing' })).toBe(false)
+    expect(awaitsPaidAmount({ status: 'failed' })).toBe(false)
   })
 })

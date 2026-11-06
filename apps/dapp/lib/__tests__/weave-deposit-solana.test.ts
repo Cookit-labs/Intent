@@ -188,6 +188,12 @@ function refused(transaction: string, reason: RegExp): void {
 }
 
 interface RpcAnswers {
+  /** SOL held by the account, in lamports. Plenty unless a test says otherwise. */
+  lamports?: number
+  /** USDC held, in base units, or null for no token account at all. */
+  usdc?: bigint | null
+  /** Whether the deposit address already has its USDC account. */
+  payoutAccountExists?: boolean
   account?: unknown
   blockhash?: unknown
   send?: () => unknown
@@ -197,9 +203,39 @@ interface RpcAnswers {
 
 function stubRpc(answers: RpcAnswers = {}): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-    const { method } = JSON.parse(String(init?.body)) as { method: string }
+    const { method, params } = JSON.parse(String(init?.body)) as {
+      method: string
+      params: unknown[]
+    }
+    const asked = params?.[0]
+    const usdc = answers.usdc === undefined ? BigInt(1_000_000_000) : answers.usdc
+    const accountInfo =
+      asked === associatedTokenAccount(ACCOUNT, USDC)
+        ? {
+            result: {
+              context: { slot: 1 },
+              value:
+                usdc === null
+                  ? null
+                  : {
+                      owner: TOKEN_PROGRAM,
+                      data: {
+                        parsed: { info: { tokenAmount: { amount: String(usdc), decimals: 6 } } },
+                      },
+                    },
+            },
+          }
+        : asked === associatedTokenAccount(DEPOSIT, USDC)
+          ? {
+              result: {
+                context: { slot: 1 },
+                value: answers.payoutAccountExists === true ? { owner: TOKEN_PROGRAM } : null,
+              },
+            }
+          : (answers.account ?? { result: { context: { slot: 1 }, value: null } })
     const replies: Record<string, unknown> = {
-      getAccountInfo: answers.account ?? { result: { context: { slot: 1 }, value: null } },
+      getAccountInfo: accountInfo,
+      getBalance: { result: { context: { slot: 1 }, value: answers.lamports ?? 1_000_000_000 } },
       getLatestBlockhash: answers.blockhash ?? {
         result: {
           context: { slot: 1 },
@@ -579,6 +615,36 @@ describe('build', () => {
   it('refuses when no blockhash comes back', async () => {
     stubRpc({ blockhash: { error: { code: -32005, message: 'behind' } } })
     await expect(solanaDeposit.build(EXPECTATION)).rejects.toBeInstanceOf(ChainActionRefused)
+  })
+
+  it('refuses a deposit of more USDC than the wallet holds, saying both figures', async () => {
+    stubRpc({ usdc: BigInt(500_000) })
+    await expect(solanaDeposit.assertCanPay?.(EXPECTATION)).rejects.toThrow(
+      /You hold 0\.5 USDC, and this cash-out sends 25\.5 USDC/
+    )
+  })
+
+  it('refuses when there is too little SOL for the fee and opening the payout account', async () => {
+    stubRpc({ lamports: 400_000 })
+    const attempt = solanaDeposit.assertCanPay?.(EXPECTATION)
+    await expect(attempt).rejects.toThrow(/open the payout address’s USDC account/)
+    await expect(attempt).rejects.toThrow(/You hold 0\.0004 SOL/)
+  })
+
+  it('does not refuse when the balances cannot be read, leaving it to the wallet', async () => {
+    stubRpc({ account: { error: { code: -32005, message: 'behind' } }, usdc: null })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}'))
+    )
+    await expect(solanaDeposit.assertCanPay?.(EXPECTATION)).resolves.toBeUndefined()
+  })
+
+  it('needs only the fee once the payout account exists', async () => {
+    stubRpc({ lamports: 400_000, payoutAccountExists: true })
+    await expect(solanaDeposit.assertCanPay?.(EXPECTATION)).resolves.toBeUndefined()
+    stubRpc({ lamports: 10_000, payoutAccountExists: true })
+    await expect(solanaDeposit.assertCanPay?.(EXPECTATION)).rejects.toThrow(/network fee/)
   })
 
   it('refuses a memo before asking the network anything', async () => {

@@ -656,6 +656,7 @@ describe('the Apps page rows', () => {
 
   it('shows each chain its own row and no venue that does not name it', () => {
     expect(on('avalanche')).toEqual([
+      'weave-avalanche',
       '1click-avalanche',
       'cow-limit',
       'uniswap-avalanche',
@@ -1259,11 +1260,23 @@ describe('submit: what the chain says the wallet sent', () => {
     })
 
     it.each<[string, () => Json]>([
+      // A smart account, or MetaMask paying gas in a token, sends through a relayer or EntryPoint.
+      ['sent by a relayer', () => paying([transferLog(AVAX_USDC.id, USD_UNITS)], { from: OTHER })],
       [
-        'from another account',
-        () => paying([transferLog(AVAX_USDC.id, USD_UNITS)], { from: OTHER }),
+        'sent through a smart account',
+        () => paying([transferLog(AVAX_USDC.id, USD_UNITS)], { to: OTHER }),
       ],
-      ['to another contract', () => paying([transferLog(AVAX_USDC.id, USD_UNITS)], { to: OTHER })],
+    ])(
+      'accepts a transfer %s when the token’s own log shows this order paid',
+      async (_name, build) => {
+        rpc.waitForReceipt = async () => build()
+        await expect(submitTo(prepared)).resolves.toMatchObject({ ok: true, hash: HASH })
+        expect(sim.notified).toHaveLength(1)
+      }
+    )
+
+    it.each<[string, () => Json]>([
+      ['from another account, with no transfer', () => paying([], { from: OTHER })],
       ['with no logs', () => paying([])],
       ['with a log from another token', () => paying([transferLog(AVAX_USDT.id, USD_UNITS)])],
       [

@@ -20,6 +20,8 @@ export interface CashoutOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** What a paid order actually paid out, which can be less than the estimate. */
+  paidDest?: string | undefined
   institutionName: string
   accountName: string
   accountMask: string
@@ -156,6 +158,14 @@ export function statusText(status: CashoutStatus): string {
 export function shouldPoll(status: CashoutStatus): boolean {
   return status === 'waiting' || status === 'processing'
 }
+
+/** Paid, but Weave hasn't yet said how much reached the account, which is the figure shown. */
+export function awaitsPaidAmount(order: Pick<CashoutOrderView, 'status' | 'paidDest'>): boolean {
+  return order.status === 'paid' && order.paidDest === undefined
+}
+
+/** How many more reads a paid order gets for its amount, at the poll's pace, before it stops. */
+export const PAID_AMOUNT_READS = 12
 
 const MOBILE_PREFIX: Record<string, string> = {
   KES: '254712345678',

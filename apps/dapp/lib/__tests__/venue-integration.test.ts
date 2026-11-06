@@ -16,6 +16,7 @@ import { venues } from '../venues'
  */
 
 const byId = (id: string) => venues.find((v) => v.id === id)
+const byIdPrefix = (prefix: string) => venues.filter((v) => v.id.startsWith(prefix))
 
 describe('integration status is claimed accurately', () => {
   it('marks the Stellar DEX as executing', () => {
@@ -187,5 +188,18 @@ describe('beta venues', () => {
     expect(byId('noether')?.beta).toBe(true)
     const others = venues.filter((v) => v.id !== 'noether' && v.beta === true)
     expect(others).toEqual([])
+  })
+})
+
+describe('Weave, the cash-out', () => {
+  it('is listed, running, on every chain a cash-out runs on, and nowhere else', async () => {
+    const { CASHOUT_CHAINS } = await import('../weave/types')
+    const weave = byIdPrefix('weave-')
+    expect(weave.map((v) => v.id).sort()).toEqual(CASHOUT_CHAINS.map((c) => `weave-${c}`).sort())
+    for (const v of weave) {
+      expect(v.category).toBe('offramp')
+      expect(v.integration).toBe('executes')
+      expect(v.capability).toMatch(/actually paid/)
+    }
   })
 })

@@ -14,6 +14,8 @@ import {
   nextAttempt,
   orderPhase,
   shouldPoll,
+  awaitsPaidAmount,
+  PAID_AMOUNT_READS,
   type CashoutAttempt,
   type CashoutCurrency,
   type CashoutOrderView,
@@ -355,10 +357,17 @@ export function useCashout(): Cashout {
     setOpened((o) => ({ key: (o?.key ?? 0) + 1, seed: {}, chain: slug }))
   }, [locked, slug])
 
+  // A paid order is read a few more times for what it paid, which is the figure the receipt shows.
+  const paidReads = useRef(0)
+  const orderId = state.order?.id
+  useEffect(() => {
+    paidReads.current = 0
+  }, [orderId])
   const trackedId =
     (state.phase === 'tracking' || state.phase === 'pending' || state.phase === 'check') &&
     state.order !== undefined &&
-    shouldPoll(state.order.status)
+    (shouldPoll(state.order.status) ||
+      (awaitsPaidAmount(state.order) && paidReads.current < PAID_AMOUNT_READS))
       ? state.order.id
       : undefined
 
@@ -374,6 +383,7 @@ export function useCashout(): Cashout {
         const body = (await res.json()) as { order?: CashoutOrderView }
         const next = body.order
         if (next === undefined || cancelled) return
+        if (awaitsPaidAmount(next)) paidReads.current += 1
         setState((s) => {
           if (s.order?.id !== next.id) return s
           const unsure = s.phase === 'pending' || s.phase === 'check'

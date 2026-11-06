@@ -102,6 +102,7 @@ beforeEach(() => {
     getByProviderOrder: vi.fn(async () => row()),
     listForEmail: vi.fn(async () => [row()]),
     setStatus: vi.fn(async () => undefined),
+    setPaid: vi.fn(async () => undefined),
   }
   vi.stubEnv('WEAVE_CASHOUT_CURRENCIES', 'NGN,KES')
   vi.stubEnv('WEAVE_WEBHOOK_SECRET', 'whsec')
@@ -277,13 +278,25 @@ describe('GET one order', () => {
     expect(fn(state.repo['setStatus'])).toHaveBeenCalledWith('ord_1', 'processing', 'processing')
   })
 
-  it('does not ask Weave about a final order', async () => {
+  it('does not ask Weave about a final order whose paid amount is known', async () => {
+    fn(state.repo['getForEmail']).mockResolvedValue(
+      row({ status: 'paid', providerStatus: 'completed', paidDest: '877.08' })
+    )
+    const res = await one(get(`orders/${ID}`), context)
+    expect((await res.json()).order).toMatchObject({ status: 'paid', paidDest: '877.08' })
+    expect(fn(state.weave['getOrder'])).not.toHaveBeenCalled()
+  })
+
+  it('asks Weave once for what a paid order paid, and shows that', async () => {
     fn(state.repo['getForEmail']).mockResolvedValue(
       row({ status: 'paid', providerStatus: 'completed' })
     )
+    fn(state.weave['getOrder']).mockResolvedValue({
+      ok: true,
+      value: { id: ID, status: 'completed', destAmount: 877.08 },
+    })
     const res = await one(get(`orders/${ID}`), context)
-    expect((await res.json()).order.status).toBe('paid')
-    expect(fn(state.weave['getOrder'])).not.toHaveBeenCalled()
+    expect((await res.json()).order).toMatchObject({ status: 'paid', paidDest: '877.08' })
   })
 
   it('falls back to the stored row when Weave cannot be reached', async () => {

@@ -129,6 +129,8 @@ function PayoutProgress({
   onRetry: () => void
 }): JSX.Element {
   const done = order.status === 'paid'
+  // What Weave says reached the account, after every fee. Only this is shown once paid.
+  const paid = done ? order.paidDest : undefined
   const running = shouldPoll(order.status)
   const bad = !done && !running
   const reached = order.status === 'waiting' ? 0 : order.status === 'processing' ? 1 : 2
@@ -218,7 +220,11 @@ function PayoutProgress({
         <ArrowRight className="text-muted-foreground h-4 w-4" />
         <span className="flex items-center gap-2 text-lg font-semibold">
           {bank !== undefined ? <BankMark bank={bank} className="h-6 w-6" /> : null}
-          {formatPayout(order.estimatedDest, order.currency)}
+          {paid !== undefined
+            ? formatPayout(paid, order.currency)
+            : done
+              ? 'Confirming the amount paid…'
+              : `≈ ${formatPayout(order.estimatedDest, order.currency)}`}
         </span>
       </div>
 
@@ -523,7 +529,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
       <div className={cn(SHELL, 'gap-5')}>
         <CardHeader
           title="Review payout"
-          subtitle="This is an estimate. The final amount can differ slightly."
+          subtitle="An estimate after the provider’s fees. What lands can be a few percent lower, and the receipt shows the exact amount paid."
         />
 
         <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums dark:bg-[#121212]">

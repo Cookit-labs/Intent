@@ -31,7 +31,7 @@ import {
 } from '../../chains/solana/assert-safe'
 import { venueFetch } from '../../chains/solana/http'
 import { createSolanaSubmit, explorerUrl, feePayerSignature } from '../../chains/solana/submit'
-import { SOLANA_TOKENS } from '../../chains/solana/tokens'
+import { fromBaseUnits, SOLANA_TOKENS } from '../../chains/solana/tokens'
 import { withoutWalletGuards } from '../../chains/solana/wallet-guards'
 import {
   ChainActionRefused,
@@ -386,6 +386,71 @@ function compile(
   return getBase64EncodedWireTransaction(compileTransaction(message))
 }
 
+/** Every Solana signature costs this. */
+const SIGNATURE_FEE_LAMPORTS = BigInt(5_000)
+const PRIORITY_FEE_LAMPORTS = (BigInt(COMPUTE_UNIT_LIMIT) * COMPUTE_UNIT_PRICE) / BigInt(1_000_000)
+/** The rent-exempt minimum of a 165-byte token account, which opening the deposit's account costs. */
+const TOKEN_ACCOUNT_RENT_LAMPORTS = BigInt(2_039_280)
+
+const RpcBalance = z.object({ result: z.object({ value: z.number().int().nonnegative() }) })
+
+/** This wallet's balance of a token, read from its own token account, as `usdcBalance` does. */
+async function tokenBalance(account: string, token: ChainToken): Promise<bigint> {
+  const { result } = RpcTokenAccount.parse(
+    await rpc('getAccountInfo', [
+      associatedTokenAccount(account, token.id),
+      { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ])
+  )
+  return result.value === null
+    ? BigInt(0)
+    : BigInt(result.value.data.parsed.info.tokenAmount.amount)
+}
+
+/**
+ * The token and the SOL this deposit spends, checked before a wallet is asked: otherwise a
+ * shortfall shows only as the wallet's own "insufficient balance", which says nothing of what
+ * is missing. The deposit opens the address's token account when it has none, and the wallet
+ * pays that account's rent, so the SOL needed depends on it.
+ */
+async function assertCanPay(expectation: DepositExpectation): Promise<void> {
+  const units = orderUnits(expectation)
+  const token = tokenOf(expectation)
+  const payout = associatedTokenAccount(expectation.depositAddress, token.id)
+  let held: bigint
+  let lamports: bigint
+  let opens: boolean
+  try {
+    const [tokens, balance, existing] = await Promise.all([
+      tokenBalance(expectation.account, token),
+      rpc('getBalance', [expectation.account, { commitment: 'confirmed' }]),
+      rpc('getAccountInfo', [payout, { encoding: 'base64', commitment: 'confirmed' }]),
+    ])
+    held = tokens
+    lamports = BigInt(RpcBalance.parse(balance).result.value)
+    opens = RpcAccount.parse(existing).result.value === null
+  } catch {
+    // Unread is not short: the wallet still checks, and a slow node shouldn't stop a cash-out.
+    return
+  }
+  if (held < units) {
+    refuse(
+      `You hold ${fromBaseUnits(String(held), token.decimals)} ${token.symbol}, and this cash-out sends ${expectation.amount} ${token.symbol}.`
+    )
+  }
+  const fee = SIGNATURE_FEE_LAMPORTS + PRIORITY_FEE_LAMPORTS
+  const needed = fee + (opens ? TOKEN_ACCOUNT_RENT_LAMPORTS : BigInt(0))
+  if (lamports < needed) {
+    const sol = (value: bigint): string => fromBaseUnits(String(value), 9)
+    const why = opens
+      ? `${sol(fee)} for the network fee and ${sol(TOKEN_ACCOUNT_RENT_LAMPORTS)} to open the payout address’s ${token.symbol} account`
+      : `the network fee`
+    refuse(
+      `Sending this needs about ${sol(needed)} SOL: ${why}. You hold ${sol(lamports)} SOL. Add a little SOL and try again.`
+    )
+  }
+}
+
 async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   const units = orderUnits(expectation)
   await assertDepositIsNotTokenAccount(expectation.depositAddress, tokenOf(expectation))
@@ -448,6 +513,7 @@ export const solanaDeposit: DepositChain = {
   isDepositAddress: isAddress,
   usdcBalance,
   build,
+  assertCanPay,
   assertSafe,
   submit,
 }

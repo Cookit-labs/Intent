@@ -12,6 +12,18 @@ const NEAR = ['NEAR']
  */
 export const nearVenues: Venue[] = [
   {
+    id: 'weave-near',
+    name: 'Weave',
+    family: 'near',
+    category: 'offramp',
+    chains: ['NEAR'],
+    bestFor: 'Cashing out USDC to a bank or mobile money in naira, shillings and more',
+    url: 'https://paywithweave.com',
+    integration: 'executes',
+    capability:
+      'Cash out USDC to a bank or mobile money account in Nigeria, Kenya, Uganda or Tanzania. Weave bridges the USDC to Base and pays out through Paycrest, and the receipt shows what it actually paid. Every deposit is checked before you sign.',
+  },
+  {
     id: '1click',
     family: 'near',
     name: 'NEAR Intents 1Click',

@@ -250,6 +250,19 @@ export const venues: Venue[] = [
   // A payout service, not a trading venue: the agents' venue list drops the
   // off-ramp category, and a payout is a follow-on the user fills in a form.
   {
+    id: 'weave-stellar',
+    name: 'Weave',
+    family: 'stellar' as const,
+    category: 'offramp',
+    chains: ['Stellar'],
+    bestFor: 'Cashing out USDC to a bank or mobile money in naira, shillings and more',
+    url: 'https://paywithweave.com',
+    integration: 'executes',
+    networks: ['mainnet'],
+    capability:
+      'Cash out USDC to a bank or mobile money account in Nigeria, Kenya, Uganda or Tanzania. Weave bridges the USDC to Base and pays out through Paycrest, and the receipt shows what it actually paid. Every deposit is checked before you sign.',
+  },
+  {
     id: 'linq',
     name: 'Linq',
     family: 'stellar' as const,
