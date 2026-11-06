@@ -668,6 +668,7 @@ describe('module', () => {
   it('adds 1Click once the secret that protects its deposits is there', () => {
     expect(buildSolanaVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
       'jupiter',
+      'raydium',
       '1click-solana',
       'jupiter-lend',
       'kamino',
@@ -684,6 +685,7 @@ describe('module', () => {
   it('offers the venues that need no key', () => {
     expect(buildSolanaVenues({}).map((v) => v.id)).toEqual([
       'jupiter',
+      'raydium',
       'jupiter-lend',
       'kamino',
       'kamino-limit',
@@ -697,8 +699,13 @@ describe('module', () => {
   })
 
   it('lets only the swaps land their own transactions', () => {
-    const [swap, oneClick, lend, kamino] = buildSolanaVenues({ AUTH_SECRET: 'x'.repeat(48) })
+    const [swap, raydium, oneClick, lend, kamino] = buildSolanaVenues({
+      AUTH_SECRET: 'x'.repeat(48),
+    })
     expect(swap?.submit).toBeTypeOf('function')
+    // Raydium has no endpoint that sends, so its swap lands through the module's own submit.
+    expect(raydium?.id).toBe('raydium')
+    expect(raydium?.submit).toBeUndefined()
     expect(oneClick?.submit).toBeTypeOf('function')
     expect(lend?.submit).toBeUndefined()
     expect(kamino?.submit).toBeUndefined()
@@ -741,8 +748,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(21)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(21)
+    expect(solanaVenues).toHaveLength(22)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(22)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])
