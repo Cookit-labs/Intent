@@ -20,6 +20,8 @@ export interface CashoutOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** What a paid order actually paid out, which can be less than the estimate. */
+  paidDest?: string | undefined
   institutionName: string
   accountName: string
   accountMask: string

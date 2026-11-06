@@ -77,6 +77,8 @@ export interface WeaveOrder {
 export interface WeaveOrderState {
   id: string
   status: string
+  /** What the order paid out, in the payout currency, as Weave records it. Present once known. */
+  destAmount?: number | undefined
 }
 
 export interface WeaveClientOptions {
@@ -144,7 +146,11 @@ const Placed = z.object({
   nextAction: Deposit.nullish(),
 })
 
-const OrderState = z.object({ id: z.string().min(1).optional(), status: z.string().min(1) })
+const OrderState = z.object({
+  id: z.string().min(1).optional(),
+  status: z.string().min(1),
+  destAmount: z.number().finite().nonnegative().optional(),
+})
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -383,7 +389,11 @@ export function createWeaveClient(options: WeaveClientOptions = {}): WeaveClient
       if (!parsed.success || (parsed.data.id !== undefined && parsed.data.id !== id)) {
         return { ok: false, code: 'unexpected', message: UNREADABLE }
       }
-      return { ok: true, value: { id, status: parsed.data.status } }
+      const { status, destAmount } = parsed.data
+      return {
+        ok: true,
+        value: { id, status, ...(destAmount !== undefined ? { destAmount } : {}) },
+      }
     },
   }
 }
