@@ -129,7 +129,7 @@ function PayoutProgress({
   onRetry: () => void
 }): JSX.Element {
   const done = order.status === 'paid'
-  // What Weave says it paid out. Fees and the payout rate can leave it below the estimate.
+  // What Weave says reached the account, after every fee. Only this is shown once paid.
   const paid = done ? order.paidDest : undefined
   const running = shouldPoll(order.status)
   const bad = !done && !running
@@ -220,19 +220,15 @@ function PayoutProgress({
         <ArrowRight className="text-muted-foreground h-4 w-4" />
         <span className="flex items-center gap-2 text-lg font-semibold">
           {bank !== undefined ? <BankMark bank={bank} className="h-6 w-6" /> : null}
-          {formatPayout(paid ?? order.estimatedDest, order.currency)}
+          {paid !== undefined
+            ? formatPayout(paid, order.currency)
+            : done
+              ? 'Confirming the amount paid…'
+              : `≈ ${formatPayout(order.estimatedDest, order.currency)}`}
         </span>
       </div>
 
       <dl className="divide-bubble-agent-border flex flex-col divide-y text-sm dark:divide-white/[0.07]">
-        {paid !== undefined && Number(paid) !== Number(order.estimatedDest) ? (
-          <div className="flex items-center justify-between gap-4 py-2">
-            <dt className="text-muted-foreground">Estimated when ordered</dt>
-            <dd className="text-right font-medium tabular-nums">
-              {formatPayout(order.estimatedDest, order.currency)}
-            </dd>
-          </div>
-        ) : null}
         <div className="flex items-center justify-between gap-4 py-2">
           <dt className="text-muted-foreground">Account holder</dt>
           <dd className="text-right font-medium">

@@ -52,6 +52,7 @@ describe('which venues are on mainnet at launch', () => {
         'soroswap-aggregator',
         'stellar-pools',
         'stellarx',
+        'weave-stellar',
       ].sort()
     )
   })
@@ -61,7 +62,7 @@ describe('which venues are on mainnet at launch', () => {
     // service behind it. Phoenix has no standing testnet deployment at all
     // (see contract-registry.ts's phoenixFactory). Both are deliberately
     // absent there rather than listed and unusable.
-    const mainnetOnly = new Set(['linq', 'phoenix'])
+    const mainnetOnly = new Set(['linq', 'phoenix', 'weave-stellar'])
     for (const v of stellar) {
       expect(isVenueOn(v, 'testnet'), `${v.id} on testnet`).toBe(!mainnetOnly.has(v.id))
     }
@@ -219,7 +220,7 @@ describe('what the Apps page may call available, decided on the server', () => {
 
   it('has every Stellar venue on testnet, except the ones that have no testnet', () => {
     const ids = availableVenueIds('testnet', {})
-    const mainnetOnly = new Set(['linq', 'phoenix'])
+    const mainnetOnly = new Set(['linq', 'phoenix', 'weave-stellar'])
     for (const v of stellar) expect(ids.has(v.id), v.id).toBe(!mainnetOnly.has(v.id))
   })
 
