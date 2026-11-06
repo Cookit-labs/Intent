@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { BETA_NOTICE_SEEN } from './beta-notice-seen'
+
 /**
  * Agents talking, in the chat, with a fake wallet. The race route is stubbed
  * with the frames a real race sends, so no agent, price or chain is needed.
  */
-test.use({ storageState: { cookies: [], origins: [] } })
+// No cookie, so no wallet is remembered, but the beta notice is seen, or it covers the chat.
+test.use({ storageState: { cookies: [], origins: BETA_NOTICE_SEEN } })
 // The chat page takes over a minute on a dev server's first hit.
 test.beforeEach(() => test.slow())
 
