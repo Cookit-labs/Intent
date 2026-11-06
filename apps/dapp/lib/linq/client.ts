@@ -28,7 +28,18 @@ export type LinqResult<T> = { ok: true; value: T } | LinqFailure
 
 export type LinqCoin = 'xlm' | 'usdc'
 
+/**
+ * Where a Linq order takes its deposit. Linq's dashboard docs list `sui` (USDSUI, USDC) and
+ * `stellar` (USDC, XLM) among others; only these two are ordered from here.
+ */
+export type LinqChain = 'stellar' | 'sui'
+
+/** A Sui account or object address: 0x and 64 hex digits. */
+const SUI_ADDRESS = /^0x[0-9a-fA-F]{64}$/
+
 export interface LinqOrderInput {
+  /** Stellar unless said. A Sui order is USDC only, sent from the user's own wallet. */
+  chain?: LinqChain
   /**
    * The asset the user deposits. XLM is ordered by the naira the recipient
    * should get; USDC by the amount actually in hand, because it follows a swap
@@ -269,11 +280,15 @@ export function createLinqClient(options: LinqClientOptions = {}): {
         return { ok: false, code: 'rejected', message: 'The payout amount is missing.' }
       }
 
+      const chain: LinqChain = input.chain ?? 'stellar'
+      if (chain === 'sui' && input.coin !== 'usdc') {
+        return { ok: false, code: 'rejected', message: 'A Sui payout is ordered in USDC only.' }
+      }
       const res = await call('/b2b/offramp', {
         method: 'POST',
         body: {
           ...amount,
-          chain: 'stellar',
+          chain,
           coin: input.coin,
           currency: 'NGN',
           manualDeposit: true,
@@ -294,10 +309,15 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       const body = res.value
       const address = str(body['walletAddress'])
       const amountCoin = num(body['amountStableCoin'])
+      // On Sui the order must also be for exactly the USDC asked: that is what the wallet signs.
+      const validAddress =
+        chain === 'sui' ? SUI_ADDRESS.test(address) : StrKey.isValidEd25519PublicKey(address)
+      const exactAmount = chain !== 'sui' || amountCoin === input.amountStableCoin
       const matches =
-        str(body['chain']).toLowerCase() === 'stellar' &&
+        str(body['chain']).toLowerCase() === chain &&
         str(body['coin']).toLowerCase() === input.coin &&
-        StrKey.isValidEd25519PublicKey(address) &&
+        validAddress &&
+        exactAmount &&
         amountCoin > 0 &&
         str(body['id']) !== ''
       if (!matches) {
@@ -358,3 +378,5 @@ export function verifyLinqSignature(
   const given = Buffer.from(header)
   return given.length === expected.length && timingSafeEqual(given, expected)
 }
+
+export type LinqClient = ReturnType<typeof createLinqClient>

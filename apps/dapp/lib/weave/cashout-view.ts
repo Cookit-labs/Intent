@@ -20,6 +20,8 @@ export interface CashoutOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** The provider locked `estimatedDest` and pays exactly that, so it is no estimate. */
+  exactDest?: boolean | undefined
   /** What a paid order actually paid out, which can be less than the estimate. */
   paidDest?: string | undefined
   institutionName: string

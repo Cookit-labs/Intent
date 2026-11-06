@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { ChainActionRefused } from '../../../../../../lib/chains/types'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
 import { reportError } from '../../../../../../lib/server/report'
+import { createLinqClient } from '../../../../../../lib/linq/client'
 import { createWeaveClient } from '../../../../../../lib/weave/client'
 import { depositChain } from '../../../../../../lib/weave/deposit'
 import { chainRefusal, guardCashout } from '../../../../../../lib/weave/guard'
@@ -43,7 +44,7 @@ export async function POST(
     return NextResponse.json({ error: 'send_started', message: SEND_STARTED }, { status: 409 })
   }
 
-  const refused = payRefusal(await syncOrder(repo, row, createWeaveClient()))
+  const refused = payRefusal(await syncOrder(repo, row, createWeaveClient(), createLinqClient()))
   if (refused !== undefined) {
     return NextResponse.json(
       { error: refused.code, message: `${refused.reason} Nothing was signed or sent.` },
