@@ -627,6 +627,40 @@ describe('submit', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  /** What Phantom adds before signing: a Lighthouse assertion on the signer's own account. */
+  const lighthouse: Instruction = {
+    programAddress: 'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95',
+    accounts: [{ address: ACCOUNT, role: AccountRole.READONLY }],
+    data: Uint8Array.from([5, 0, 1]),
+  }
+
+  it('sends a deposit Phantom guarded, exactly as the wallet signed it', async () => {
+    const fetchMock = stubRpc()
+    const guarded = signed(compile([createAta(), transfer(), lighthouse]))
+    const result = await solanaDeposit.submit(
+      { family: 'solana', signedTransaction: guarded },
+      EXPECTATION
+    )
+    expect(result.ok).toBe(true)
+    const sent = fetchMock.mock.calls
+      .map(
+        ([, init]) =>
+          JSON.parse(String((init as RequestInit).body)) as { method: string; params: unknown[] }
+      )
+      .find((call) => call.method === 'sendTransaction')
+    expect(sent?.params[0]).toBe(guarded)
+  })
+
+  it('still refuses any other program a wallet adds beside the guard', async () => {
+    const fetchMock = stubRpc()
+    const other: Instruction = { programAddress: OTHER, accounts: [], data: Uint8Array.from([1]) }
+    const tampered = signed(compile([createAta(), transfer(), lighthouse, other]))
+    await expect(
+      solanaDeposit.submit({ family: 'solana', signedTransaction: tampered }, EXPECTATION)
+    ).rejects.toThrow(/does not need/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('refuses another family without sending', async () => {
     const fetchMock = stubRpc()
     const result = await solanaDeposit.submit({ family: 'near', hashes: ['x'] }, EXPECTATION)
