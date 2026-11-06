@@ -25,6 +25,18 @@ export const solanaVenues: Venue[] = [
       'Swaps USDC, USDT, SOL, JitoSOL, mSOL, sSOL and ONyc through Jupiter’s on-chain router. Refuses thin liquidity, and checks every transaction before you sign.',
   },
   {
+    id: 'raydium',
+    family: 'solana',
+    name: 'Raydium',
+    category: 'swap',
+    chains: ['Solana'],
+    bestFor: 'Swapping straight against Raydium’s own pools',
+    url: 'https://raydium.io/swap',
+    integration: 'executes',
+    capability:
+      'Swaps USDC, USDT, SOL, JitoSOL, mSOL, sSOL and ONyc through Raydium’s router, which races Jupiter for the better price. Checks that every transaction spends exactly the amount quoted and accepts no less than the quote’s floor before you sign.',
+  },
+  {
     // Listed, as Lulo is: whether this runs depends on a secret this client-safe file can't read.
     id: '1click-solana',
     family: 'solana',

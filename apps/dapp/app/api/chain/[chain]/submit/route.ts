@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { chainModule } from '../../../../../lib/chains/registry'
+import { withoutWalletGuards } from '../../../../../lib/chains/solana/wallet-guards'
 import { ChainActionRefused, type SigningPayload } from '../../../../../lib/chains/types'
 import { logExecution } from '../../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
@@ -72,7 +73,8 @@ export async function POST(
   if (signed.family === 'solana' || signed.family === 'sui') {
     const payload: SigningPayload =
       signed.family === 'solana'
-        ? { family: 'solana', transaction: signed.signedTransaction }
+        ? // A wallet's own guard instructions aren't this app's to check; the rest still is.
+          { family: 'solana', transaction: withoutWalletGuards(signed.signedTransaction) }
         : { family: 'sui', transaction: signed.transaction }
     try {
       venue.assertSafe(payload, account, context)

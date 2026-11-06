@@ -97,6 +97,19 @@ export const JUPITER_SWAP_POLICY: SolanaVenuePolicy = {
   mayWrapSol: true,
 }
 
+/**
+ * Raydium's AMM routing program, https://docs.raydium.io/reference/program-addresses. Its source and
+ * IDL are not public, so `assertRaydiumRoute` reads the three instructions its Trade API builds.
+ */
+export const RAYDIUM_ROUTE_PROGRAM = 'routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS'
+
+/** Raydium wraps and unwraps SOL inside its router, which `assertRaydiumRoute` bounds. */
+export const RAYDIUM_SWAP_POLICY: SolanaVenuePolicy = {
+  venueName: 'Raydium',
+  programs: { [RAYDIUM_ROUTE_PROGRAM]: {} },
+  mayWrapSol: true,
+}
+
 export const JUPITER_LEND_POLICY: SolanaVenuePolicy = {
   venueName: 'Jupiter Lend',
   programs: { [JUPITER_LEND_PROGRAM]: { discriminators: [DEPOSIT_DISCRIMINATOR] } },

@@ -113,6 +113,56 @@ export function chainNamesOf(token: string): string[] {
   return [...TOKEN_OF_CHAIN_NAME].filter(([, symbol]) => symbol === wanted).map(([name]) => name)
 }
 
+const FIGURE = String.raw`(\d[\d,]*(?:\.\d+)?|\.\d+)`
+/** "$5 worth of sol", "$5 of sol", "5 dollars worth of sol" and "5 usd of sol": a figure in dollars. */
+const WORTH_OF = new RegExp(
+  String.raw`(^|[^\w$.,])(?:\$\s?${FIGURE}|${FIGURE}\s?(?:usd|dollars?|bucks))\s+(worth\s+of|of)\s+(?:my\s+|the\s+)?([a-z][a-z0-9.+]{0,11})(?![a-z0-9])`,
+  'gi'
+)
+/** After a bare "of", only a token counts: "$110 of profit" is no amount of anything. */
+const TOKEN_AFTER_OF = new Set([
+  'sol',
+  'sui',
+  'near',
+  'avax',
+  'mon',
+  'xlm',
+  'usdc',
+  'usdt',
+  'eth',
+  'btc',
+  'wbtc',
+  'wal',
+  'deep',
+  'jup',
+  'bonk',
+  'jitosol',
+  'msol',
+])
+
+/**
+ * "$0.8 worth of sol" as "$0.8 sol", the one shape the strict parsers read as dollars, so no model
+ * is left to decide between dollars and a count. Nothing else in the text changes.
+ */
+export function dollarsWorthOf(text: string): string {
+  return text.replace(
+    WORTH_OF,
+    (
+      whole,
+      lead: string,
+      dollar: string | undefined,
+      word: string | undefined,
+      link: string,
+      token: string
+    ) => {
+      const isToken =
+        TOKEN_AFTER_OF.has(token.toLowerCase()) || TOKEN_OF_CHAIN_NAME.has(token.toLowerCase())
+      if (!/^worth/i.test(link) && !isToken) return whole
+      return `${lead}$${dollar ?? word} ${token}`
+    }
+  )
+}
+
 /** Plain decimal text: no separators, one leading zero on ".5" and none on "05". */
 export function amountOf(text: string): string {
   const plain = text.replace(/,/g, '')

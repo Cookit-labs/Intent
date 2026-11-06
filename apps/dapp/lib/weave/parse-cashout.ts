@@ -1,4 +1,4 @@
-import { chainTokenWord } from '../chains/parse-action'
+import { chainTokenWord, dollarsWorthOf } from '../chains/parse-action'
 import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
 import { closedCashoutReply, isCashoutChain } from './types'
 
@@ -176,7 +176,7 @@ function readAmount(text: string): string | undefined {
  * also mean other things, so they count only with a fiat destination.
  */
 export function parseCashout(text: string): CashoutRead | null {
-  const clean = text
+  const clean = dollarsWorthOf(text)
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ')
