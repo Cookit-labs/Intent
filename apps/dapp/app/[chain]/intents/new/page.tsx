@@ -2,26 +2,14 @@ import { parseChainSegment } from '@intent/config'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 
-import { IntentChat } from '../../../../components/intents/intent-chat'
-import { intentIntro } from '../../../../lib/intent-intro-copy'
-
 export const metadata: Metadata = { title: 'New intent' }
 
+/** The chat is drawn by `ChatHost` in the chain layout, under this page's own heading. */
 export default async function NewIntentPage({
   params,
 }: {
   params: Promise<{ chain: string }>
-}): Promise<JSX.Element> {
-  const route = parseChainSegment((await params).chain)
-  if (route === undefined) notFound()
-
-  return (
-    <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-10">
-      <div className="mb-6">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Submit an intent</h1>
-        <p className="text-muted-foreground mt-1 text-sm">{intentIntro(route.slug)}</p>
-      </div>
-      <IntentChat />
-    </div>
-  )
+}): Promise<null> {
+  if (parseChainSegment((await params).chain) === undefined) notFound()
+  return null
 }

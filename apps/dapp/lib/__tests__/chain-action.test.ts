@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { looksLikeChainAction, parseChainAction } from '../chains/parse-action'
+import { chainTokenWord, looksLikeChainAction, parseChainAction } from '../chains/parse-action'
 import { prepareChainAction } from '../chains/prepare'
 import { chainModule } from '../chains/registry'
 import {
@@ -28,6 +28,24 @@ describe('parseChainAction', () => {
     })
   })
 
+  it('writes a bare decimal the way the build route and base units accept it', () => {
+    const amount = parseChainAction('swap .5 USDC to SOL')?.amount as string
+    expect(amount).toBe('0.5')
+    expect(toBaseUnits(amount, 6)).toBe('500000')
+    expect(parseChainAction('supply $.25 USDC')?.amount).toBe('0.25')
+    expect(parseChainAction('stake .1 NEAR')?.amount).toBe('0.1')
+  })
+
+  it.each([
+    ['5', '5'],
+    ['0.5', '0.5'],
+    ['1,000', '1000'],
+    ['1,000.5', '1000.5'],
+    ['$20', '20'],
+  ])('keeps %s as it read before', (typed, amount) => {
+    expect(parseChainAction(`swap ${typed} USDC to SOL`)?.amount).toBe(amount)
+  })
+
   it('reads a supply and a stake', () => {
     expect(parseChainAction('supply 100 USDC on Kamino')).toMatchObject({
       kind: 'supply',
@@ -39,6 +57,42 @@ describe('parseChainAction', () => {
       tokenIn: 'NEAR',
       venue: 'rNEAR',
     })
+  })
+
+  it.each([
+    '1,5',
+    '0,5',
+    '1,50',
+    '10,00',
+    '1,0000',
+    ',5',
+    '1,,000',
+    '1000,000',
+    '0,500',
+    '0,050',
+    '0,005',
+    '00,500',
+    '01,000',
+  ])('reads no amount from %s, on any kind', (amount) => {
+    expect(parseChainAction(`send ${amount} USDC to bob.near`)).toBeNull()
+    expect(parseChainAction(`swap ${amount} USDC to SOL`)).toBeNull()
+    expect(parseChainAction(`supply ${amount} USDC`)).toBeNull()
+    expect(parseChainAction(`stake ${amount} SUI`)).toBeNull()
+  })
+
+  it.each([
+    ['1,000', '1000'],
+    ['1,000.5', '1000.5'],
+    ['1,500', '1500'],
+    ['12,345,678', '12345678'],
+    ['.5', '0.5'],
+    ['05', '5'],
+    ['007.5', '7.5'],
+    ['0.5', '0.5'],
+    ['0', '0'],
+  ])('reads %s as %s', (typed, amount) => {
+    expect(parseChainAction(`send ${typed} USDC to bob.near`)?.amount).toBe(amount)
+    expect(parseChainAction(`stake ${typed} SUI`)?.amount).toBe(amount)
   })
 
   it('does not guess at anything looser', () => {
@@ -115,30 +169,30 @@ describe('prepareChainAction', () => {
   const swap = { kind: 'swap', amount: '10', tokenIn: 'usdc', tokenOut: 'SOL' } as const
 
   it('prepares a valid action', async () => {
-    await expect(prepareChainAction(moduleWith(), swap, 'acct', {})).resolves.toBe(prepared)
+    await expect(prepareChainAction(moduleWith(), swap, 'acct')).resolves.toBe(prepared)
   })
 
   it('refuses a token it does not know', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, tokenOut: 'SCAM' }, 'acct', {})
+      prepareChainAction(moduleWith(), { ...swap, tokenOut: 'SCAM' }, 'acct')
     ).rejects.toThrow(/verified token/)
   })
 
-  it('refuses a trade it cannot price, even when the Stellar default is testnet', async () => {
+  it('builds a trade it cannot price, since nothing here depends on a dollar value', async () => {
     await expect(
-      prepareChainAction(moduleWith({ priceUsd: async () => undefined }), swap, 'acct', {})
-    ).rejects.toThrow(/could not be valued/)
+      prepareChainAction(moduleWith({ priceUsd: async () => undefined }), swap, 'acct')
+    ).resolves.toBeDefined()
   })
 
-  it('refuses a trade over the cap', async () => {
+  it('takes a trade of any size', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, amount: '501' }, 'acct', {})
-    ).rejects.toThrow(/caps each trade/)
+      prepareChainAction(moduleWith(), { ...swap, amount: '5000000' }, 'acct')
+    ).resolves.toBeDefined()
   })
 
   it('refuses a venue that cannot do this', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, venue: 'nope' }, 'acct', {})
+      prepareChainAction(moduleWith(), { ...swap, venue: 'nope' }, 'acct')
     ).rejects.toThrow(/can't swap here/)
   })
 
@@ -146,8 +200,53 @@ describe('prepareChainAction', () => {
     const unsafe = (): void => {
       throw new ChainActionRefused('unexpected program')
     }
-    await expect(prepareChainAction(moduleWith({}, unsafe), swap, 'acct', {})).rejects.toThrow(
+    await expect(prepareChainAction(moduleWith({}, unsafe), swap, 'acct')).rejects.toThrow(
       /unexpected program/
     )
+  })
+})
+
+describe('chainTokenWord', () => {
+  it.each([
+    ['solana', 'SOL'],
+    ['Solana', 'SOL'],
+    ['SOLANA', 'SOL'],
+    ['avalanche', 'AVAX'],
+    ['AVALANCHE', 'AVAX'],
+    ['monad', 'MON'],
+    ['Monad', 'MON'],
+  ])('reads %s as %s', (word, token) => {
+    expect(chainTokenWord(word)).toBe(token)
+  })
+
+  it.each(['solanax', 'xsolana', 'solana ', 'sol', 'SOL', 'sui', 'near', 'usdc', 'USDC', ''])(
+    'leaves %j as it is',
+    (word) => {
+      expect(chainTokenWord(word)).toBe(word)
+    }
+  )
+
+  it.each(['constructor', 'toString', '__proto__'])('finds nothing inherited in %s', (word) => {
+    expect(chainTokenWord(word)).toBe(word)
+  })
+})
+
+describe('parseChainAction on a chain name', () => {
+  it('reads it as the token on every kind, in or out', () => {
+    expect(parseChainAction('swap 1 avalanche to usdc')).toMatchObject({
+      tokenIn: 'AVAX',
+      tokenOut: 'usdc',
+    })
+    expect(parseChainAction('swap 1 monad to usdc')).toMatchObject({ tokenIn: 'MON' })
+    expect(parseChainAction('swap 1 usdc to Solana')).toMatchObject({ tokenOut: 'SOL' })
+    expect(parseChainAction('supply 1 solana')).toMatchObject({ kind: 'supply', tokenIn: 'SOL' })
+    expect(parseChainAction('stake 1 solana')).toMatchObject({ kind: 'stake', tokenIn: 'SOL' })
+  })
+
+  it('leaves a venue that names a chain as it is', () => {
+    expect(parseChainAction('swap 1 sol to usdc on solana')).toMatchObject({
+      tokenIn: 'sol',
+      venue: 'solana',
+    })
   })
 })

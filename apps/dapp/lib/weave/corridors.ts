@@ -1,4 +1,4 @@
-import { CASHOUT_CHAINS, type CashoutChain } from './types'
+import { CASHOUT_CHAINS, closedCashoutReply, type CashoutChain } from './types'
 
 export type CashoutCurrency = 'NGN' | 'KES' | 'UGX' | 'TZS'
 
@@ -23,10 +23,11 @@ export function isCashoutCurrency(value: string): value is CashoutCurrency {
 type Env = Record<string, string | undefined>
 
 /**
- * The currencies a payout can go to right now. Naira only unless the deployment
- * says otherwise, because no real payout has been tested for the others. A list
- * that names nothing known opens nothing: someone set it on purpose, and falling
- * back would pay out where they did not ask.
+ * The currencies an order may name right now. Naira only unless the deployment says
+ * otherwise, the one currency Weave's own list names. Weave has not paid out a real
+ * order in this app in any of them, naira included. A list that names nothing known
+ * opens nothing: someone set it on purpose, and falling back would pay out where they
+ * did not ask.
  */
 export function liveCurrencies(env: Env = process.env): CashoutCurrency[] {
   const raw = env['WEAVE_CASHOUT_CURRENCIES']?.trim()
@@ -44,6 +45,7 @@ export function cashOutPrompt(chain: string, env: Env = process.env): string {
   const weave = onWeave ? liveCurrencies(env) : []
   const stellar = chain === 'stellar'
   if (!stellar && !isCashoutChainName(chain)) return ''
+  if (closedCashoutReply(chain) !== undefined) return ''
 
   const codes = stellar ? ['NGN' as const, ...weave.filter((code) => code !== 'NGN')] : weave
   if (codes.length === 0) return ''
@@ -61,6 +63,9 @@ export function cashOutPrompt(chain: string, env: Env = process.env): string {
     'ask which currency they want and list these. If they named one of them, do not ask again.',
     'If they ask for another currency, say it is not available and list these.',
     stellar ? 'The asset is USDC, or XLM when the payout is in naira.' : 'The asset is USDC.',
+    stellar
+      ? 'Weave, which pays every currency here but naira, has not paid out a real order in this app yet. If asked whether this has worked, say so.'
+      : 'Weave, which pays these, has not paid out a real order in this app yet. If asked whether this has worked, say so.',
   ].join(' ')
 }
 

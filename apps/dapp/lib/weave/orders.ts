@@ -371,8 +371,7 @@ export async function getWeaveOrderRepo(): Promise<WeaveOrderRepo> {
   return repo
 }
 
-/** Above this, an order is refused rather than offered. */
-export const MAX_COST_PERCENT = 5
+export { MAX_COST_PERCENT } from './types'
 
 function canonicalDecimal(text: string): string | undefined {
   const match = /^(\d+)(?:\.(\d+))?$/.exec(text)

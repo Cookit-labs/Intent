@@ -7,16 +7,21 @@ import {
   monadDescriptor,
 } from '@intent/config'
 import type { ChainDescriptor } from '@intent/types'
-import { BaseError, UserRejectedRequestError, type Address, type Hex } from 'viem'
+import { type Address, type Hex } from 'viem'
 import { useAccount, useBalance, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
-import { getAccount, sendTransaction, switchChain } from 'wagmi/actions'
+import {
+  getAccount,
+  sendTransaction,
+  signTypedData,
+  switchChain,
+  waitForTransactionReceipt,
+} from 'wagmi/actions'
 import { avalanche, monad } from 'viem/chains'
 
 import type { ChainAdapter, ChainWallet } from '../chain-adapter'
-import type { SignedOutcome, SigningPayload } from '../chains/types'
+import { signTypedOn, walletFailure, type TypedWallet } from '../chains/evm/sign-typed'
+import { withArticle, type SignedOutcome, type SigningPayload } from '../chains/types'
 import { arcTestnet, wagmiConfig } from '../wagmi.config'
-import { isUserRejection } from '../wallet/connector'
-import { walletErrorMessage } from '../wallet/error-message'
 
 /**
  * An EVM chain's wallet, behind the shared adapter interface. wagmi holds one
@@ -93,41 +98,73 @@ function evmAdapter(
   }
 }
 
-async function signAvalanche(payload: SigningPayload): Promise<SignedOutcome> {
-  if (payload.family !== 'evm') {
-    return { ok: false, reason: 'wallet_error', detail: 'That is not an Avalanche transaction.' }
-  }
-  if (payload.chainId !== avalanche.id) {
-    return { ok: false, reason: 'wallet_error', detail: 'That transaction is not for Avalanche.' }
-  }
-  const { status, chainId: walletChain } = getAccount(wagmiConfig)
-  if (status !== 'connected') {
-    return { ok: false, reason: 'wallet_error', detail: 'Reconnect your wallet and try again.' }
-  }
-  try {
-    if (walletChain !== avalanche.id) {
-      await switchChain(wagmiConfig, { chainId: avalanche.id })
+/** wagmi's actions, as the pure typed-signing helper asks for them. */
+const typedWallet: TypedWallet = {
+  account: () => getAccount(wagmiConfig),
+  switchChain: (chainId) => switchChain(wagmiConfig, { chainId: chainId as 43114 | 143 }),
+  signTypedData: (args) => signTypedData(wagmiConfig, args),
+}
+
+function signOn(name: string, chainId: 43114 | 143): NonNullable<ChainAdapter['signPrepared']> {
+  return async (payload: SigningPayload): Promise<SignedOutcome> => {
+    if (payload.family === 'evm-typed') return signTypedOn(name, chainId, payload, typedWallet)
+    if (payload.family !== 'evm') {
+      return {
+        ok: false,
+        reason: 'wallet_error',
+        detail: `That is not ${withArticle(name)} transaction.`,
+      }
     }
-    const hash = await sendTransaction(wagmiConfig, {
-      to: payload.to as Address,
-      data: payload.data as Hex,
-      value: BigInt(0),
-      chainId: avalanche.id,
-    })
-    return { ok: true, signed: { family: 'evm', hash } }
-  } catch (e) {
-    // viem's message goes on to list the whole request, so its short one is what is read.
-    const detail = e instanceof BaseError ? e.shortMessage : walletErrorMessage(e)
-    const declined =
-      (e instanceof BaseError &&
-        e.walk((cause) => cause instanceof UserRejectedRequestError) !== null) ||
-      isUserRejection(detail)
-    return declined
-      ? { ok: false, reason: 'rejected' }
-      : { ok: false, reason: 'wallet_error', detail }
+    if (payload.chainId !== chainId) {
+      return { ok: false, reason: 'wallet_error', detail: `That transaction is not for ${name}.` }
+    }
+    // BigInt would also read hex or an empty string, and this is real money.
+    if (!/^\d+$/.test(payload.value)) {
+      return { ok: false, reason: 'wallet_error', detail: 'That transaction’s value is not valid.' }
+    }
+    const { status, chainId: walletChain } = getAccount(wagmiConfig)
+    if (status !== 'connected') {
+      return { ok: false, reason: 'wallet_error', detail: 'Reconnect your wallet and try again.' }
+    }
+    try {
+      if (walletChain !== chainId) {
+        await switchChain(wagmiConfig, { chainId })
+      }
+      if (payload.approval !== undefined) {
+        const approval = await sendTransaction(wagmiConfig, {
+          to: payload.approval.to as Address,
+          data: payload.approval.data as Hex,
+          chainId,
+        })
+        const { status: approved } = await waitForTransactionReceipt(wagmiConfig, {
+          hash: approval,
+          chainId,
+        })
+        if (approved !== 'success') {
+          return {
+            ok: false,
+            reason: 'wallet_error',
+            detail: `The approval failed on ${name}, so the next step was not sent.`,
+          }
+        }
+      }
+      const hash = await sendTransaction(wagmiConfig, {
+        to: payload.to as Address,
+        data: payload.data as Hex,
+        value: BigInt(payload.value),
+        chainId,
+      })
+      return { ok: true, signed: { family: 'evm', hash } }
+    } catch (e) {
+      return walletFailure(e)
+    }
   }
 }
 
 export const arcAdapter = evmAdapter(arcDescriptor, arcTestnet.id)
-export const avalancheAdapter = evmAdapter(avalancheDescriptor, avalanche.id, signAvalanche)
-export const monadAdapter = evmAdapter(monadDescriptor, monad.id)
+export const avalancheAdapter = evmAdapter(
+  avalancheDescriptor,
+  avalanche.id,
+  signOn('Avalanche', avalanche.id)
+)
+export const monadAdapter = evmAdapter(monadDescriptor, monad.id, signOn('Monad', monad.id))

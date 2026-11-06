@@ -37,7 +37,7 @@ const HOLDER = 'JANE ADEYEMI'
 const REQUESTER = 'wallet:alice.near'
 
 const body = {
-  chain: 'near',
+  chain: 'sui',
   account: 'alice.near',
   amount: '25.5',
   currency: 'KES',
@@ -57,14 +57,14 @@ function post(over: Record<string, unknown> = {}, headers: Record<string, string
 const placed = {
   id: 'ord_1',
   status: 'awaiting_deposit',
-  sourceAssetKey: 'crypto:NEAR:USDC',
+  sourceAssetKey: 'crypto:SUI:USDC',
   destAssetKey: 'fiat:KES',
   deposit: {
     address: 'weave.near',
     memo: undefined,
     amount: '25.5',
     token: 'USDC',
-    chain: 'NEAR',
+    chain: 'SUI',
     expiresAt: '2026-11-04T13:00:00.000Z',
   },
 }
@@ -114,7 +114,6 @@ beforeEach(() => {
     isDepositAddress: (a: string) => a.endsWith('.near'),
   }
   vi.stubEnv('WEAVE_CASHOUT_CURRENCIES', 'NGN,KES')
-  vi.stubEnv('MAINNET_MAX_TRADE_USD', '')
 })
 
 describe('checks before anything is asked of Weave', () => {
@@ -156,6 +155,15 @@ describe('checks before anything is asked of Weave', () => {
     await refused(post({ chain: 'stellar', currency: 'NGN' }), 400)
   })
 
+  it('refuses NEAR, which Weave cannot make an order for, in words that say what to do', async () => {
+    const json = await refused(post({ chain: 'near' }), 422)
+    expect(json['error']).toBe('chain_closed')
+    expect(json['message']).toMatch(/move your USDC to Solana, Avalanche or Sui/)
+    expect(json['message']).toMatch(/Nothing was signed or sent\.$/)
+    expect(called(state.weave['quote'])).not.toHaveBeenCalled()
+    expect(called(state.weave['institutions'])).not.toHaveBeenCalled()
+  })
+
   it('refuses a Stellar cash-out off mainnet', async () => {
     state.mainnet = false
     await refused(post({ chain: 'stellar', currency: 'KES' }), 403)
@@ -185,7 +193,7 @@ describe('checks before anything is asked of Weave', () => {
 describe('a retry of the same attempt', () => {
   const existing = {
     id: KEY,
-    chain: 'near',
+    chain: 'sui',
     status: 'waiting',
     providerStatus: 'awaiting_deposit',
     accountIdentifier: DIGITS,
@@ -251,32 +259,17 @@ describe('a retry of the same attempt', () => {
   })
 })
 
-describe('the cap', () => {
-  it('refuses above the cap in a plain sentence, asking Weave nothing', async () => {
-    const res = await POST(post({ amount: '501' }))
-    expect(res.status).toBe(400)
-    const { message } = await res.json()
-    expect(message).toContain('$500')
-    expect(message).toContain('$501.00')
-    expect(message).not.toContain('MAINNET_MAX_TRADE_USD')
-    expect(called(state.weave['quote'])).not.toHaveBeenCalled()
-  })
-
-  it('reads the cap as mainnet whatever the page is on', async () => {
-    state.mainnet = false
-    expect((await POST(post({ amount: '501' }))).status).toBe(400)
-  })
-
-  it('allows exactly the cap', async () => {
+describe('the size of a cash-out', () => {
+  it('has no dollar limit of its own', async () => {
     called(state.weave['quote']).mockResolvedValueOnce({
       ok: true,
-      value: { destAmount: 1, netUsd: 500, seconds: 1 },
+      value: { destAmount: 1, netUsd: 50_000, seconds: 1 },
     })
     called(state.weave['createOrder']).mockResolvedValueOnce({
       ok: true,
-      value: { ...placed, deposit: { ...placed.deposit, amount: '500' } },
+      value: { ...placed, deposit: { ...placed.deposit, amount: '50000' } },
     })
-    expect((await POST(post({ amount: '500' }))).status).toBe(200)
+    expect((await POST(post({ amount: '50000' }))).status).toBe(200)
   })
 })
 
@@ -412,7 +405,7 @@ describe('checking the answer against what was asked', () => {
   })
 
   it('accepts lower-case names and an amount written differently', async () => {
-    answering({ chain: 'near', token: 'usdc', amount: '25.5000000' })
+    answering({ chain: 'sui', token: 'usdc', amount: '25.5000000' })
     expect((await POST(post())).status).toBe(200)
   })
 })
@@ -458,7 +451,7 @@ describe('a good order', () => {
   it('sends the request to Weave with the wallet as refund address', async () => {
     await POST(post())
     expect(called(state.weave['createOrder'])).toHaveBeenCalledWith({
-      chain: 'near',
+      chain: 'sui',
       currency: 'KES',
       amount: '25.5',
       account: 'alice.near',
@@ -481,7 +474,7 @@ describe('a good order', () => {
   it('stores the row from what was asked and answered', async () => {
     await POST(post())
     expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({
-      chain: 'near',
+      chain: 'sui',
       email: REQUESTER,
       account: 'alice.near',
       providerOrder: 'ord_1',

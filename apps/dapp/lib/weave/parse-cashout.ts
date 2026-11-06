@@ -1,4 +1,6 @@
-import { isCashoutChain } from './types'
+import { chainTokenWord } from '../chains/parse-action'
+import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
+import { closedCashoutReply, isCashoutChain } from './types'
 
 export type CashoutCurrencyCode = 'NGN' | 'KES' | 'UGX' | 'TZS'
 
@@ -10,7 +12,7 @@ export interface CashoutRequest {
 
 export type CashoutRead =
   | CashoutRequest
-  | { unsupportedToken: string; currency?: CashoutCurrencyCode }
+  | { unsupportedToken: string; amount?: string; dollars?: string; currency?: CashoutCurrencyCode }
   | { unsupportedCurrency: string }
 
 export type CashoutRoute =
@@ -19,6 +21,15 @@ export type CashoutRoute =
   /** No currency was named, and a person's country is not something to assume. */
   | { kind: 'ask'; amount?: string }
   | { kind: 'token'; token: string }
+  /** A swap to USDC then a cash-out, on a chain that can finish it. */
+  | {
+      kind: 'sequence'
+      token: string
+      amount: string
+      /** `amount` is dollars of the token, to be sized at a live price before anything runs. */
+      amountIsUsd?: true
+      currency?: CashoutCurrencyCode
+    }
   | { kind: 'currency'; currency: string }
 
 const CURRENCY_WORDS: Record<string, CashoutCurrencyCode> = {
@@ -131,8 +142,23 @@ function hasOwn(table: Record<string, string>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(table, key)
 }
 
-function isFiatWord(word: string): boolean {
+/** Whether this word or phrase names a currency, paid here or not. Lower case, single spaces. */
+export function isFiatWord(word: string): boolean {
   return hasOwn(CURRENCY_WORDS, word) || hasOwn(OTHER_FIAT, word)
+}
+
+/**
+ * The one currency the person's own words name, or nothing if they name none or more than one, so
+ * that the question is asked instead. Only words that mean a currency alone count: "my nigerian
+ * friend" says nothing about a payout.
+ */
+export function currencyNamedIn(turns: readonly string[]): CashoutCurrencyCode | undefined {
+  const text = turns.join(' ').toLowerCase().replace(/\s+/g, ' ')
+  const found = new Set<CashoutCurrencyCode>()
+  for (const [word, code] of Object.entries(CURRENCY_WORDS)) {
+    if (new RegExp(String.raw`(?<![a-z0-9])${word}(?![a-z0-9])`).test(text)) found.add(code)
+  }
+  return found.size === 1 ? [...found][0] : undefined
 }
 
 /** Plain decimal text, or nothing for a shape that is not an amount or is zero. */
@@ -194,7 +220,13 @@ export function parseCashout(text: string): CashoutRead | null {
   if (token !== undefined && token !== 'usdc' && !dollarAmount) {
     if (isFiatWord(token)) return null
     if (amount === undefined && !KNOWN_TOKENS.has(token)) return null
-    return { unsupportedToken: token.toUpperCase(), ...withCurrency }
+    // A fiat we don't pay is said, not dropped: the token case would lose it.
+    if (target !== undefined && currency === undefined && !namesNoCurrency) {
+      return { unsupportedCurrency: OTHER_FIAT[target] as string }
+    }
+    // A dollar figure is not an amount of this token.
+    const ofToken = amount === undefined ? {} : dollar ? { dollars: amount } : { amount }
+    return { unsupportedToken: token.toUpperCase(), ...ofToken, ...withCurrency }
   }
   if (token === undefined && amount !== undefined && !dollar) return null
 
@@ -237,7 +269,13 @@ export function routeCashout(
   chain: string,
   stellarMainnet = true
 ): CashoutRoute {
-  if (read === null || !isCashoutChain(chain)) return { kind: 'pass' }
+  if (read === null) return { kind: 'pass' }
+  // The chat answers `token` from `unsupportedTokenReply`, which gives a closed chain's own refusal,
+  // so no form opens and nobody types bank details for an order that can't be made.
+  if (closedCashoutReply(chain) !== undefined) {
+    return { kind: 'token', token: 'unsupportedToken' in read ? read.unsupportedToken : 'USDC' }
+  }
+  if (!isCashoutChain(chain)) return { kind: 'pass' }
 
   const weaveOnly = (currency: CashoutCurrencyCode | undefined): boolean =>
     currency !== undefined && currency !== 'NGN'
@@ -248,18 +286,38 @@ export function routeCashout(
       : { kind: 'currency', currency: read.unsupportedCurrency }
   }
   if ('unsupportedToken' in read) {
-    return chain === 'stellar' && !weaveOnly(read.currency)
-      ? { kind: 'pass' }
-      : { kind: 'token', token: read.unsupportedToken }
+    if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
+    const figure = read.amount ?? read.dollars
+    // A leading zero may be a decimal comma, "0,500" read as 0500, and a swap would take it as 500.
+    if (
+      figure !== undefined &&
+      !/^0\d/.test(figure) &&
+      (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain)
+    ) {
+      return {
+        kind: 'sequence',
+        token: chainTokenWord(read.unsupportedToken),
+        amount: figure,
+        ...(read.dollars !== undefined ? { amountIsUsd: true as const } : {}),
+        ...(read.currency !== undefined ? { currency: read.currency } : {}),
+      }
+    }
+    return { kind: 'token', token: read.unsupportedToken }
   }
+  // Off Stellar a leading zero may be a decimal comma, "0,500" read as 0500: the form opens
+  // with no seed and the person types the amount.
+  const seed =
+    read.amount !== undefined && (chain === 'stellar' || !/^0\d/.test(read.amount))
+      ? { amount: read.amount }
+      : {}
   if (read.currency === undefined) {
     if (chain === 'stellar' && !stellarMainnet) return { kind: 'pass' }
-    return { kind: 'ask', ...(read.amount !== undefined ? { amount: read.amount } : {}) }
+    return { kind: 'ask', ...seed }
   }
   if (chain === 'stellar' && !weaveOnly(read.currency)) return { kind: 'pass' }
   return {
     kind: 'open',
-    ...(read.amount !== undefined ? { amount: read.amount } : {}),
+    ...seed,
     ...(read.currency !== undefined ? { currency: read.currency } : {}),
   }
 }

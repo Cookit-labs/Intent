@@ -160,6 +160,19 @@ export function BorrowConfirm({
             ? 'Clearing a debt returns the collateral behind it to your control.'
             : 'Borrowed against the collateral you have posted. Interest accrues from the moment it settles.'}
         </p>
+        {direction === 'repay' && borrow.everything === true ? (
+          <p className="text-muted-foreground mt-1 text-xs">
+            You owe about {display(borrow.owed) ?? ''} {borrow.asset ?? ''}. Your wallet may show{' '}
+            {display(borrow.amount) ?? ''}: interest keeps growing until this settles, so it asks
+            for slightly more, and the pool returns the difference in the same transaction.
+          </p>
+        ) : null}
+        {direction === 'repay' && borrow.everything !== true && borrow.remaining !== undefined ? (
+          <p className="text-muted-foreground mt-1 text-xs">
+            About {display(borrow.remaining) ?? ''} {borrow.asset ?? ''} stays owed and keeps
+            growing.
+          </p>
+        ) : null}
       </div>
 
       {/* The risk panel. Only meaningful for a borrow: a repayment can only

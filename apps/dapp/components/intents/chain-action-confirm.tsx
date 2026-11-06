@@ -4,10 +4,51 @@ import { Button, Card } from '@intent/ui'
 import { ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
+import { stepErrorMessage } from '../../lib/agents/chain-race'
+import { limitSettledNote } from '../../lib/chains/orders-view'
+import { useChain } from '../../providers/chain-provider'
+import type { PreparedAction } from '../../lib/chains/types'
 
-/** Review, sign and result for an action on Solana, Sui or NEAR. */
-export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Element {
-  const { phase, prepared, error, hash, explorerUrl } = action
+function cardLine({ kind, pay, venueName }: PreparedAction): string {
+  const what = `${pay.amount} ${pay.symbol}`
+  switch (kind) {
+    case 'send':
+      return `This moves ${what} from your wallet`
+    case 'withdraw':
+    case 'unstake':
+      return `You take ${what} out of ${venueName}`
+    case 'borrow':
+      return `You borrow ${what} from ${venueName}, and owe it back with interest`
+    case 'repay':
+      return `You repay ${what} to ${venueName}`
+    case 'stream':
+      return `This commits ${what} from your wallet to a stream on ${venueName}`
+    case 'invoice':
+      return `This bills ${what} on ${venueName}, and moves nothing from your wallet`
+    case 'claim':
+      return `You collect ${what} from ${venueName}`
+    case 'cancel':
+      return `You end this stream on ${venueName}, and get back ${what} that hasn't streamed`
+    default:
+      return `You pay ${what} on ${venueName}`
+  }
+}
+
+/** Review, sign and result for an action on a chain other than Stellar. */
+export function ChainActionConfirm({
+  action,
+  sequenceSettled = false,
+  typedStep,
+}: {
+  action: ChainAction
+  /** This card is step 2, after a swap that was signed and settled. */
+  sequenceSettled?: boolean
+  /** That step as a request of its own, for when it can't go on from here. */
+  typedStep?: string | undefined
+}): JSX.Element {
+  const { phase, prepared, hash, explorerUrl, earlier } = action
+  const { slug } = useChain()
+  const error = stepErrorMessage(action.error, sequenceSettled, typedStep)
   const busy = phase === 'signing' || phase === 'submitting'
 
   return (
@@ -15,7 +56,9 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {phase === 'building' ? (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
-          Getting a live price
+          {action.building === 'swap' || action.building === 'supply' || action.building === 'stake'
+            ? 'Getting a live price'
+            : 'Building this transaction'}
         </p>
       ) : null}
 
@@ -48,9 +91,9 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
       {prepared !== undefined && phase !== 'failed' && phase !== 'pending' ? (
         <>
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{prepared.summary}</span>
+            <span className="text-sm font-medium [overflow-wrap:anywhere]">{prepared.summary}</span>
             <span className="text-muted-foreground text-xs">
-              You pay {prepared.pay.amount} {prepared.pay.symbol} on {prepared.venueName}
+              {cardLine(prepared)}
               {prepared.receive !== undefined
                 ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
                 : ''}
@@ -74,7 +117,52 @@ export function ChainActionConfirm({ action }: { action: ChainAction }): JSX.Ele
             </ul>
           ) : null}
 
-          {phase === 'settled' ? (
+          {phase === 'review' && earlier !== undefined ? (
+            <p role="alert" className="flex flex-wrap items-center gap-2 text-sm leading-relaxed">
+              {earlier.text}
+              {earlier.explorerUrl !== undefined && earlier.hash !== undefined ? (
+                <a
+                  href={earlier.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                >
+                  {`${earlier.hash.slice(0, 6)}…${earlier.hash.slice(-4)}`}
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
+              ) : null}
+            </p>
+          ) : null}
+
+          {phase === 'review' && error !== undefined ? (
+            <p role="alert" className="text-sm leading-relaxed">
+              {error}
+            </p>
+          ) : null}
+
+          {phase === 'settled' && action.canContinue ? (
+            <div className="flex flex-col gap-2">
+              <p className="flex items-center gap-2 text-sm font-medium" role="status">
+                Done. One more signature finishes this.
+              </p>
+              <div>
+                <Button size="sm" onClick={action.continueSetup}>
+                  Continue
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {phase === 'settled' &&
+          !action.canContinue &&
+          prepared.kind === 'limit' &&
+          action.source?.kind === 'request' ? (
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              {limitSettledNote(slug)}
+            </p>
+          ) : null}
+
+          {phase === 'settled' && action.canContinue ? null : phase === 'settled' ? (
             <p className="flex items-center gap-2 text-sm font-medium" role="status">
               Sent
               {explorerUrl !== undefined ? (

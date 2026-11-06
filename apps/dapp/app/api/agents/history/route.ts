@@ -2,6 +2,7 @@ import { activeNetwork } from '@intent/config'
 import { StrKey } from '@stellar/stellar-sdk'
 import { NextResponse } from 'next/server'
 
+import { isWalletAddress } from '../../../../lib/wallet/address'
 import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { getAnalyticsRepo } from '../../../../lib/server/analytics'
@@ -12,6 +13,15 @@ export const dynamic = 'force-dynamic'
 
 const DEFAULT_PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
+
+const STELLAR_SHAPE = /^G[A-Z2-7]{55}$/
+
+/** A Stellar address is checked by its checksum; the other chains' by the shape the app accepts. */
+function validAccount(account: string): boolean {
+  return STELLAR_SHAPE.test(account)
+    ? StrKey.isValidEd25519PublicKey(account)
+    : isWalletAddress(account)
+}
 
 /**
  * A wallet's own agent races, each with the winning agent's reasoning and
@@ -34,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const url = new URL(request.url)
   const account = url.searchParams.get('account')
-  if (account === null || !StrKey.isValidEd25519PublicKey(account)) {
+  if (account === null || !validAccount(account)) {
     return NextResponse.json({ error: 'invalid_account' }, { status: 400 })
   }
 
@@ -49,7 +59,8 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const repo = await getAnalyticsRepo()
     const result = await repo.historyForAccount({
-      network: activeNetwork(),
+      // Other chains' actions are logged as mainnet, whatever Stellar network the page is on.
+      network: STELLAR_SHAPE.test(account) ? activeNetwork() : 'mainnet',
       account,
       page,
       pageSize,

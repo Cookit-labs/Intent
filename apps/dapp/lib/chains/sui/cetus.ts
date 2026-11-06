@@ -9,6 +9,7 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenueQuote,
 } from '../types'
 import { cetusOverlay, judgeRoute, SLIPPAGE_BPS } from './cetus-rules'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
@@ -35,7 +36,8 @@ function notes(tokens: string[], slippagePercent: number, feeBps: number | undef
   ]
 }
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+/** The best route and every check on it. The race and Review both go through this. */
+async function bestRoute(request: ChainActionRequest, account: string) {
   assertSuiAccount(account)
   const tokenIn = tokenBySymbol(SUI_TOKENS, request.tokenIn)
   const tokenOut = tokenBySymbol(SUI_TOKENS, request.tokenOut ?? '')
@@ -87,6 +89,20 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
     priceIn,
     priceOut,
   })
+  return { tokenIn, tokenOut, client, overlay, aggregator, slippage, route, amountOut }
+}
+
+/** What the route would give back. Builds nothing, so nothing here could be signed. */
+async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { tokenOut, amountOut } = await bestRoute(request, account)
+  return {
+    receive: { amount: displayAmount(amountOut, tokenOut.decimals), symbol: tokenOut.symbol },
+  }
+}
+
+async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const { tokenIn, tokenOut, client, overlay, aggregator, slippage, route, amountOut } =
+    await bestRoute(request, account)
 
   const tx = new Transaction()
   tx.setSender(account)
@@ -114,6 +130,7 @@ export const cetusVenue: ChainVenue = {
   id: 'cetus',
   name: VENUE_NAME,
   kinds: ['swap'],
+  quote,
   prepare,
   assertSafe: (payload: SigningPayload, account: string) =>
     assertPtbSafe(payload, account, CETUS_POLICY),

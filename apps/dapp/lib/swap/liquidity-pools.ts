@@ -143,6 +143,43 @@ export async function fetchPools(options: PoolOptions = {}): Promise<Pool[]> {
     .filter((p) => !p.isEmpty)
 }
 
+/** One pool by id. Undefined means the network has no such pool. Anything unreadable throws. */
+export async function fetchPool(
+  poolId: string,
+  options: PoolOptions = {}
+): Promise<HorizonPool | undefined> {
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
+  const doFetch = options.fetchImpl ?? fetch
+
+  const res = await doFetch(`${horizonUrl}/liquidity_pools/${encodeURIComponent(poolId)}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (res.status === 404) return undefined
+  if (!res.ok) throw new Error(`Horizon ${res.status}`)
+  return (await res.json()) as HorizonPool
+}
+
+export interface HeldPoolShare extends PoolPosition {
+  poolId: string
+  shares: string
+}
+
+/** What an account holds in pools, each share valued against the pool's live reserves. */
+export async function readPoolShares(
+  account: string,
+  options: PoolOptions = {}
+): Promise<HeldPoolShare[]> {
+  const held = await fetchPoolPositions(account, options)
+  return Promise.all(
+    held.map(async ({ poolId, shares }) => {
+      const pool = await fetchPool(poolId, options)
+      // The account holds shares in it, so the network not knowing it is a failed read.
+      if (pool === undefined) throw new Error(`pool ${poolId} could not be read`)
+      return { poolId, shares, ...poolShare(parsePool(pool), shares) }
+    })
+  )
+}
+
 /**
  * The pools an account has a position in.
  *

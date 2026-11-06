@@ -95,6 +95,8 @@ export const ANALYTICS_DDL: readonly string[] = [
   // free text from every model on every race rather than the one plan a
   // user's funds actually moved on.
   `ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS reasoning TEXT`,
+  // Races from before other chains ran are all Stellar's, which the default says.
+  `ALTER TABLE agent_races ADD COLUMN IF NOT EXISTS chain TEXT NOT NULL DEFAULT 'stellar'`,
 ]
 
 export type ExecutionKind =
@@ -110,6 +112,8 @@ export type ExecutionKind =
   | 'solana'
   | 'sui'
   | 'near'
+  | 'avalanche'
+  | 'monad'
 
 export interface ExecutionRecord {
   network: StellarNetworkName
@@ -137,6 +141,13 @@ export interface SubmitLike {
   hash?: string
   reason?: string
   code?: string
+}
+
+const OTHER_CHAINS: readonly ExecutionKind[] = ['solana', 'sui', 'near', 'avalanche', 'monad']
+
+/** The chain an execution happened on, which is what a race it follows must have run on. */
+function raceChainOf(kind: ExecutionKind): string {
+  return OTHER_CHAINS.includes(kind) ? kind : 'stellar'
 }
 
 const CODE = /^[a-z][a-z0-9_]{0,39}$/
@@ -197,6 +208,8 @@ export interface RaceAttemptFailed {
 export interface RaceInput {
   id: string
   network: StellarNetworkName
+  /** The chain the race ran on; Stellar when omitted. */
+  chain?: string
   startedAt: Date
   durationMs: number
   intent: { type: string; tokenIn: string; tokenOut: string; sizeUsd: number | undefined }
@@ -209,6 +222,7 @@ export interface RaceInput {
 export interface RaceRecord {
   id: string
   network: StellarNetworkName
+  chain: string
   startedAt: Date
   intentType: string
   tokenIn: string
@@ -245,6 +259,7 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
   return {
     id: input.id,
     network: input.network,
+    chain: input.chain ?? 'stellar',
     startedAt: input.startedAt,
     intentType: input.intent.type,
     tokenIn: input.intent.tokenIn,
@@ -319,6 +334,8 @@ export interface HistoryQuery {
 
 export interface HistoryEntry {
   raceId: string
+  /** The chain the race ran on, since one EVM address can have raced on several. */
+  chain: string
   startedAt: string
   tokenIn: string
   tokenOut: string
@@ -352,6 +369,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
            (SELECT id FROM agent_races
              WHERE id = $14::uuid AND network = $2 AND winner IS NOT NULL
+               AND chain = $15
                AND started_at <= $9::timestamptz
                AND started_at > $9::timestamptz - interval '30 minutes'))
          ON CONFLICT DO NOTHING`,
@@ -370,6 +388,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.amountIn ?? null,
           r.flow?.volumeUsd ?? null,
           r.raceId ?? null,
+          raceChainOf(r.kind),
         ]
       )
     },
@@ -397,8 +416,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       await query(
         `INSERT INTO agent_races
            (id, network, started_at, intent_type, token_in, token_out, size_usd,
-            agents, answered, winner, unanimous, outcome, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            agents, answered, winner, unanimous, outcome, duration_ms, chain)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT DO NOTHING`,
         [
           r.id,
@@ -414,6 +433,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.unanimous,
           r.outcome,
           r.durationMs,
+          r.chain,
         ]
       )
       for (const p of r.proposals) {
@@ -453,6 +473,10 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
      * there is nothing to explain to this wallet about a plan it never
      * acted on, winning or not.
      *
+     * An EVM address matches whatever its casing, since a wallet may report it checksummed
+     * on one call and lower-case on another; every other chain's address is exact, as
+     * Solana and Sui addresses are case-sensitive.
+     *
      * `address` scopes by equality on an indexed column — the same trust
      * model every other wallet-scoped read in this app uses (naira orders,
      * swap history): whoever knows the address can read what it did. That
@@ -462,18 +486,21 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       const limit = Math.max(1, Math.min(100, pageSize))
       const offset = Math.max(0, (Math.max(1, page) - 1) * limit)
       const { rows } = await query(
-        `SELECT r.id AS race_id, r.started_at, r.token_in, r.token_out, r.size_usd,
+        `SELECT r.id AS race_id, r.chain, r.started_at, r.token_in, r.token_out, r.size_usd,
                 r.winner, p.model AS winning_model, p.reasoning, e.hash AS executed_hash
            FROM usage_executions e
            JOIN agent_races r ON r.id = e.race_id
            LEFT JOIN agent_proposals p ON p.race_id = r.id AND p.won
-          WHERE e.network = $1 AND e.account = $2
+          WHERE e.network = $1
+            AND (e.account = $2
+                 OR ($2 ~ '^0x[0-9a-fA-F]{40}$' AND lower(e.account) = lower($2)))
           ORDER BY r.started_at DESC
           LIMIT $3 OFFSET $4`,
         [network, account, limit + 1, offset]
       )
       const entries = rows.slice(0, limit).map((row) => ({
         raceId: String(row['race_id']),
+        chain: String(row['chain']),
         startedAt: new Date(row['started_at'] as string).toISOString(),
         tokenIn: String(row['token_in']),
         tokenOut: String(row['token_out']),

@@ -3,8 +3,9 @@ import { z } from 'zod'
 import { weaveAssetKey, type CashoutChain } from './types'
 
 /**
- * Server-side client for Weave: USDC in on five chains, local currency to a bank
- * or mobile money account.
+ * Server-side client for Weave: USDC in, local currency out to a bank or mobile money
+ * account. Quotes and unfunded orders have been seen live, but no order has paid out in
+ * this app, so nothing past the deposit address has been seen to work.
  *
  * The key can create orders that pay real money, so this must only be reached from
  * route handlers. Weave's docs are known to be out of date, so every answer is read
@@ -155,9 +156,9 @@ function unwrap(body: unknown): unknown {
 }
 
 /**
- * Reads Weave's answer to placing an order, or nothing if it is not one. No real
- * order has been placed yet, so this shape is unconfirmed, and this is the one
- * function to fix when the first real answer differs. `depositInstruction` may be
+ * Reads Weave's answer to placing an order, or nothing if it is not one. No funded
+ * order has run yet, so this shape is unconfirmed, and this is the one function to
+ * fix when the first real answer differs. `depositInstruction` may be
  * absent with only `nextAction`, which carries no expiry.
  */
 export function parsePlacedOrder(body: unknown): WeaveOrder | undefined {

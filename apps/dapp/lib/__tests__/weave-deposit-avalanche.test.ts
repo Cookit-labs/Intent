@@ -220,6 +220,16 @@ describe('avalancheDeposit.assertSafe', () => {
     )
   })
 
+  it('refuses an order naming a token other than USDC, which is all this deposit moves', () => {
+    const usdt = { symbol: 'USDT', id: OTHER_TOKEN, decimals: 6 }
+    expectRefused(() => avalancheDeposit.assertSafe(payload(), { ...plain, token: usdt }), /USDC/)
+  })
+
+  it('takes an order naming USDC as one naming nothing', () => {
+    const usdc = { symbol: 'USDC', id: USDC.toLowerCase(), decimals: 6 }
+    expect(() => avalancheDeposit.assertSafe(payload(), { ...plain, token: usdc })).not.toThrow()
+  })
+
   it('refuses an order with a memo, which this chain cannot carry', () => {
     expectRefused(() => avalancheDeposit.assertSafe(payload(), { ...plain, memo: '42' }), /memo/i)
   })
@@ -256,6 +266,12 @@ describe('avalancheDeposit.build', () => {
       value: '0',
     })
     expect(reads.sort()).toEqual([`avax ${ACCOUNT}`, `usdc ${ACCOUNT}`])
+  })
+
+  it('never builds USDC for an order that names another token', async () => {
+    const deposit = createAvalancheDeposit(() => fakeClient())
+    const usdt = { symbol: 'USDT', id: OTHER_TOKEN, decimals: 6 }
+    await expect(deposit.build({ ...plain, token: usdt })).rejects.toThrow(/USDC/)
   })
 
   async function refusal(deposit: typeof avalancheDeposit, expectation = plain): Promise<Error> {
@@ -334,6 +350,13 @@ describe('avalancheDeposit.submit', () => {
         },
       })
     )
+
+  it('never confirms a USDC transfer for an order that names another token', async () => {
+    const usdt = { symbol: 'USDT', id: OTHER_TOKEN, decimals: 6 }
+    await expect(
+      withReceipt(receipt()).submit(signed, { ...plain, token: usdt })
+    ).rejects.toBeInstanceOf(ChainActionRefused)
+  })
 
   it('confirms a transfer that paid this order', async () => {
     await expect(withReceipt(receipt()).submit(signed, plain)).resolves.toEqual({
@@ -509,11 +532,11 @@ describe('the EVM adapters’ signPrepared', () => {
     return import('../adapters/evm-adapter')
   }
 
-  it('exists on Avalanche alone', async () => {
+  it('exists on Avalanche and Monad, and not on Arc', async () => {
     const { arcAdapter, avalancheAdapter, monadAdapter } = await adapters()
     expect(avalancheAdapter.signPrepared).toBeTypeOf('function')
+    expect(monadAdapter.signPrepared).toBeTypeOf('function')
     expect(arcAdapter.signPrepared).toBeUndefined()
-    expect(monadAdapter.signPrepared).toBeUndefined()
     // The first import of the adapter pulls in the wallet libraries, which takes
     // longer than the default when the whole suite is running.
   }, 30_000)

@@ -9,6 +9,8 @@ import type { ChainToken } from '../types'
  * - USDT: https://tether.to/en/supported-protocols
  * - JitoSOL: https://go.jito.network/docs/jitosol/jitosol-liquid-staking/for-developers/staking-integration/
  * - ONyc: https://docs.onre.finance/technical-resources/token-configuration-and-reference
+ * - mSOL: https://docs.marinade.finance/developers/contract-addresses (5 November 2026)
+ * - sSOL: https://docs.solayer.org/resources/solayer-programs.md (5 November 2026)
  * - SOL: the wrapped SOL mint, the Token Program's native mint.
  */
 export const SOLANA_TOKENS: readonly ChainToken[] = [
@@ -41,6 +43,18 @@ export const SOLANA_TOKENS: readonly ChainToken[] = [
     id: '5Y8NV33Vv7WbnLfq3zBcKSdYPrk7g2KoiQoe7M2tcxp5',
     decimals: 9,
     name: 'OnRe Tokenized Reinsurance',
+  },
+  {
+    symbol: 'mSOL',
+    id: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    decimals: 9,
+    name: 'Marinade Staked SOL',
+  },
+  {
+    symbol: 'sSOL',
+    id: 'sSo14endRuUbvQaJS3dq36Q829a3A6BEfoeeRGJywEh',
+    decimals: 9,
+    name: 'Solayer Restaked SOL',
   },
 ]
 

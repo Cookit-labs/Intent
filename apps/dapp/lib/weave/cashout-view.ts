@@ -1,6 +1,6 @@
 import type { SignedOutcome, SignedPayload, SigningPayload } from '../chains/types'
 import { WEAVE_BANK_LOGOS } from './bank-logos'
-import type { CashoutChain } from './types'
+import { closedCashoutReply, type CashoutChain } from './types'
 
 export const CASHOUT_STATUSES = [
   'waiting',
@@ -135,14 +135,18 @@ export function isValidAmount(amount: string): boolean {
   return /^\d+(\.\d{1,6})?$/.test(amount) && /[1-9]/.test(amount)
 }
 
+/** Weave's docs don't say how or when a refund runs, and none has run here, so none is promised. */
+const REFUND_UNPROVEN =
+  "Refunds are Weave's to make and none has run in this app yet, so check your wallet and keep this order."
+
 const STATUS_TEXT: Record<CashoutStatus, string> = {
   waiting: 'Waiting for your deposit to be confirmed.',
   processing: 'Deposit received. The payout is on its way.',
   paid: 'Paid. The money has been sent to the account.',
-  failed: 'The payout failed. Your USDC is due back to your connected wallet.',
-  expired:
-    'No deposit arrived in time, so this cash-out was cancelled. Any USDC you sent is due back to your connected wallet.',
-  refunded: 'The payout did not complete. Your USDC was refunded to your connected wallet.',
+  failed: `The payout failed. Any USDC you sent is due back to your connected wallet. ${REFUND_UNPROVEN}`,
+  expired: `No deposit arrived in time, so this cash-out was cancelled. Any USDC you sent is due back to your connected wallet. ${REFUND_UNPROVEN}`,
+  refunded:
+    'The payout did not complete. Weave says your USDC was refunded to your connected wallet, so check that it arrived.',
 }
 
 export function statusText(status: CashoutStatus): string {
@@ -195,8 +199,11 @@ export function cleanIdentifier(text: string): string {
 
 type SigningFamily = SigningPayload['family']
 
-/** These wallets broadcast for themselves, so an error back may follow a transfer that went out. */
-function walletSends(family: SigningFamily): boolean {
+/**
+ * These wallets broadcast for themselves, so an error back may follow a transfer that went out. A
+ * typed EVM message is only signed, and goes nowhere until the server posts it.
+ */
+export function walletSends(family: SigningFamily): boolean {
   return family === 'near' || family === 'evm'
 }
 
@@ -336,8 +343,12 @@ export function cashoutChoices(
   return chain === 'stellar' ? [NAIRA, ...weave.filter((c) => c.code !== 'NGN')] : [...weave]
 }
 
-export function unsupportedTokenReply(token: string): string {
-  return `Cash-outs take USDC, not ${token}. Swap your ${token} to USDC first, then cash out.`
+/** On a chain closed to cash-outs, swapping first would not help, and neither would a token named. */
+export function unsupportedTokenReply(token: string, chain: string): string {
+  return (
+    closedCashoutReply(chain) ??
+    `Cash-outs take USDC, not ${token}. Swap your ${token} to USDC first, then cash out.`
+  )
 }
 
 export function unsupportedCurrencyReply(

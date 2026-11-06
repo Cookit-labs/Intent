@@ -14,14 +14,47 @@ export const dynamic = 'force-dynamic'
 const Body = z.object({
   account: z.string().min(1).max(128),
   request: z.object({
-    kind: z.enum(['swap', 'supply', 'stake']),
+    kind: z.enum([
+      'swap',
+      'supply',
+      'stake',
+      'send',
+      'limit',
+      'withdraw',
+      'unstake',
+      'borrow',
+      'repay',
+      'stream',
+      'invoice',
+      'pay_invoice',
+      'claim',
+      'cancel',
+    ]),
     amount: z
       .string()
-      .regex(/^\d+(\.\d+)?$/)
+      .regex(/^(\d+(\.\d+)?|all)$/)
       .max(40),
     tokenIn: z.string().min(1).max(16),
     tokenOut: z.string().min(1).max(16).optional(),
     venue: z.string().min(1).max(40).optional(),
+    recipient: z.string().min(1).max(128).optional(),
+    limitPrice: z.string().min(1).max(40).optional(),
+    durationDays: z
+      .string()
+      .regex(/^[1-9]\d{0,4}$/)
+      .optional(),
+    dueDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    invoiceId: z
+      .string()
+      .regex(/^\d{1,78}$/)
+      .optional(),
+    streamId: z
+      .string()
+      .regex(/^[A-Za-z0-9]{1,64}$/)
+      .optional(),
   }),
 })
 
@@ -43,7 +76,19 @@ export async function POST(
   }
 
   try {
-    const { kind, amount, tokenIn, tokenOut, venue } = parsed.data.request
+    const {
+      kind,
+      amount,
+      tokenIn,
+      tokenOut,
+      venue,
+      recipient,
+      limitPrice,
+      durationDays,
+      dueDate,
+      invoiceId,
+      streamId,
+    } = parsed.data.request
     const prepared = await prepareChainAction(
       chainApi,
       {
@@ -52,6 +97,12 @@ export async function POST(
         tokenIn,
         ...(tokenOut !== undefined ? { tokenOut } : {}),
         ...(venue !== undefined ? { venue } : {}),
+        ...(recipient !== undefined ? { recipient } : {}),
+        ...(limitPrice !== undefined ? { limitPrice } : {}),
+        ...(durationDays !== undefined ? { durationDays } : {}),
+        ...(dueDate !== undefined ? { dueDate } : {}),
+        ...(invoiceId !== undefined ? { invoiceId } : {}),
+        ...(streamId !== undefined ? { streamId } : {}),
       },
       parsed.data.account
     )

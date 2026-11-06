@@ -26,7 +26,7 @@ const CATEGORIES: readonly VenueCategory[] = [
 
 describe('the NEAR venue list', () => {
   it('has every row of the report, with the fields filled in', () => {
-    expect(nearVenues).toHaveLength(14)
+    expect(nearVenues).toHaveLength(15)
     for (const venue of nearVenues) {
       expect(venue.family).toBe('near')
       expect(venue.chains).toEqual(['NEAR'])
@@ -43,16 +43,18 @@ describe('the NEAR venue list', () => {
 
   it('claims execution exactly for the venues the module wires', () => {
     const claimed = nearVenues.filter((v) => v.integration === 'executes').map((v) => v.id)
-    expect(claimed.sort()).toEqual(nearModule.venues.map((v) => v.id).sort())
+    // A wallet transfer is not an app, so the Apps list has no entry for it.
+    const wired = nearModule.venues.map((v) => v.id).filter((id) => id !== 'send')
+    expect(claimed.sort()).toEqual(wired.sort())
     for (const venue of nearVenues) {
       if (venue.integration === 'executes') expect(venue.capability).toBeTruthy()
       else expect(venue.capability).toBeUndefined()
     }
   })
 
-  it('keeps Rhea Lend and the Linq route listed, and says why on the first', () => {
+  it('says what happened to Rhea Lend, and keeps the Linq route listed', () => {
     const lend = nearVenues.find((v) => v.id === 'rhea-lend')
-    expect(lend?.integration).toBeUndefined()
+    expect(lend?.integration).toBe('executes')
     expect(lend?.bestFor).toMatch(/18\.4M/)
     expect(nearVenues.find((v) => v.id === 'near-linq-cashout')?.integration).toBeUndefined()
   })
@@ -106,9 +108,9 @@ describe('1Click Earn', () => {
   }
   const earn = nearModule.venues.find((v) => v.id === '1click-earn')
 
-  it('is the default for supply and does nothing else', () => {
+  it('is the default for supply, and takes money back out', () => {
     expect(nearModule.defaultVenue.supply).toBe('1click-earn')
-    expect(earn?.kinds).toEqual(['supply'])
+    expect(earn?.kinds).toEqual(['supply', 'withdraw', 'claim'])
   })
 
   it('accepts a stablecoin deposit and refuses the wrap path a swap may use', () => {

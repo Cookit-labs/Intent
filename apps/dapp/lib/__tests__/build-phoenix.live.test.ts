@@ -15,10 +15,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
  * of which fails in simulation with an error that names none of those
  * things, and none of which a fixture written from this module's own
  * assumptions would ever see.
+ *
+ * The account is looked up rather than pinned. A simulation really moves the
+ * tokens, so it needs an account that can spend them, and any one wallet's
+ * balance is not ours to rely on: this suite once pinned a wallet that fell to
+ * 1.68 XLM, and every run then failed on the wallet with Phoenix working fine.
  */
 
 const SKIP = process.env['SKIP_LIVE'] === '1'
-const ME = 'GAJ74DIC3252BKBTDCEYTDA2ZYDRDBDT3QMZU5IW2HOZQBYVXMRZZEFA'
+const HORIZON = 'https://horizon.stellar.org'
+const USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'
 
 type Loaded = {
   resolveAsset: typeof import('../swap/assets').resolveAsset
@@ -34,6 +40,32 @@ type Loaded = {
 }
 
 let mod: Loaded
+let funded: string
+
+interface HorizonAccount {
+  id: string
+  balances: { asset_type: string; asset_code?: string; balance: string; limit?: string }[]
+}
+
+/** An account with a USDC trustline and XLM to spare, so a swap tests Phoenix and not the wallet. */
+async function fundedAccount(): Promise<string> {
+  const res = await fetch(`${HORIZON}/accounts?asset=USDC:${USDC_ISSUER}&limit=200&order=desc`)
+  if (!res.ok) throw new Error(`Horizon ${res.status}`)
+  const body = (await res.json()) as { _embedded: { records: HorizonAccount[] } }
+
+  const account = body._embedded.records.find((record) => {
+    const xlm = record.balances.find((b) => b.asset_type === 'native')
+    const usdc = record.balances.find((b) => b.asset_code === 'USDC')
+    return (
+      xlm !== undefined &&
+      Number(xlm.balance) > 100 &&
+      usdc !== undefined &&
+      Number(usdc.limit) - Number(usdc.balance) > 100
+    )
+  })
+  if (account === undefined) throw new Error('no funded account found on Horizon')
+  return account.id
+}
 
 beforeAll(async () => {
   vi.resetModules()
@@ -47,6 +79,7 @@ beforeAll(async () => {
     ])
   const quoter = createPhoenixQuoter()
   mod = { resolveAsset, buildPhoenixSwap, prepareSorobanSwap, quoter }
+  if (!SKIP) funded = await fundedAccount()
   // Deliberately not unstubbed here: buildPhoenixSwap and assertVenueOn also
   // read activeNetwork() at call time, inside the tests below, not only at
   // construction. The stub stays live for the whole suite and is removed
@@ -78,7 +111,7 @@ describe.skipIf(SKIP)('a Phoenix swap the pool accepts', () => {
     const minReceive = (BigInt(quote.quote.destAmount) / BigInt(2)).toString()
 
     const built = await mod.buildPhoenixSwap({
-      account: ME,
+      account: funded,
       from: XLM,
       to: USDC,
       sendAmount: '10000000',
@@ -87,8 +120,8 @@ describe.skipIf(SKIP)('a Phoenix swap the pool accepts', () => {
     })
 
     const prepared = await mod.prepareSorobanSwap(built.xdr)
-    expect(prepared.ok).toBe(true)
     if (!prepared.ok) throw new Error(prepared.reason)
+    expect(prepared.ok).toBe(true)
   }, 60_000)
 
   it('is refused by the pool when the floor is above what it would pay', async () => {
@@ -106,7 +139,7 @@ describe.skipIf(SKIP)('a Phoenix swap the pool accepts', () => {
 
     const tooHigh = (BigInt(quote.quote.destAmount) * BigInt(10)).toString()
     const built = await mod.buildPhoenixSwap({
-      account: ME,
+      account: funded,
       from: XLM,
       to: USDC,
       sendAmount: '10000000',
@@ -116,5 +149,8 @@ describe.skipIf(SKIP)('a Phoenix swap the pool accepts', () => {
 
     const prepared = await mod.prepareSorobanSwap(built.xdr)
     expect(prepared.ok).toBe(false)
+    // Refused for the floor. A wallet that cannot pay fails too, and that would
+    // pass here while proving nothing about the floor.
+    if (!prepared.ok) expect(prepared.reason).not.toMatch(/resulting balance/)
   }, 60_000)
 })

@@ -98,17 +98,6 @@ const REQUEST_TYPE_BORROW = 4
 const REQUEST_TYPE_REPAY = 5
 
 /**
- * Repaying more than is owed repays exactly what is owed.
- *
- * The same clamping the withdrawal sentinel relies on, and needed for the same
- * reason in the opposite direction: interest accrues every ledger, so a debt
- * figure read a moment ago is already *short*. Repaying it exactly would leave
- * a few stroops outstanding — and unlike leftover supply dust, a leftover
- * liability keeps growing and keeps the position liquidatable.
- */
-const REPAY_EVERYTHING = '170141183460469231731687303715884105727'
-
-/**
  * Asking for more than the position holds withdraws all of it.
  *
  * The pool clamps a withdrawal to the balance rather than reverting, which is
@@ -328,6 +317,19 @@ type PoolCallNoun =
   | 'borrow'
   | 'repayment'
 
+/**
+ * Which requests each kind of call may carry. The three addresses say who a call
+ * acts for; this says what it does, so a borrow cannot pass as a withdrawal.
+ */
+const REQUEST_TYPES: Record<PoolCallNoun, readonly number[]> = {
+  supply: [REQUEST_TYPE_SUPPLY],
+  withdrawal: [REQUEST_TYPE_WITHDRAW, REQUEST_TYPE_WITHDRAW_COLLATERAL],
+  'collateral supply': [REQUEST_TYPE_SUPPLY_COLLATERAL],
+  'collateral withdrawal': [REQUEST_TYPE_WITHDRAW_COLLATERAL],
+  borrow: [REQUEST_TYPE_BORROW],
+  repayment: [REQUEST_TYPE_REPAY],
+}
+
 function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun): void {
   const decoded = TransactionBuilder.fromXDR(built, stellarNetwork.networkPassphrase)
 
@@ -357,9 +359,17 @@ function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun):
   }
 
   const invocation = hostFunction.invokeContract as
-    | { functionName?: unknown; args?: xdr.ScVal[] }
+    | { contractAddress?: xdr.ScAddress; functionName?: unknown; args?: xdr.ScVal[] }
     | undefined
   if (invocation === undefined) throw new Error('refusing to sign: the call could not be read')
+
+  const called =
+    invocation.contractAddress !== undefined
+      ? Address.fromScAddress(invocation.contractAddress).toString()
+      : undefined
+  if (called !== blendPool()) {
+    throw new Error(`refusing to sign: ${called ?? 'an unreadable contract'} is not Blend's pool.`)
+  }
 
   // `functionName` decodes to an `XdrString`, not a plain string and not a byte
   // array. `Buffer.from()` on it silently yields zero bytes.
@@ -389,6 +399,21 @@ function assertSelfPoolCall(built: string, account: string, noun: PoolCallNoun):
       )
     }
   })
+
+  const requests = scValToNative(args[3] as xdr.ScVal) as
+    | { amount?: unknown; request_type?: unknown }[]
+    | undefined
+  if (!Array.isArray(requests) || requests.length === 0) {
+    throw new Error(`refusing to sign: the ${noun} carries no request`)
+  }
+  for (const request of requests) {
+    if (!REQUEST_TYPES[noun].includes(Number(request.request_type))) {
+      throw new Error(`refusing to sign: this call does something other than a ${noun}.`)
+    }
+    if (BigInt(String(request.amount)) <= BigInt(0)) {
+      throw new Error(`refusing to sign: a ${noun} needs a positive amount`)
+    }
+  }
 }
 
 export interface BuildWithdrawOptions {
@@ -600,7 +625,11 @@ export async function buildBlendCollateralSupply(
 }
 
 /**
- * Reclaims collateral, making it an ordinary supply balance again.
+ * Takes collateral back out of the pool, to the wallet.
+ *
+ * It does not become a plain supply on the way: simulated on mainnet on
+ * 2026-11-05, a whole collateral withdrawal left `supply` and `collateral` both
+ * empty, and Blend's `apply_withdraw_collateral` adds a pool transfer to `to`.
  *
  * The pool refuses this if it would leave outstanding liabilities
  * under-collateralised, which is the protection that matters here: the check
@@ -617,6 +646,53 @@ export async function buildBlendCollateralWithdraw(
     'collateral withdrawal',
     WITHDRAW_EVERYTHING
   )
+}
+
+/**
+ * Empties an asset held both ways, plain and as collateral, in one signature.
+ *
+ * One `submit` takes a list of requests, so "withdraw all" does not need two
+ * transactions when a person holds the asset in both forms.
+ */
+export async function buildBlendWithdrawEverywhere(
+  options: BuildCollateralOptions
+): Promise<BuiltCollateral> {
+  assertVenueOn('blend')
+  const { account, asset } = options
+  const poolId = options.poolId ?? blendPool()
+  const horizonUrl = options.horizonUrl ?? stellarNetwork.horizonUrl
+  const sequence = await loadSequence(account, horizonUrl, options.fetchImpl ?? fetch)
+
+  const operation = new Contract(poolId).call(
+    'submit',
+    new Address(account).toScVal(),
+    new Address(account).toScVal(),
+    new Address(account).toScVal(),
+    xdr.ScVal.scvVec([
+      poolRequest(asset, WITHDRAW_EVERYTHING, REQUEST_TYPE_WITHDRAW),
+      poolRequest(asset, WITHDRAW_EVERYTHING, REQUEST_TYPE_WITHDRAW_COLLATERAL),
+    ])
+  )
+
+  const tx = new TransactionBuilder(new Account(account, sequence), {
+    fee: BASE_FEE,
+    networkPassphrase: stellarNetwork.networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(TIMEOUT_SECONDS)
+    .build()
+
+  const built = tx.toXDR()
+  assertSelfWithdraw(built, account)
+
+  return {
+    xdr: built,
+    recipient: account,
+    asset,
+    amount: WITHDRAW_EVERYTHING,
+    everything: true,
+    networkPassphrase: stellarNetwork.networkPassphrase,
+  }
 }
 
 /**
@@ -644,41 +720,52 @@ export async function buildBlendBorrow(options: BuildCollateralOptions): Promise
 }
 
 /**
- * Repays a liability, in whole or in part.
+ * Repays a liability, always for a named amount.
  *
- * Omitting the amount repays everything, and that is the path worth taking:
- * a debt read a moment ago is already larger, so repaying an exact figure
- * leaves a remainder that keeps accruing and keeps the position liquidatable.
- * The pool clamps an over-large repayment to what is actually owed, so the
- * sentinel costs nothing and closes the liability exactly.
+ * A withdrawal can ask for `i128::MAX` because the pool clamps what it pays out.
+ * A repayment cannot: Blend's `apply_repay` takes the whole requested amount from
+ * the wallet first and refunds the excess afterwards, so the token refuses the
+ * transfer ("spent amount is too large for an i64", simulated against real
+ * mainnet borrowers on 2026-11-05). `repayAllAmount` in `./exit` works out the
+ * figure that clears a debt.
  */
 export async function buildBlendRepay(options: BuildCollateralOptions): Promise<BuiltCollateral> {
   assertVenueOn('blend')
-  return buildSinglePoolCall(options, REQUEST_TYPE_REPAY, 'repayment', REPAY_EVERYTHING)
+  if (options.amount === undefined) {
+    throw new Error('a repayment needs an amount')
+  }
+  return buildSinglePoolCall(options, REQUEST_TYPE_REPAY, 'repayment', undefined)
+}
+
+/** The account's pool tokens by reserve index, as `submit` says they will stand afterwards. */
+export interface PositionsAfter {
+  supply: Record<string, string>
+  collateral: Record<string, string>
+  liabilities: Record<string, string>
 }
 
 /**
- * What the position still holds after the withdrawal, from the simulation.
+ * What the account holds after the call, from the simulation.
  *
- * **Not the amount withdrawn**, which is the trap this function exists to avoid
- * falling into. `submit` returns the account's positions *after* the call, so
- * reading `supply` here gives the remainder — reporting it as the sum taken out
- * would be exactly wrong, and most wrong on a full withdrawal, where the
- * remainder is zero and the amount taken is everything.
+ * **Not the amount moved.** `submit` returns the positions after the call, and
+ * an emptied reserve has no entry at all rather than a zero.
  */
-function readRemainingTokens(sim: rpc.Api.SimulateTransactionSuccessResponse): string | undefined {
+function readPositionsAfter(
+  sim: rpc.Api.SimulateTransactionSuccessResponse
+): PositionsAfter | undefined {
   try {
-    const positions = scValToNative(sim.result?.retval as xdr.ScVal) as
-      | { supply?: Record<string, unknown> }
+    const raw = scValToNative(sim.result?.retval as xdr.ScVal) as
+      | Partial<Record<keyof PositionsAfter, Record<string, unknown>>>
       | undefined
+    if (raw === undefined) return undefined
 
-    const supply = positions?.supply
-    if (supply === undefined) return undefined
-
-    // An emptied position returns no supply entry at all rather than a zero,
-    // so an absent reserve here means nothing left.
-    const first = Object.values(supply)[0]
-    return first === undefined ? '0' : String(first)
+    const strings = (map: Record<string, unknown> | undefined): Record<string, string> =>
+      Object.fromEntries(Object.entries(map ?? {}).map(([k, v]) => [k, String(v)]))
+    return {
+      supply: strings(raw.supply),
+      collateral: strings(raw.collateral),
+      liabilities: strings(raw.liabilities),
+    }
   } catch {
     return undefined
   }
@@ -696,7 +783,7 @@ function readRemainingTokens(sim: rpc.Api.SimulateTransactionSuccessResponse): s
 export async function prepareBlendWithdraw(
   built: string,
   rpcUrl: string = stellarNetwork.sorobanRpcUrl
-): Promise<{ ok: true; xdr: string; remaining?: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; xdr: string; after?: PositionsAfter } | { ok: false; reason: string }> {
   const server = new rpc.Server(rpcUrl)
 
   let tx
@@ -718,13 +805,13 @@ export async function prepareBlendWithdraw(
     }
 
     const prepared = rpc.assembleTransaction(tx, sim).build()
-    const result: { ok: true; xdr: string; remaining?: string } = {
+    const result: { ok: true; xdr: string; after?: PositionsAfter } = {
       ok: true,
       xdr: prepared.toXDR(),
     }
 
-    const remaining = readRemainingTokens(sim)
-    if (remaining !== undefined) result.remaining = remaining
+    const after = readPositionsAfter(sim)
+    if (after !== undefined) result.after = after
 
     return result
   } catch (e) {

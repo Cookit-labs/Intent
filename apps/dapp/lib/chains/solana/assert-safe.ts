@@ -36,7 +36,34 @@ export interface SolanaVenuePolicy {
   programs: Readonly<Record<string, { discriminators?: readonly string[] }>>
   /** Whether wrapping SOL (a transfer to the account's own wrapped SOL account) is expected. */
   mayWrapSol: boolean
+  /**
+   * The one extra signer a venue may ask for: a brand new account this same transaction creates,
+   * paid for by the wallet, at exactly this size and rent, and owned by this program.
+   */
+  createsSigner?: { owner: string; space: bigint; lamports: bigint }
+  /** Whether closing an empty token account of the person's, rent back to them, is expected. */
+  mayCloseOwnAccounts?: boolean
 }
+
+/** One instruction a withdrawal may contain, and which of its accounts must be whose. */
+export interface ExitInstructionRule {
+  program: string
+  discriminator: string
+  /** Positions that must be the person. */
+  signers: readonly number[]
+  /** Where the money lands. Only an instruction that pays out has this. */
+  recipient?: number
+  /** Where the person's shares sit, which every instruction naming them must agree on. */
+  shares?: number
+}
+
+export interface SolanaExitPolicy extends SolanaVenuePolicy {
+  /** The token paid out, which must land in the person's own account for it. */
+  mint: string
+  rules: readonly ExitInstructionRule[]
+}
+
+const U64_MAX = BigInt('18446744073709551615')
 
 interface DecodedInstruction {
   programIndex: number
@@ -97,28 +124,31 @@ export function decodeSolanaTransaction(base64: string): DecodedSolanaTransactio
 }
 
 /**
- * The owner's token account for a mint. Written out rather than taken from the
- * kit's async derivation because `assertSafe` is synchronous by contract.
+ * A program's derived address. Written out rather than taken from the kit's async
+ * derivation because `assertSafe` is synchronous by contract.
  */
-export function associatedTokenAccount(owner: string, mint: string): string {
-  const encoder = getAddressEncoder()
+export function programAddress(seeds: readonly Uint8Array[], program: string): string {
   const decoder = getAddressDecoder()
-  const seeds = [
-    encoder.encode(owner as Address),
-    encoder.encode(TOKEN_PROGRAM as Address),
-    encoder.encode(mint as Address),
-  ]
-  const program = encoder.encode(ASSOCIATED_TOKEN_PROGRAM as Address)
+  const programBytes = Uint8Array.from(getAddressEncoder().encode(program as Address))
   for (let bump = 255; bump >= 0; bump -= 1) {
     const hash = createHash('sha256')
-    for (const seed of seeds) hash.update(Uint8Array.from(seed))
+    for (const seed of seeds) hash.update(seed)
     hash.update(Uint8Array.of(bump))
-    hash.update(Uint8Array.from(program))
+    hash.update(programBytes)
     hash.update('ProgramDerivedAddress')
     const candidate = decoder.decode(hash.digest())
     if (isOffCurveAddress(candidate)) return candidate
   }
-  throw new Error('No program address for this owner.')
+  throw new Error('No program address for these seeds.')
+}
+
+/** The owner's token account for a mint. */
+export function associatedTokenAccount(owner: string, mint: string): string {
+  const encoder = getAddressEncoder()
+  return programAddress(
+    [owner, TOKEN_PROGRAM, mint].map((part) => Uint8Array.from(encoder.encode(part as Address))),
+    ASSOCIATED_TOKEN_PROGRAM
+  )
 }
 
 export function ownWrappedSolAccount(owner: string): string {
@@ -129,7 +159,7 @@ function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function readLittleEndian(data: Uint8Array, offset: number, length: number): bigint {
+export function readLittleEndian(data: Uint8Array, offset: number, length: number): bigint {
   let value = BigInt(0)
   for (let i = length - 1; i >= 0; i -= 1) {
     value = (value << BigInt(8)) | BigInt(data[offset + i] ?? 0)
@@ -161,6 +191,30 @@ function checkComputeBudget(instructions: readonly DecodedInstruction[]): void {
   if ((price * limit) / BigInt(1_000_000) > MAX_PRIORITY_FEE_LAMPORTS) {
     refuse('This transaction would pay an unusually large priority fee from your SOL.')
   }
+}
+
+/** Whether this is the policy's one permitted account creation, paid for by the wallet. */
+function createsExtraSigner(
+  transaction: DecodedSolanaTransaction,
+  instruction: DecodedInstruction,
+  account: string,
+  policy: SolanaVenuePolicy,
+  extraSigner: string | undefined
+): boolean {
+  const { data } = instruction
+  const allowed = policy.createsSigner
+  return (
+    allowed !== undefined &&
+    extraSigner !== undefined &&
+    data.length === 52 &&
+    readLittleEndian(data, 0, 4) === BigInt(0) &&
+    instruction.accounts.length === 2 &&
+    staticAccount(transaction, instruction, 0) === account &&
+    staticAccount(transaction, instruction, 1) === extraSigner &&
+    readLittleEndian(data, 4, 8) === allowed.lamports &&
+    readLittleEndian(data, 12, 8) === allowed.space &&
+    getAddressDecoder().decode(data.subarray(20)) === allowed.owner
+  )
 }
 
 function checkSystem(
@@ -198,7 +252,8 @@ function checkToken(
   if (tag === 9) {
     const destination = staticAccount(transaction, instruction, 1)
     const owner = staticAccount(transaction, instruction, 2)
-    if (own === undefined || target !== own || destination !== account || owner !== account) {
+    const closable = (own !== undefined && target === own) || policy.mayCloseOwnAccounts === true
+    if (!closable || target === undefined || destination !== account || owner !== account) {
       refuse('This transaction would close a token account in a way that does not pay you back.')
     }
     return
@@ -239,9 +294,12 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
     if (transaction.feePayer !== account) {
       refuse(`This transaction’s network fee would not be paid by your wallet, ${account}.`)
     }
-    if (transaction.signerCount !== 1 || transaction.readonlySignerCount !== 0) {
+    const mayHaveExtra = policy.createsSigner !== undefined && transaction.signerCount === 2
+    if ((transaction.signerCount !== 1 && !mayHaveExtra) || transaction.readonlySignerCount !== 0) {
       refuse('This transaction needs a signature from someone other than you.')
     }
+    const extraSigner = mayHaveExtra ? transaction.staticAccounts[1] : undefined
+    let created = 0
 
     const budget: DecodedInstruction[] = []
     for (const instruction of transaction.instructions) {
@@ -250,8 +308,14 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
         refuse('This transaction calls a program hidden in a lookup table.')
       }
       if (program === COMPUTE_BUDGET_PROGRAM) budget.push(instruction)
-      else if (program === SYSTEM_PROGRAM) checkSystem(transaction, instruction, account, policy)
-      else if (program === TOKEN_PROGRAM) checkToken(transaction, instruction, account, policy)
+      else if (
+        program === SYSTEM_PROGRAM &&
+        createsExtraSigner(transaction, instruction, account, policy, extraSigner)
+      ) {
+        created += 1
+      } else if (program === SYSTEM_PROGRAM) {
+        checkSystem(transaction, instruction, account, policy)
+      } else if (program === TOKEN_PROGRAM) checkToken(transaction, instruction, account, policy)
       else if (program === ASSOCIATED_TOKEN_PROGRAM) {
         checkAssociatedToken(transaction, instruction, account)
       } else {
@@ -265,6 +329,9 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
           refuse(`This transaction asks ${policy.venueName} for an instruction I didn’t expect.`)
         }
       }
+    }
+    if (mayHaveExtra && created !== 1) {
+      refuse('This transaction needs a signature from someone other than you.')
     }
     checkComputeBudget(budget)
   }
@@ -284,6 +351,109 @@ export function assertDepositAmount(base64: string, program: string, baseUnits: 
     refuse('This transaction is not the single deposit you asked for.')
   } else if (readLittleEndian(deposit.data, 8, 8) !== BigInt(baseUnits)) {
     refuse('This deposit’s amount is not the amount you asked for.')
+  }
+}
+
+function ruleFor(
+  transaction: DecodedSolanaTransaction,
+  instruction: DecodedInstruction,
+  rules: readonly ExitInstructionRule[]
+): ExitInstructionRule | undefined {
+  const program = transaction.staticAccounts[instruction.programIndex]
+  const discriminator = hex(instruction.data.subarray(0, 8))
+  return rules.find((rule) => rule.program === program && rule.discriminator === discriminator)
+}
+
+/** Whether a payload is a withdrawal, as opposed to the deposit the same venue also builds. */
+export function isSolanaExit(
+  payload: SigningPayload,
+  rules: readonly ExitInstructionRule[]
+): boolean {
+  if (payload.family !== 'solana') return false
+  const transaction = decodeSolanaTransaction(payload.transaction)
+  return transaction.instructions.some(
+    (instruction) => ruleFor(transaction, instruction, rules)?.recipient !== undefined
+  )
+}
+
+/**
+ * What a withdrawal built by a venue's API must prove beyond the programs it calls: every
+ * instruction acts for the person alone, and the money lands in their own account for the token.
+ *
+ * The shares account needs no address of its own here. Burning shares takes the signature of
+ * whoever owns them, so a shares account that isn't the person's fails on chain, and every other
+ * instruction naming shares must name that same account, or an unstake could pay them elsewhere.
+ * A close is held to that account too, and the token program refuses to close one with a balance.
+ */
+export function assertExitAccounts(
+  base64: string,
+  account: string,
+  policy: SolanaExitPolicy
+): void {
+  const transaction = decodeSolanaTransaction(base64)
+  const recipient = associatedTokenAccount(account, policy.mint)
+  const shares = new Set<string | undefined>()
+  let payouts = 0
+
+  for (const instruction of transaction.instructions) {
+    const rule = ruleFor(transaction, instruction, policy.rules)
+    if (rule === undefined) continue
+    if (rule.signers.some((at) => staticAccount(transaction, instruction, at) !== account)) {
+      refuse(`This withdrawal asks ${policy.venueName} to act for someone other than you.`)
+    }
+    if (rule.shares !== undefined) shares.add(staticAccount(transaction, instruction, rule.shares))
+    if (rule.recipient === undefined) continue
+    payouts += 1
+    if (instruction.data.length !== 16) refuse('This withdrawal is not in the form I expected.')
+    if (staticAccount(transaction, instruction, rule.recipient) !== recipient) {
+      refuse('This withdrawal would not pay into your own token account.')
+    }
+  }
+
+  if (payouts === 0) refuse('This transaction is not the withdrawal you asked for.')
+  if (shares.size > 1 || shares.has(undefined)) {
+    refuse('This withdrawal moves your shares through an account I can’t confirm is yours.')
+  }
+  for (const instruction of transaction.instructions) {
+    if (
+      transaction.staticAccounts[instruction.programIndex] === TOKEN_PROGRAM &&
+      !shares.has(staticAccount(transaction, instruction, 0))
+    ) {
+      refuse('This withdrawal closes a token account it should not touch.')
+    }
+  }
+}
+
+/** A deposit is held to its own policy, and a withdrawal to the stricter one, never a blend. */
+export function solanaEarnAssertSafe(deposit: SolanaVenuePolicy, exit: SolanaExitPolicy) {
+  const depositSafe = solanaAssertSafe(deposit)
+  const exitSafe = solanaAssertSafe(exit)
+  return (payload: SigningPayload, account: string): void => {
+    if (!isSolanaExit(payload, exit.rules)) return depositSafe(payload, account)
+    exitSafe(payload, account)
+    if (payload.family === 'solana') assertExitAccounts(payload.transaction, account, exit)
+  }
+}
+
+/**
+ * Binds a withdrawal to what was asked: the amounts paid out add up to it exactly. The whole of a
+ * position is the program's own "everything" value, which a venue may split across steps.
+ */
+export function assertExitAmount(
+  base64: string,
+  rules: readonly ExitInstructionRule[],
+  baseUnits: bigint
+): void {
+  const transaction = decodeSolanaTransaction(base64)
+  const amounts = transaction.instructions
+    .filter((instruction) => ruleFor(transaction, instruction, rules)?.recipient !== undefined)
+    .map((instruction) => readLittleEndian(instruction.data, 8, 8))
+  const matches =
+    baseUnits === U64_MAX
+      ? amounts.includes(U64_MAX)
+      : !amounts.includes(U64_MAX) && amounts.reduce((a, b) => a + b, BigInt(0)) === baseUnits
+  if (amounts.length === 0 || !matches) {
+    refuse('This withdrawal’s amount is not the amount you asked for.')
   }
 }
 

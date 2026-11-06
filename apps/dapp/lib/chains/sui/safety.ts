@@ -18,12 +18,15 @@ export interface ParsedCall {
 /** The bytes of a literal argument, or nothing when the value comes from elsewhere in the transaction. */
 export type ReadPure = (argument: TxArgument | undefined) => Uint8Array | undefined
 
+/** The id of an object argument, or nothing when the value comes from elsewhere in the transaction. */
+export type ReadObject = (argument: TxArgument | undefined) => string | undefined
+
 export interface PtbPolicy {
   venueName: string
   /** Normalized `package::module::function`. A package alone is too coarse: see below. */
   allowedCalls: ReadonlySet<string>
   /** Checks the arguments of an allowed call, where they can name a recipient or a limit. */
-  checkCall?: (call: ParsedCall, read: ReadPure, account: string) => void
+  checkCall?: (call: ParsedCall, read: ReadPure, account: string, readObject: ReadObject) => void
 }
 
 export function moveTarget(pkg: string, module: string, fn: string): string {
@@ -50,7 +53,7 @@ function refuse(reason: string): never {
   throw new ChainActionRefused(`${reason} ${NOTHING_SENT}`)
 }
 
-function parse(transaction: string): TxData {
+export function parsePtb(transaction: string): TxData {
   // Only BCS bytes. The JSON form can hold unresolved values that are not what gets signed.
   if (transaction === '' || !/^[A-Za-z0-9+/]+={0,2}$/.test(transaction)) {
     refuse('I could not read this as a Sui transaction.')
@@ -62,12 +65,28 @@ function parse(transaction: string): TxData {
   }
 }
 
-function readerFor(data: TxData): ReadPure {
+export function readerFor(data: TxData): ReadPure {
   return (argument) => {
     if (argument === undefined || argument.$kind !== 'Input') return undefined
     const input = data.inputs[argument.Input]
     if (input?.$kind !== 'Pure') return undefined
     return fromBase64(input.Pure.bytes)
+  }
+}
+
+export function objectReaderFor(data: TxData): ReadObject {
+  return (argument) => {
+    if (argument === undefined || argument.$kind !== 'Input') return undefined
+    const input = data.inputs[argument.Input]
+    if (input?.$kind !== 'Object') return undefined
+    const { Object: held } = input
+    const id =
+      held.$kind === 'SharedObject'
+        ? held.SharedObject.objectId
+        : held.$kind === 'ImmOrOwnedObject'
+          ? held.ImmOrOwnedObject.objectId
+          : held.Receiving.objectId
+    return normalizeSuiAddress(id)
   }
 }
 
@@ -95,8 +114,9 @@ export function assertPtbSafe(payload: SigningPayload, account: string, policy: 
   if (payload.family !== 'sui') refuse('That is not a Sui transaction.')
   if (!isValidSuiAddress(account)) refuse('That is not a Sui address.')
   const me = normalizeSuiAddress(account)
-  const data = parse(payload.transaction)
+  const data = parsePtb(payload.transaction)
   const read = readerFor(data)
+  const readObject = objectReaderFor(data)
 
   if (typeof data.sender === 'string' && normalizeSuiAddress(data.sender) !== me) {
     refuse('This transaction would be sent from a different account than your wallet.')
@@ -133,7 +153,7 @@ export function assertPtbSafe(payload: SigningPayload, account: string, policy: 
         }
         const args = command.MoveCall.arguments
         if (target === SEND_FUNDS) assertPaysAccount(read, args[1], me)
-        policy.checkCall?.({ target, typeArguments, arguments: args }, read, me)
+        policy.checkCall?.({ target, typeArguments, arguments: args }, read, me, readObject)
         break
       }
       default:

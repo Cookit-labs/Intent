@@ -8,7 +8,6 @@ import { applySlippage } from '../../../../lib/swap/assets'
 import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { collectQuotes } from '../../../../lib/swap/quote'
 import { createHorizonQuoter } from '../../../../lib/swap/sources/horizon-quoter'
-import { assertPlanWithinCap } from '../../../../lib/server/trade-cap'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 
 /**
@@ -66,9 +65,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const built = await buildPlan({ account: body.account, actions })
-    // Step by step against the mainnet cap, once the plan has been built, so
-    // a step whose venue is not on this network is refused by name first.
-    await assertPlanWithinCap(actions)
     return NextResponse.json({
       xdr: built.xdr,
       steps: built.steps,

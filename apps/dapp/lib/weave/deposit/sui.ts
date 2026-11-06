@@ -27,7 +27,14 @@ type TxCommand = TxData['commands'][number]
 type TxArgument = Extract<TxCommand, { $kind: 'SplitCoins' }>['SplitCoins']['coin']
 
 const USDC = tokenBySymbol(SUI_TOKENS, 'USDC') as ChainToken
-const USDC_COIN = normalizeStructTag(`0x2::coin::Coin<${USDC.id}>`)
+
+function tokenOf(expectation: DepositExpectation): ChainToken {
+  return expectation.token ?? USDC
+}
+
+function coinTypeOf(token: ChainToken): string {
+  return normalizeStructTag(`0x2::coin::Coin<${token.id}>`)
+}
 
 const MAX_U64 = BigInt('18446744073709551615')
 const READ_TIMEOUT_MS = 10_000
@@ -49,13 +56,14 @@ function orderUnits(expectation: DepositExpectation): string {
   if (normalizeSuiAddress(depositAddress) === normalizeSuiAddress(account)) {
     refuse('This order’s deposit address is your own wallet.')
   }
+  const token = tokenOf(expectation)
   let units: string
   try {
-    units = toBaseUnits(amount, USDC.decimals)
+    units = toBaseUnits(amount, token.decimals)
   } catch (e) {
     return refuse(e instanceof Error ? e.message : 'That is not an amount.')
   }
-  if (BigInt(units) > MAX_U64) refuse('This order’s amount is too large for USDC.')
+  if (BigInt(units) > MAX_U64) refuse(`This order’s amount is too large for ${token.symbol}.`)
   return units
 }
 
@@ -106,6 +114,7 @@ function isResultOf(argument: TxArgument | undefined, command: number): boolean 
  */
 function spentCoins(transaction: string, expectation: DepositExpectation): string[] {
   const units = orderUnits(expectation)
+  const { symbol } = tokenOf(expectation)
   const me = normalizeSuiAddress(expectation.account)
   const data = parse(transaction)
 
@@ -125,14 +134,14 @@ function spentCoins(transaction: string, expectation: DepositExpectation): strin
   const transfer = data.commands[splitAt + 1]
   const merges = data.commands.slice(0, Math.max(splitAt, 0))
   if (split?.$kind !== 'SplitCoins' || transfer?.$kind !== 'TransferObjects') {
-    return refuse('This transaction does more than the one USDC transfer this order needs.')
+    return refuse(`This transaction does more than the one ${symbol} transfer this order needs.`)
   }
 
   const coin = coinInput(data, split.SplitCoins.coin)
   const coins = new Set([coin])
   for (const merge of merges) {
     if (merge.$kind !== 'MergeCoins') {
-      return refuse('This transaction does more than the one USDC transfer this order needs.')
+      return refuse(`This transaction does more than the one ${symbol} transfer this order needs.`)
     }
     if (coinInput(data, merge.MergeCoins.destination) !== coin) {
       refuse('This transaction merges coins into something other than the coin it pays from.')
@@ -186,17 +195,23 @@ async function read<T>(work: Promise<T>): Promise<T> {
   }
 }
 
-async function coinsCovering(account: string, units: bigint): Promise<SuiClientTypes.Coin[]> {
+async function coinsCovering(
+  account: string,
+  units: bigint,
+  expectation: DepositExpectation
+): Promise<SuiClientTypes.Coin[]> {
   const { core } = suiClient()
+  const token = tokenOf(expectation)
+  const wanted = coinTypeOf(token)
   const picked: SuiClientTypes.Coin[] = []
   let total = BigInt(0)
   let cursor: string | null = null
   for (let page = 0; page < MAX_COIN_PAGES; page += 1) {
     const reply: SuiClientTypes.ListCoinsResponse = await read(
-      core.listCoins({ owner: account, coinType: USDC.id, limit: COINS_PER_PAGE, cursor })
+      core.listCoins({ owner: account, coinType: token.id, limit: COINS_PER_PAGE, cursor })
     )
     for (const coin of reply.objects) {
-      if (total < units && normalizeStructTag(coin.type) === USDC_COIN) {
+      if (total < units && normalizeStructTag(coin.type) === wanted) {
         picked.push(coin)
         total += BigInt(coin.balance)
       }
@@ -206,19 +221,22 @@ async function coinsCovering(account: string, units: bigint): Promise<SuiClientT
     cursor = reply.cursor
   }
 
-  const { balance } = await read(core.getBalance({ owner: account, coinType: USDC.id }))
+  const { balance } = await read(core.getBalance({ owner: account, coinType: token.id }))
   if (BigInt(balance.balance) >= units) {
+    // Weave's orders name no token, and a person there is cashing out rather than swapping.
+    const action = expectation.token === undefined ? 'cash-out' : 'swap'
     refuse(
-      'Your USDC is in your Sui address balance or across too many small coins, and this cash-out can only spend coins.'
+      `Your ${token.symbol} is in your Sui address balance or across too many small coins, and this ${action} can only spend coins.`
     )
   }
-  return refuse('This wallet holds less USDC than this order’s amount.')
+  return refuse(`This wallet holds less ${token.symbol} than this order’s amount.`)
 }
 
 async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   const units = orderUnits(expectation)
   const me = normalizeSuiAddress(expectation.account)
-  const coins = await coinsCovering(me, BigInt(units))
+  const token = tokenOf(expectation)
+  const coins = await coinsCovering(me, BigInt(units), expectation)
 
   const tx = new Transaction()
   tx.setSender(me)
@@ -226,14 +244,16 @@ async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   const [coin, ...others] = coins.map((c) =>
     tx.object(Inputs.ObjectRef({ objectId: c.objectId, version: c.version, digest: c.digest }))
   )
-  if (coin === undefined) return refuse('This wallet holds less USDC than this order’s amount.')
+  if (coin === undefined) {
+    return refuse(`This wallet holds less ${token.symbol} than this order’s amount.`)
+  }
   if (others.length > 0) tx.mergeCoins(coin, others)
   const [split] = tx.splitCoins(coin, [BigInt(units)])
   tx.transferObjects([split as never], normalizeSuiAddress(expectation.depositAddress))
 
   let transaction: string
   try {
-    transaction = await buildUnsigned(tx, suiClient(), USDC.symbol)
+    transaction = await buildUnsigned(tx, suiClient(), token.symbol)
   } catch (e) {
     return refuse(
       e instanceof ChainActionRefused ? e.message : 'Sui’s network could not build this just now.'
@@ -244,20 +264,25 @@ async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   return payload
 }
 
-/** What the bytes can't show: that each coin spent really is USDC, and the account's own. */
-async function assertSpendsOwnUsdc(ids: string[], account: string): Promise<void> {
+/** What the bytes can't show: that each coin spent really is the token, and the account's own. */
+async function assertSpendsOwnToken(
+  ids: string[],
+  account: string,
+  token: ChainToken
+): Promise<void> {
   const me = normalizeSuiAddress(account)
+  const wanted = coinTypeOf(token)
   const { objects } = await read(suiClient().core.getObjects({ objectIds: ids }))
-  const allOwnUsdc =
+  const allOwn =
     objects.length === ids.length &&
     objects.every(
       (object) =>
         !(object instanceof Error) &&
-        normalizeStructTag(object.type) === USDC_COIN &&
+        normalizeStructTag(object.type) === wanted &&
         object.owner.$kind === 'AddressOwner' &&
         normalizeSuiAddress(object.owner.AddressOwner) === me
     )
-  if (!allOwnUsdc) refuse('A coin in this transaction is not USDC held by your wallet.')
+  if (!allOwn) refuse(`A coin in this transaction is not ${token.symbol} held by your wallet.`)
 }
 
 async function submit(
@@ -267,16 +292,16 @@ async function submit(
   if (signed.family !== 'sui') {
     return { ok: false, error: 'That is not a Sui transaction, so nothing was sent.' }
   }
+  const token = tokenOf(expectation)
   const ids = spentCoins(signed.transaction, expectation)
-  await assertSpendsOwnUsdc(ids, expectation.account)
+  await assertSpendsOwnToken(ids, expectation.account, token)
   try {
     const result = await submitSui({ account: expectation.account, venueId: 'weave', signed })
-    // submitSui words a failure for a trade, which a person cashing out never made.
+    // submitSui words a failure for a trade, and what failed here is only the deposit.
     return !result.ok && result.pending !== true && result.error.includes('trade')
       ? {
           ok: false,
-          error:
-            'This deposit failed on the network, so your USDC did not move and only the network fee was spent. You can try again.',
+          error: `This deposit failed on the network, so your ${token.symbol} did not move and only the network fee was spent. You can try again.`,
         }
       : result
   } catch {
@@ -285,7 +310,7 @@ async function submit(
     return {
       ok: false,
       pending: true,
-      error: `Your USDC deposit was sent (${digest}) but isn't confirmed yet. Don't send it again until you've checked https://suiscan.xyz/mainnet/tx/${digest}.`,
+      error: `Your ${token.symbol} deposit was sent (${digest}) but isn't confirmed yet. Don't send it again until you've checked https://suiscan.xyz/mainnet/tx/${digest}.`,
     }
   }
 }

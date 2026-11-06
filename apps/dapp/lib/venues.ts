@@ -1,6 +1,7 @@
 import { activeNetwork, type StellarNetworkName } from '@intent/config'
-import type { Venue } from '@intent/types'
+import type { ChainDescriptor, Venue } from '@intent/types'
 
+import { evmVenues } from './chains/evm/venues'
 import { nearVenues } from './chains/near/venues'
 import { solanaVenues } from './chains/solana/venues'
 import { suiVenues } from './chains/sui/venues'
@@ -10,6 +11,7 @@ export const venues: Venue[] = [
   ...solanaVenues,
   ...suiVenues,
   ...nearVenues,
+  ...evmVenues,
   {
     id: 'cow-swap',
     family: 'evm' as const,
@@ -105,7 +107,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Swaps route through Soroswap’s Soroban router. On the same assets it has quoted several times the classic DEX price.',
+      'Swaps route through Soroswap’s Soroban router, priced live against the other venues.',
   },
   {
     // A different product from the AMM above, and listed apart from it on
@@ -136,7 +138,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Swaps route through Aquarius’s router against the pool the agent chose. Which router wins depends on the direction of the trade.',
+      'Swaps route through Aquarius’s router against the pool the agent chose, priced live against the other venues.',
   },
   {
     // Mainnet only: Phoenix has no standing testnet instance to quote
@@ -198,7 +200,7 @@ export const venues: Venue[] = [
     // A getter: which bonds exist depends on the network of the request.
     get capability(): string {
       return activeNetwork() === 'mainnet'
-        ? 'Buy tokenized Mexican and US treasury bills (CETES, USTRY). They settle like any other classic asset.'
+        ? 'Buy tokenized Mexican and US treasury bills (CETES, USTRY). They settle like any other classic asset, and getting out is selling them back for USDC on the network’s order book, at whatever that book pays then. No Etherfuse account needed.'
         : 'Buy tokenized Mexican, US and Korean treasury bills. They settle like any other classic asset.'
     },
   },
@@ -213,7 +215,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Deposit both sides of a pair and earn a share of the 0.3% trading fee. Run by the network itself, with no contract to trust.',
+      'A share in a pool earns part of its 0.3% trading fee, and comes out in whatever mix the pool holds by then. Run by the network itself, with no contract to trust. Any share your wallet holds can be withdrawn from the History tab. Depositing is not offered from the chat.',
   },
   {
     id: 'blend',
@@ -226,7 +228,7 @@ export const venues: Venue[] = [
     integration: 'executes',
     networks: ['testnet', 'mainnet'],
     capability:
-      'Rates are read live. Supply, borrow, repay and collateral are signed here, and a borrow is checked by the pool itself. A position with a loan can be liquidated if its collateral falls.',
+      'Rates are read live. Supply, withdraw, borrow, repay and collateral are signed here, by typing "withdraw 25 XLM" or from the History tab, and each is checked by the pool itself. A withdrawal waits if the pool has lent out too much of that asset. A position with a loan can be liquidated if its collateral falls.',
   },
   {
     id: 'defindex',
@@ -301,7 +303,7 @@ export const venues: Venue[] = [
     url: 'https://noether.exchange',
     integration: 'quotes',
     capability:
-      'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs an API key from its closed beta, so it is unverified end to end. Unaudited, testnet-only; its gateway reports 0.0.0-dev.',
+      'Mark prices and open interest are read live, and “long XLM 10x with 50 USDC” prepares a position to sign. Signing needs an API key from its closed beta, so it is unverified end to end. Testnet-only here: its mainnet contracts are paused until its audit clears, and its gateway reports 0.0.0-dev.',
   },
   // A name service, not a trading venue. It earns its place because a send
   // to deon.xlm settles through what it resolves; the agents never see it.
@@ -322,6 +324,24 @@ export const venues: Venue[] = [
     },
   },
 ]
+
+const EVM_CHAINS_WITH_VENUES = ['Avalanche', 'Monad']
+
+/**
+ * Whether a venue belongs on this chain's lists. Family decides, except that EVM chains share one:
+ * Avalanche and Monad list only the venues that name them, and a venue naming either one belongs
+ * to that chain alone. Arc has no venues of its own, so it keeps the rest of the family's list.
+ */
+export function venueOnChain(
+  venue: Pick<Venue, 'family' | 'chains'>,
+  chain: Pick<ChainDescriptor, 'family' | 'name'>
+): boolean {
+  if (venue.family !== chain.family) return false
+  if (chain.family !== 'evm') return true
+  return EVM_CHAINS_WITH_VENUES.includes(chain.name)
+    ? venue.chains.includes(chain.name)
+    : !venue.chains.some((name) => EVM_CHAINS_WITH_VENUES.includes(name))
+}
 
 /**
  * Which venues exist on which network.

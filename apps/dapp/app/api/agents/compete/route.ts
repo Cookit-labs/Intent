@@ -2,7 +2,12 @@ import { activeNetwork } from '@intent/config'
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
-import type { AgentProposalResult } from '../../../../lib/agents/brain'
+import type { AgentProposalResult, MarketContext } from '../../../../lib/agents/brain'
+import {
+  intentFromChainAction,
+  quoteChainRoutes,
+  type ChainRouteQuote,
+} from '../../../../lib/agents/chain-routes'
 import type { CompetitionFrame } from '../../../../lib/agents/events'
 import { encodeFrame } from '../../../../lib/agents/events'
 import { buildMarketContextAsync, quoteRoutes } from '../../../../lib/agents/market-context'
@@ -11,6 +16,22 @@ import { benchedUntilFor, lineUp, noteRateLimited } from '../../../../lib/agents
 import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
+import { runTalk } from '../../../../lib/agents/talk'
+import { applyFinalChoice } from '../../../../lib/agents/talk-final'
+import {
+  assertValidAmount,
+  assertKnownTokens,
+  assertNativeReserve,
+} from '../../../../lib/chains/prepare'
+import { limitPair } from '../../../../lib/chains/limit'
+import { restOption, restRoute } from '../../../../lib/agents/rest-option'
+import { chainModule } from '../../../../lib/chains/registry'
+import {
+  ChainActionRefused,
+  type ChainActionKind,
+  type ChainActionRequest,
+  type ChainModule,
+} from '../../../../lib/chains/types'
 import { parseCompoundIntent } from '../../../../lib/parse-compound'
 import { isLimitType } from '../../../../lib/intent-kind'
 import { buildParsedIntent, parseIntent, type ReadingForIntent } from '../../../../lib/parse-intent'
@@ -20,6 +41,11 @@ import { ensureLiveAssets, tickersIn } from '../../../../lib/swap/live-assets'
 import { fetchOrderBookTop } from '../../../../lib/swap/limit-price'
 import type { OrderBookTop } from '../../../../lib/swap/limit-price'
 import type { SwapQuote } from '../../../../lib/swap/quote'
+import {
+  applyChainMeasure,
+  isUnmeasuredSwap,
+  settleChainPlan,
+} from '../../../../lib/agents/settle-chain-plan'
 import { resolveExecutionPlan } from '../../../../lib/agents/tool-schema'
 import type { ParsedIntent } from '../../../../lib/parse-intent'
 import { logRace, type RaceInput } from '../../../../lib/server/analytics'
@@ -57,7 +83,7 @@ const AGENT_TIMEOUT_MS = 60_000
 const WINDOW_SECONDS = 30
 
 /**
- * Chains a competition can execute on.
+ * Chains a competition can execute on: Stellar, and any chain with a module.
  *
  * Checked before anything runs, and by name. The chain used to default to
  * 'arc' when the body carried none, and an unrecognised slug fell through to
@@ -65,8 +91,112 @@ const WINDOW_SECONDS = 30
  * which the agents were offered Uniswap. Now a missing or unsupported chain is
  * an answer the user reads, not a race that quietly runs on the wrong facts.
  */
-const EXECUTING_CHAINS: Record<string, string> = {
-  stellar: 'Stellar',
+function canExecuteOn(chain: string): boolean {
+  return chain === 'stellar' || chainModule(chain) !== undefined
+}
+
+const CHAIN_ACTION_KINDS: readonly ChainActionKind[] = ['swap', 'supply', 'stake']
+
+/** The longest account a chain uses is a 64-character NEAR implicit account; Sui and EVM are shorter. */
+const MAX_ACCOUNT_CHARS = 128
+
+/**
+ * Reads the structured action from the body, or nothing. Only the shape is
+ * checked here; whether the tokens are real is checked against the chain.
+ */
+function chainActionFromBody(raw: unknown): ChainActionRequest | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { kind, amount, tokenIn, tokenOut, venue } = raw as Record<string, unknown>
+  if (typeof kind !== 'string' || !CHAIN_ACTION_KINDS.includes(kind as ChainActionKind)) {
+    return undefined
+  }
+  if (typeof amount !== 'string' || typeof tokenIn !== 'string') return undefined
+  return {
+    kind: kind as ChainActionKind,
+    amount: amount.slice(0, 40),
+    tokenIn: tokenIn.slice(0, 40),
+    ...(typeof tokenOut === 'string' ? { tokenOut: tokenOut.slice(0, 40) } : {}),
+    ...(typeof venue === 'string' ? { venue: venue.slice(0, 40) } : {}),
+  }
+}
+
+/**
+ * What the agents are given for an action on a chain that is not Stellar: the
+ * chain's own venues and real quotes, and none of Stellar's prices, assets or
+ * order book. Returns the sentence to show instead when there is nothing to race.
+ * A `refusal` is the action itself being refused, which the user must read as
+ * written; a plain string is a race that could not run, where the direct route
+ * is still worth trying.
+ */
+async function chainRaceFacts(
+  chain: string,
+  chainApi: ChainModule,
+  action: ChainActionRequest,
+  account: string | undefined,
+  text: string
+): Promise<{ intent: ParsedIntent; market: MarketContext } | string | { refusal: string }> {
+  // No venue to quote, and none for the direct route to build on, so nothing is worth trying.
+  if (!chainApi.venues.some((v) => v.kinds.includes(action.kind))) {
+    return {
+      refusal: `Nothing here can ${action.kind} on this chain yet, so nothing was signed or sent.`,
+    }
+  }
+  try {
+    assertKnownTokens(chainApi, action)
+    assertValidAmount(action)
+  } catch (e) {
+    if (e instanceof ChainActionRefused)
+      return { refusal: `${e.message} Nothing was signed or sent.` }
+    throw e
+  }
+  if (account === undefined) {
+    return 'No wallet account came with this request, so nothing could be priced. Nothing was signed or sent.'
+  }
+  try {
+    await assertNativeReserve(chainApi, action, account)
+  } catch (e) {
+    // Worded in full already, ending as every refusal here does.
+    if (e instanceof ChainActionRefused) return { refusal: e.message }
+    throw e
+  }
+
+  const routes = await quoteChainRoutes(chainApi, action, account)
+  if (routes.length === 0) {
+    return 'No route on this chain could be priced right now, so the agents had nothing to judge. Nothing was signed or sent.'
+  }
+
+  const tokenIn = chainApi.tokens.find(
+    (t) => t.symbol.toUpperCase() === action.tokenIn.toUpperCase()
+  )
+  const price =
+    tokenIn === undefined ? undefined : await chainApi.priceUsd(tokenIn).catch(() => undefined)
+
+  // The chain's market already leaves out Stellar's assets, prices, lending
+  // rates and anchors; see `buildMarketContext`.
+  const base = await buildMarketContextAsync(chain)
+  const pair = action.kind === 'swap' ? limitPair(action.tokenIn, action.tokenOut ?? '') : undefined
+  const baseToken = chainApi.tokens.find((t) => t.symbol.toUpperCase() === pair?.base)
+  const marketUsd =
+    pair === undefined || baseToken === undefined
+      ? undefined
+      : pair.selling
+        ? price
+        : await chainApi.priceUsd(baseToken).catch(() => undefined)
+  const rest = marketUsd === undefined ? undefined : restOption(chainApi, action, marketUsd)
+  const market: MarketContext = {
+    ...base,
+    ...(rest !== undefined ? { rest } : {}),
+    prices: price !== undefined && tokenIn !== undefined ? { [tokenIn.symbol]: price } : {},
+    venues: chainApi.venues
+      .filter((v) => routes.some((r) => r.id === `${v.id}-1`))
+      .map((v) => ({
+        id: v.id,
+        name: v.name,
+        category: action.kind === 'swap' ? 'dex' : action.kind === 'supply' ? 'lending' : 'staking',
+      })),
+    routes,
+  }
+  return { intent: intentFromChainAction(action, text, price), market }
 }
 
 /**
@@ -120,10 +250,11 @@ function settlePlan(
  */
 function measured(
   proposal: AgentProposalResult,
-  quote: SwapQuote | undefined,
+  quote: SwapQuote | ChainRouteQuote | undefined,
   prices: Record<string, number>
 ): AgentProposalResult {
   if (quote === undefined) return proposal
+  if ('kind' in quote && quote.kind === 'chain') return applyChainMeasure(proposal, quote)
   const m = measureRoute(quote, prices)
   if (m === undefined) return proposal
   return {
@@ -134,7 +265,10 @@ function measured(
 }
 
 /** One SSE stream carrying a single error frame, then closing. */
-function errorStream(code: 'agents_offline' | 'chain_unsupported', message: string): Response {
+function errorStream(
+  code: 'agents_offline' | 'chain_unsupported' | 'action_refused',
+  message: string
+): Response {
   const encoder = new TextEncoder()
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -167,7 +301,7 @@ export async function POST(request: Request): Promise<Response> {
       b !== null &&
       'account' in b &&
       typeof b.account === 'string' &&
-      b.account.length <= 64
+      b.account.length <= MAX_ACCOUNT_CHARS
         ? b.account
         : undefined
     )
@@ -180,6 +314,10 @@ export async function POST(request: Request): Promise<Response> {
   let chain: string
   let context: string[]
   let reading: ReadingForIntent | undefined
+  let chainAction: ChainActionRequest | undefined
+  // Asked for by the client, because a tab from before talk shipped knows nothing
+  // of a held plan: it would offer Review on one and sign the winner's trade.
+  let clientTalks: boolean
 
   try {
     const body = (await request.json()) as {
@@ -187,13 +325,19 @@ export async function POST(request: Request): Promise<Response> {
       chain?: unknown
       context?: unknown
       reading?: unknown
+      chainAction?: unknown
+      talk?: unknown
     }
     if (typeof body.text !== 'string' || body.text.trim() === '') {
       return NextResponse.json({ error: 'invalid_text' }, { status: 400 })
     }
     text = body.text.trim().slice(0, MAX_INTENT_CHARS)
-    await ensureLiveAssets(tickersIn(text))
     chain = typeof body.chain === 'string' ? body.chain.trim() : ''
+    chainAction = chainActionFromBody(body.chainAction)
+    clientTalks = body.talk === true
+    // Stellar's live-asset lookup is for Stellar's tickers; a chain action
+    // names its tokens itself and they are checked against the chain's own list.
+    if (chain === 'stellar' || chainAction === undefined) await ensureLiveAssets(tickersIn(text))
     reading = readingFromBody(body.reading, text)
     context = Array.isArray(body.context)
       ? body.context.filter((line): line is string => typeof line === 'string').slice(0, 8)
@@ -211,11 +355,17 @@ export async function POST(request: Request): Promise<Response> {
       'No chain was named for this intent. Reload the app and try again.'
     )
   }
-  if (EXECUTING_CHAINS[chain] === undefined) {
+  if (!canExecuteOn(chain)) {
     return errorStream(
       'chain_unsupported',
-      `Agents can execute only on ${Object.values(EXECUTING_CHAINS).join(', ')} right now. ` +
-        `Switch the chain to run a competition.`
+      'Agents can execute only on Stellar, Solana, Sui, NEAR, Avalanche and Monad right now. ' +
+        'Switch the chain to run a competition.'
+    )
+  }
+  if (chain !== 'stellar' && chainAction === undefined) {
+    return errorStream(
+      'chain_unsupported',
+      'This request did not say what to do on this chain, so no race was run. Nothing was signed or sent.'
     )
   }
 
@@ -223,7 +373,10 @@ export async function POST(request: Request): Promise<Response> {
   if (full === undefined) {
     return errorStream(
       'agents_offline',
-      'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+      // Off Stellar the chat builds the direct route next, so something can still be signed.
+      chain === 'stellar'
+        ? 'The agents are not online right now, so nothing was proposed. Nothing can be executed until they are.'
+        : 'The agents are not online right now, so nothing was proposed.'
     )
   }
   const roster = lineUp(full)
@@ -236,45 +389,60 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
+  // Off Stellar the facts come from the chain's own venues and quotes, and a
+  // refusal or an unpriceable action ends here, before any agent is called.
+  const chainApi = chain === 'stellar' ? undefined : chainModule(chain)
+  const chainFacts =
+    chainApi !== undefined && chainAction !== undefined
+      ? await chainRaceFacts(chain, chainApi, chainAction, account, text)
+      : undefined
+  if (typeof chainFacts === 'string') return errorStream('chain_unsupported', chainFacts)
+  if (chainFacts !== undefined && 'refusal' in chainFacts) {
+    return errorStream('action_refused', chainFacts.refusal)
+  }
+
   const competitionId = randomUUID()
   // Taken here, in the request, so the race is recorded for the network it ran on.
   const network = activeNetwork()
   const startedAt = new Date()
   // Prices are fetched first so the parser can size "$30 of XLM" against the
   // real market rather than an indicative table.
-  const market = await buildMarketContextAsync(chain)
+  const market = chainFacts?.market ?? (await buildMarketContextAsync(chain))
   // A structured reading, when the chat has one, is what the agents are given.
   // Re-reading the words would lose a paraphrase that no keyword recognises.
   const intent =
-    reading !== undefined
+    chainFacts?.intent ??
+    (reading !== undefined
       ? buildParsedIntent(reading, market.prices)
-      : parseIntent(text, market.prices)
+      : parseIntent(text, market.prices))
 
   // Priced before the agents run, so they choose between real routes rather
   // than describing hypothetical ones. Failing to quote is not fatal: the
   // competition proceeds without executable routes and says so.
-  try {
-    const routes = await quoteRoutes(
-      chain,
-      intent.input.tokenIn,
-      intent.input.tokenOut,
-      toBaseUnits(intent.input.amountIn),
-      undefined,
-      // A limit order states a price it will not trade through, expressed as
-      // a minimum output so the quoter can decline. Keyed on `limitPriceUsd`
-      // rather than `targetPriceUsd`: the latter falls back to spot when the
-      // user named no price, and a limit derived from the market is not one.
-      isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
-        ? {
-            minReceive: toBaseUnits(
-              (Number(intent.input.amountIn) * intent.limitPriceUsd).toFixed(7)
-            ),
-          }
-        : {}
-    )
-    if (routes.length > 0) market.routes = routes
-  } catch {
-    // Leaving routes unset is the honest outcome; agents reason without them.
+  if (chainFacts === undefined) {
+    try {
+      const routes = await quoteRoutes(
+        chain,
+        intent.input.tokenIn,
+        intent.input.tokenOut,
+        toBaseUnits(intent.input.amountIn),
+        undefined,
+        // A limit order states a price it will not trade through, expressed as
+        // a minimum output so the quoter can decline. Keyed on `limitPriceUsd`
+        // rather than `targetPriceUsd`: the latter falls back to spot when the
+        // user named no price, and a limit derived from the market is not one.
+        isLimitType(intent.input.type) && intent.limitPriceUsd !== undefined
+          ? {
+              minReceive: toBaseUnits(
+                (Number(intent.input.amountIn) * intent.limitPriceUsd).toFixed(7)
+              ),
+            }
+          : {}
+      )
+      if (routes.length > 0) market.routes = routes
+    } catch {
+      // Leaving routes unset is the honest outcome; agents reason without them.
+    }
   }
 
   // One read for the whole competition: every agent's resting price is checked
@@ -282,7 +450,7 @@ export async function POST(request: Request): Promise<Response> {
   let book: OrderBookTop | undefined
   const from = resolveAsset(intent.input.tokenIn)
   const to = resolveAsset(intent.input.tokenOut)
-  if (from !== undefined && to !== undefined) {
+  if (chainFacts === undefined && from !== undefined && to !== undefined) {
     const base = from.issuer === undefined ? from : to
     const counter = from.issuer === undefined ? to : from
     try {
@@ -292,14 +460,27 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
+  let closed = false
+  // Fires when the person has gone, such as sending a note that restarts the race.
+  const personLeft = new AbortController()
+
   const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      closed = true
+      personLeft.abort()
+    },
     async start(controller) {
       const encoder = new TextEncoder()
-      let closed = false
 
       const send = (frame: CompetitionFrame): void => {
         if (closed) return
-        controller.enqueue(encoder.encode(encodeFrame(frame)))
+        try {
+          controller.enqueue(encoder.encode(encodeFrame(frame)))
+        } catch {
+          // The stream ended underneath us, which is the person leaving by another name.
+          closed = true
+          personLeft.abort()
+        }
       }
 
       // What each agent did, for the analytics log. Only outcomes and timings:
@@ -312,7 +493,9 @@ export async function POST(request: Request): Promise<Response> {
       ): Promise<void> =>
         logRace({
           id: competitionId,
-          network,
+          // Other chains only run on mainnet, and their submits are logged there too.
+          network: chain === 'stellar' ? network : 'mainnet',
+          chain,
           startedAt,
           durationMs: Date.now() - startedAt.getTime(),
           intent: {
@@ -334,85 +517,194 @@ export async function POST(request: Request): Promise<Response> {
         // "thinking". Each agent is a model, and the user can see which.
         agents: roster.map(({ key, name, gradient, model }) => ({ key, name, gradient, model })),
         windowSeconds: WINDOW_SECONDS,
+        ...(chainFacts !== undefined ? { routeCount: market.routes?.length ?? 0 } : {}),
       })
+
+      // Agents talk once at least two of them can. A brain that can't keeps its
+      // first take, and a race where fewer than two can runs as it always has.
+      const talking = clientTalks && roster.filter((a) => a.brain.talk !== undefined).length >= 2
+      const talkStartedAt = Date.now()
+      const rawFirstTakes = new Map<string, AgentProposalResult>()
+      const firstTakeAborts: AbortController[] = []
+
+      // The checked plan for what this request is, whichever turn produced it.
+      const settleAndMeasure = (proposal: AgentProposalResult): AgentProposalResult => {
+        const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
+        return measured(
+          chainFacts === undefined
+            ? settlePlan(proposal, intent, book)
+            : settleChainPlan(proposal, own !== undefined ? market.rest : undefined),
+          own?.quote as SwapQuote | ChainRouteQuote | undefined,
+          market.prices
+        )
+      }
+
+      // A plan that rests an order signs the order, not the swap it was measured against.
+      const sendProposal = (proposal: AgentProposalResult): void => {
+        const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
+        send({
+          type: 'competition:proposal',
+          competitionId,
+          proposal,
+          ...(own !== undefined
+            ? {
+                route:
+                  proposal.executionMode === 'rest' &&
+                  market.rest !== undefined &&
+                  proposal.restPriceUsd !== undefined
+                    ? restRoute(own.quote as ChainRouteQuote, market.rest, proposal.restPriceUsd)
+                    : own.quote,
+              }
+            : {}),
+        })
+      }
 
       // Agents run concurrently and are emitted as they finish, so one slow
       // agent delays only its own card.
-      const settled = await Promise.all(
-        roster.map(async (agent, seat) => {
-          const began = Date.now()
-          const controllerForAgent = new AbortController()
-          const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
+      const takes = roster.map(async (agent, seat) => {
+        const began = Date.now()
+        const controllerForAgent = new AbortController()
+        firstTakeAborts.push(controllerForAgent)
+        personLeft.signal.addEventListener('abort', () => controllerForAgent.abort(), {
+          once: true,
+        })
+        const timer = setTimeout(() => controllerForAgent.abort(), AGENT_TIMEOUT_MS)
 
-          try {
-            const outcome = await agent.brain.propose({
-              intent,
-              agent: agent.key,
-              seat,
-              market,
-              chain,
-              ...(context.length > 0 ? { context } : {}),
-              signal: controllerForAgent.signal,
-            })
+        try {
+          const outcome = await agent.brain.propose({
+            intent,
+            agent: agent.key,
+            seat,
+            market,
+            chain,
+            ...(context.length > 0 ? { context } : {}),
+            signal: controllerForAgent.signal,
+          })
 
-            if (!outcome.ok) {
-              if (outcome.error === 'rate_limited') {
-                noteRateLimited(agent.key, outcome.retryAfterMs)
-              }
-              attempts.push({
-                agent: agent.key,
-                model: agent.model,
-                ok: false,
-                latencyMs: Date.now() - began,
-                error: outcome.error,
-              })
-              // Said, and left empty. No placeholder: an agent that did not
-              // answer has no proposal, and showing one would be inventing it.
-              send({
-                type: 'competition:failed',
-                competitionId,
-                agent: agent.key,
-                error: outcome.error,
-              })
-              return undefined
+          if (!outcome.ok) {
+            if (outcome.error === 'rate_limited') {
+              noteRateLimited(agent.key, outcome.retryAfterMs)
             }
-
-            // This agent's own route, so executing it signs what it proposed
-            // rather than what the winner proposed.
-            const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
-
-            const proposal = measured(
-              settlePlan(outcome.proposal, intent, book),
-              own?.quote as SwapQuote | undefined,
-              market.prices
-            )
-
             attempts.push({
               agent: agent.key,
               model: agent.model,
-              ok: true,
+              ok: false,
               latencyMs: Date.now() - began,
-              routeId: proposal.routeId,
-              executionMode: proposal.executionMode,
-              // Passed for every agent; raceRecordFrom is the one place that
-              // keeps it only for the row that actually won.
-              reasoning: proposal.reasoning,
+              error: outcome.error,
             })
-
+            // Said, and left empty. No placeholder: an agent that did not
+            // answer has no proposal, and showing one would be inventing it.
             send({
-              type: 'competition:proposal',
+              type: 'competition:failed',
+              competitionId,
+              agent: agent.key,
+              error: outcome.error,
+            })
+            return undefined
+          }
+
+          // This agent's own route, so executing it signs what it proposed
+          // rather than what the winner proposed.
+          const own = (market.routes ?? []).find((r) => r.id === outcome.proposal.routeId)
+
+          const proposal = settleAndMeasure(outcome.proposal)
+          rawFirstTakes.set(agent.key, outcome.proposal)
+
+          attempts.push({
+            agent: agent.key,
+            model: agent.model,
+            ok: true,
+            latencyMs: Date.now() - began,
+            routeId: proposal.routeId,
+            executionMode: proposal.executionMode,
+            // Passed for every agent; raceRecordFrom is the one place that
+            // keeps it only for the row that actually won.
+            reasoning: proposal.reasoning,
+          })
+
+          // A first take in a race that talks may still change, so it carries
+          // no route: there is nothing to review until final plans are in.
+          if (talking) {
+            send({
+              type: 'competition:take',
               competitionId,
               proposal,
-              ...(own !== undefined ? { route: own.quote } : {}),
+              ...(own !== undefined ? { source: own.source } : {}),
             })
-            return proposal
-          } finally {
-            clearTimeout(timer)
+          } else {
+            sendProposal(proposal)
           }
-        })
-      )
+          return proposal
+        } finally {
+          clearTimeout(timer)
+        }
+      })
 
-      const proposals = settled.filter((p): p is AgentProposalResult => p !== undefined)
+      let proposals: AgentProposalResult[]
+      if (talking) {
+        const firstTakes = new Map<string, AgentProposalResult>()
+        takes.forEach((take, i) => {
+          const key = roster[i]?.key
+          void take.then((plan) => {
+            if (plan !== undefined && key !== undefined) firstTakes.set(key, plan)
+          })
+        })
+        const { finals } = await runTalk({
+          seats: roster.map(({ key, name, brain }) => ({
+            key,
+            name,
+            talk: brain.talk?.bind(brain),
+          })),
+          takes,
+          facts: {
+            chain,
+            // Whatever the clarifier confirmed, since every agent is held to it.
+            intent: context.length > 0 ? `${text} (${context.join('; ')})` : text,
+            routes: market.routes ?? [],
+          },
+          startedAt: talkStartedAt,
+          emit: (line) => send({ type: 'competition:talk', competitionId, line }),
+          applyFinal: (agentKey, choice) => {
+            const first = firstTakes.get(agentKey)
+            const rawFirst = rawFirstTakes.get(agentKey)
+            if (first === undefined || rawFirst === undefined) return undefined
+            const seat = roster.findIndex((a) => a.key === agentKey)
+            return applyFinalChoice({
+              first,
+              rawFirst,
+              choice,
+              request: {
+                intent,
+                agent: agentKey,
+                seat,
+                market,
+                chain,
+                ...(context.length > 0 ? { context } : {}),
+              },
+              settle: settleAndMeasure,
+            })
+          },
+          closeLateTakes: () => {
+            for (const abort of firstTakeAborts) abort.abort()
+          },
+          onRateLimited: (agentKey, retryAfterMs) => noteRateLimited(agentKey, retryAfterMs),
+          signal: personLeft.signal,
+        })
+        proposals = finals
+        for (const final of finals) {
+          // The record shows what the agent ended on, not where it started.
+          const attempt = attempts.find((a) => a.agent === final.agent && a.ok)
+          if (attempt !== undefined && attempt.ok) {
+            attempt.routeId = final.routeId
+            attempt.executionMode = final.executionMode
+            attempt.reasoning = final.reasoning
+          }
+          sendProposal(final)
+        }
+      } else {
+        const settled = await Promise.all(takes)
+        proposals = settled.filter((p): p is AgentProposalResult => p !== undefined)
+      }
 
       if (proposals.length === 0) {
         send({
@@ -422,17 +714,36 @@ export async function POST(request: Request): Promise<Response> {
             'None of the agents answered this time. Nothing was proposed. Try again in a moment.',
         })
         await record(null, null, {})
-        closed = true
-        controller.close()
+        if (!closed) {
+          closed = true
+          controller.close()
+        }
         return
       }
 
       // What the user actually asked for, so a follow-on nobody requested
       // can be told apart from one they did. The same parser the sequence
       // flow uses, rather than a second opinion about the same sentence.
-      const compound = parseCompoundIntent(text, market.prices)
+      const compound =
+        chainFacts === undefined ? parseCompoundIntent(text, market.prices) : undefined
       const followOn = compound?.followOn.kind
       const anchorLimits = (market.offramps ?? []).find((o) => o.asset === 'USDC')
+
+      // A supply or a stake is ranked on the rate each route shows.
+      const apyEntries = (market.routes ?? []).flatMap((r) => {
+        const q = r.quote as Partial<ChainRouteQuote> | undefined
+        return q?.kind === 'chain' && q.apyPercent !== undefined
+          ? [[r.id, q.apyPercent] as const]
+          : []
+      })
+      const apyByRoute = apyEntries.length > 0 ? Object.fromEntries(apyEntries) : undefined
+
+      const unmeasuredRoutes = (market.routes ?? [])
+        .filter((r) => {
+          const q = r.quote as Partial<ChainRouteQuote> | undefined
+          return q?.kind === 'chain' && isUnmeasuredSwap(q as ChainRouteQuote)
+        })
+        .map((r) => r.id)
 
       const plan: PlanContext = {
         escrowUsd: intent.escrowUsd,
@@ -449,9 +760,17 @@ export async function POST(request: Request): Promise<Response> {
         ...(book?.ask !== undefined ? { recentHighUsd: book.ask } : {}),
         ...(anchorLimits?.maxAmount !== undefined ? { offrampMaxUsd: anchorLimits.maxAmount } : {}),
         ...(anchorLimits?.minAmount !== undefined ? { offrampMinUsd: anchorLimits.minAmount } : {}),
+        ...(apyByRoute !== undefined ? { apyByRoute } : {}),
+        ...(unmeasuredRoutes.length > 0 ? { unmeasuredRoutes } : {}),
       }
 
-      const scored = scoreProposals(proposals, { competitionId, plan })
+      const scored = scoreProposals(proposals, {
+        competitionId,
+        plan,
+        ...(chainFacts !== undefined ? { restsBelowFills: true } : {}),
+      })
+      // An agent that held off has no plan to score.
+      const heldOff = new Set(proposals.filter((p) => p.held === true).map((p) => p.agent))
       const winner = pickWinner(scored)
       let unanimous: boolean | null = null
 
@@ -469,11 +788,15 @@ export async function POST(request: Request): Promise<Response> {
           type: 'competition:winner',
           competitionId,
           winner,
-          scores: Object.fromEntries(scored.map((s) => [s.agent, s.score])),
+          scores: Object.fromEntries(
+            scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
+          ),
           // Only the agents that actually lost points, so the common case
           // sends nothing extra.
           penalties: Object.fromEntries(
-            scored.filter((s) => s.penalties.length > 0).map((s) => [s.agent, s.penalties])
+            scored
+              .filter((s) => s.penalties.length > 0 && !heldOff.has(s.agent))
+              .map((s) => [s.agent, s.penalties])
           ),
           unanimous,
           ...(chosen !== undefined ? { route: chosen.quote } : {}),
@@ -483,10 +806,14 @@ export async function POST(request: Request): Promise<Response> {
       await record(
         winner,
         winner !== null ? unanimous : null,
-        Object.fromEntries(scored.map((s) => [s.agent, s.score]))
+        Object.fromEntries(
+          scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
+        )
       )
-      closed = true
-      controller.close()
+      if (!closed) {
+        closed = true
+        controller.close()
+      }
     },
   })
 

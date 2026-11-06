@@ -1,5 +1,12 @@
 import type { Venue } from '@intent/types'
 
+import { aftermathListing } from './aftermath-listing'
+import { deepbookListing } from './deepbook-listing'
+import { momentumListing } from './momentum-listing'
+import { scallopListing } from './scallop-listing'
+import { suilendListing } from './suilend-listing'
+import { walrusListing } from './walrus-listing'
+
 function listed(
   id: string,
   name: string,
@@ -27,8 +34,16 @@ export const suiVenues: Venue[] = [
     url: 'https://app.cetus.zone',
     bestFor: "Swaps at the best route across Sui's main pools",
     integration: 'executes',
-    capability: 'Swaps SUI, USDC, USDsui and USDT',
+    capability: 'Swaps SUI, USDC, USDsui, USDT, WAL and the liquid staking tokens sSUI and afSUI',
   },
+  // Listed, as Lulo is on Solana: whether this runs depends on a secret this client-safe file can't read.
+  listed(
+    '1click-sui',
+    'NEAR Intents 1Click',
+    'swap',
+    'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
+    'A second swap price from competing market makers, spending USDC or USDT'
+  ),
   {
     id: 'navi',
     family: 'sui',
@@ -38,7 +53,8 @@ export const suiVenues: Venue[] = [
     url: 'https://app.naviprotocol.io',
     bestFor: 'Earning on USDC, at a variable rate that can move quickly',
     integration: 'executes',
-    capability: 'Supplies USDC and shows the current rate',
+    capability:
+      'Supplies USDC, withdraws, borrows and repays, shows the current rate, and refuses a loan your supply cannot safely back',
   },
   listed(
     'bluefin-aggregator',
@@ -47,13 +63,7 @@ export const suiVenues: Venue[] = [
     'https://trade.bluefin.io/swap',
     'Swaps with quotes from market makers, formerly 7K'
   ),
-  listed(
-    'suilend',
-    'Suilend',
-    'lending',
-    'https://suilend.fi',
-    'Lending in the largest market on Sui, under new ownership since June 2026'
-  ),
+  suilendListing,
   listed(
     'current-finance',
     'Current Finance',
@@ -82,13 +92,21 @@ export const suiVenues: Venue[] = [
     'https://www.bucketprotocol.io',
     'USDB savings, though the current rate may not compete'
   ),
-  listed(
-    'deepbook',
-    'DeepBook',
-    'orderbook',
-    'https://www.deepbook.tech',
-    "Sui's on-chain order book, for limit orders"
-  ),
+  deepbookListing,
+  momentumListing,
+  walrusListing,
+  {
+    id: 'deepbook-limit',
+    family: 'sui',
+    name: 'DeepBook Limit Orders',
+    category: 'orderbook',
+    chains: ['Sui'],
+    url: 'https://deepbook.xyz',
+    bestFor: 'Selling or buying SUI at a price you name, for up to 7 days',
+    integration: 'executes',
+    capability:
+      'Places, reads, cancels and collects SUI orders against USDC, and checks every transaction before you sign. Filled tokens wait in your DeepBook account until you collect them.',
+  },
   {
     id: 'springsui',
     family: 'sui',
@@ -98,27 +116,8 @@ export const suiVenues: Venue[] = [
     url: 'https://www.springsui.com',
     bestFor: 'Liquid staking with the largest pool on Sui',
     integration: 'executes',
-    capability: 'Stakes SUI for sSUI',
+    capability: 'Stakes SUI for sSUI, and unstakes sSUI right away for a small fee',
   },
-  listed(
-    'haedal',
-    'Haedal',
-    'staking',
-    'https://www.haedal.xyz',
-    'Liquid staking with haSUI. Its vaults lost about $915K in June 2026; staking reportedly was not affected'
-  ),
-  listed(
-    'aftermath',
-    'Aftermath',
-    'aggregator',
-    'https://aftermath.finance',
-    'Swaps and afSUI staking. Its perps lost about $1.14M in April 2026'
-  ),
-  listed(
-    'scallop',
-    'Scallop',
-    'lending',
-    'https://scallop.io',
-    'Lending with a small USDC pool. A retired contract lost about $142K in April 2026'
-  ),
+  aftermathListing,
+  scallopListing,
 ]

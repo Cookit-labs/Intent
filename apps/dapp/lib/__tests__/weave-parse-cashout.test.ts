@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import { cashoutStarts } from '../chains/parse-sequence'
+import { unsupportedTokenReply } from '../weave/cashout-view'
 import { parseCashout, parseCurrencyAnswer, routeCashout } from '../weave/parse-cashout'
+import { closedCashoutReply } from '../weave/types'
 
 describe('parseCurrencyAnswer', () => {
   it.each([
@@ -106,9 +109,11 @@ describe('parseCashout', () => {
   it('keeps the currency beside an unsupported token', () => {
     expect(parseCashout('cash out 5 xlm to kes')).toEqual({
       unsupportedToken: 'XLM',
+      amount: '5',
       currency: 'KES',
     })
-    expect(parseCashout('cash out 5 sol')).toEqual({ unsupportedToken: 'SOL' })
+    expect(parseCashout('cash out 5 sol')).toEqual({ unsupportedToken: 'SOL', amount: '5' })
+    expect(parseCashout('cash out sol')).toEqual({ unsupportedToken: 'SOL' })
   })
 
   it.each([
@@ -162,7 +167,7 @@ describe('parseCashout', () => {
 describe('routeCashout', () => {
   const read = (text: string): ReturnType<typeof parseCashout> => parseCashout(text)
 
-  it.each(['near', 'solana', 'sui', 'avalanche', 'stellar'])(
+  it.each(['solana', 'sui', 'avalanche', 'stellar'])(
     'asks which currency on %s when none is named',
     (chain) => {
       expect(routeCashout(read('off-ramp 3 USDC'), chain)).toEqual({ kind: 'ask', amount: '3' })
@@ -185,7 +190,7 @@ describe('routeCashout', () => {
     })
   })
 
-  it.each(['near', 'solana', 'sui', 'avalanche'])('opens the card on %s', (chain) => {
+  it.each(['solana', 'sui', 'avalanche'])('opens the card on %s', (chain) => {
     expect(routeCashout(read('cash out 25 usdc to kes'), chain)).toEqual({
       kind: 'open',
       amount: '25',
@@ -198,8 +203,43 @@ describe('routeCashout', () => {
     })
   })
 
-  it.each(['near', 'solana', 'sui', 'avalanche'])('answers refusals on %s', (chain) => {
-    expect(routeCashout(read('cash out 5 sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
+  it("runs the person's own sentence, reading the chain name as its token", () => {
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana'), 'solana')).toEqual({
+      kind: 'sequence',
+      token: 'SOL',
+      amount: '0.01477',
+    })
+    expect(routeCashout(parseCashout('cash out 5 avalanche to kes'), 'avalanche')).toEqual({
+      kind: 'sequence',
+      token: 'AVAX',
+      amount: '5',
+      currency: 'KES',
+    })
+  })
+
+  it('changes nothing on Stellar for a chain name', () => {
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana'), 'stellar')).toEqual({
+      kind: 'pass',
+    })
+    expect(routeCashout(parseCashout('Offramp 0.01477 solana to kes'), 'stellar')).toEqual({
+      kind: 'token',
+      token: 'SOLANA',
+    })
+  })
+
+  it('leaves what the parser reads, and a refusal elsewhere, as they were', () => {
+    expect(parseCashout('Offramp 0.01477 solana')).toEqual({
+      unsupportedToken: 'SOLANA',
+      amount: '0.01477',
+    })
+    expect(routeCashout(parseCashout('cash out 5 solana'), 'near')).toEqual({
+      kind: 'token',
+      token: 'SOLANA',
+    })
+  })
+
+  it.each(['solana', 'sui', 'avalanche'])('answers refusals on %s', (chain) => {
+    expect(routeCashout(read('cash out sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
     expect(routeCashout(read('cash out 5 usdc to brl'), chain)).toEqual({
       kind: 'currency',
       currency: 'BRL',
@@ -231,9 +271,50 @@ describe('routeCashout', () => {
     })
   })
 
-  it.each(['monad', 'arc'])('changes nothing on %s', (chain) => {
-    expect(routeCashout(read('cash out 25 usdc to kes'), chain)).toEqual({ kind: 'pass' })
-    expect(routeCashout(read('cash out 5 sol'), chain)).toEqual({ kind: 'pass' })
+  it('changes nothing on a chain with no cash-out and nothing to say about it', () => {
+    expect(routeCashout(read('cash out 25 usdc to kes'), 'arc')).toEqual({ kind: 'pass' })
+    expect(routeCashout(read('cash out 5 sol'), 'arc')).toEqual({ kind: 'pass' })
+  })
+
+  describe.each(['near', 'monad'])('on %s, which is closed', (chain) => {
+    it.each([
+      'cash out',
+      'off-ramp 3 USDC',
+      'cash out 25 usdc to kes',
+      'sell 25 usdc for naira',
+      'withdraw 25 usdc to my bank',
+    ])('opens no form for "%s"', (text) => {
+      const route = routeCashout(read(text), chain)
+      expect(route).toEqual({ kind: 'token', token: 'USDC' })
+      expect(cashoutStarts(route)).toBe(false)
+    })
+
+    it('answers a token or a currency it would not pay the same way', () => {
+      expect(routeCashout(read('cash out 5 sol'), chain)).toEqual({ kind: 'token', token: 'SOL' })
+      expect(routeCashout(read('cash out 5 usdc to brl'), chain)).toEqual({
+        kind: 'token',
+        token: 'USDC',
+      })
+    })
+
+    it('says plainly what to do, whatever was named', () => {
+      for (const token of ['USDC', 'SOL']) {
+        const reply = unsupportedTokenReply(token, chain)
+        expect(reply).toBe(closedCashoutReply(chain))
+        expect(reply).toMatch(/move your USDC to Solana, Avalanche or Sui/)
+        expect(reply).toMatch(/has not paid out a real order/)
+        expect(reply).toMatch(/ Nothing was signed or sent\.$/)
+        expect(reply).not.toMatch(/Swap your/)
+      }
+    })
+
+    it('leaves what was not a cash-out alone', () => {
+      expect(routeCashout(read('swap 5 sol to usdc'), chain)).toEqual({ kind: 'pass' })
+    })
+  })
+
+  it.each(['stellar', 'solana', 'sui', 'avalanche', 'arc'])('does not close %s', (chain) => {
+    expect(closedCashoutReply(chain)).toBeUndefined()
   })
 
   it('passes what was not a cash-out', () => {
