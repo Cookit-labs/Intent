@@ -32,6 +32,7 @@ import {
 import { venueFetch } from '../../chains/solana/http'
 import { createSolanaSubmit, explorerUrl, feePayerSignature } from '../../chains/solana/submit'
 import { SOLANA_TOKENS } from '../../chains/solana/tokens'
+import { withoutWalletGuards } from '../../chains/solana/wallet-guards'
 import {
   ChainActionRefused,
   tokenBySymbol,
@@ -416,7 +417,11 @@ async function submit(
   if (signed.family !== 'solana') {
     return { ok: false, error: 'That is not a Solana transaction, so nothing was sent.' }
   }
-  assertSafe({ family: 'solana', transaction: signed.signedTransaction }, expectation)
+  // Phantom's Lighthouse guards are its own and only make the transfer fail; the rest is checked.
+  assertSafe(
+    { family: 'solana', transaction: withoutWalletGuards(signed.signedTransaction) },
+    expectation
+  )
   const hash = feePayerSignature(signed.signedTransaction)
   if (hash === undefined) {
     return {
