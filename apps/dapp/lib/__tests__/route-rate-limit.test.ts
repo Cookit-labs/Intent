@@ -41,6 +41,8 @@ const ROUTES: Record<string, () => Promise<Route>> = {
   'perps/session': () => import('../../app/api/perps/session/route'),
   'perps/submit': () => import('../../app/api/perps/submit/route'),
   'plan/build': () => import('../../app/api/plan/build/route'),
+  'pools/submit': () => import('../../app/api/pools/submit/route'),
+  'pools/withdraw': () => import('../../app/api/pools/withdraw/route'),
   'plan/submit': () => import('../../app/api/plan/submit/route'),
   'send/build': () => import('../../app/api/send/build/route'),
   'send/resolve': () => import('../../app/api/send/resolve/route'),

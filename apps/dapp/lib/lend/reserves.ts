@@ -2,6 +2,7 @@ import { activeNetwork, stellarNetwork, type StellarNetworkName } from '@intent/
 import {
   Account,
   Address,
+  Asset,
   BASE_FEE,
   Contract,
   TransactionBuilder,
@@ -10,6 +11,7 @@ import {
   type xdr,
 } from '@stellar/stellar-sdk'
 
+import { resolveAsset } from '../swap/assets'
 import { blendPool } from '../swap/contract-registry'
 
 /**
@@ -76,7 +78,71 @@ const SUPPLY_COMPOUNDS_PER_YEAR = 52
 const BORROW_COMPOUNDS_PER_YEAR = 365
 
 /** Any account works: a simulation touches neither balance nor sequence. */
-const READ_ONLY_SOURCE = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVVUX'
+export const READ_ONLY_SOURCE = 'GCYQ3NXJHGD7P36OVKII6GKVLAENQ6ZETYOBAPZTI4R6ZWUU6QLHVVUX'
+
+export interface BlendReserve {
+  /** The reserve's asset, as a contract id. */
+  id: string
+  symbol: string
+}
+
+/**
+ * What each network's pool lends, by contract id and by that contract's own
+ * `symbol()`, both read from the chain on 2026-11-05 through `get_reserve_list`.
+ * A live test checks this against the pool. Testnet's USDC is Blend's own token,
+ * not Circle's, which is why a ticker alone cannot name a reserve.
+ */
+const BLEND_RESERVES: Record<StellarNetworkName, BlendReserve[]> = {
+  mainnet: [
+    { id: 'CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA', symbol: 'XLM' },
+    { id: 'CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75', symbol: 'USDC' },
+    { id: 'CDTKPWPLOURQA2SGTKTUQOWRCBZEORB4BWBOMJ3D3ZTQQSGE5F6JBQLV', symbol: 'EURC' },
+  ],
+  testnet: [
+    { id: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC', symbol: 'XLM' },
+    { id: 'CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE', symbol: 'wETH' },
+    { id: 'CAP5AMC2OHNVREO66DFIN6DHJMPOBAJ2KCDDIMFBR7WWJH5RZBFM3UEI', symbol: 'wBTC' },
+    { id: 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU', symbol: 'USDC' },
+  ],
+}
+
+export function blendReserves(network: StellarNetworkName = activeNetwork()): BlendReserve[] {
+  return BLEND_RESERVES[network]
+}
+
+/** The reserve a ticker names on this network, or undefined if the pool lends no such asset. */
+export function blendReserveFor(
+  symbol: string,
+  network: StellarNetworkName = activeNetwork()
+): string | undefined {
+  const wanted = symbol.toUpperCase()
+  return BLEND_RESERVES[network].find((r) => r.symbol.toUpperCase() === wanted)?.id
+}
+
+/**
+ * The reserve a holding of this ticker can be supplied to, or undefined if there
+ * is none. Stricter than `blendReserveFor`: the token this app trades under the
+ * ticker must be the one the pool lends, which testnet's USDC is not.
+ */
+export function suppliableReserve(symbol: string): string | undefined {
+  const reserve = blendReserveFor(symbol)
+  const asset = resolveAsset(symbol)
+  if (reserve === undefined || asset === undefined) return undefined
+
+  const held = asset.issuer === undefined ? Asset.native() : new Asset(asset.code, asset.issuer)
+  return held.contractId(stellarNetwork.networkPassphrase) === reserve ? reserve : undefined
+}
+
+/** A reserve's ticker, or a shortened id for one this list does not know. */
+export function blendSymbol(
+  assetId: string,
+  network: StellarNetworkName = activeNetwork()
+): string {
+  return (
+    BLEND_RESERVES[network].find((r) => r.id === assetId)?.symbol ??
+    `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
+  )
+}
 
 /**
  * Blend's XLM reserve, as a contract id.

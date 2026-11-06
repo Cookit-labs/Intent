@@ -22,12 +22,7 @@ const ARC_FAUCET_URL = 'https://faucet.circle.com'
  * Everything here is derived from the connection and the active chain, so the
  * badge cannot claim a network the wallet is not on.
  */
-export function NetworkStatus({
-  tradeCapUsd,
-}: {
-  /** The per-trade cap on mainnet, when there is one. Decided on the server. */
-  tradeCapUsd?: number | undefined
-}): JSX.Element {
+export function NetworkStatus(): JSX.Element {
   const { slug, descriptor } = useChain()
   const {
     isConnected,
@@ -104,13 +99,7 @@ export function NetworkStatus({
             {FAUCET_LABEL[slug]}
           </a>
         )
-      ) : isMainnet() || (slug !== 'stellar' && slug !== 'arc') ? (
-        tradeCapUsd !== undefined && slug === 'stellar' ? (
-          <span className="text-muted-foreground text-[11px] leading-none">
-            Trades up to ${tradeCapUsd}
-          </span>
-        ) : null
-      ) : (
+      ) : isMainnet() || (slug !== 'stellar' && slug !== 'arc') ? null : (
         <span className="text-muted-foreground hidden text-xs sm:inline">
           pre-mainnet · rails may change
         </span>

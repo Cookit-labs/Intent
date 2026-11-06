@@ -6,6 +6,7 @@
 
 export interface AgentHistoryEntry {
   raceId: string
+  chain: string
   startedAt: string
   tokenIn: string
   tokenOut: string

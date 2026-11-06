@@ -270,6 +270,13 @@ describe('preparing a 1Click swap', () => {
     expect(prepared.notes.join(' ')).toMatch(/minus a fee/)
   })
 
+  it('keeps NEAR’s cost sentence word for word', async () => {
+    const prepared = await oneClickVenue.prepare(swap(), ME)
+    expect(prepared.notes[0]).toMatch(
+      /^NEAR Intents runs on mainnet only, so this moves real funds\. .* After all costs you get about [\d.]+% less in value than you pay, and at least /
+    )
+  })
+
   it('sends the API key and app fees only when configured', async () => {
     await oneClickVenue.prepare(swap(), ME)
     expect(sim.quoteHeaders[0]).not.toHaveProperty('X-API-Key')
@@ -483,35 +490,19 @@ describe('what 1Click can refuse', () => {
 })
 
 describe('the whole prepare path for NEAR', () => {
-  const noCap = { MAINNET_MAX_TRADE_USD: '500' }
-
-  it('defaults swaps to 1Click', async () => {
-    const prepared = await prepareChainAction(nearModule, swap(), ME, noCap)
+  it('defaults swaps to Rhea, and reaches 1Click when named', async () => {
+    expect(nearModule.defaultVenue.swap).toBe('rhea-dex')
+    const prepared = await prepareChainAction(nearModule, swap({ venue: '1click' }), ME)
     expect(prepared.venueId).toBe('1click')
   })
 
-  it('refuses over the cap before asking for any quote', async () => {
-    await expect(
-      prepareChainAction(nearModule, swap({ amount: '501' }), ME, noCap)
-    ).rejects.toThrow(/caps each trade/)
-    await expect(
-      prepareChainAction(
-        nearModule,
-        swap({ tokenIn: 'NEAR', tokenOut: 'USDC', amount: '126' }),
-        ME,
-        noCap
-      )
-    ).rejects.toThrow(/caps each trade/)
-    expect(sim.quotes).toHaveLength(0)
-  })
-
   it('refuses an unknown token and a venue that cannot do this', async () => {
-    await expect(
-      prepareChainAction(nearModule, swap({ tokenIn: 'DOGE' }), ME, noCap)
-    ).rejects.toThrow(/verified token/)
-    await expect(
-      prepareChainAction(nearModule, swap({ venue: 'rnear' }), ME, noCap)
-    ).rejects.toThrow(/can't swap here/)
+    await expect(prepareChainAction(nearModule, swap({ tokenIn: 'DOGE' }), ME)).rejects.toThrow(
+      /verified token/
+    )
+    await expect(prepareChainAction(nearModule, swap({ venue: 'rnear' }), ME)).rejects.toThrow(
+      /can't swap here/
+    )
   })
 
   it('reads the price of the exact asset, not another with the same symbol', async () => {
@@ -527,13 +518,10 @@ describe('the whole prepare path for NEAR', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('has no price when the token list fails, so the trade is refused', async () => {
+  it('has no price when the token list fails', async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response('nope', { status: 500 }))
     const usdc = nearModule.tokens.find((t) => t.symbol === 'USDC')
     await expect(nearModule.priceUsd(usdc as NonNullable<typeof usdc>)).resolves.toBeUndefined()
-    await expect(prepareChainAction(nearModule, swap(), ME, noCap)).rejects.toThrow(
-      /could not be valued/
-    )
   })
 })
 

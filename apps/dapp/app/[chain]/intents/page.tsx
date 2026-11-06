@@ -1,25 +1,11 @@
-'use client'
-
-import { IntentChat } from '../../../components/intents/intent-chat'
-
 /**
- * The composer, and only the composer.
+ * The composer, and only the composer: `ChatHost` in the chain layout draws it,
+ * so the chat stays mounted when the person goes to another page.
  *
  * History used to sit behind a second tab here, which hid a whole page of
  * settled trades and open positions behind a label most people never
  * clicked. It has its own page now, one step away in the sidebar.
  */
-export default function IntentsPage(): JSX.Element {
-  return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
-      <div className="mb-6">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Intents</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Say what you want. Agents compete to deliver it.
-        </p>
-      </div>
-
-      <IntentChat />
-    </div>
-  )
+export default function IntentsPage(): null {
+  return null
 }

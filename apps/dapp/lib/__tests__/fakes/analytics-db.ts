@@ -52,6 +52,7 @@ export interface FakeRace {
   unanimous: boolean | null
   outcome: string
   duration_ms: number
+  chain: string
 }
 
 export interface FakeProposal {
@@ -110,9 +111,21 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
         return { rows: [] }
       }
 
-      const matchRace = (id: string | null, network: string, at: string): string | null => {
+      const matchRace = (
+        id: string | null,
+        network: string,
+        at: string,
+        chain: string
+      ): string | null => {
         const race = races.find((r) => r.id === id)
-        if (race === undefined || race.network !== network || race.winner === null) return null
+        if (
+          race === undefined ||
+          race.network !== network ||
+          race.chain !== chain ||
+          race.winner === null
+        ) {
+          return null
+        }
         const age = new Date(at).getTime() - new Date(race.started_at).getTime()
         return age >= 0 && age < 30 * 60_000 ? race.id : null
       }
@@ -133,6 +146,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           amountIn,
           volumeUsd,
           raceId,
+          raceChain,
         ] = p as [
           string,
           string,
@@ -148,6 +162,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           string | null,
           number | null,
           string | null,
+          string,
         ]
         const duplicate =
           hash !== null && executions.some((e) => e.network === network && e.hash === hash)
@@ -166,7 +181,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           asset_out: assetOut,
           amount_in: amountIn,
           volume_usd: volumeUsd,
-          race_id: matchRace(raceId, network, submittedAt),
+          race_id: matchRace(raceId, network, submittedAt, raceChain),
         })
         return { rows: [{ id }] }
       }
@@ -212,6 +227,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           unanimous,
           outcome,
           durationMs,
+          chain,
         ] = p as [
           string,
           string,
@@ -226,6 +242,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           boolean | null,
           string,
           number,
+          string,
         ]
         if (races.some((r) => r.id === id)) return { rows: [] }
         races.push({
@@ -242,6 +259,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           unanimous,
           outcome,
           duration_ms: durationMs,
+          chain,
         })
         return { rows: [{ id }] }
       }
@@ -285,13 +303,21 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
       if (sql.startsWith('SELECT r.id AS race_id')) {
         const [network, account, limit, offset] = p as [string, string, number, number]
         const rows = executions
-          .filter((e) => e.network === network && e.account === account && e.race_id !== null)
+          .filter(
+            (e) =>
+              e.network === network &&
+              (e.account === account ||
+                (/^0x[0-9a-fA-F]{40}$/.test(account) &&
+                  e.account.toLowerCase() === account.toLowerCase())) &&
+              e.race_id !== null
+          )
           .map((e) => {
             const race = races.find((r) => r.id === e.race_id)
             if (race === undefined) return undefined
             const winning = proposals.find((pr) => pr.race_id === race.id && pr.won)
             return {
               race_id: race.id,
+              chain: race.chain,
               started_at: race.started_at,
               token_in: race.token_in,
               token_out: race.token_out,

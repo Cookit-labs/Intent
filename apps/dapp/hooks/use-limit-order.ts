@@ -23,6 +23,7 @@ export type LimitPhase =
   | 'signing'
   | 'submitting'
   | 'placed'
+  | 'cancelled'
   | 'refused'
   | 'failed'
 
@@ -57,8 +58,8 @@ export interface LimitOrder extends LimitOrderState {
   prepare: (req: PlaceRequest) => void
   /** Signs and submits what `prepare` produced. */
   confirm: () => void
-  /** Withdraws a resting order, on-chain. */
-  cancel: (offerId: string, sellSymbol: string, buySymbol: string) => void
+  /** Withdraws a resting order, on-chain. The route reads the order's assets from the ledger. */
+  cancel: (offerId: string) => void
   reset: () => void
 }
 
@@ -140,7 +141,7 @@ export function useLimitOrder(): LimitOrder {
   )
 
   const submit = useCallback(
-    async (xdr: string, account: string): Promise<void> => {
+    async (xdr: string, account: string, cancelling = false): Promise<void> => {
       setState((s) => ({ ...s, phase: 'signing' }))
 
       const signed = await adapter.signTransaction?.({ xdr, address: account })
@@ -151,9 +152,10 @@ export function useLimitOrder(): LimitOrder {
 
       if (!signed.ok) {
         // Declining returns to review: the user chose that, and the order is
-        // still on the table.
+        // still on the table. A cancellation has nothing to review, and the
+        // order simply stays where it was.
         if (signed.reason === 'rejected') {
-          setState((s) => ({ ...s, phase: 'review' }))
+          setState((s) => (cancelling ? { phase: 'idle' } : { ...s, phase: 'review' }))
           return
         }
         setState((s) => ({
@@ -185,14 +187,16 @@ export function useLimitOrder(): LimitOrder {
           error:
             result.reason !== undefined
               ? FAILURE_MESSAGES[result.reason]
-              : 'The order was not placed.',
+              : cancelling
+                ? 'The order was not withdrawn.'
+                : 'The order was not placed.',
         }))
         return
       }
 
       setState((s) => ({
         ...s,
-        phase: 'placed',
+        phase: cancelling ? 'cancelled' : 'placed',
         ...(result.hash !== undefined ? { hash: result.hash } : {}),
         ...(result.explorerUrl !== undefined ? { explorerUrl: result.explorerUrl } : {}),
       }))
@@ -210,7 +214,7 @@ export function useLimitOrder(): LimitOrder {
   }, [state.xdr, address, submit])
 
   const cancel = useCallback(
-    (offerId: string, sellSymbol: string, buySymbol: string) => {
+    (offerId: string) => {
       if (address === undefined) return
 
       async function run(): Promise<void> {
@@ -222,8 +226,6 @@ export function useLimitOrder(): LimitOrder {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               account: address,
-              sellSymbol,
-              buySymbol,
               // Zero size removes the order. Stellar has no delete operation.
               amount: '0',
               offerId,
@@ -239,7 +241,7 @@ export function useLimitOrder(): LimitOrder {
             return
           }
 
-          await submit(built.xdr, address as string)
+          await submit(built.xdr, address as string, true)
         } catch {
           setState({ phase: 'failed', error: 'Could not reach the network.' })
         }

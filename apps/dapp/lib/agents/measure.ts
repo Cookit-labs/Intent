@@ -1,4 +1,5 @@
 import { fromBaseUnits } from '../swap/assets'
+import type { ChainRouteQuote } from './chain-routes'
 
 /**
  * What a route is actually worth, measured rather than claimed.
@@ -71,4 +72,28 @@ export function measureRoute(
     vsOraclePct: (1 - efficiency) * 100,
     efficiency,
   }
+}
+
+/**
+ * What a chain route is worth in dollars, for ranking routes against each
+ * other on chains whose tokens have different decimals.
+ *
+ * The figures come from the quote's dollar values, which were priced from
+ * display amounts. Nothing here reads base units. A route that cannot be
+ * priced is undefined, never zero: an unpriced route is not a free one.
+ *
+ * A supply or a stake keeps its principal rather than trading it, so it has no
+ * slippage to measure; it is reported at no loss and ranks on its rate instead.
+ */
+export function measureChainRoute(
+  q: ChainRouteQuote
+): { outUsd: number; vsInPct: number } | undefined {
+  const valueIn = q.valueInUsd
+  if (valueIn === undefined || !Number.isFinite(valueIn) || valueIn <= 0) return undefined
+
+  if (q.request.kind !== 'swap') return { outUsd: valueIn, vsInPct: 0 }
+
+  const valueOut = q.valueOutUsd
+  if (valueOut === undefined || !Number.isFinite(valueOut) || valueOut <= 0) return undefined
+  return { outUsd: valueOut, vsInPct: (1 - valueOut / valueIn) * 100 }
 }

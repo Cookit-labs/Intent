@@ -26,6 +26,24 @@ export const SUI_TOKENS: readonly ChainToken[] = [
     decimals: 6,
     name: 'Tether (Sui Bridge)',
   },
+  {
+    symbol: 'WAL',
+    id: '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL',
+    decimals: 9,
+    name: 'Walrus',
+  },
+  {
+    symbol: 'sSUI',
+    id: '0x83556891f4a0f233ce7b05cfe7f957d4020492a34f5405b2cb9377d060bef4bf::spring_sui::SPRING_SUI',
+    decimals: 9,
+    name: 'Spring SUI',
+  },
+  {
+    symbol: 'afSUI',
+    id: '0xf325ce1300e8dac124071d3152c5c5ee6174914f8bc2161e88329cf579246efc::afsui::AFSUI',
+    decimals: 9,
+    name: 'Aftermath Staked SUI',
+  },
 ]
 
 export const STABLECOIN_SYMBOLS: ReadonlySet<string> = new Set(['USDC', 'USDsui', 'USDT'])

@@ -1,5 +1,6 @@
 import { stellarNetwork } from '@intent/config'
 import {
+  Account,
   Address,
   BASE_FEE,
   Contract,
@@ -12,7 +13,7 @@ import {
 import { blendPool } from '../swap/contract-registry'
 import { liquidationPrice, positionHealth, type HealthLeg, type PositionHealth } from './health'
 import { readPrices } from './oracle'
-import { blendXlm, readReserve, readReserveList } from './reserves'
+import { READ_ONLY_SOURCE, blendSymbol, blendXlm, readReserve, readReserveList } from './reserves'
 
 /**
  * What an account holds in the Blend pool, and how close it is to liquidation.
@@ -41,6 +42,8 @@ const RATE_SCALAR = BigInt('1000000000000')
 export interface BlendBalance {
   /** The reserve's asset contract. */
   assetId: string
+  /** Its place in the pool's reserve list, which is how `submit` reports positions. */
+  reserveIndex: number
   symbol: string
   /** The raw pool balance, in bTokens or dTokens. */
   tokens: string
@@ -83,13 +86,13 @@ export interface ReadPositionOptions {
 }
 
 /**
- * Simulating a read needs a source account, and any funded account will do —
  * `get_positions` takes the account it reports on as an argument rather than
- * reading the invoker. The account being asked about is therefore always a
- * valid choice and needs no separate key.
+ * reading the invoker, so the fixed read-only source serves. Using the account
+ * itself would make a wallet with no funds yet read as a failure rather than as
+ * holding nothing.
  */
 async function simulate(server: rpc.Server, account: string, passphrase: string): Promise<unknown> {
-  const source = await server.getAccount(account)
+  const source = new Account(READ_ONLY_SOURCE, '0')
   const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: passphrase })
     .addOperation(new Contract(blendPool()).call('get_positions', new Address(account).toScVal()))
     .setTimeout(60)
@@ -175,13 +178,6 @@ export async function readBlendPositions(
   const assets = [...reserves.values()].map((reserve) => reserve.asset)
   const prices = await readPrices(assets, { rpcUrl })
 
-  function symbolFor(assetId: string): string {
-    // Only XLM is named here because it is the only asset this app supplies.
-    // Anything else shows its contract id rather than a guessed ticker — the
-    // ticker-impersonation trap this codebase has hit before.
-    return assetId === blendXlm() ? 'XLM' : `${assetId.slice(0, 4)}…${assetId.slice(-4)}`
-  }
-
   function balanceFor(index: number, tokens: bigint, rate: bigint): BlendBalance | undefined {
     const reserve = reserves.get(index)
     if (reserve === undefined) return undefined
@@ -189,7 +185,8 @@ export async function readBlendPositions(
     const amount = (tokens * rate) / RATE_SCALAR
     return {
       assetId: reserve.asset,
-      symbol: symbolFor(reserve.asset),
+      reserveIndex: index,
+      symbol: blendSymbol(reserve.asset),
       tokens: tokens.toString(),
       amount: amount.toString(),
       display: (Number(amount) / 1e7).toFixed(7),

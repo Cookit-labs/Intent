@@ -132,14 +132,16 @@ describe('DeFindex is claimed as far as it has been proven', () => {
 
 describe('the integrated venues are on the right chain', () => {
   it('keeps every executing venue on a chain that can execute', () => {
-    // An EVM venue marked executable would send a user to a confirm screen that
-    // cannot build anything: EVM chains connect but have no signing path yet.
+    // Of the EVM chains only Avalanche and Monad can sign. Anywhere else, a venue marked executable
+    // would send a user to a confirm screen that cannot build anything.
     for (const v of venues) {
-      if (v.integration === 'executes') {
-        expect(
-          ['stellar', 'solana', 'sui', 'near'],
-          `${v.id} claims execution but is ${v.family}`
-        ).toContain(v.family)
+      if (v.integration !== 'executes') continue
+      expect(
+        ['stellar', 'solana', 'sui', 'near', 'evm'],
+        `${v.id} claims execution but is ${v.family}`
+      ).toContain(v.family)
+      if (v.family === 'evm') {
+        expect(v.chains.every((chain) => chain === 'Avalanche' || chain === 'Monad')).toBe(true)
       }
     }
   })
@@ -158,9 +160,9 @@ describe('Noether, the perps venue', () => {
     expect(noether?.integration).toBe('quotes')
   })
 
-  it('says the protocol is unaudited and testnet-only', () => {
+  it('says its mainnet contracts wait on an audit, and that it runs on testnet only', () => {
     const capability = byId('noether')?.capability ?? ''
-    expect(capability).toMatch(/unaudited/i)
+    expect(capability).toMatch(/paused until its audit/i)
     expect(capability).toMatch(/testnet/i)
     expect(capability).toMatch(/0\.0\.0-dev/)
     expect(capability).toMatch(/closed beta/i)

@@ -1,5 +1,11 @@
 import type { Venue } from '@intent/types'
 
+import { jitoListing } from './jito-listing'
+import { kaminoLendListing } from './kamino-lend-listing'
+import { marinadeListing } from './marinade-listing'
+import { solayerListing } from './solayer-listing'
+import { streamflowVenue } from './streamflow-listing'
+
 /**
  * The Solana apps the Apps screen shows, from the ranked table in the integration
  * report. `executes` means the app builds, checks, signs and submits here with no
@@ -16,7 +22,17 @@ export const solanaVenues: Venue[] = [
     url: 'https://jup.ag',
     integration: 'executes',
     capability:
-      'Swaps USDC, USDT, SOL, JitoSOL and ONyc through Jupiter’s on-chain router. Refuses thin liquidity, and checks every transaction before you sign.',
+      'Swaps USDC, USDT, SOL, JitoSOL, mSOL, sSOL and ONyc through Jupiter’s on-chain router. Refuses thin liquidity, and checks every transaction before you sign.',
+  },
+  {
+    // Listed, as Lulo is: whether this runs depends on a secret this client-safe file can't read.
+    id: '1click-solana',
+    family: 'solana',
+    name: 'NEAR Intents 1Click',
+    category: 'swap',
+    chains: ['Solana'],
+    bestFor: 'A second swap price from competing market makers, spending USDC or USDT',
+    url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
   },
   {
     id: 'jupiter-lend',
@@ -28,7 +44,7 @@ export const solanaVenues: Venue[] = [
     url: 'https://jup.ag/lend',
     integration: 'executes',
     capability:
-      'Deposits USDC or USDT and shows the current rate. Jupiter labels the API beta. Withdrawing isn’t wired here yet.',
+      'Deposits USDC or USDT and shows the current rate. Withdraws them too, built from the chain with no company server. Jupiter labels its deposit API beta.',
   },
   {
     id: 'kamino',
@@ -40,7 +56,7 @@ export const solanaVenues: Venue[] = [
     url: 'https://kamino.com',
     integration: 'executes',
     capability:
-      'Deposits USDC into Kamino’s largest USDC vault by deposits, and names it before you sign. Withdrawing isn’t wired here yet.',
+      'Deposits USDC into Kamino’s largest USDC vault by deposits, and names it before you sign. Withdraws through Kamino’s API, which this exit depends on.',
   },
   {
     id: 'onre',
@@ -144,4 +160,9 @@ export const solanaVenues: Venue[] = [
     bestFor: 'Oracle-priced perpetuals against a pool. Leverage can lose your whole position',
     url: 'https://jup.ag/perps',
   },
+  kaminoLendListing,
+  jitoListing,
+  marinadeListing,
+  solayerListing,
+  streamflowVenue,
 ]

@@ -64,17 +64,18 @@ const COMPUTE_UNIT_LIMIT = 100_000
 /** About 0.00001 SOL at the limit above, enough to land without a live fee estimate. */
 const COMPUTE_UNIT_PRICE = BigInt(100_000)
 
-/**
- * `createSolanaSubmit` has no flag for a send it can't confirm yet, only this wording.
- * The tests run the real function, so a change to the wording fails them.
- */
-const UNCONFIRMED_SEND = 'not confirmed yet'
+function tokenOf(expectation: DepositExpectation): ChainToken {
+  return expectation.token ?? USDC
+}
 
-const NOT_ONE_TRANSFER =
-  'This transaction asks the Token Program for something other than one USDC transfer.'
+function notOneTransfer(token: ChainToken): string {
+  return `This transaction asks the Token Program for something other than one ${token.symbol} transfer.`
+}
 
 const RpcAccount = z.object({
-  result: z.object({ value: z.object({ owner: z.string() }).nullable() }),
+  result: z.object({
+    value: z.object({ owner: z.string(), executable: z.boolean().optional() }).nullable(),
+  }),
 })
 
 const RpcBlockhash = z.object({
@@ -97,13 +98,14 @@ function orderUnits(expectation: DepositExpectation): bigint {
   if (!isAddress(account)) refuse('That is not a Solana wallet address.')
   if (!isAddress(depositAddress)) refuse('This order’s deposit address is not a Solana address.')
   if (depositAddress === account) refuse('This order’s deposit address is your own wallet.')
+  const token = tokenOf(expectation)
   let units: bigint
   try {
-    units = BigInt(toBaseUnits(amount, USDC.decimals))
+    units = BigInt(toBaseUnits(amount, token.decimals))
   } catch (e) {
     return refuse(e instanceof Error ? e.message : 'That is not an amount.')
   }
-  if (units > MAX_U64) refuse('This order’s amount is too large for USDC.')
+  if (units > MAX_U64) refuse(`This order’s amount is too large for ${token.symbol}.`)
   return units
 }
 
@@ -158,7 +160,7 @@ function checkAccountCreation(
     expectation.account,
     destination,
     expectation.depositAddress,
-    USDC.id,
+    tokenOf(expectation).id,
     SYSTEM_PROGRAM,
     TOKEN_PROGRAM,
   ]
@@ -180,13 +182,14 @@ function checkTransfer(
   destination: string,
   units: bigint
 ): void {
+  const token = tokenOf(expectation)
   const [from, mint, to, owner, ...rest] = accountsOf(transaction, instruction)
-  if (rest.length > 0 || owner === undefined) refuse(NOT_ONE_TRANSFER)
-  if (mint !== USDC.id || instruction.data[9] !== USDC.decimals) {
-    refuse('This transfer is not USDC.')
+  if (rest.length > 0 || owner === undefined) refuse(notOneTransfer(token))
+  if (mint !== token.id || instruction.data[9] !== token.decimals) {
+    refuse(`This transfer is not ${token.symbol}.`)
   }
-  if (from !== associatedTokenAccount(expectation.account, USDC.id)) {
-    refuse('This transfer does not come from your USDC account.')
+  if (from !== associatedTokenAccount(expectation.account, token.id)) {
+    refuse(`This transfer does not come from your ${token.symbol} account.`)
   }
   if (owner !== expectation.account) refuse('This transfer is not authorised by your wallet.')
   if (to !== destination) refuse('This transfer does not go to this order’s deposit address.')
@@ -197,12 +200,13 @@ function checkTransfer(
 
 /**
  * Only this shape passes: compute budget settings, then at most one creation of the
- * deposit's USDC account, then one TransferChecked. Lookup tables are refused outright
+ * deposit's token account, then one TransferChecked. Lookup tables are refused outright
  * because resolving one needs the network, and this check has to see every account.
  */
 function assertSafe(payload: SigningPayload, expectation: DepositExpectation): void {
   if (payload.family !== 'solana') refuse('That is not a Solana transaction.')
   const units = orderUnits(expectation)
+  const token = tokenOf(expectation)
   const transaction = decode(payload.transaction)
   if (hasLookupTables(payload.transaction)) {
     refuse('This transaction uses a lookup table, which hides accounts from this check.')
@@ -224,19 +228,19 @@ function assertSafe(payload: SigningPayload, expectation: DepositExpectation): v
         return 'create'
       case TOKEN_PROGRAM:
         if (instruction.data.length !== 10 || instruction.data[0] !== TRANSFER_CHECKED) {
-          refuse(NOT_ONE_TRANSFER)
+          refuse(notOneTransfer(token))
         }
         return 'transfer'
       default:
-        return refuse('This transaction calls a program a USDC deposit does not need.')
+        return refuse(`This transaction calls a program a ${token.symbol} deposit does not need.`)
     }
   })
   if (!/^(budget,)*(create,)?transfer$/.test(steps.join(','))) {
-    refuse('This transaction is not the one USDC transfer this order needs.')
+    refuse(`This transaction is not the one ${token.symbol} transfer this order needs.`)
   }
   checkComputeBudget(budget)
 
-  const destination = associatedTokenAccount(expectation.depositAddress, USDC.id)
+  const destination = associatedTokenAccount(expectation.depositAddress, token.id)
   const transfer = transaction.instructions[transaction.instructions.length - 1] as Instruction
   const creation = transaction.instructions[transaction.instructions.length - 2]
   if (steps[steps.length - 2] === 'create' && creation !== undefined) {
@@ -288,14 +292,24 @@ async function usdcBalance(account: string): Promise<bigint> {
  * Funds sent to a token account's own token account can't be moved by anyone, since a
  * token account has no key to sign with. A missing account is fine: it is a fresh wallet.
  */
-async function assertDepositIsNotTokenAccount(depositAddress: string): Promise<void> {
+export async function assertDepositIsNotTokenAccount(
+  depositAddress: string,
+  token: ChainToken,
+  /** For an address a person typed. A program holds no key either, so what it is sent is stranded. */
+  options: { refusePrograms?: boolean } = {}
+): Promise<void> {
   const reply = RpcAccount.safeParse(
     await rpc('getAccountInfo', [depositAddress, { encoding: 'base64', commitment: 'confirmed' }])
   )
   if (!reply.success) refuse('Solana’s network could not be read just now.')
+  if (options.refusePrograms === true && reply.data.result.value?.executable === true) {
+    refuse(`That address is a program, and ${token.symbol} sent there would be stuck.`)
+  }
   const owner = reply.data.result.value?.owner
   if (owner === TOKEN_PROGRAM || owner === TOKEN_2022_PROGRAM) {
-    refuse('This order’s deposit address is a token account, and USDC sent there would be stuck.')
+    refuse(
+      `This order’s deposit address is a token account, and ${token.symbol} sent there would be stuck.`
+    )
   }
 }
 
@@ -305,7 +319,8 @@ function compile(
   lifetime: { blockhash: string; lastValidBlockHeight: number }
 ): string {
   const { account, depositAddress } = expectation
-  const destination = associatedTokenAccount(depositAddress, USDC.id)
+  const token = tokenOf(expectation)
+  const destination = associatedTokenAccount(depositAddress, token.id)
   const message = pipe(
     createTransactionMessage({ version: 'legacy' }),
     (m) => setTransactionMessageFeePayer(account as Address, m),
@@ -340,7 +355,7 @@ function compile(
               { address: account as Address, role: AccountRole.WRITABLE_SIGNER },
               { address: destination as Address, role: AccountRole.WRITABLE },
               { address: depositAddress as Address, role: AccountRole.READONLY },
-              { address: USDC.id as Address, role: AccountRole.READONLY },
+              { address: token.id as Address, role: AccountRole.READONLY },
               { address: SYSTEM_PROGRAM as Address, role: AccountRole.READONLY },
               { address: TOKEN_PROGRAM as Address, role: AccountRole.READONLY },
             ],
@@ -350,17 +365,17 @@ function compile(
             programAddress: TOKEN_PROGRAM as Address,
             accounts: [
               {
-                address: associatedTokenAccount(account, USDC.id) as Address,
+                address: associatedTokenAccount(account, token.id) as Address,
                 role: AccountRole.WRITABLE,
               },
-              { address: USDC.id as Address, role: AccountRole.READONLY },
+              { address: token.id as Address, role: AccountRole.READONLY },
               { address: destination as Address, role: AccountRole.WRITABLE },
               { address: account as Address, role: AccountRole.READONLY_SIGNER },
             ],
             data: Uint8Array.from([
               TRANSFER_CHECKED,
               ...getU64Encoder().encode(units),
-              USDC.decimals,
+              token.decimals,
             ]),
           },
         ],
@@ -372,7 +387,7 @@ function compile(
 
 async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   const units = orderUnits(expectation)
-  await assertDepositIsNotTokenAccount(expectation.depositAddress)
+  await assertDepositIsNotTokenAccount(expectation.depositAddress, tokenOf(expectation))
   const reply = RpcBlockhash.safeParse(
     await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }])
   )
@@ -386,11 +401,11 @@ async function build(expectation: DepositExpectation): Promise<SigningPayload> {
   return payload
 }
 
-function pending(hash: string): SubmitResult {
+function pending(hash: string, token: ChainToken): SubmitResult {
   return {
     ok: false,
     pending: true,
-    error: `Your USDC deposit was sent (${hash}) but isn't confirmed yet. Don't send it again until you've checked ${explorerUrl(hash)}.`,
+    error: `Your ${token.symbol} deposit was sent (${hash}) but isn't confirmed yet. Don't send it again until you've checked ${explorerUrl(hash)}.`,
   }
 }
 
@@ -415,9 +430,9 @@ async function submit(
     result = await createSolanaSubmit()({ account: expectation.account, venueId: 'weave', signed })
   } catch {
     // A connection that broke during the send says nothing about whether it landed.
-    return pending(hash)
+    return pending(hash, tokenOf(expectation))
   }
-  return !result.ok && result.error.includes(UNCONFIRMED_SEND) ? pending(hash) : result
+  return !result.ok && result.pending === true ? pending(hash, tokenOf(expectation)) : result
 }
 
 export const solanaDeposit: DepositChain = {

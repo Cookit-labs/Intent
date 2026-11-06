@@ -1,3 +1,4 @@
+import type { ThreadItem } from './agents/talk-lines'
 import type { AgentProposalView } from './agents/competition'
 
 import { listTurns, saveTurnRemote, updateTurnRemote } from './api/conversation-client'
@@ -41,6 +42,11 @@ export interface ChatTurn {
    * transcript rather than a conversation.
    */
   routesByAgent?: Record<string, unknown>
+  /**
+   * What the agents said to each other. Kept on this browser only: the server
+   * doesn't store it, so another device shows the final cards alone.
+   */
+  talk?: { thread: ThreadItem[]; takes: Record<string, AgentProposalView> }
   /** Set once a swap from this conversation settles. */
   txHash?: string
   /** Which agent the user chose, when they chose one. */
@@ -329,6 +335,7 @@ export async function syncTurns(chain: string): Promise<ChatTurn[]> {
       ...(server.conversation === undefined && local.conversation !== undefined
         ? { conversation: local.conversation }
         : {}),
+      ...(server.talk === undefined && local.talk !== undefined ? { talk: local.talk } : {}),
     })
   }
 

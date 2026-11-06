@@ -19,14 +19,11 @@ import { ThemeToggle } from './theme-toggle'
  */
 export function Header({
   menuButton,
-  tradeCapUsd,
 }: {
   /** The drawer trigger, supplied by the shell that owns the drawer's state. */
   menuButton?: ReactNode
   /** Unused here; the shell passes the handler through `menuButton`. */
   onOpenMenu?: () => void
-  /** The mainnet per-trade cap, shown beside the network. */
-  tradeCapUsd?: number | undefined
 }): JSX.Element {
   return (
     // Clear, so the canvas glow behind it reads through. The page scrolls in
@@ -40,7 +37,7 @@ export function Header({
         <ChainSwitcher
           caption={
             <div className="hidden pl-2 md:block">
-              <NetworkStatus tradeCapUsd={tradeCapUsd} />
+              <NetworkStatus />
             </div>
           }
         />

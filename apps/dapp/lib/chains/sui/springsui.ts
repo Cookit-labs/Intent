@@ -8,8 +8,10 @@ import {
   type ChainVenue,
   type PreparedAction,
   type SigningPayload,
+  type VenueQuote,
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
+import { stakesAfterSwap } from './haedal'
 import {
   mintedAmount,
   SPRINGSUI_PACKAGE,
@@ -19,6 +21,12 @@ import {
   SSUI_WEIGHT_HOOK,
 } from './policies'
 import { assertPtbSafe } from './safety'
+import {
+  assertSpringsuiUnstakeSafe,
+  isSpringsuiRedeem,
+  prepareSpringsuiUnstake,
+  readSpringsuiPositions,
+} from './springsui-unstake'
 import { displayAmount } from './tokens'
 
 const SUI_SYSTEM_STATE = '0x5'
@@ -26,7 +34,8 @@ const SUI_DECIMALS = 9
 const SSUI_DECIMALS = 9
 const DRY_RUN_TIMEOUT_MS = 15_000
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+/** Builds the stake and dry-runs it, which moves nothing, to read what it would mint. */
+async function checkedStake(request: ChainActionRequest, account: string) {
   assertSuiAccount(account)
   if (request.tokenIn.trim().toUpperCase() !== 'SUI') {
     throw new ChainActionRefused(
@@ -69,7 +78,18 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
     )
   }
 
-  const receive = displayAmount(received, SSUI_DECIMALS)
+  return { transaction, receive: displayAmount(received, SSUI_DECIMALS) }
+}
+
+/** No apyPercent: no rate can be read from SpringSui here, and a rate is never invented. */
+async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { receive } = await checkedStake(request, account)
+  return { receive: { amount: receive, symbol: 'sSUI' } }
+}
+
+async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  if (request.kind === 'unstake') return prepareSpringsuiUnstake(request, account)
+  const { transaction, receive } = await checkedStake(request, account)
   return {
     venueId: 'springsui',
     venueName: 'SpringSui',
@@ -89,8 +109,14 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
 export const springsuiVenue: ChainVenue = {
   id: 'springsui',
   name: 'SpringSui',
-  kinds: ['stake'],
+  kinds: ['stake', 'unstake'],
+  assertCanFollow: stakesAfterSwap('SpringSui'),
+  quote,
+  positions: readSpringsuiPositions,
   prepare,
+  // A redeem and a mint are never allowed in one transaction: each policy allows only its own.
   assertSafe: (payload: SigningPayload, account: string) =>
-    assertPtbSafe(payload, account, SPRINGSUI_POLICY),
+    isSpringsuiRedeem(payload)
+      ? assertSpringsuiUnstakeSafe(payload, account)
+      : assertPtbSafe(payload, account, SPRINGSUI_POLICY),
 }

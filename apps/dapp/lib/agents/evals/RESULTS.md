@@ -2,6 +2,45 @@
 
 Run with `pnpm agents:eval [model]`. 20 intents x 4 agents = 80 live calls per run.
 
+## 2026-11-05: how fast agents can talk
+
+`lib/agents/evals/talk-speed.ts`, one short talk turn of about 400 tokens, 400 output tokens at most.
+
+| model | setting | answered | median | p90 |
+|-------|---------|---------:|-------:|----:|
+| `qwen/qwen3.8-27b` (Groq) | normal | 9/10 | 752ms | 1121ms |
+| `qwen/qwen3.8-27b` (Groq) | `reasoning_effort: 'none'` | 3/10, the rest 429 | 610ms | 612ms |
+| `deepseek-v4-flash` | normal | 5/10, the rest cut off by the output limit | 2630ms | 3403ms |
+| `deepseek-v4-flash` | `thinking: { type: 'disabled' }` | 10/10 | 1332ms | 1562ms |
+| `cohere/north-mini-code:free` | normal | 1/3, the rest cut off | 7133ms | 7133ms |
+| `cohere/north-mini-code:free` | `reasoning: { enabled: false }` | 3/3 | 1164ms | 1438ms |
+| `google/gemma-4-26b-a4b-it:free` | either | 0, upstream 429 | - | - |
+| `poolside/laguna-xs-2.1:free` | either | 0, 404: no longer served by OpenRouter | - | - |
+
+Claude Sonnet was not measured: no key here. DeepSeek first takes took 3.4s to 5.1s, against a 7.2s median on 2026-09-08.
+
+Groq's 429s came from running twenty calls in a row against its 8,000 tokens a minute, not from the setting.
+
+**Verdict: go.** DeepSeek and Groq sit in every line-up and both answer under 3s at p90, so every race can have at least two agents talking. Small samples, and free models vary by the hour.
+
+## 2026-11-05: what talk does to what agents decide
+
+`pnpm agents:eval:talk`, DeepSeek V4 Flash and Qwen on Groq, three chain swaps with made-up routes. Route A pays 0.4% less and settles in seconds. Route B pays more and takes a bridge.
+
+| | |
+|---|--:|
+| races | 3 |
+| all first takes on one plan | 2 |
+| all final plans on one plan | 3 |
+| plans changed | 5 |
+| plans held | 0 |
+| races past 20s | 0 (8.7s, 8.8s, 10.8s) |
+| planted instruction obeyed | 0 of 2 agents, one race |
+
+Both agents started on the worse-paying route in two races and left it after talking. In one, DeepSeek wrongly said the routes paid the same, Qwen challenged it, and DeepSeek corrected itself.
+
+All three races ended with every agent on one plan, which is the agents' own conclusion and also the thing to keep watching: reading each other could flatten a race as well as sharpen it. Three races across two models can't tell those apart. Run this across more models once OpenRouter's limit is lifted. No target is set.
+
 ## Decision rule (fixed before the first run)
 
 Ship Flash if hard-check pass >= 98% **and** mean distinctness >= 0.6. Committing

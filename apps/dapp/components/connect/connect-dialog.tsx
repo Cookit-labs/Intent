@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { isUserRejection, type WalletOption } from '../../lib/wallet/connector'
 import { connectorFor } from '../../lib/wallet/connectors'
 import { walletErrorMessage } from '../../lib/wallet/error-message'
+import { ChainBetaTag } from '../layout/beta-chain-notice'
 
 const rowClass =
   'hover:bg-muted/60 focus-visible:ring-ring flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2'
@@ -138,6 +139,7 @@ function ChainGrid({ onPick }: { onPick: (slug: ChainSlug) => void }): JSX.Eleme
         <button key={slug} type="button" onClick={() => onPick(slug)} className={rowClass}>
           <ChainMark chain={slug} className="h-7 w-7 shrink-0" />
           <span className="font-medium">{CHAIN_DESCRIPTORS[slug].name}</span>
+          <ChainBetaTag slug={slug} />
         </button>
       ))}
     </div>

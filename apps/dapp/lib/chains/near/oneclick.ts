@@ -14,6 +14,10 @@ const MAX_PRICE_AGE_MS = 15 * 60_000
 /** The combined fee limit is 500 bps, and 1Click adds 25 of its own without a key. */
 const MAX_APP_FEE_BPS = 475
 
+/**
+ * A NEAR token's asset id, which is its account by rule. Other chains' ids can't be worked
+ * out from a contract, so they come from the list through `oneClickAssetId`.
+ */
 export function assetIdOf(token: ChainToken): string {
   return `nep141:${token.id}`
 }
@@ -42,6 +46,9 @@ const TokenList = z.array(
     symbol: z.string(),
     price: z.number().optional(),
     priceUpdatedAt: z.string().optional(),
+    // Allowed to be null so that a change to these can't stop NEAR's prices from being read.
+    blockchain: z.string().nullish(),
+    contractAddress: z.string().nullish(),
   })
 )
 export type OneClickToken = z.infer<typeof TokenList>[number]
@@ -143,10 +150,17 @@ export interface QuoteInput {
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
   deadline: string
   slippageBps: number
+  /** The money already sits in the person's NEAR Intents balance, and any refund goes back there. */
+  fromIntents?: boolean | undefined
 }
 
 /** A sentence for what 1Click said. Its own text is not passed on, because it is outside this app. */
 function refusalFor(status: number, message: string): ChainActionRefused {
+  if (/not available/i.test(message)) {
+    return new ChainActionRefused(
+      "NEAR Intents isn't offering this route right now, and a different amount won't change that. Nothing was signed or sent."
+    )
+  }
   if (/no liquidity/i.test(message)) {
     return new ChainActionRefused(
       'NEAR Intents has no price for this right now, usually because the amount is too small or too large for the market. Try a different amount, or try again in a minute. Nothing was signed or sent.'
@@ -182,16 +196,17 @@ function refusalFor(status: number, message: string): ChainActionRefused {
  */
 export async function requestQuote(input: QuoteInput): Promise<QuoteEnvelope> {
   const fees = appFees()
+  const funding = input.fromIntents === true ? 'INTENTS' : 'ORIGIN_CHAIN'
   const body = {
     dry: input.dry,
     swapType: 'EXACT_INPUT',
     slippageTolerance: input.slippageBps,
     originAsset: input.originAsset,
-    depositType: 'ORIGIN_CHAIN',
+    depositType: funding,
     destinationAsset: input.destinationAsset,
     amount: input.amount,
     refundTo: input.account,
-    refundType: 'ORIGIN_CHAIN',
+    refundType: funding,
     recipient: input.account,
     recipientType: input.recipientType,
     deadline: input.deadline,
@@ -230,11 +245,14 @@ export async function requestQuote(input: QuoteInput): Promise<QuoteEnvelope> {
   return parsed.data
 }
 
-/** Optional speed-up, per the docs. A failure here changes nothing about the swap. */
+/**
+ * Optional speed-up, per the docs. A failure here changes nothing about the swap. The sender
+ * account only means something on NEAR, so other chains leave it out.
+ */
 export async function notifyDeposit(
   depositAddress: string,
   txHash: string,
-  nearSenderAccount: string
+  nearSenderAccount?: string
 ): Promise<void> {
   await fetch(`${BASE_URL}/deposit/submit`, {
     method: 'POST',

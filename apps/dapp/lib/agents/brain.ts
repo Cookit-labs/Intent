@@ -258,7 +258,28 @@ export interface AgentProposalResult {
    * ever fills.
    */
   restPriceUsd?: number
+  /**
+   * The agent ended on not doing this now, in its own words.
+   *
+   * Set only by the final turn of a talk. A held plan has no route, so there is
+   * nothing to sign from it, and it never wins.
+   */
+  held?: true
 }
+
+/** One short turn of agents talking: a prompt, a tool, and a reply checked by whoever asked. */
+export interface TalkCall {
+  agent: AgentKey
+  system: string
+  user: string
+  tool: { name: string; description: string; parameters: Record<string, unknown> }
+  signal?: AbortSignal
+}
+
+/** The tool's arguments as the model wrote them. What makes them usable is decided by the caller. */
+export type TalkOutcome =
+  | { ok: true; args: unknown; meta: BrainMeta }
+  | { ok: false; error: BrainErrorCode; meta: BrainMeta; retryAfterMs?: number }
 
 export type BrainErrorCode =
   | 'timeout'
@@ -314,4 +335,6 @@ export interface AgentBrain {
    * short bounded reasoning is what these models do best.
    */
   propose: (req: ProposalRequest) => Promise<ProposalOutcome>
+  /** One short talk turn. Absent on a brain that can't talk, which keeps its first take. */
+  talk?: (call: TalkCall) => Promise<TalkOutcome>
 }

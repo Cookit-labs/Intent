@@ -6,7 +6,6 @@ import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
 import { requesterOf } from '../../../../lib/server/requester'
-import { assertWithinCap, TradeCapExceeded, tradeCapUsd } from '../../../../lib/server/trade-cap'
 import { createWeaveClient, quoteCostPercent } from '../../../../lib/weave/client'
 import { isCurrencyAllowed } from '../../../../lib/weave/corridors'
 import { depositChain } from '../../../../lib/weave/deposit'
@@ -22,7 +21,7 @@ import {
   toPublic,
 } from '../../../../lib/weave/orders'
 import { nextStatus } from '../../../../lib/weave/status'
-import { isCashoutChain } from '../../../../lib/weave/types'
+import { closedCashoutReply, isCashoutChain } from '../../../../lib/weave/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,23 +52,6 @@ function refusalFor(path: (string | number)[]): string {
       return 'Choose where the money should go.'
     default:
       return 'This page is out of date. Reload it and try again.'
-  }
-}
-
-/**
- * The cap always reads as mainnet, because a cash-out always is. Its own wording is
- * for whoever runs the deployment, so a person gets this instead.
- */
-function overCap(usd: number): Response | undefined {
-  try {
-    assertWithinCap(usd, process.env, 'mainnet')
-    return undefined
-  } catch (e) {
-    if (!(e instanceof TradeCapExceeded)) throw e
-    return refusal(
-      'over_limit',
-      `This app caps each cash-out at $${tradeCapUsd(process.env, 'mainnet')}, and this one is about $${usd.toFixed(2)}. Try a smaller amount.`
-    )
   }
 }
 
@@ -112,6 +94,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!isCashoutChain(chain)) {
     return refusal('unknown_chain', 'Cash-outs are not available on this chain.')
   }
+  // The chat refuses this before any form opens. A page left open from before it did can still post.
+  const closed = closedCashoutReply(chain)
+  if (closed !== undefined) return refusal('chain_closed', closed, 422)
   const onThisNetwork = chainRefusal(chain)
   if (onThisNetwork !== undefined) return onThisNetwork
 
@@ -171,9 +156,6 @@ export async function POST(request: Request): Promise<Response> {
       unconfirmed === undefined ? 503 : 409
     )
   }
-
-  const capped = overCap(Number(amount))
-  if (capped !== undefined) return capped
 
   const weave = createWeaveClient()
   const fail = (code: string, message: string): Response =>

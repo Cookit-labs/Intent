@@ -150,6 +150,14 @@ describe('status', () => {
     expect(statusText('failed')).toMatch(/due back to your connected wallet/)
   })
 
+  it.each(['failed', 'expired'] as const)('promises no refund it has not seen on %s', (status) => {
+    expect(statusText(status)).toMatch(/none has run in this app yet/)
+  })
+
+  it('gives a refund as what Weave says, and asks the person to check it', () => {
+    expect(statusText('refunded')).toMatch(/Weave says .* check that it arrived/)
+  })
+
   it.each(['waiting', 'processing'] as const)('keeps polling while %s', (status) => {
     expect(shouldPoll(status)).toBe(true)
   })
@@ -358,7 +366,7 @@ describe('what may be offered', () => {
 
 describe('words', () => {
   it('says a token must be swapped to USDC first', () => {
-    const reply = unsupportedTokenReply('SOL')
+    const reply = unsupportedTokenReply('SOL', 'solana')
     expect(reply).toMatch(/USDC/)
     expect(reply).toMatch(/swap/i)
     expect(reply).toMatch(/SOL/)

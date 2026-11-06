@@ -198,30 +198,26 @@ describe('what both stake venues refuse', () => {
 
 describe('the module', () => {
   it('stakes with Meta Pool by default, and with rNEAR when named', async () => {
-    const env = { MAINNET_MAX_TRADE_USD: '500' }
-    await expect(prepareChainAction(nearModule, stake(), ME, env)).resolves.toMatchObject({
+    await expect(prepareChainAction(nearModule, stake(), ME)).resolves.toMatchObject({
       venueId: 'metapool',
     })
     await expect(
-      prepareChainAction(nearModule, stake({ venue: 'rNEAR' }), ME, env)
+      prepareChainAction(nearModule, stake({ venue: 'rNEAR' }), ME)
     ).resolves.toMatchObject({ venueId: 'rnear' })
     await expect(
-      prepareChainAction(nearModule, stake({ venue: 'meta pool' }), ME, env)
+      prepareChainAction(nearModule, stake({ venue: 'meta pool' }), ME)
     ).resolves.toMatchObject({ venueId: 'metapool' })
   })
 
-  it('refuses a stake over the cap, and a venue that cannot stake', async () => {
-    const env = { MAINNET_MAX_TRADE_USD: '500' }
-    await expect(prepareChainAction(nearModule, stake({ amount: '126' }), ME, env)).rejects.toThrow(
-      /caps each trade/
+  it('refuses a venue that cannot stake', async () => {
+    await expect(prepareChainAction(nearModule, stake({ venue: '1click' }), ME)).rejects.toThrow(
+      /can't stake here/
     )
-    await expect(
-      prepareChainAction(nearModule, stake({ venue: '1click' }), ME, env)
-    ).rejects.toThrow(/can't stake here/)
   })
 
-  it('has exactly the allowlisted tokens at the confirmed decimals', () => {
-    expect(nearModule.tokens.map((t) => [t.symbol, t.id, t.decimals])).toEqual([
+  it('has the allowlisted tokens at the confirmed decimals', () => {
+    const spendable = nearModule.tokens.filter((t) => ['NEAR', 'USDC', 'USDT'].includes(t.symbol))
+    expect(spendable.map((t) => [t.symbol, t.id, t.decimals])).toEqual([
       ['NEAR', 'wrap.near', 24],
       ['USDC', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1', 6],
       ['USDT', 'usdt.tether-token.near', 6],

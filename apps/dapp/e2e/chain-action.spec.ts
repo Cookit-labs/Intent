@@ -1,11 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { BETA_NOTICE_SEEN } from './beta-notice-seen'
+
 /**
  * The chat's path on a chain that is not Stellar, from typed words to a signed
  * result, with a fake wallet the way a real one announces itself. Both server
  * routes are stubbed, so nothing reaches a chain and no agent or price is needed.
  */
-test.use({ storageState: { cookies: [], origins: [] } })
+test.use({ storageState: { cookies: [], origins: BETA_NOTICE_SEEN } })
 
 const ADDRESS = 'vines1vzrYbzLMRdu58ou5XTby4qAqVRLmqo36NKPTg'
 const UNSIGNED = btoa('unsigned-transaction')
@@ -171,10 +173,10 @@ test('a transaction with no outcome yet says so, and is not shown as a failure',
 test('a refusal from the server is shown as written', async ({ page }) => {
   await connectFakeSolanaWallet(page)
   await page.route('**/api/chain/solana/prepare', (route) =>
-    route.fulfill({ status: 422, json: { error: 'This app caps each trade at $500.' } })
+    route.fulfill({ status: 422, json: { error: 'Nothing here can swap on this chain yet.' } })
   )
   await say(page, 'Swap 9000 USDC to SOL')
-  await expect(page.getByRole('alert').filter({ hasText: 'caps each trade' })).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Nothing here can swap' })).toBeVisible()
 })
 
 test('an instruction it cannot read gets told what works, and nothing is built', async ({

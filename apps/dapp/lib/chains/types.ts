@@ -6,19 +6,81 @@ import type { ChainSlug } from '@intent/types'
  * routes, the hook and the chat card know nothing about any chain in particular.
  */
 
-export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near'>
+export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake'
+export type ChainActionKind =
+  | 'swap'
+  | 'supply'
+  | 'stake'
+  | 'send'
+  | 'withdraw'
+  | 'unstake'
+  | 'borrow'
+  | 'repay'
+  | 'stream'
+  | 'invoice'
+  | 'pay_invoice'
+  /** Collecting what an earlier unstake left waiting, once it is ready. */
+  | 'claim'
+  /** Ending a stream the person started, for what hasn't streamed yet. */
+  | 'cancel'
+
+/**
+ * The amount of a request for the whole of something: a position, or what is ready to claim. A
+ * venue never sees it on a withdraw, unstake or repay, which reach it as a number and
+ * `wholePosition`. A claim and a cancel keep it, since the venue alone knows what they cover.
+ */
+export const WHOLE_AMOUNT = 'all'
+
+/** What a person holds at a venue, where it can be read. */
+export interface VenuePosition {
+  /**
+   * `supplied` comes back through a withdraw, `staked` through an unstake, `borrowed` is owed
+   * through a repay, `claimable` is ready for a claim, and `cooling` is an exit on its way.
+   */
+  slot: 'supplied' | 'staked' | 'borrowed' | 'claimable' | 'cooling'
+  symbol: string
+  /** Display units. */
+  amount: string
+  /** Roughly when a `cooling` exit can be claimed, in hours from now, where the chain says. */
+  readyInHours?: number | undefined
+  /** A stream's id, where this position is one. */
+  id?: string | undefined
+}
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
   kind: ChainActionKind
+  /** A number, or `WHOLE_AMOUNT` on the kinds that take it. */
   amount: string
+  /**
+   * `amount` is dollars, not tokens: "$5 of SOL". Only the chat's start of an action reads this,
+   * and it is swapped for a count of tokens there, so nothing past that point ever sees it.
+   */
+  amountIsUsd?: true | undefined
+  /**
+   * The amount was read as all of the position. A venue that can empty it exactly, leaving no
+   * interest behind, should. One that can't still takes `amount`, which is what was read.
+   */
+  wholePosition?: boolean | undefined
+  /** Cancelling only: the stream's id on chain. */
+  streamId?: string | undefined
   tokenIn: string
   /** Swaps only. */
   tokenOut?: string | undefined
   /** A venue the user named. Absent means the chain's default for this kind. */
   venue?: string | undefined
+  /**
+   * Who gets paid or billed, exactly as typed: sends, streams and invoices. It decides where the
+   * money goes, so it is checked and never changed.
+   */
+  recipient?: string | undefined
+  /** Streams only: whole days the amount is paid over. */
+  durationDays?: string | undefined
+  /** Invoices only: when it is due, as YYYY-MM-DD. */
+  dueDate?: string | undefined
+  /** Paying an invoice only: the invoice's id on chain, as digits. */
+  invoiceId?: string | undefined
 }
 
 export interface NearTransaction {
@@ -29,12 +91,20 @@ export interface NearTransaction {
   }[]
 }
 
-/** What the wallet is asked to sign. Base64 for Solana and Sui. */
+/** What the wallet is asked to sign. Base64 for Solana and Sui. An EVM `value` is decimal base units. */
 export type SigningPayload =
   | { family: 'solana'; transaction: string }
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
-  | { family: 'evm'; chainId: number; to: string; data: string; value: '0' }
+  | {
+      family: 'evm'
+      chainId: number
+      to: string
+      data: string
+      value: string
+      /** An ERC-20 `approve` the wallet sends and sees confirmed first, when the call pulls a token. */
+      approval?: { to: string; data: string } | undefined
+    }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
@@ -96,31 +166,140 @@ export interface ChainToken {
 /** Raised for a refusal the user should read, such as an unknown token or thin liquidity. */
 export class ChainActionRefused extends Error {}
 
+/** What a venue says it would give back, read without building anything to sign. */
+export interface VenueQuote {
+  receive?: { amount: string; symbol: string }
+  apyPercent?: number
+  /** Only where every route on the chain is valued by the same source, as on NEAR. */
+  valueOutUsd?: number
+  /**
+   * What this route costs the wallet beyond what it delivers, as a route elsewhere would not.
+   * The race takes it off the route's value, at the chain's own price for this token.
+   */
+  walletCost?: { amount: string; symbol: string }
+}
+
 export interface ChainVenue {
   id: string
   name: string
   kinds: readonly ChainActionKind[]
+  /**
+   * A price for the agent race. Must not create a deposit address or any other
+   * thing that costs money or leaves state behind: a race quotes every venue,
+   * and only the one the user presses Review on may be built.
+   */
+  quote?: ((request: ChainActionRequest, account: string) => Promise<VenueQuote>) | undefined
   prepare: (request: ChainActionRequest, account: string) => Promise<PreparedAction>
+  /**
+   * What this account holds here, read from the chain. Empty means nothing is there, so it must
+   * throw rather than return empty when it could not read. It decides where a withdraw goes when
+   * no venue was named, and what "all" means, so it reads the live figure, interest included.
+   */
+  positions?: ((account: string) => Promise<VenuePosition[]>) | undefined
   /**
    * Refuses a payload that does anything but what was asked: wrong signer, an
    * unexpected program, a transfer out. Runs on what the venue's API returned
    * before the user sees it, and again on signed bytes at submit, because the
    * venue's API and the browser are both outside what this server controls.
+   *
+   * `context` is what `prepare` issued, handed back by the browser. A venue that reads it
+   * must prove the server wrote it before believing any of it.
    */
-  assertSafe: (payload: SigningPayload, account: string) => void
+  assertSafe: (
+    payload: SigningPayload,
+    account: string,
+    context?: Record<string, string> | undefined
+  ) => void
   /** Overrides the module's submit where a venue lands its own transactions. */
   submit?: ((input: SubmitInput) => Promise<SubmitResult>) | undefined
+  /**
+   * Refuses a step this venue could not run after a swap, while the swap is still unsigned. Reads
+   * only: nothing is built. A venue without this can't follow a swap.
+   */
+  assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
 }
+
+/** A step that would follow a swap. The amount isn't known until the swap has delivered it. */
+export interface FollowOnStep {
+  kind: ChainActionKind
+  tokenIn: string
+  venue?: string | undefined
+  recipient?: string | undefined
+}
+
+/** `assertCanFollow` for a venue that takes only these tokens. */
+export function takesOnly(
+  venueName: string,
+  symbols: readonly string[]
+): NonNullable<ChainVenue['assertCanFollow']> {
+  return async ({ tokenIn }) => {
+    const wanted = tokenIn.trim().toUpperCase()
+    if (symbols.some((symbol) => symbol.toUpperCase() === wanted)) return
+    throw new ChainActionRefused(
+      `${venueName} takes ${symbols.join(' or ')} here, not ${tokenIn}. Nothing was signed or sent.`
+    )
+  }
+}
+
+/**
+ * One token a wallet holds. Anything that measures a change in a holding must match on `id`, never
+ * on `symbol`: an unlisted token's symbol comes from its coin type or its contract, which anyone
+ * can name to copy a real one.
+ */
+export interface TokenBalance {
+  symbol: string
+  id: string
+  amount: string
+  decimals: number
+  native: boolean
+  /** In this chain's token table. An unlisted token can't be traded here yet. */
+  listed: boolean
+}
+
+export interface WalletBalances {
+  tokens: TokenBalance[]
+  /** False when some token the wallet may hold is missing from `tokens`. */
+  complete: boolean
+  /** Only known tokens can be read on this chain, so an unlisted one is never shown. */
+  knownOnly?: boolean | undefined
+  /** Symbols of listed tokens that could not be read, and so are left out rather than shown as zero. */
+  unread?: string[] | undefined
+}
+
+/** Longest a balance read may take, all calls together. */
+export const BALANCE_DEADLINE_MS = 15_000
 
 export interface ChainModule {
   chain: ChainWithActions
   tokens: readonly ChainToken[]
   venues: readonly ChainVenue[]
   defaultVenue: Partial<Record<ChainActionKind, string>>
+  /**
+   * Where a token only one venue here can take goes when no venue is named, by upper-case symbol.
+   * Comes before the default, which would only refuse it.
+   */
+  venueForToken?: Partial<Record<ChainActionKind, Record<string, string>>> | undefined
   /** Dollars per display unit, or nothing if no live price, in which case the trade is refused. */
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */
   submit: (input: SubmitInput) => Promise<SubmitResult>
+  /** Every token the account holds, read now. Throws on a malformed account (a refusal) or an unreadable chain. */
+  balances: (account: string, signal?: AbortSignal) => Promise<WalletBalances>
+  /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
+  tokenHints?: Record<string, string> | undefined
+}
+
+/** "an Avalanche", "a Monad". */
+export function withArticle(name: string): string {
+  return `${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`
+}
+
+/**
+ * A venue's rate as the race reads it: base and reward together, since the agents compare
+ * one figure. No rate read means no rate here, never a zero or a guess.
+ */
+export function quotedApy(apy: PreparedAction['apy']): VenueQuote {
+  return apy === undefined ? {} : { apyPercent: apy.basePercent + (apy.rewardPercent ?? 0) }
 }
 
 export function tokenBySymbol(

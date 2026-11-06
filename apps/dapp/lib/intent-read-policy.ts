@@ -1,3 +1,5 @@
+import { chainNamesOf } from './chains/parse-action'
+import { chainModule } from './chains/registry'
 import { configuredLendingVenues } from './lend/venues'
 import { resolveVerifiedAsset } from './swap/asset-registry'
 
@@ -76,4 +78,34 @@ export function unknownTickers(text: string): string[] {
     seen.add(word)
   }
   return [...seen].slice(0, 3)
+}
+
+/**
+ * What a reading may name on a chain that has its own module, or nothing on Stellar and chains
+ * without one. Symbols are upper case, as a reading is checked in upper case: the chain's tokens,
+ * its coin and the words people use for the coin ("solana"), and venues that can take a deposit.
+ */
+export function chainReadPolicy(
+  chain: string
+): { symbols: string[]; venues: string[] } | undefined {
+  const found = chainModule(chain)
+  if (found === undefined) return undefined
+  const symbols = found.tokens.flatMap((token) => [
+    token.symbol.toUpperCase(),
+    ...chainNamesOf(token.symbol).map((name) => name.toUpperCase()),
+  ])
+  const venues = found.venues.filter((v) => v.kinds.includes('supply')).map((v) => v.id)
+  return { symbols: [...new Set(symbols)], venues }
+}
+
+/**
+ * The chain's sentence for a token the person wrote that it spells another way, such as USDT for
+ * Monad's USDT0, or nothing. For a message that could not be read, so they are told why.
+ */
+export function tokenHintIn(chain: string, text: string): string | undefined {
+  const hints = chainModule(chain)?.tokenHints
+  if (hints === undefined) return undefined
+  const words = new Set(text.toUpperCase().match(/[A-Z0-9]+/g) ?? [])
+  const symbol = Object.keys(hints).find((key) => words.has(key.toUpperCase()))
+  return symbol === undefined ? undefined : hints[symbol]
 }

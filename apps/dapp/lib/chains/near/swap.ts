@@ -9,6 +9,7 @@ import {
   type PreparedAction,
   type SubmitInput,
   type SubmitResult,
+  type VenueQuote,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import {
@@ -25,6 +26,7 @@ import {
   DEPOSIT_ADDRESS,
   STORAGE_DEPOSIT_YOCTO,
   STORAGE_GAS,
+  SWAP_CONTRACTS,
   TRANSFER_GAS,
   WRAP_GAS,
 } from './safety'
@@ -44,13 +46,26 @@ const CONFIRM_WAIT_MS = 10_000
 const STATUS_WAIT_MS = 23_000
 const STATUS_POLL_MS = 2_000
 
-const EXPLORER_NOTE = 'You can follow it at explorer.near-intents.org by searching for'
+export const EXPLORER_NOTE = 'You can follow it at explorer.near-intents.org by searching for'
 
-interface Destination {
+export const ONECLICK_RISK_NOTE =
+  'NEAR Intents had an exploit of about $3.8M around 1 October 2026 in its bridge links. Funds were reported returned, but bridges and solvers it relies on remain a risk.'
+
+export interface Destination {
   assetId: string
   symbol: string
   decimals: number
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
+}
+
+/** What a swap spends, as 1Click names it. Off NEAR the id comes from `oneClickAssetId`. */
+export interface QuoteOrigin {
+  assetId: string
+  decimals: number
+}
+
+function nearOrigin(token: ChainToken): QuoteOrigin {
+  return { assetId: assetIdOf(token), decimals: token.decimals }
 }
 
 function lossBetween(paid: number, received: number): number {
@@ -67,12 +82,12 @@ function lossBetween(paid: number, received: number): number {
  */
 async function assertFairValue(
   envelope: QuoteEnvelope,
-  tokenIn: ChainToken,
+  origin: QuoteOrigin,
   destination: Destination
 ): Promise<number> {
   const { quote } = envelope
   const [priceIn, priceOut] = await Promise.all([
-    oneClickPrice(assetIdOf(tokenIn), tokenIn.decimals),
+    oneClickPrice(origin.assetId, origin.decimals),
     oneClickPrice(destination.assetId, destination.decimals),
   ])
   const quoted = lossBetween(Number(quote.amountInUsd), Number(quote.amountOutUsd))
@@ -80,7 +95,7 @@ async function assertFairValue(
     priceIn === undefined || priceOut === undefined
       ? Number.NaN
       : lossBetween(
-          toDisplayNumber(quote.amountIn, tokenIn.decimals) * priceIn,
+          toDisplayNumber(quote.amountIn, origin.decimals) * priceIn,
           toDisplayNumber(quote.amountOut, destination.decimals) * priceOut
         )
   if (!Number.isFinite(quoted) || !Number.isFinite(listed)) {
@@ -108,20 +123,22 @@ function assertQuoteMatches(
     account: string
     recipientType: Destination['recipientType']
     deadline: string
+    fromIntents?: boolean
   }
 ): void {
   const { quote, quoteRequest: asked } = envelope
+  const funding = input.fromIntents === true ? 'INTENTS' : 'ORIGIN_CHAIN'
   const matches =
     asked.dry === input.dry &&
     asked.swapType === 'EXACT_INPUT' &&
-    asked.depositType === 'ORIGIN_CHAIN' &&
+    asked.depositType === funding &&
     asked.originAsset === input.originAsset &&
     asked.destinationAsset === input.destinationAsset &&
     asked.amount === input.amount &&
     asked.recipient === input.account &&
     asked.recipientType === input.recipientType &&
     asked.refundTo === input.account &&
-    asked.refundType === 'ORIGIN_CHAIN' &&
+    asked.refundType === funding &&
     asked.deadline === input.deadline &&
     asked.slippageTolerance <= SLIPPAGE_BPS &&
     quote.amountIn === input.amount &&
@@ -198,7 +215,24 @@ function isPositive(amount: string | undefined): amount is string {
   return amount !== undefined && BigInt(amount) > BigInt(0)
 }
 
-function costNote(envelope: QuoteEnvelope, loss: number, symbol: string, decimals: number): string {
+/** The parts of the cost note that depend on what the chain's wallet pays for itself. */
+export interface CostWording {
+  withdrawFor: string
+  total: string
+}
+
+const NEAR_COST_WORDING: CostWording = {
+  withdrawFor: 'to register you on that token',
+  total: 'After all costs',
+}
+
+export function costNote(
+  envelope: QuoteEnvelope,
+  loss: number,
+  symbol: string,
+  decimals: number,
+  wording: CostWording = NEAR_COST_WORDING
+): string {
   const bps = feeBps(envelope)
   const fee =
     bps === undefined
@@ -206,10 +240,18 @@ function costNote(envelope: QuoteEnvelope, loss: number, symbol: string, decimal
       : `The quote includes a ${(bps / 100).toFixed(2)}% fee, taken from what you send.`
   const withdraw = envelope.quote.withdrawFee
   const registration = isPositive(withdraw)
-    ? ` It also takes ${formatUnits(withdraw, decimals)} ${symbol} to register you on that token.`
+    ? ` It also takes ${formatUnits(withdraw, decimals)} ${symbol} ${wording.withdrawFor}.`
     : ''
   const percent = (Math.max(loss, 0) * 100).toFixed(2)
-  return `NEAR Intents runs on mainnet only, so this moves real funds. ${fee}${registration} After all costs you get about ${percent}% less in value than you pay, and at least ${formatUnits(envelope.quote.minAmountOut, decimals)} ${symbol}.`
+  return `NEAR Intents runs on mainnet only, so this moves real funds. ${fee}${registration} ${wording.total} you get about ${percent}% less in value than you pay, and at least ${formatUnits(envelope.quote.minAmountOut, decimals)} ${symbol}.`
+}
+
+export function depositNote(envelope: QuoteEnvelope, tokenIn: ChainToken, account: string): string {
+  const refundFee = envelope.quote.refundFee
+  const refundNote = isPositive(refundFee)
+    ? `, minus a fee of ${formatUnits(refundFee, tokenIn.decimals)} ${tokenIn.symbol}`
+    : ''
+  return `Your funds go to a one-time deposit address from 1Click, which this app can't check on-chain. Sign within 5 minutes, because a late deposit may be refunded instead of swapped. If the swap can't finish, 1Click returns your funds to ${account}${refundNote}.`
 }
 
 interface DepositFlow {
@@ -220,6 +262,90 @@ interface DepositFlow {
   extraNotes: string[]
 }
 
+export function assertNearAccount(account: string): void {
+  if (!NEAR_ACCOUNT.test(account)) {
+    throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
+  }
+}
+
+/**
+ * The preview half of every 1Click flow: a dry quote, checked against what was asked and
+ * against live prices. A dry quote makes no deposit address, so the race can run it for
+ * every venue, and Review runs it again before the real quote. The caller has already
+ * checked the account belongs to the origin chain.
+ */
+export async function previewOneClick(
+  amountText: string,
+  origin: QuoteOrigin,
+  destination: Destination,
+  account: string,
+  fromIntents = false
+) {
+  const amount = toBaseUnits(amountText, origin.decimals)
+  const shared = {
+    originAsset: origin.assetId,
+    destinationAsset: destination.assetId,
+    amount,
+    account,
+    recipientType: destination.recipientType,
+    slippageBps: SLIPPAGE_BPS,
+    fromIntents,
+  }
+
+  const dryDeadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
+  const preview = await requestQuote({ ...shared, dry: true, deadline: dryDeadline })
+  assertQuoteMatches(preview, { ...shared, dry: true, deadline: dryDeadline })
+  await assertFairValue(preview, origin, destination)
+  return { shared, preview }
+}
+
+/**
+ * The real quote, which creates a deposit address, under the same checks as the preview.
+ * The address itself is left to the caller, because its shape depends on the chain.
+ */
+export async function liveOneClick(
+  shared: Awaited<ReturnType<typeof previewOneClick>>['shared'],
+  origin: QuoteOrigin,
+  destination: Destination
+) {
+  const deadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
+  const live = await requestQuote({ ...shared, dry: false, deadline })
+  assertQuoteMatches(live, { ...shared, dry: false, deadline })
+  const loss = await assertFairValue(live, origin, destination)
+  return { live, loss, deadline }
+}
+
+export function assertNoDepositMemo(envelope: QuoteEnvelope): void {
+  const { depositMemo } = envelope.quote
+  if (depositMemo !== undefined && depositMemo !== '') {
+    throw new ChainActionRefused(
+      'NEAR Intents asked for a deposit memo, which this app does not send. Nothing was signed or sent.'
+    )
+  }
+}
+
+function venueQuoteFrom(preview: QuoteEnvelope, destination: Destination): VenueQuote {
+  return {
+    receive: {
+      amount: formatUnits(preview.quote.amountOut, destination.decimals),
+      symbol: destination.symbol,
+    },
+    valueOutUsd: Number(preview.quote.amountOutUsd),
+  }
+}
+
+/** What a dry quote says the swap would give back. Never reads a deposit address. */
+export async function quoteOneClick(
+  amountText: string,
+  tokenIn: ChainToken,
+  destination: Destination,
+  account: string
+): Promise<VenueQuote> {
+  assertNearAccount(account)
+  const { preview } = await previewOneClick(amountText, nearOrigin(tokenIn), destination, account)
+  return venueQuoteFrom(preview, destination)
+}
+
 /** The quote flow behind every 1Click venue. Only the destination and the wording differ. */
 export async function prepareOneClickDeposit(
   flow: DepositFlow,
@@ -228,46 +354,22 @@ export async function prepareOneClickDeposit(
   destination: Destination,
   account: string
 ): Promise<PreparedAction> {
-  if (!NEAR_ACCOUNT.test(account)) {
-    throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
-  }
-  const amount = toBaseUnits(amountText, tokenIn.decimals)
-  const shared = {
-    originAsset: assetIdOf(tokenIn),
-    destinationAsset: destination.assetId,
-    amount,
-    account,
-    recipientType: destination.recipientType,
-    slippageBps: SLIPPAGE_BPS,
-  }
+  assertNearAccount(account)
+  const origin = nearOrigin(tokenIn)
+  const { shared } = await previewOneClick(amountText, origin, destination, account)
+  const amount = shared.amount
 
-  const dryDeadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
-  const preview = await requestQuote({ ...shared, dry: true, deadline: dryDeadline })
-  assertQuoteMatches(preview, { ...shared, dry: true, deadline: dryDeadline })
-  await assertFairValue(preview, tokenIn, destination)
+  const { live, loss, deadline } = await liveOneClick(shared, origin, destination)
 
-  const deadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
-  const live = await requestQuote({ ...shared, dry: false, deadline })
-  assertQuoteMatches(live, { ...shared, dry: false, deadline })
-  const loss = await assertFairValue(live, tokenIn, destination)
-
-  const { depositAddress, depositMemo } = live.quote
+  const { depositAddress } = live.quote
   if (depositAddress === undefined || !DEPOSIT_ADDRESS.test(depositAddress)) {
     throw new ChainActionRefused(
       "NEAR Intents' deposit address didn't look right, so it was not used. Nothing was signed or sent."
     )
   }
-  if (depositMemo !== undefined && depositMemo !== '') {
-    throw new ChainActionRefused(
-      'NEAR Intents asked for a deposit memo, which this app does not send. Nothing was signed or sent.'
-    )
-  }
+  assertNoDepositMemo(live)
 
   const transaction = await buildDepositTransaction(tokenIn, account, depositAddress, amount)
-  const refundFee = live.quote.refundFee
-  const refundNote = isPositive(refundFee)
-    ? `, minus a fee of ${formatUnits(refundFee, tokenIn.decimals)} ${tokenIn.symbol}`
-    : ''
 
   return {
     venueId: flow.venueId,
@@ -282,7 +384,7 @@ export async function prepareOneClickDeposit(
     },
     notes: [
       costNote(live, loss, destination.symbol, destination.decimals),
-      `Your funds go to a one-time deposit address from 1Click, which this app can't check on-chain. Sign within 5 minutes, because a late deposit may be refunded instead of swapped. If the swap can't finish, 1Click returns your funds to ${account}${refundNote}.`,
+      depositNote(live, tokenIn, account),
       ...flow.extraNotes,
     ],
     signing: { family: 'near', transactions: [transaction] },
@@ -290,13 +392,39 @@ export async function prepareOneClickDeposit(
   }
 }
 
-async function prepareSwap(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+function swapTokens(request: ChainActionRequest): { tokenIn: ChainToken; tokenOut: ChainToken } {
   const tokenIn = tokenBySymbol(nearTokens, request.tokenIn)
   const tokenOut = tokenBySymbol(nearTokens, request.tokenOut ?? '')
-  if (request.kind !== 'swap' || tokenIn === undefined || tokenOut === undefined) {
+  if (
+    request.kind !== 'swap' ||
+    tokenIn === undefined ||
+    tokenOut === undefined ||
+    !SWAP_CONTRACTS.has(tokenIn.id) ||
+    !SWAP_CONTRACTS.has(tokenOut.id)
+  ) {
     throw new ChainActionRefused('NEAR Intents here swaps between NEAR, USDC and USDT.')
   }
   if (tokenIn.id === tokenOut.id) throw new ChainActionRefused('Those are the same token.')
+  return { tokenIn, tokenOut }
+}
+
+async function quoteSwap(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  const { tokenIn, tokenOut } = swapTokens(request)
+  return quoteOneClick(
+    request.amount,
+    tokenIn,
+    {
+      assetId: assetIdOf(tokenOut),
+      symbol: tokenOut.symbol,
+      decimals: tokenOut.decimals,
+      recipientType: 'DESTINATION_CHAIN',
+    },
+    account
+  )
+}
+
+async function prepareSwap(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+  const { tokenIn, tokenOut } = swapTokens(request)
   const toNear = tokenOut.id === WRAP_NEAR
   return prepareOneClickDeposit(
     {
@@ -309,9 +437,7 @@ async function prepareSwap(request: ChainActionRequest, account: string): Promis
           : toNear
             ? `Swap ${amount} ${token.symbol} for NEAR through NEAR Intents, delivered to your NEAR account as NEAR or wNEAR.`
             : `Swap ${amount} ${token.symbol} for ${tokenOut.symbol} through NEAR Intents, into your NEAR account.`,
-      extraNotes: [
-        'NEAR Intents had an exploit of about $3.8M around 1 October 2026 in its bridge links. Funds were reported returned, but bridges and solvers it relies on remain a risk.',
-      ],
+      extraNotes: [ONECLICK_RISK_NOTE],
     },
     request.amount,
     tokenIn,
@@ -358,11 +484,16 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
   const hash = signed.hashes[signed.hashes.length - 1]
   const depositAddress = context?.['depositAddress']
   if (hash === undefined || !NEAR_TX_HASH.test(hash)) {
-    return { ok: false, error: 'The wallet did not return a transaction hash to follow.' }
+    return {
+      ok: false,
+      pending: true,
+      error: 'The wallet did not return a transaction hash to follow.',
+    }
   }
   if (depositAddress === undefined || !DEPOSIT_ADDRESS.test(depositAddress)) {
     return {
       ok: false,
+      pending: true,
       error: `This swap's deposit address was lost, so it can't be followed from here. Your transaction is ${hash}. Check your wallet before trying again.`,
     }
   }
@@ -377,11 +508,14 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
   }
   if (outcome.state === 'success') {
     const paysDeposit = outcome.calls.some(
-      (c) => c.method === 'ft_transfer' && c.args['receiver_id'] === depositAddress
+      (c) =>
+        (c.method === 'ft_transfer' || c.method === 'mt_transfer') &&
+        c.args['receiver_id'] === depositAddress
     )
     if (outcome.signer !== account || !paysDeposit) {
       return {
         ok: false,
+        pending: true,
         error: `Transaction ${hash} is not this account's deposit for this swap, so it was not reported to NEAR Intents. Check your wallet's activity.`,
       }
     }
@@ -394,7 +528,11 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
     lastStatus = body?.status ?? lastStatus
     const recipient = body?.quoteResponse?.quoteRequest?.recipient
     if (recipient !== undefined && recipient !== account) {
-      return { ok: false, error: 'That deposit address belongs to a different swap.' }
+      return {
+        ok: false,
+        pending: true,
+        error: 'That deposit address belongs to a different swap.',
+      }
     }
     switch (body?.status) {
       case 'SUCCESS':
@@ -407,11 +545,13 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
       case 'FAILED':
         return {
           ok: false,
+          pending: true,
           error: `The swap failed after your deposit (${hash}). The refund address is ${account}, so that is where your funds should return. ${EXPLORER_NOTE} ${depositAddress}.`,
         }
       case 'INCOMPLETE_DEPOSIT':
         return {
           ok: false,
+          pending: true,
           error: `NEAR Intents received less than the quote needed, so it won't swap. What arrived is due back at ${account}. ${EXPLORER_NOTE} ${depositAddress}.`,
         }
       default:
@@ -427,6 +567,7 @@ export const oneClickVenue: ChainVenue = {
   id: ONECLICK_VENUE_ID,
   name: 'NEAR Intents 1Click',
   kinds: ['swap'],
+  quote: quoteSwap,
   prepare: prepareSwap,
   assertSafe: assertOneClickSafe,
   submit: submitOneClick,

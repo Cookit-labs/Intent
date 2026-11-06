@@ -6,7 +6,6 @@ import {
   http,
   isAddress,
   parseAbi,
-  parseEventLogs,
   zeroAddress,
   type Address,
   type Hash,
@@ -16,6 +15,7 @@ import {
 } from 'viem'
 import { avalanche } from 'viem/chains'
 
+import { erc20TransferPaid } from '../../chains/evm/submit'
 import {
   ChainActionRefused,
   toBaseUnits,
@@ -87,8 +87,16 @@ function expectedUnits(amount: string): bigint {
   }
 }
 
+/** This deposit moves USDC and nothing else, so an order naming another token must not reach it. */
+function assertUsdc(expectation: DepositExpectation): void {
+  if (expectation.token !== undefined && !same(expectation.token.id, USDC)) {
+    refuse('Avalanche deposits here move USDC and no other token.')
+  }
+}
+
 function assertSafe(payload: SigningPayload, expectation: DepositExpectation): void {
   if (payload.family !== 'evm') return refuse('That is not an Avalanche transaction.')
+  assertUsdc(expectation)
   if (expectation.memo !== undefined) refuse('Avalanche cannot carry the memo this order needs.')
   if (!isDepositAddress(expectation.depositAddress)) {
     refuse('This order’s deposit address cannot take a deposit.')
@@ -138,16 +146,12 @@ async function readBalances(
 }
 
 function paidThisOrder(receipt: DepositReceipt, expectation: DepositExpectation): boolean {
-  if (!same(receipt.from, expectation.account)) return false
-  if (receipt.to === null || !same(receipt.to, USDC)) return false
-  const amount = BigInt(toBaseUnits(expectation.amount, USDC_DECIMALS))
-  return parseEventLogs({ abi: erc20Abi, eventName: 'Transfer', logs: receipt.logs }).some(
-    (log) =>
-      same(log.address, USDC) &&
-      same(log.args.from, expectation.account) &&
-      same(log.args.to, expectation.depositAddress) &&
-      log.args.value === amount
-  )
+  return erc20TransferPaid(receipt, {
+    token: USDC,
+    account: expectation.account,
+    depositAddress: expectation.depositAddress,
+    units: BigInt(toBaseUnits(expectation.amount, USDC_DECIMALS)),
+  })
 }
 
 /** Takes the client as a function so nothing connects until a deposit is actually read. */
@@ -195,6 +199,11 @@ export function createAvalancheDeposit(client: () => AvalancheClient): DepositCh
       if (signed.family !== 'evm') {
         throw new ChainActionRefused(
           'That is not an Avalanche transaction. Nothing was sent from here.'
+        )
+      }
+      if (expectation.token !== undefined && !same(expectation.token.id, USDC)) {
+        throw new ChainActionRefused(
+          'This deposit can only be confirmed as USDC. Nothing was sent from here.'
         )
       }
       const { hash } = signed
