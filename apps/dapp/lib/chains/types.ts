@@ -8,24 +8,79 @@ import type { ChainSlug } from '@intent/types'
 
 export type ChainWithActions = Extract<ChainSlug, 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'>
 
-export type ChainActionKind = 'swap' | 'supply' | 'stake' | 'send'
+export type ChainActionKind =
+  | 'swap'
+  | 'supply'
+  | 'stake'
+  | 'send'
+  | 'withdraw'
+  | 'unstake'
+  | 'borrow'
+  | 'repay'
+  | 'stream'
+  | 'invoice'
+  | 'pay_invoice'
+  /** Collecting what an earlier unstake left waiting, once it is ready. */
+  | 'claim'
+  /** Ending a stream the person started, for what hasn't streamed yet. */
+  | 'cancel'
+
+/**
+ * The amount of a request for the whole of something: a position, or what is ready to claim. A
+ * venue never sees it on a withdraw, unstake or repay, which reach it as a number and
+ * `wholePosition`. A claim and a cancel keep it, since the venue alone knows what they cover.
+ */
+export const WHOLE_AMOUNT = 'all'
+
+/** What a person holds at a venue, where it can be read. */
+export interface VenuePosition {
+  /**
+   * `supplied` comes back through a withdraw, `staked` through an unstake, `borrowed` is owed
+   * through a repay, `claimable` is ready for a claim, and `cooling` is an exit on its way.
+   */
+  slot: 'supplied' | 'staked' | 'borrowed' | 'claimable' | 'cooling'
+  symbol: string
+  /** Display units. */
+  amount: string
+  /** Roughly when a `cooling` exit can be claimed, in hours from now, where the chain says. */
+  readyInHours?: number | undefined
+  /** A stream's id, where this position is one. */
+  id?: string | undefined
+}
 
 /** What the user asked for. Amounts are decimal text in display units. */
 export interface ChainActionRequest {
   kind: ChainActionKind
+  /** A number, or `WHOLE_AMOUNT` on the kinds that take it. */
   amount: string
   /**
    * `amount` is dollars, not tokens: "$5 of SOL". Only the chat's start of an action reads this,
    * and it is swapped for a count of tokens there, so nothing past that point ever sees it.
    */
   amountIsUsd?: true | undefined
+  /**
+   * The amount was read as all of the position. A venue that can empty it exactly, leaving no
+   * interest behind, should. One that can't still takes `amount`, which is what was read.
+   */
+  wholePosition?: boolean | undefined
+  /** Cancelling only: the stream's id on chain. */
+  streamId?: string | undefined
   tokenIn: string
   /** Swaps only. */
   tokenOut?: string | undefined
   /** A venue the user named. Absent means the chain's default for this kind. */
   venue?: string | undefined
-  /** Sends only, exactly as typed. Where the money goes, so it is checked and never changed. */
+  /**
+   * Who gets paid or billed, exactly as typed: sends, streams and invoices. It decides where the
+   * money goes, so it is checked and never changed.
+   */
   recipient?: string | undefined
+  /** Streams only: whole days the amount is paid over. */
+  durationDays?: string | undefined
+  /** Invoices only: when it is due, as YYYY-MM-DD. */
+  dueDate?: string | undefined
+  /** Paying an invoice only: the invoice's id on chain, as digits. */
+  invoiceId?: string | undefined
 }
 
 export interface NearTransaction {
@@ -41,7 +96,15 @@ export type SigningPayload =
   | { family: 'solana'; transaction: string }
   | { family: 'sui'; transaction: string }
   | { family: 'near'; transactions: NearTransaction[] }
-  | { family: 'evm'; chainId: number; to: string; data: string; value: string }
+  | {
+      family: 'evm'
+      chainId: number
+      to: string
+      data: string
+      value: string
+      /** An ERC-20 `approve` the wallet sends and sees confirmed first, when the call pulls a token. */
+      approval?: { to: string; data: string } | undefined
+    }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
@@ -128,6 +191,12 @@ export interface ChainVenue {
   quote?: ((request: ChainActionRequest, account: string) => Promise<VenueQuote>) | undefined
   prepare: (request: ChainActionRequest, account: string) => Promise<PreparedAction>
   /**
+   * What this account holds here, read from the chain. Empty means nothing is there, so it must
+   * throw rather than return empty when it could not read. It decides where a withdraw goes when
+   * no venue was named, and what "all" means, so it reads the live figure, interest included.
+   */
+  positions?: ((account: string) => Promise<VenuePosition[]>) | undefined
+  /**
    * Refuses a payload that does anything but what was asked: wrong signer, an
    * unexpected program, a transfer out. Runs on what the venue's API returned
    * before the user sees it, and again on signed bytes at submit, because the
@@ -205,6 +274,11 @@ export interface ChainModule {
   tokens: readonly ChainToken[]
   venues: readonly ChainVenue[]
   defaultVenue: Partial<Record<ChainActionKind, string>>
+  /**
+   * Where a token only one venue here can take goes when no venue is named, by upper-case symbol.
+   * Comes before the default, which would only refuse it.
+   */
+  venueForToken?: Partial<Record<ChainActionKind, Record<string, string>>> | undefined
   /** Dollars per display unit, or nothing if no live price, in which case the trade is refused. */
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */

@@ -53,7 +53,7 @@ export interface CollateralRequest {
 export interface Collateral extends CollateralState {
   /** Builds and simulates, holding it for review. Does not sign. */
   prepare: (request: CollateralRequest) => void
-  /** Reclaims collateral, returning it to a plain supply balance. */
+  /** Takes collateral back out of the pool, to the wallet. */
   reclaim: (request: CollateralRequest) => void
   confirm: () => void
   reset: () => void

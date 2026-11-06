@@ -1151,33 +1151,7 @@ describe('prepareChainAction on a send', () => {
         SOL_ME
       )
     )
-    expect(said).toMatch(/only a send/i)
-  })
-
-  it('applies the dollar cap, in words for a transfer', async () => {
-    const said = await refusalOf(
-      prepareChainAction(
-        moduleFor('solana'),
-        request({ amount: '600', recipient: SOL_TO }),
-        SOL_ME,
-        {}
-      )
-    )
-    expect(said).toMatch(/caps each transfer/)
-    expect(said).not.toMatch(/trade/)
-    expect(sim.rpc).toEqual([])
-  })
-
-  it('refuses a token it can’t price, in words for a transfer', async () => {
-    const said = await refusalOf(
-      prepareChainAction(
-        moduleFor('solana', { priceUsd: async () => undefined }),
-        request({ recipient: SOL_TO }),
-        SOL_ME,
-        {}
-      )
-    )
-    expect(said).toMatch(/This transfer could not be valued/)
+    expect(said).toMatch(/doesn't take an address/i)
   })
 
   it('keeps the fee reserve on a native send', async () => {
@@ -1199,8 +1173,7 @@ describe('prepareChainAction on a send', () => {
           }),
         }),
         request({ recipient: EVM_TO, tokenIn: 'AVAX' }),
-        EVM_ME,
-        {}
+        EVM_ME
       )
     )
     expect(said).toMatch(/Keep about 0\.01 AVAX/)
@@ -1216,7 +1189,7 @@ describe('prepareChainAction on a send', () => {
       listed: true,
     })
     const send = (amount: string, chain: ChainModule): Promise<PreparedAction> =>
-      prepareChainAction(chain, request({ amount, recipient: EVM_TO }), EVM_ME, {})
+      prepareChainAction(chain, request({ amount, recipient: EVM_TO }), EVM_ME)
 
     it('refuses a known shortfall in a plain sentence', async () => {
       const chain = moduleFor('avalanche', {
@@ -1284,8 +1257,7 @@ describe('prepareChainAction on a send', () => {
       await prepareChainAction(
         moduleFor('avalanche', { balances }),
         request({ tokenIn: 'AVAX', recipient: EVM_TO }),
-        EVM_ME,
-        {}
+        EVM_ME
       )
       expect(balances).toHaveBeenCalledTimes(1)
     })
@@ -1302,8 +1274,7 @@ describe('prepareChainAction on a send', () => {
       await prepareChainAction(
         moduleFor('avalanche', { balances, venues: [venue], defaultVenue: { supply: 'lend' } }),
         { kind: 'supply', amount: '50', tokenIn: 'USDC' },
-        EVM_ME,
-        {}
+        EVM_ME
       )
       expect(balances).not.toHaveBeenCalled()
     })
@@ -1315,8 +1286,7 @@ describe('prepareChainAction on a send', () => {
       prepareChainAction(
         moduleFor('solana', { balances }),
         request({ recipient: SOL_TO, tokenIn: 'SOL' }),
-        SOL_ME,
-        {}
+        SOL_ME
       )
     )
     expect(said).toContain('Sending SOL')
@@ -1327,8 +1297,7 @@ describe('prepareChainAction on a send', () => {
     const prepared: PreparedAction = await prepareChainAction(
       moduleFor('avalanche'),
       request({ recipient: EVM_TO }),
-      EVM_ME,
-      {}
+      EVM_ME
     )
     expect(prepared.kind).toBe('send')
     expect(prepared.context?.['recipient']).toBe(EVM_TO)

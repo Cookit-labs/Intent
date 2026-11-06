@@ -3,7 +3,7 @@
 import { Button, Card } from '@intent/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { ArrowRight, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { useBlendPosition } from '../../hooks/use-blend-position'
@@ -13,6 +13,7 @@ import { useCollateral } from '../../hooks/use-collateral'
 import { useWithdrawalStatus } from '../../hooks/use-withdrawal-status'
 import { BorrowConfirm } from './borrow-confirm'
 import { LIQUIDATION_HF, MINIMUM_SAFE_HF } from '../../lib/lend/health'
+import { blendReserves } from '../../lib/lend/reserves'
 import { loadTurns, onTurnsChanged } from '../../lib/chat-history'
 import { lookupAnchor } from '../../lib/offramp/anchors'
 import { pendingWithdrawals } from '../../lib/offramp/pending-withdrawals'
@@ -21,6 +22,8 @@ import { blendPositionUrl } from '../../lib/swap/contract-registry'
 import { toBaseUnits } from '../../lib/swap/assets'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
+import { OpenOrders } from './open-orders'
+import { PoolPositions, loadPoolShares } from './pool-positions'
 import { WithdrawConfirm } from './withdraw-confirm'
 
 /**
@@ -81,20 +84,73 @@ function typedBaseUnits(draft: string, heldBase: string): string | undefined {
   return base
 }
 
-/**
- * What this pool lends.
- *
- * Read from the pool's reserve list rather than a ticker table: Blend's USDC
- * is a different issuer from Circle's, so an asset that looks familiar can be
- * one this pool has never heard of. These four are its whole reserve list,
- * confirmed by reading each contract's own `symbol` rather than inferring it.
- */
-const BORROWABLE = [
-  { id: 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU', symbol: 'USDC' },
-  { id: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC', symbol: 'XLM' },
-  { id: 'CAP5AMC2OHNVREO66DFIN6DHJMPOBAJ2KCDDIMFBR7WWJH5RZBFM3UEI', symbol: 'wBTC' },
-  { id: 'CAZAQB3D7KSLSNOSQKYD2V4JP5V2Y3B4RDJZRLBFCCIXDCTE3WHSY3UE', symbol: 'wETH' },
-]
+/** A typed amount, a button for it, and a button for all of it. "All" is the only way to empty one. */
+function AmountAction({
+  label,
+  symbol,
+  held,
+  busy,
+  onSome,
+  onAll,
+  secondary,
+}: {
+  label: string
+  symbol: string
+  /** Base units. A typed figure above this is refused rather than quietly changed. */
+  held: string
+  busy: boolean
+  onSome: (baseUnits: string) => void
+  onAll: () => void
+  /** A second use for the typed amount. */
+  secondary?: { label: string; disabled: boolean; onSome: (baseUnits: string) => void }
+}): JSX.Element {
+  // Held as text rather than a number: a half-written "5." is a valid thing to
+  // be typing and not a valid number.
+  const [draft, setDraft] = useState('')
+  const typed = typedBaseUnits(draft, held)
+
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        inputMode="decimal"
+        placeholder="Amount"
+        aria-label={`Amount of ${symbol} to ${label.toLowerCase()}`}
+        disabled={busy}
+        className="border-border bg-background focus:border-foreground/40 w-24 rounded-md border px-2 py-1.5 text-sm tabular-nums outline-none transition-colors disabled:opacity-50"
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          if (typed !== undefined) onSome(typed)
+        }}
+        disabled={busy || typed === undefined}
+      >
+        {label}
+      </Button>
+      {/* Distinct from typing the balance shown. That figure is stale the moment
+          it renders, as interest moves it every ledger, so only this path can
+          actually empty it. */}
+      <Button size="sm" variant="ghost" onClick={onAll} disabled={busy}>
+        All
+      </Button>
+      {secondary !== undefined ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            if (typed !== undefined) secondary.onSome(typed)
+          }}
+          disabled={busy || typed === undefined || secondary.disabled}
+        >
+          {secondary.label}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
 
 /** How a health factor reads to somebody who has never seen one. */
 function healthTone(hf: number | undefined): string {
@@ -106,15 +162,15 @@ function healthTone(hf: number | undefined): string {
 
 export function OpenPositions(): JSX.Element | null {
   const { address, isConnected } = useWallet()
-  const { position, positions } = useBlendPosition()
+  const { positions, error: blendUnread } = useBlendPosition()
   const withdraw = useWithdraw()
   const borrow = useBorrow()
   const queryClient = useQueryClient()
-  // What the user has typed, held as text rather than a number: a half-written
-  // "5." is a valid thing to be typing and not a valid number.
-  const [draft, setDraft] = useState('')
+  // What this network's pool lends: a list for the wrong network offers a loan
+  // the pool has never heard of.
+  const borrowable = blendReserves()
   const [borrowDraft, setBorrowDraft] = useState('')
-  const [borrowAsset, setBorrowAsset] = useState(BORROWABLE[0]?.id ?? '')
+  const [borrowAsset, setBorrowAsset] = useState(borrowable[0]?.id ?? '')
   // Posting collateral is a `submit` like any other, so it reuses the same
   // build-review-sign machinery rather than a bespoke path.
   const collateral$ = useCollateral()
@@ -134,30 +190,36 @@ export function OpenPositions(): JSX.Element | null {
   // just been paid looked like it had not been recorded at all.
   useEffect(() => onTurnsChanged(() => setPending(pendingWithdrawals(loadTurns(slug)))), [slug])
 
-  const { data: offers } = useQuery({
+  const { data: offers, isError: offersUnread } = useQuery({
     queryKey: ['open-offers', address],
     queryFn: () => loadOffers(address as string),
     enabled: isConnected && address !== undefined,
     refetchInterval: 15_000,
   })
+  const { data: poolShares, isError: poolsUnread } = useQuery({
+    queryKey: ['pool-shares', address],
+    queryFn: () => loadPoolShares(address as string),
+    enabled: isConnected && address !== undefined,
+    refetchInterval: 60_000,
+  })
 
   /**
-   * Converts part of a plain supply into collateral.
+   * Posts collateral, from the wallet.
    *
-   * Confirmed first, because this is the step that spends the guarantee: a
-   * plain supply cannot be liquidated and collateral can, and no other action
-   * in this app changes that. The wallet prompt that follows says nothing
-   * about seizure, so the app has to.
+   * Confirmed first, because this is the step that takes on the risk: a plain
+   * supply cannot be liquidated and collateral can. It does not convert a supply:
+   * Blend's `apply_supply_collateral` takes the amount from the spender. The wallet
+   * prompt that follows says nothing about seizure, so the app has to.
    */
   function postCollateral(baseUnits: string, assetId: string, symbol: string): void {
     const display = (Number(baseUnits) / 1e7).toLocaleString(undefined, {
       maximumFractionDigits: 7,
     })
     const agreed = window.confirm(
-      `Post ${display} ${symbol} as collateral?\n\n` +
-        'It keeps earning, and it can back a loan. It can also be taken from you if a loan ' +
+      `Post ${display} ${symbol} from your wallet as collateral?\n\n` +
+        'It earns, and it can back a loan. It can also be taken from you if a loan ' +
         'you open against it falls below its liquidation threshold.\n\n' +
-        'A plain supply carries no such risk. This one will.'
+        'What you already have supplied stays as it is, and carries no such risk.'
     )
     if (!agreed) return
 
@@ -172,19 +234,23 @@ export function OpenPositions(): JSX.Element | null {
     if (withdraw.phase !== 'settled') return
     void queryClient.invalidateQueries({ queryKey: ['blend-position', address] })
   }, [withdraw.phase, queryClient, address])
+  useEffect(() => {
+    if (borrow.phase !== 'settled') return
+    void queryClient.invalidateQueries({ queryKey: ['blend-position', address] })
+  }, [borrow.phase, queryClient, address])
 
-  const resting = offers ?? []
+  const supplied = positions?.supplied ?? []
   const collateral = positions?.collateral ?? []
   const borrowed = positions?.borrowed ?? []
   const count =
-    resting.length +
-    (position != null ? 1 : 0) +
+    (offers?.length ?? 0) +
+    (poolShares?.length ?? 0) +
+    supplied.length +
     collateral.length +
     borrowed.length +
     pending.length
 
   const busy = withdraw.phase !== 'idle'
-  const typed = position == null ? undefined : typedBaseUnits(draft, position.amount)
 
   // A borrow is not bounded by a balance the way a withdrawal is, so this
   // only checks the figure is well formed. The pool decides whether the
@@ -203,7 +269,8 @@ export function OpenPositions(): JSX.Element | null {
 
   // Nothing open is a perfectly good state and says so once, rather than
   // rendering an empty titled section that reads as something failing to load.
-  if (!isConnected || count === 0) return null
+  // A read that failed is not "nothing open", which is the one thing this must not imply.
+  if (!isConnected || (count === 0 && !blendUnread && !offersUnread && !poolsUnread)) return null
 
   return (
     <div className="flex flex-col gap-3">
@@ -212,11 +279,19 @@ export function OpenPositions(): JSX.Element | null {
         <span>{count}</span>
       </div>
 
+      {blendUnread ? (
+        <Card className="text-muted-foreground p-4 text-sm">
+          Could not read your Blend position from the network, so this list may be missing money you
+          hold there. It will try again shortly.
+        </Card>
+      ) : null}
+
       {/* Lending first: it earns continuously and has no expiry, so it is the
-          position most easily forgotten. */}
-      {position != null ? (
-        <Card className="flex items-center gap-4 p-4">
-          <TokenIcon symbol={position.symbol} size={28} />
+          position most easily forgotten. Every asset, not only XLM: a supply of
+          anything else used to be invisible here, and so had no way out. */}
+      {supplied.map((held) => (
+        <Card key={`supply-${held.assetId}`} className="flex flex-wrap items-center gap-4 p-4">
+          <TokenIcon symbol={held.symbol} size={28} />
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3">
@@ -224,7 +299,7 @@ export function OpenPositions(): JSX.Element | null {
               <span className="text-muted-foreground text-xs">earning</span>
             </div>
             <div className="mt-1.5 text-sm font-medium tabular-nums">
-              {amount(position.display)} {position.symbol}
+              {amount(held.display)} {held.symbol}
             </div>
           </div>
 
@@ -233,58 +308,28 @@ export function OpenPositions(): JSX.Element | null {
                 offer a withdrawal for a plain (non-collateral) supply, which is
                 how a real position became visible here and retrievable
                 nowhere. */}
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              inputMode="decimal"
-              placeholder="Amount"
-              aria-label={`Amount of ${position.symbol} to withdraw`}
-              disabled={busy}
-              className="border-border bg-background focus:border-foreground/40 w-24 rounded-md border px-2 py-1.5 text-sm tabular-nums outline-none transition-colors disabled:opacity-50"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (typed === undefined) return
+            <AmountAction
+              label="Withdraw"
+              symbol={held.symbol}
+              held={held.amount}
+              busy={busy}
+              onSome={(baseUnits) =>
                 withdraw.prepare({
-                  assetId: position.assetId,
-                  symbol: position.symbol,
-                  amount: typed,
+                  assetId: held.assetId,
+                  symbol: held.symbol,
+                  amount: baseUnits,
+                  from: 'supply',
                 })
-              }}
-              disabled={busy || typed === undefined}
-            >
-              Withdraw
-            </Button>
-            {/* Distinct from typing the balance shown. That figure is stale the
-                moment it renders -- the position earns every ledger -- so only
-                this path can actually empty it. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() =>
-                withdraw.prepare({ assetId: position.assetId, symbol: position.symbol })
               }
-              disabled={busy}
-            >
-              All
-            </Button>
-            {/* The one action here that takes a guarantee away. A plain supply
-                cannot be liquidated; collateral can. Typing an amount and
-                pressing this converts that much of it, and the confirmation
-                says so plainly rather than treating it as a transfer. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                if (typed === undefined) return
-                postCollateral(typed, position.assetId, position.symbol)
+              onAll={() =>
+                withdraw.prepare({ assetId: held.assetId, symbol: held.symbol, from: 'supply' })
+              }
+              secondary={{
+                label: 'As collateral',
+                disabled: collateral$.phase !== 'idle',
+                onSome: (baseUnits) => postCollateral(baseUnits, held.assetId, held.symbol),
               }}
-              disabled={busy || typed === undefined || collateral$.phase !== 'idle'}
-            >
-              As collateral
-            </Button>
+            />
             <a
               href={blendPositionUrl()}
               target="_blank"
@@ -296,7 +341,7 @@ export function OpenPositions(): JSX.Element | null {
             </a>
           </div>
         </Card>
-      ) : null}
+      ))}
 
       {/* Sits directly under the position it acts on, so the amount being
           withdrawn and the amount held are readable together. */}
@@ -314,7 +359,7 @@ export function OpenPositions(): JSX.Element | null {
                 {collateral$.error ?? 'Something went wrong.'}
               </p>
               <p className="text-muted-foreground text-xs">
-                Nothing moved, and your supply is unchanged.
+                Nothing moved, and your wallet is unchanged.
               </p>
               <Button
                 variant="outline"
@@ -357,9 +402,9 @@ export function OpenPositions(): JSX.Element | null {
                 {collateral$.asset ?? ''} as collateral
               </div>
               <p className="text-muted-foreground text-sm">
-                This much of your supply stops being untouchable. It keeps earning the same yield,
-                and it becomes seizable if a loan you open against it falls below its liquidation
-                threshold.
+                This much moves from your wallet into the pool. It earns the same yield as a supply,
+                and it can be seized if a loan you open against it falls below its liquidation
+                threshold. What you already have supplied stays as it is.
               </p>
               <div className="flex items-center gap-3">
                 <Button
@@ -388,24 +433,49 @@ export function OpenPositions(): JSX.Element | null {
           difference is whether it can be taken. Both earn; only this one backs
           a loan. */}
       {collateral.map((held) => (
-        <Card key={`collateral-${held.assetId}`} className="flex items-center gap-4 p-4">
+        <Card key={`collateral-${held.assetId}`} className="flex flex-wrap items-center gap-4 p-4">
           <TokenIcon symbol={held.symbol} size={28} />
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-semibold">Collateral in Blend</span>
-              <span className="text-muted-foreground text-xs">backing your loans</span>
+              <span className="text-muted-foreground text-xs">
+                {borrowed.length > 0 ? 'backing your loans' : 'earning'}
+              </span>
             </div>
             <div className="mt-1.5 text-sm font-medium tabular-nums">
               {amount(held.display)} {held.symbol}
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The way out, which this row did not have. The pool pays it to the
+                wallet, and refuses if a loan still needs it. */}
+            <AmountAction
+              label="Withdraw"
+              symbol={held.symbol}
+              held={held.amount}
+              busy={busy}
+              onSome={(baseUnits) =>
+                withdraw.prepare({
+                  assetId: held.assetId,
+                  symbol: held.symbol,
+                  amount: baseUnits,
+                  from: 'collateral',
+                })
+              }
+              onAll={() =>
+                withdraw.prepare({
+                  assetId: held.assetId,
+                  symbol: held.symbol,
+                  from: 'collateral',
+                })
+              }
+            />
             {/* Which asset to borrow, since it is rarely the one posted. The
-                pool lends four and they are not interchangeable — wBTC at
-                $100,000 against XLM at $0.42 means a typo of one decimal is
-                the difference between a safe loan and an instant liquidation. */}
+                pool lends several and they are not interchangeable: a typo of
+                one decimal is the difference between a safe loan and an instant
+                liquidation. */}
             <select
               value={borrowAsset}
               onChange={(e) => setBorrowAsset(e.target.value)}
@@ -413,7 +483,7 @@ export function OpenPositions(): JSX.Element | null {
               disabled={borrow.phase !== 'idle'}
               className="border-border bg-background rounded-md border px-2 py-1.5 text-sm outline-none disabled:opacity-50"
             >
-              {BORROWABLE.map((asset) => (
+              {borrowable.map((asset) => (
                 <option key={asset.id} value={asset.id}>
                   {asset.symbol}
                 </option>
@@ -435,7 +505,7 @@ export function OpenPositions(): JSX.Element | null {
                 if (borrowUnits === undefined) return
                 borrow.prepare('borrow', {
                   assetId: borrowAsset,
-                  symbol: BORROWABLE.find((a) => a.id === borrowAsset)?.symbol ?? '',
+                  symbol: borrowable.find((a) => a.id === borrowAsset)?.symbol ?? '',
                   amount: borrowUnits,
                 })
               }}
@@ -449,7 +519,7 @@ export function OpenPositions(): JSX.Element | null {
 
       {/* Debt. The only row here that grows on its own. */}
       {borrowed.map((owed) => (
-        <Card key={`debt-${owed.assetId}`} className="flex items-center gap-4 p-4">
+        <Card key={`debt-${owed.assetId}`} className="flex flex-wrap items-center gap-4 p-4">
           <TokenIcon symbol={owed.symbol} size={28} />
 
           <div className="min-w-0 flex-1">
@@ -473,14 +543,20 @@ export function OpenPositions(): JSX.Element | null {
             ) : null}
           </div>
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => borrow.prepare('repay', { assetId: owed.assetId, symbol: owed.symbol })}
-            disabled={borrow.phase !== 'idle'}
-          >
-            Repay all
-          </Button>
+          <AmountAction
+            label="Repay"
+            symbol={owed.symbol}
+            held={owed.amount}
+            busy={borrow.phase !== 'idle'}
+            onSome={(baseUnits) =>
+              borrow.prepare('repay', {
+                assetId: owed.assetId,
+                symbol: owed.symbol,
+                amount: baseUnits,
+              })
+            }
+            onAll={() => borrow.prepare('repay', { assetId: owed.assetId, symbol: owed.symbol })}
+          />
         </Card>
       ))}
 
@@ -491,30 +567,10 @@ export function OpenPositions(): JSX.Element | null {
         collateralSymbol={collateral[0]?.symbol}
       />
 
-      {resting.map((offer) => (
-        <Card key={offer.id} className="flex items-center gap-4 p-4">
-          <TokenIcon symbol={offer.sellingAsset} size={28} />
+      {/* Read from the ledger, each with its way out. */}
+      <OpenOrders account={address} />
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold">Limit order</span>
-              <span className="text-muted-foreground text-xs">resting</span>
-            </div>
-            <div className="mt-1.5 flex items-center gap-2 text-sm tabular-nums">
-              <span className="font-medium">
-                {amount(offer.remaining)} {offer.sellingAsset}
-              </span>
-              <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <TokenIcon symbol={offer.buyingAsset} size={18} />
-                {offer.buyingAsset}
-              </span>
-            </div>
-          </div>
-
-          <span className="text-muted-foreground text-xs tabular-nums">@ {offer.price}</span>
-        </Card>
-      ))}
+      <PoolPositions account={address} />
 
       {pending.map((w) => {
         const anchor = lookupAnchor(w.anchor.id)

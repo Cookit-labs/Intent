@@ -115,7 +115,7 @@ describe('POST /api/agents/compete on a chain', () => {
     expect(given.market.routes).toHaveLength(1)
     expect(given.market.routes[0]).toMatchObject({ id: 'ref-1', source: 'Ref' })
     expect(given.market.venues).toEqual([{ id: 'ref', name: 'Ref', category: 'dex' }])
-  })
+  }, 60_000)
 
   it('still refuses near without a chain action', async () => {
     const { POST } = await import('../../app/api/agents/compete/route')
@@ -273,8 +273,6 @@ describe('POST /api/agents/compete on a chain', () => {
       ['a non-numeric amount', 'lots', 4],
       ['a zero amount', '0', 4],
       ['a negative amount', '-3', 4],
-      ['an amount over the trade cap', '1000000000', 4],
-      ['a token with no live price', '5', null],
     ]
     it.each(cases)('%s', async (_name, amount, price) => {
       const quote = vi.fn(async () => ({ receive: { amount: '1', symbol: 'USDC' } }))

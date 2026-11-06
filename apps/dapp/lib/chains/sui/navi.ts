@@ -16,8 +16,15 @@ import {
 } from '../types'
 import { assertSuiAccount, buildUnsigned, suiClient, withTimeout } from './client'
 import { naviApy, poolNotes } from './navi-rules'
-import { NAVI_POLICY } from './policies'
-import { assertPtbSafe } from './safety'
+import {
+  assertNaviSafe,
+  naviChainReader,
+  prepareNaviBorrow,
+  prepareNaviRepay,
+  prepareNaviWithdraw,
+  readNaviPositions,
+  type NaviReader,
+} from './navi-withdraw'
 import { SUI_TOKENS } from './tokens'
 
 const REQUEST_TIMEOUT_MS = 10_000
@@ -57,11 +64,15 @@ async function checkedPool(request: ChainActionRequest, account: string) {
 }
 
 async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+  if (request.kind !== 'supply') return {}
   const { pool } = await checkedPool(request, account)
   return quotedApy(naviApy(pool))
 }
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+async function prepareSupply(
+  request: ChainActionRequest,
+  account: string
+): Promise<PreparedAction> {
   const { token, amount, pool } = await checkedPool(request, account)
 
   const tx = new Transaction()
@@ -90,13 +101,22 @@ async function prepare(request: ChainActionRequest, account: string): Promise<Pr
   }
 }
 
-export const naviVenue: ChainVenue = {
-  id: 'navi',
-  name: 'NAVI',
-  kinds: ['supply'],
-  assertCanFollow: takesOnly('NAVI', ['USDC']),
-  quote,
-  prepare,
-  assertSafe: (payload: SigningPayload, account: string) =>
-    assertPtbSafe(payload, account, NAVI_POLICY),
+export function createNaviVenue(reader: NaviReader = naviChainReader): ChainVenue {
+  return {
+    id: 'navi',
+    name: 'NAVI',
+    kinds: ['supply', 'withdraw', 'borrow', 'repay'],
+    assertCanFollow: takesOnly('NAVI', ['USDC']),
+    quote,
+    prepare: (request, account) => {
+      if (request.kind === 'withdraw') return prepareNaviWithdraw(request, account, reader)
+      if (request.kind === 'borrow') return prepareNaviBorrow(request, account, reader)
+      if (request.kind === 'repay') return prepareNaviRepay(request, account, reader)
+      return prepareSupply(request, account)
+    },
+    positions: (account) => readNaviPositions(account, reader),
+    assertSafe: (payload: SigningPayload, account: string) => assertNaviSafe(payload, account),
+  }
 }
+
+export const naviVenue = createNaviVenue()

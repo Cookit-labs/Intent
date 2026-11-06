@@ -1,6 +1,6 @@
 import { chainTokenWord } from '../chains/parse-action'
 import { SEQUENCE_CASHOUT_CHAINS } from '../chains/sequence'
-import { isCashoutChain } from './types'
+import { closedCashoutReply, isCashoutChain } from './types'
 
 export type CashoutCurrencyCode = 'NGN' | 'KES' | 'UGX' | 'TZS'
 
@@ -269,7 +269,13 @@ export function routeCashout(
   chain: string,
   stellarMainnet = true
 ): CashoutRoute {
-  if (read === null || !isCashoutChain(chain)) return { kind: 'pass' }
+  if (read === null) return { kind: 'pass' }
+  // The chat answers `token` from `unsupportedTokenReply`, which gives a closed chain's own refusal,
+  // so no form opens and nobody types bank details for an order that can't be made.
+  if (closedCashoutReply(chain) !== undefined) {
+    return { kind: 'token', token: 'unsupportedToken' in read ? read.unsupportedToken : 'USDC' }
+  }
+  if (!isCashoutChain(chain)) return { kind: 'pass' }
 
   const weaveOnly = (currency: CashoutCurrencyCode | undefined): boolean =>
     currency !== undefined && currency !== 'NGN'

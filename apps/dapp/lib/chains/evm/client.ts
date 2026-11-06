@@ -29,15 +29,20 @@ export interface EvmClient {
   transaction: (hash: Hash) => Promise<EvmTransaction>
 }
 
-/** Reads this chain only, so a hash from another chain isn't found here. */
-export function evmClient(chain: EvmChain, transport?: Transport): EvmClient {
+/** A viem client that reads this chain, for a venue reading its own contracts. Never signs. */
+export function evmReader(chain: EvmChain, transport?: Transport) {
   const { chain: viemChain, rpcEnv } = EVM_CHAINS[chain]
-  const client = createPublicClient({
+  return createPublicClient({
     chain: viemChain,
     transport:
       transport ??
       http(process.env[rpcEnv]?.trim() || undefined, { timeout: RPC_TIMEOUT_MS, retryCount: 1 }),
   })
+}
+
+/** Reads this chain only, so a hash from another chain isn't found here. */
+export function evmClient(chain: EvmChain, transport?: Transport): EvmClient {
+  const client = evmReader(chain, transport)
   return {
     tokenBalance: (token, account) =>
       client.readContract({

@@ -103,7 +103,9 @@ export function WithdrawConfirm({ withdraw }: { withdraw: Withdraw }): JSX.Eleme
           {withdraw.asset ?? ''}
         </div>
         <p className="text-muted-foreground mt-1 text-sm">
-          From the Blend pool back to your wallet. One transaction, one signature.
+          {withdraw.from === 'collateral'
+            ? 'Collateral, from the Blend pool back to your wallet. One transaction, one signature.'
+            : 'From the Blend pool back to your wallet. One transaction, one signature.'}
         </p>
       </div>
 
@@ -114,7 +116,9 @@ export function WithdrawConfirm({ withdraw }: { withdraw: Withdraw }): JSX.Eleme
       <p className="text-muted-foreground text-xs">
         {emptied
           ? 'This closes the position. Interest earned right up to the moment it settles comes with it.'
-          : `About ${display(withdraw.remaining) ?? 'some'} ${withdraw.asset ?? ''} stays supplied and keeps earning.`}
+          : withdraw.from === 'collateral'
+            ? `About ${display(withdraw.remaining) ?? 'some'} ${withdraw.asset ?? ''} stays as collateral and keeps earning.`
+            : `About ${display(withdraw.remaining) ?? 'some'} ${withdraw.asset ?? ''} stays supplied and keeps earning.`}
       </p>
 
       <div className="flex items-center gap-3">

@@ -14,7 +14,7 @@ import type { MarketPrice } from '../swap/price-types'
 import { fetchMarketPrices } from '../swap/prices'
 import { soroswapRouter } from '../swap/contract-registry'
 import { readContractCall } from '../swap/plan-validator'
-import { usdValue } from './trade-cap'
+import { usdValue } from './usd-value'
 
 /**
  * What a signed transaction moved, read from its own bytes.

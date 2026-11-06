@@ -18,12 +18,14 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useGoToChain } from '../../hooks/use-go-to-chain'
+import { chainLabelWithBeta } from '../../lib/chain-beta'
 import { chainTitle } from '../../lib/chain-title'
 import { otherStellarNetwork } from '../../lib/other-stellar-network'
 import { pathUnderChain } from '../../lib/wallet/chain-path'
 import { connectorFor } from '../../lib/wallet/connectors'
 import { useWallet } from '../../hooks/use-wallet'
 import { ConnectDialog } from '../connect/connect-dialog'
+import { ChainBetaTag } from './beta-chain-notice'
 import { useChain } from '../../providers/chain-provider'
 
 /**
@@ -75,7 +77,7 @@ function entriesFor(): Entry[] {
 export function ChainSwitcher({
   caption,
 }: {
-  /** A line under the pill, such as the trade cap. The menu opens below it. */
+  /** A line under the pill. The menu opens below it. */
   caption?: ReactNode
 } = {}): JSX.Element {
   const { slug, network, descriptor } = useChain()
@@ -142,7 +144,7 @@ export function ChainSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Chain: ${descriptor.networkLabel}. Switch chain`}
+        aria-label={`Chain: ${chainLabelWithBeta(slug, descriptor.networkLabel)}. Switch chain`}
         className={cn(
           'hover:bg-muted/60 inline-flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-2.5 text-sm font-semibold transition-colors',
           open && 'bg-muted/60'
@@ -159,6 +161,7 @@ export function ChainSwitcher({
           />
         </span>
         {chainTitle(descriptor.name, descriptor.networkLabel)}
+        <ChainBetaTag slug={slug} />
         <ChevronDown
           className={cn(
             'text-muted-foreground h-3.5 w-3.5 transition-transform',
@@ -184,11 +187,14 @@ export function ChainSwitcher({
                   type="button"
                   role="menuitem"
                   onClick={() => switchTo(entry)}
-                  aria-label={entry.label}
+                  aria-label={chainLabelWithBeta(entry.slug, entry.label)}
                   className={rowClass(entry.slug === slug && entry.network === network)}
                 >
                   <ChainMark chain={entry.slug} className="h-7 w-7 shrink-0" />
-                  <span className="flex-1">{chainTitle(entry.name, entry.label)}</span>
+                  <span className="flex flex-1 items-center gap-1.5">
+                    {chainTitle(entry.name, entry.label)}
+                    <ChainBetaTag slug={entry.slug} />
+                  </span>
                   {entry.slug === slug && entry.network === network ? (
                     <Check className="text-brand h-4 w-4" />
                   ) : null}
@@ -202,11 +208,14 @@ export function ChainSwitcher({
                     type="button"
                     role="menuitem"
                     onClick={() => switchChain(option)}
-                    aria-label={d.networkLabel}
+                    aria-label={chainLabelWithBeta(option, d.networkLabel)}
                     className={rowClass(option === slug)}
                   >
                     <ChainMark chain={option} className="h-7 w-7 shrink-0" />
-                    <span className="flex-1">{chainTitle(d.name, d.networkLabel)}</span>
+                    <span className="flex flex-1 items-center gap-1.5">
+                      {chainTitle(d.name, d.networkLabel)}
+                      <ChainBetaTag slug={option} />
+                    </span>
                     {option === slug ? <Check className="text-brand h-4 w-4" /> : null}
                   </button>
                 )

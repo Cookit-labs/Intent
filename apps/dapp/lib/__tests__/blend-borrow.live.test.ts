@@ -100,18 +100,15 @@ describe.skipIf(SKIP)('repaying', () => {
     }
   }, 90_000)
 
-  it('repays everything when no amount is named', async () => {
-    // The sentinel matters more for a debt than for a supply: interest makes a
-    // figure read a moment ago too *small*, so an exact repayment leaves a
-    // remainder that keeps growing and keeps the position liquidatable.
-    const built = await buildBlendRepay({ account: ME, asset: WBTC })
-
-    expect(built.everything).toBe(true)
-    expect(built.amount).toBe('170141183460469231731687303715884105727')
+  it('takes no sentinel: a repayment always names an amount', async () => {
+    // The pool takes the whole amount from the wallet before refunding, so
+    // `i128::MAX` is refused by the token. This test used to pin that sentinel
+    // without simulating it, which is how "Repay all" shipped broken.
+    await expect(buildBlendRepay({ account: ME, asset: WBTC })).rejects.toThrow(/needs an amount/)
   }, 60_000)
 
   it('pays down the signing account and no other', async () => {
-    const built = await buildBlendRepay({ account: ME, asset: blendXlm() })
+    const built = await buildBlendRepay({ account: ME, asset: blendXlm(), amount: '10000000' })
 
     expect(() => assertSelfRepay(built.xdr, ME)).not.toThrow()
     expect(() => assertSelfRepay(built.xdr, STRANGER)).toThrow(/refusing to sign/)

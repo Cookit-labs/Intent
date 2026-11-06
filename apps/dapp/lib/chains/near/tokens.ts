@@ -15,6 +15,8 @@ export const nearTokens: readonly ChainToken[] = [
   { symbol: 'NEAR', id: WRAP_NEAR, decimals: 24, name: 'NEAR' },
   { symbol: 'USDC', id: USDC_NEAR, decimals: 6, name: 'USD Coin' },
   { symbol: 'USDT', id: USDT_NEAR, decimals: 6, name: 'Tether USD' },
+  { symbol: 'stNEAR', id: METAPOOL_CONTRACT, decimals: 24, name: 'Meta Pool Staked NEAR' },
+  { symbol: 'rNEAR', id: RNEAR_CONTRACT, decimals: 24, name: 'Rhea Staked NEAR' },
 ]
 
 export const YOCTO_PER_NEAR = BigInt('1000000000000000000000000')

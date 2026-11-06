@@ -22,7 +22,7 @@ export type CompetitionErrorCode =
   | 'agents_offline'
   | 'chain_unsupported'
   | 'no_agent_answered'
-  /** The action itself was refused (unknown token, bad amount, over the cap); shown as written. */
+  /** The action itself was refused (unknown token, bad amount); shown as written. */
   | 'action_refused'
 
 export interface CompetitionError {

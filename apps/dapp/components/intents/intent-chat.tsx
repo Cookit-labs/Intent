@@ -83,6 +83,7 @@ import { chainCapabilities } from '../../lib/chains/capabilities'
 import { sizeInUnits } from '../../lib/chains/dollar-amount'
 import { chainHelp, helpForUnread } from '../../lib/chains/explain'
 import { racesFirst } from '../../lib/chains/parse-action'
+import { asksForPositions, readPositionsReply } from '../../lib/chains/positions-reply'
 import {
   cashoutStarts,
   chainRouteFromReading,
@@ -167,6 +168,10 @@ import type { WithdrawLimits } from '../../lib/offramp/sep24'
 import { estimatedReceiveOf } from '../../lib/offramp/labels'
 import { useSupply } from '../../hooks/use-supply'
 import { SupplyConfirm } from './supply-confirm'
+import { useBorrow } from '../../hooks/use-borrow'
+import { useWithdraw } from '../../hooks/use-withdraw'
+import { BorrowConfirm } from './borrow-confirm'
+import { WithdrawConfirm } from './withdraw-confirm'
 import { usePerp } from '../../hooks/use-perp'
 import { PerpConfirm } from './perp-confirm'
 import { parsePerpIntent } from '../../lib/parse-perp'
@@ -175,14 +180,15 @@ import {
   tradeableSymbols,
   type VerifiedAsset,
 } from '../../lib/swap/asset-registry'
-import { blendXlm } from '../../lib/lend/reserves'
+import { parseStellarExit, whereReply, type StellarExit } from '../../lib/lend/parse-exit'
+import type { BlendPositions } from '../../lib/lend/position'
+import { suppliableReserve } from '../../lib/lend/reserves'
 import { lendingVenueName } from '../../lib/lend/venues'
 import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
 import { LimitConfirm } from './limit-confirm'
 import { OpenOrders } from './open-orders'
-import { TradeCapNote } from '../layout/trade-cap'
 import { ComposerInput } from './composer-input'
 import { NativeCoinTicker } from './native-coin-ticker'
 import { PriceTicker } from './price-ticker'
@@ -613,6 +619,9 @@ export function IntentChat({
   // Supplying an asset already held. A separate shape from a sequence: there is
   // no earlier step whose output has to be carried.
   const supply = useSupply()
+  // Money coming back out, typed rather than pressed. Their own hooks: these never run beside a trade.
+  const exitWithdraw = useWithdraw()
+  const exitRepay = useBorrow()
   const chainAction = useChainAction()
   // A new race gets a clean slate when the chain changes.
   useEffect(() => {
@@ -991,6 +1000,16 @@ export function IntentChat({
     recordSettled('The supply settled.', supplyHash, supply.explorerUrl)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplyHash])
+  const exitWithdrawHash = exitWithdraw.phase === 'settled' ? exitWithdraw.hash : undefined
+  useEffect(() => {
+    recordSettled('The withdrawal settled.', exitWithdrawHash, exitWithdraw.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitWithdrawHash])
+  const exitRepayHash = exitRepay.phase === 'settled' ? exitRepay.hash : undefined
+  useEffect(() => {
+    recordSettled('The repayment settled.', exitRepayHash, exitRepay.explorerUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitRepayHash])
   const perpHash = perp.phase === 'settled' ? perp.hash : undefined
   useEffect(() => {
     recordSettled('The position opened.', perpHash, perp.explorerUrl)
@@ -1054,6 +1073,10 @@ export function IntentChat({
     swap.phase === 'submitting' ||
     sequence.phase === 'signing' ||
     sequence.phase === 'submitting' ||
+    exitWithdraw.phase === 'signing' ||
+    exitWithdraw.phase === 'submitting' ||
+    exitRepay.phase === 'signing' ||
+    exitRepay.phase === 'submitting' ||
     chainSigning(chainAction.phase)
 
   // Declared after the effects that record, so a transaction settling in the same
@@ -1085,6 +1108,8 @@ export function IntentChat({
     dialogue.current = []
     setPending(null)
     supply.reset()
+    exitWithdraw.reset()
+    exitRepay.reset()
     perp.reset()
     planExec.reset()
     limit.reset()
@@ -1193,6 +1218,8 @@ export function IntentChat({
     sequence.reset()
     swap.reset()
     supply.reset()
+    exitWithdraw.reset()
+    exitRepay.reset()
     perp.reset()
     setExecutingKey(null)
     setPlacedId(null)
@@ -1496,15 +1523,23 @@ export function IntentChat({
         return
       }
 
+      // The asset named, by its own contract. This always sent XLM's, so "supply 5 USDC" signed 5 XLM
+      // under a card that said USDC. Refused when the pool does not lend the token held here.
+      const reserve = suppliableReserve(supplyOnly.asset)
+      if (reserve === undefined) {
+        setAffordError(`Blend does not take ${supplyOnly.asset} here. Nothing was signed or sent.`)
+        return
+      }
+
       const units =
         supplyOnly.amount === undefined
-          ? (balances?.xlm ?? '0')
+          ? heldUnits(supplyOnly.asset)
           : supplyOnly.amountIsUsd === true
             ? (Number(supplyOnly.amount) / (price as number)).toFixed(7)
             : supplyOnly.amount
 
       supply.prepare({
-        assetId: blendXlm(),
+        assetId: reserve,
         symbol: supplyOnly.asset,
         amount: toBaseUnits(units),
       })
@@ -1666,15 +1701,23 @@ export function IntentChat({
             return
           }
 
+          const reserve = suppliableReserve(symbol)
+          if (reserve === undefined) {
+            setParsed(null)
+            setFollowOn(null)
+            setAffordError(`Blend does not take ${symbol} here. Nothing was signed or sent.`)
+            return
+          }
+
           const units = !stated
-            ? (balances?.xlm ?? '0')
+            ? heldUnits(symbol)
             : body.amountIsUsd === true
               ? ((body.amountUsd ?? 0) / (price as number)).toFixed(7)
               : String(body.amountUsd ?? 0)
 
           setParsed(null)
           setFollowOn(null)
-          supply.prepare({ assetId: blendXlm(), symbol, amount: toBaseUnits(units) })
+          supply.prepare({ assetId: reserve, symbol, amount: toBaseUnits(units) })
           return
         }
         // A token the app cannot vouch for: ask rather than guess. Nothing is run.
@@ -1748,6 +1791,59 @@ export function IntentChat({
       setFollowOn(null)
       setParsed(single)
     })()
+  }
+
+  /** All of an asset the wallet holds, as a display figure. */
+  function heldUnits(symbol: string): string {
+    return (symbol === 'XLM' ? balances?.xlm : balances?.trustlines?.[symbol]?.balance) ?? '0'
+  }
+
+  /**
+   * "Withdraw 25 XLM" and "repay 5 USDC" on Stellar. Straight to a card to sign, with no model
+   * in the way: see `parse-exit.ts`. The server reads the position and says if it can't be done.
+   */
+  function startStellarExit(exit: StellarExit, text: string): void {
+    if (executionInFlight) {
+      setAffordError(FINISH_SIGNATURE_NOTICE)
+      return
+    }
+    archiveOpenTurn()
+    resetTurnState()
+    setClarifying(null)
+    setParsed(null)
+    setMessage(text)
+    setTurnId(crypto.randomUUID())
+
+    if (exit.kind === 'where') {
+      if (!isConnected || address === undefined) {
+        setAffordError('Connect a wallet first, so there is an account to look at.')
+        return
+      }
+      void fetch(`/api/lend/position?account=${encodeURIComponent(address)}`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error('unread')
+          const body = (await res.json()) as { positions?: BlendPositions | null }
+          if (body.positions == null) throw new Error('unread')
+          setAffordError(whereReply(body.positions))
+        })
+        .catch(() => {
+          setAffordError('Could not read your Blend position. Nothing was signed or sent.')
+        })
+      return
+    }
+
+    let amount: string | undefined
+    try {
+      amount = exit.amount === undefined ? undefined : toBaseUnits(exit.amount)
+    } catch {
+      setAffordError(
+        'That amount has more decimal places than Stellar keeps. Nothing was signed or sent.'
+      )
+      return
+    }
+    const request = { symbol: exit.symbol, ...(amount !== undefined ? { amount } : {}) }
+    if (exit.kind === 'withdraw') exitWithdraw.prepare(request)
+    else exitRepay.prepare('repay', request)
   }
 
   /** Ends a chain sequence where it stands. Its USDC stays the person's, and they are told so. */
@@ -2088,8 +2184,9 @@ export function IntentChat({
    */
   function handleSubmit(typed: string): void {
     latest.current.turn += 1
-    // A misspelled verb is corrected before anything reads the sentence.
-    const text = fixVerbTypo(typed)
+    // A misspelled verb is corrected before anything reads the sentence. "Tell me my positions"
+    // has none, and would become "sell me".
+    const text = asksForPositions(typed) ? typed : fixVerbTypo(typed)
 
     // A chain signature is with the wallet: a new message must not close its card.
     if (chainSigning(chainAction.phase)) {
@@ -2129,6 +2226,12 @@ export function IntentChat({
 
     if (cashoutRoute.kind !== 'pass') {
       startCashout(cashoutRoute, text)
+      return
+    }
+
+    const stellarExit = slug === 'stellar' ? parseStellarExit(text) : null
+    if (stellarExit !== null) {
+      startStellarExit(stellarExit, text)
       return
     }
 
@@ -2262,10 +2365,18 @@ export function IntentChat({
     const earlier = raceContext(thread, [])
     // The conversation so far, replies included. Without it every message is
     // read cold, and "explain that better" has nothing to improve on.
-    const answer = await fetchOrchestrate(turns, earlier, slug, fetch, dialogue.current)
+    // A question about positions needs no model, and takes the balance path from here on.
+    const positions = asksForPositions(text)
+    const answer = positions
+      ? { outcome: 'balance' as const }
+      : await fetchOrchestrate(turns, earlier, slug, fetch, dialogue.current)
     // The busy indicator stays up until the holdings are read. A reply that arrives after the
     // person moved to another wallet, chain or message is not theirs any more, so it is dropped.
-    const balanceText = answer.outcome === 'balance' ? await walletBalanceReply() : undefined
+    const balanceText = positions
+      ? await readPositionsReply(slug, descriptor.name, isConnected ? address : undefined)
+      : answer.outcome === 'balance'
+        ? await walletBalanceReply()
+        : undefined
     clarifyRuns.current -= 1
     if (clarifyRuns.current === 0) setClarifyBusy(false)
     // The last wallet's question, answered after it left. A balance has its own rule below.
@@ -2702,12 +2813,22 @@ export function IntentChat({
         const venue =
           followOn.venueNamed === true ? followOn.venue : (agentsVenue ?? followOn.venue)
 
+        // The token the swap delivers, by its own contract. This always named XLM's, so a swap into
+        // USDC went on to supply that many XLM. Said before the swap, not after it has run.
+        const lendAsset = suppliableReserve(parsed.input.tokenOut)
+        if (venue === 'blend' && lendAsset === undefined) {
+          setAffordError(
+            `Blend does not take ${parsed.input.tokenOut} here, so this cannot end in a supply. Nothing was signed or sent.`
+          )
+          return
+        }
+
         sequence.prepare({
           kind: 'swap-then-lend',
           ...slippageEdit,
           quote: route,
           receiveSymbol: parsed.input.tokenOut,
-          lendAsset: blendXlm(),
+          lendAsset: lendAsset ?? '',
           venue,
           swapLabel: `Swap ${parsed.input.amountIn} ${parsed.input.tokenIn} for ${parsed.input.tokenOut}`,
         })
@@ -3409,6 +3530,8 @@ export function IntentChat({
               {/* Supplying what the account already holds. One transaction,
                 one signature — no sequence to explain. */}
               {supply.phase !== 'idle' ? <SupplyConfirm supply={supply} /> : null}
+              {exitWithdraw.phase !== 'idle' ? <WithdrawConfirm withdraw={exitWithdraw} /> : null}
+              {exitRepay.phase !== 'idle' ? <BorrowConfirm borrow={exitRepay} /> : null}
 
               {restored === null ? (
                 <ChainSequenceSteps steps={{ ...chainSequence, runNext: pressNextStep }} />
@@ -3493,11 +3616,7 @@ export function IntentChat({
 
               {/* Everything currently resting, read from the ledger rather than
                 remembered here, so a fill that happened elsewhere still shows. */}
-              <OpenOrders
-                account={slug === 'stellar' ? address : undefined}
-                cancelling={limit.phase === 'signing' || limit.phase === 'submitting'}
-                onCancel={(offer) => limit.cancel(offer.id, offer.sellingAsset, offer.buyingAsset)}
-              />
+              <OpenOrders account={slug === 'stellar' ? address : undefined} />
 
               {/* Appears only once an agent has won with an executable route, so
                 the race is never interrupted by a confirmation prompt.
@@ -3599,7 +3718,6 @@ export function IntentChat({
               : {})}
           {...(parsed ? { onReset: handleReset } : {})}
         />
-        <TradeCapNote />
         {createIntent.isError ? (
           <p className="text-foreground mt-2 text-xs">
             {(createIntent.error as Error).message || 'Something went wrong. No funds moved.'}

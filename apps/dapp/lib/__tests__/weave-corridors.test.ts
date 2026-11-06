@@ -29,10 +29,25 @@ describe('cashOutPrompt', () => {
     expect(cashOutPrompt('arc', live)).toBe('')
     expect(cashOutPrompt('monad', live)).toBe('')
   })
+
+  it('promises nothing from NEAR, which has a deposit path but no order Weave will make', () => {
+    expect(cashOutPrompt('near', live)).toBe('')
+  })
+
+  it('says Weave has paid out no real order, wherever it names a Weave currency', () => {
+    expect(cashOutPrompt('sui', live)).toMatch(/has not paid out a real order/)
+    expect(cashOutPrompt('stellar', { ...live, WEAVE_CASHOUT_CURRENCIES: 'KES' })).toMatch(
+      /every currency here but naira, has not paid out a real order/
+    )
+  })
+
+  it('leaves that out where only Linq pays', () => {
+    expect(cashOutPrompt('stellar', {})).not.toMatch(/Weave/)
+  })
 })
 
 describe('liveCurrencies', () => {
-  it('is naira only when nothing is set, since no other payout has been tested', () => {
+  it('is naira only when nothing is set', () => {
     expect(liveCurrencies({})).toEqual(['NGN'])
     expect(liveCurrencies({ WEAVE_CASHOUT_CURRENCIES: '  ' })).toEqual(['NGN'])
   })

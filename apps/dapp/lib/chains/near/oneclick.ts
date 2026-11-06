@@ -150,10 +150,17 @@ export interface QuoteInput {
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
   deadline: string
   slippageBps: number
+  /** The money already sits in the person's NEAR Intents balance, and any refund goes back there. */
+  fromIntents?: boolean | undefined
 }
 
 /** A sentence for what 1Click said. Its own text is not passed on, because it is outside this app. */
 function refusalFor(status: number, message: string): ChainActionRefused {
+  if (/not available/i.test(message)) {
+    return new ChainActionRefused(
+      "NEAR Intents isn't offering this route right now, and a different amount won't change that. Nothing was signed or sent."
+    )
+  }
   if (/no liquidity/i.test(message)) {
     return new ChainActionRefused(
       'NEAR Intents has no price for this right now, usually because the amount is too small or too large for the market. Try a different amount, or try again in a minute. Nothing was signed or sent.'
@@ -189,16 +196,17 @@ function refusalFor(status: number, message: string): ChainActionRefused {
  */
 export async function requestQuote(input: QuoteInput): Promise<QuoteEnvelope> {
   const fees = appFees()
+  const funding = input.fromIntents === true ? 'INTENTS' : 'ORIGIN_CHAIN'
   const body = {
     dry: input.dry,
     swapType: 'EXACT_INPUT',
     slippageTolerance: input.slippageBps,
     originAsset: input.originAsset,
-    depositType: 'ORIGIN_CHAIN',
+    depositType: funding,
     destinationAsset: input.destinationAsset,
     amount: input.amount,
     refundTo: input.account,
-    refundType: 'ORIGIN_CHAIN',
+    refundType: funding,
     recipient: input.account,
     recipientType: input.recipientType,
     deadline: input.deadline,

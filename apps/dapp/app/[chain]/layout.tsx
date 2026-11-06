@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation'
 import { WalletGate } from '../../components/connect/wallet-gate'
 import { ChatHost } from '../../components/intents/chat-host'
 import { AppShell } from '../../components/layout/app-shell'
-import { tradeCapUsd } from '../../lib/server/trade-cap'
+import { BetaChainNotice } from '../../components/layout/beta-chain-notice'
 import { ChainProvider } from '../../providers/chain-provider'
 
 /**
@@ -29,15 +29,6 @@ export default async function ChainLayout({
   // showing a different chain than the URL names would be worse than an error.
   if (parseChainSegment(chain) === undefined) notFound()
 
-  // A misconfigured cap must not take the whole frame down with it; the
-  // routes that enforce it report the problem where it matters.
-  let cap: number | undefined
-  try {
-    cap = tradeCapUsd()
-  } catch {
-    cap = undefined
-  }
-
   // For the browser tests, which have no wallet. Needs the server's own setting
   // as well as the cookie, so a visitor cannot switch the gate off in production.
   const bypass =
@@ -47,7 +38,8 @@ export default async function ChainLayout({
   return (
     <ChainProvider segment={chain}>
       <WalletGate bypass={bypass}>
-        <AppShell tradeCapUsd={cap}>
+        <BetaChainNotice />
+        <AppShell>
           <ChatHost key={chain}>{children}</ChatHost>
         </AppShell>
       </WalletGate>

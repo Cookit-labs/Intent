@@ -156,11 +156,13 @@ describe('assertOneClickSafe refuses tampering', () => {
     refused(() => assertOneClickSafe(payload(USDC_NEAR, [noAmount]), ME))
   })
 
-  it('refuses a zero, malformed or oversized transfer', () => {
+  it('refuses a zero or malformed transfer, and takes one of any size', () => {
     refused(() => assertOneClickSafe(payload(USDC_NEAR, [transfer('0')]), ME))
     refused(() => assertOneClickSafe(payload(USDC_NEAR, [transfer('-1')]), ME))
     refused(() => assertOneClickSafe(payload(USDC_NEAR, [transfer('1.5')]), ME))
-    refused(() => assertOneClickSafe(payload(USDC_NEAR, [transfer('10000000001')]), ME))
+    expect(() =>
+      assertOneClickSafe(payload(USDC_NEAR, [transfer('10000000000000')]), ME)
+    ).not.toThrow()
   })
 
   it('refuses a storage payment of the wrong size or for a stranger', () => {
@@ -312,13 +314,10 @@ describe('the staking checks', () => {
     )
   })
 
-  it('refuses a stake of nothing, or beyond the ceiling of 1,000 NEAR', () => {
+  it('refuses a stake of nothing, and takes one of any size', () => {
     refused(() => assertMetapoolSafe(payload(METAPOOL_CONTRACT, [stake('0')]), ME))
-    refused(() =>
-      assertMetapoolSafe(payload(METAPOOL_CONTRACT, [stake('1000000000000000000000000001')]), ME)
-    )
     expect(() =>
-      assertMetapoolSafe(payload(METAPOOL_CONTRACT, [stake('1000000000000000000000000000')]), ME)
+      assertMetapoolSafe(payload(METAPOOL_CONTRACT, [stake('1000000000000000000000000001')]), ME)
     ).not.toThrow()
   })
 

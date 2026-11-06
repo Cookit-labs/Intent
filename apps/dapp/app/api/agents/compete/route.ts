@@ -17,7 +17,7 @@ import { getRoster } from '../../../../lib/agents/registry'
 import type { PlanContext } from '../../../../lib/agents/plan-scoring'
 import { pickWinner, scoreProposals, unanimousChoice } from '../../../../lib/agents/scoring'
 import {
-  assertAmountWithinCap,
+  assertValidAmount,
   assertKnownTokens,
   assertNativeReserve,
 } from '../../../../lib/chains/prepare'
@@ -138,8 +138,8 @@ async function chainRaceFacts(
     }
   }
   try {
-    const known = assertKnownTokens(chainApi, action)
-    await assertAmountWithinCap(chainApi, action, known)
+    assertKnownTokens(chainApi, action)
+    assertValidAmount(action)
   } catch (e) {
     if (e instanceof ChainActionRefused)
       return { refusal: `${e.message} Nothing was signed or sent.` }

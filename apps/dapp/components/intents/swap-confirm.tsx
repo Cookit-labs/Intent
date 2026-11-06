@@ -44,14 +44,8 @@ import { LedgerPreview } from './ledger-preview'
 
 /**
  * The threshold itself, inlined at build time like every other
- * `NEXT_PUBLIC_` value in this app. Not read from `trade-cap.ts`'s
- * `MAINNET_MAX_TRADE_USD`: that is a server-side hard cap enforced at submit
- * time, checked against the live price table rather than the client's
- * `usdPrices` snapshot, and it exists to refuse a trade outright. This is a
- * client-side pause that exists to slow a human down, and the two moving
- * independently is deliberate — raising the hard cap to let bigger trades
- * through should not silently also raise how much friction a human sees
- * first, and vice versa.
+ * `NEXT_PUBLIC_` value in this app. A client-side pause that exists to slow a
+ * human down, and it refuses nothing.
  */
 const CONFIRM_PAUSE_THRESHOLD_USD = Number(
   process.env.NEXT_PUBLIC_SWAP_CONFIRM_THRESHOLD_USD ?? '500'
