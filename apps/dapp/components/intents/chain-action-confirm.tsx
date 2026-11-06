@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, Card } from '@intent/ui'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { Check, ExternalLink, Loader2 } from 'lucide-react'
 
 import type { ChainAction } from '../../hooks/use-chain-action'
 import { stepErrorMessage } from '../../lib/agents/chain-race'
@@ -91,13 +91,18 @@ export function ChainActionConfirm({
       {prepared !== undefined && phase !== 'failed' && phase !== 'pending' ? (
         <>
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium [overflow-wrap:anywhere]">{prepared.summary}</span>
-            <span className="text-muted-foreground text-xs">
-              {cardLine(prepared)}
-              {prepared.receive !== undefined
-                ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
-                : ''}
+            <span className="text-[15px] font-semibold leading-snug [overflow-wrap:anywhere]">
+              {prepared.summary}
             </span>
+            {/* A swap's summary already says both amounts; saying them twice was noise. */}
+            {prepared.kind !== 'swap' ? (
+              <span className="text-muted-foreground text-xs">
+                {cardLine(prepared)}
+                {prepared.receive !== undefined
+                  ? `, and receive ${prepared.receive.approximate ? 'about ' : ''}${prepared.receive.amount} ${prepared.receive.symbol}`
+                  : ''}
+              </span>
+            ) : null}
             {prepared.apy !== undefined ? (
               <span className="text-muted-foreground text-xs">
                 Current rate {prepared.apy.basePercent.toFixed(2)}%
@@ -110,9 +115,15 @@ export function ChainActionConfirm({
           </div>
 
           {prepared.notes.length > 0 ? (
-            <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs leading-relaxed">
+            <ul className="bg-muted/50 text-muted-foreground flex flex-col gap-2 rounded-xl px-3.5 py-3 text-xs leading-relaxed">
               {prepared.notes.map((note) => (
-                <li key={note}>{note}</li>
+                <li key={note} className="flex gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className="bg-muted-foreground/50 mt-[0.45rem] h-1 w-1 shrink-0 rounded-full"
+                  />
+                  {note}
+                </li>
               ))}
             </ul>
           ) : null}
@@ -164,13 +175,14 @@ export function ChainActionConfirm({
 
           {phase === 'settled' && action.canContinue ? null : phase === 'settled' ? (
             <p className="flex items-center gap-2 text-sm font-medium" role="status">
+              <Check className="text-brand h-4 w-4" aria-hidden="true" />
               Sent
               {explorerUrl !== undefined ? (
                 <a
                   href={explorerUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-normal underline underline-offset-2"
+                  className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 text-xs font-normal tabular-nums hover:underline hover:underline-offset-2"
                 >
                   {hash !== undefined ? `${hash.slice(0, 6)}…${hash.slice(-4)}` : 'View'}
                   <ExternalLink className="h-3 w-3" aria-hidden="true" />
