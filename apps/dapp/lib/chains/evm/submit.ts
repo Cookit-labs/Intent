@@ -34,13 +34,17 @@ export function transferCalldata(to: string, units: bigint): string {
   })
 }
 
-/** Whether this receipt shows this account paying exactly this token transfer to this address. */
+/**
+ * Whether this receipt shows this account paying exactly this token transfer to this address, as
+ * the token contract's own Transfer log says. Who sent the transaction is not asked: a smart
+ * account, or MetaMask paying gas in a token, sends through a relayer or an EntryPoint, and only
+ * the account, or a spender it approved, can move its tokens at all.
+ */
 export function erc20TransferPaid(
   receipt: EvmReceipt,
   paid: { token: string; account: string; depositAddress: string; units: bigint }
 ): boolean {
-  if (!sameAddress(receipt.from, paid.account)) return false
-  if (receipt.to === null || !sameAddress(receipt.to, paid.token)) return false
+  if (receipt.status === 'reverted') return false
   return parseEventLogs({ abi: erc20Abi, eventName: 'Transfer', logs: receipt.logs }).some(
     (log) =>
       sameAddress(log.address, paid.token) &&
@@ -97,7 +101,18 @@ export async function confirmEvmTransfer(
   const expectedTo = native ? depositAddress : token.id
   const fromThisAccountToThatAddress =
     sameAddress(receipt.from, account) && receipt.to !== null && sameAddress(receipt.to, expectedTo)
-  if (!fromThisAccountToThatAddress) return notThisSwap
+  if (!fromThisAccountToThatAddress) {
+    // A relayed or smart-account send still shows the token's own Transfer log, if it paid.
+    let relayedPaid = false
+    try {
+      const units = BigInt(toBaseUnits(amount, token.decimals))
+      relayedPaid =
+        !native && erc20TransferPaid(receipt, { token: token.id, account, depositAddress, units })
+    } catch {
+      relayedPaid = false
+    }
+    return relayedPaid ? { ok: true, hash, explorerUrl: evmExplorerUrl(chain, hash) } : notThisSwap
+  }
 
   // With no amount to compare against, this can't be shown to be this transfer, or not to be.
   let units: bigint
