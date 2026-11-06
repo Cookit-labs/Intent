@@ -8,7 +8,14 @@ import {
 import { LIMIT_NOT_HERE } from './limit'
 import { ordersAsked } from './orders-view'
 import { LIMIT_EXAMPLES, limitSaid, limitShapeRefusal, parseChainLimit } from './parse-limit'
-import { AMOUNT, amountOf, chainTokenWord, dollarsOn, parseChainAction } from './parse-action'
+import {
+  AMOUNT,
+  amountOf,
+  chainTokenWord,
+  dollarsOn,
+  dollarsWorthOf,
+  parseChainAction,
+} from './parse-action'
 import {
   SEQUENCE_CASHOUT_CHAINS,
   followOnRefusal,
@@ -158,6 +165,8 @@ export function readChainMessage(
   chain: ChainWithActions,
   chainName: string
 ): ChainMessageRead {
+  // "$5 worth of sol" is read here as dollars, so it never waits on a model to say which it is.
+  text = dollarsWorthOf(text)
   const sequence = parseChainSequence(text)
   if (sequence !== null) {
     return 'refusal' in sequence
