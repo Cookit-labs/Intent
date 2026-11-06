@@ -133,6 +133,8 @@ export function fakeClient(
   return {
     tokenBalance: async () => overrides.balance ?? BigInt('1000000000000000000000000'),
     nativeBalance: async () => overrides.native ?? BigInt('1000000000000000000000000'),
+    allowance: async () => BigInt(0),
+    code: async () => undefined,
     waitForReceipt: async () =>
       ({ status: 'success', from: ACCOUNT, to: '', logs: [], ...overrides.receipt }) as EvmReceipt,
     transaction: async () => overrides.sent ?? { input: '0x', value: ZERO },

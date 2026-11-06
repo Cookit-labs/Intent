@@ -338,6 +338,7 @@ describe('the chain modules', () => {
       'aave-avalanche',
       'sablier-avalanche',
       'bulla',
+      'cow-limit',
       'send',
     ])
     expect(monadModule?.venues.map((v) => v.id)).toEqual([
@@ -388,7 +389,9 @@ describe('the chain modules', () => {
     expect(ids('avalanche', {})).not.toContain('1click-avalanche')
     expect(ids('avalanche', {})).not.toContain('send')
     expect(ids('avalanche', {})).toContain('aave-avalanche')
+    expect(ids('avalanche', {})).toContain('cow-limit')
     expect(ids('monad', { AUTH_SECRET: 'short' })).not.toContain('1click-monad')
+    expect(ids('monad', { AUTH_SECRET: 'short' })).not.toContain('cow-limit')
     expect(ids('monad', { AUTH_SECRET: 'short' })).toContain('aave-monad')
     expect(ids('monad', { AUTH_SECRET: 'x'.repeat(32) })).toEqual([
       '1click-monad',
@@ -654,6 +657,7 @@ describe('the Apps page rows', () => {
   it('shows each chain its own row and no venue that does not name it', () => {
     expect(on('avalanche')).toEqual([
       '1click-avalanche',
+      'cow-limit',
       'uniswap-avalanche',
       'pharaoh',
       'aave-avalanche',
@@ -1469,7 +1473,9 @@ describe('submit: what the chain says the wallet sent', () => {
     const deposit = (receiptTo: string, status: string, transaction: () => Promise<unknown>) =>
       createEvmDeposit('avalanche', () => ({
         tokenBalance: async () => BigInt(0),
+        allowance: async () => BigInt(0),
         nativeBalance: async () => BigInt(0),
+        code: async () => '0x',
         waitForReceipt: async () => receipt({ status, to: receiptTo }) as unknown as EvmReceipt,
         transaction: transaction as EvmClient['transaction'],
       }))

@@ -121,6 +121,8 @@ function fakeClient(
   return {
     tokenBalance: async () => BigInt(0),
     nativeBalance: async () => BigInt(0),
+    allowance: async () => BigInt(0),
+    code: async () => undefined,
     waitForReceipt: async () =>
       ({ status, from: ACCOUNT, to: SHMON, logs: [] }) as unknown as EvmReceipt,
     transaction: async () => sent,

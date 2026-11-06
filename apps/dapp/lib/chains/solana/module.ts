@@ -6,6 +6,7 @@ import { createJitoVenue } from './jito'
 import { createJupiterLendVenue } from './jupiter-lend'
 import { createJupiterSwapVenue } from './jupiter-swap'
 import { createKaminoVenue } from './kamino'
+import { createKaminoLimitVenue, limoBook } from './limo'
 import { createKaminoLendVenue } from './kamino-lend'
 import { createLuloVenue } from './lulo'
 import { createMarinadeVenue } from './marinade'
@@ -30,6 +31,7 @@ export function buildSolanaVenues(
     createJupiterLendVenue({ env }),
     // After Earn, so "supply on Kamino" stays the vault it has always meant.
     createKaminoVenue(),
+    createKaminoLimitVenue(),
     createKaminoLendVenue({ env }),
     ...(luloKey ? [createLuloVenue({ apiKey: luloKey })] : []),
     createJitoVenue({ env }),
@@ -56,9 +58,11 @@ export const solanaModule: ChainModule = {
     stream: 'streamflow',
     cancel: 'streamflow',
     send: SEND_VENUE_ID,
+    limit: 'kamino-limit',
   },
   venueForToken: { unstake: { MSOL: 'marinade', JITOSOL: 'jito', SSOL: 'solayer' } },
   priceUsd,
   submit: createSolanaSubmit({ deadlineMs: SUBMIT_DEADLINE_MS }),
   balances: readSolanaBalances,
+  limitBook: limoBook(),
 }

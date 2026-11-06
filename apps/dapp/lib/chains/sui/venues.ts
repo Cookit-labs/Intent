@@ -96,6 +96,18 @@ export const suiVenues: Venue[] = [
   momentumListing,
   walrusListing,
   {
+    id: 'deepbook-limit',
+    family: 'sui',
+    name: 'DeepBook Limit Orders',
+    category: 'orderbook',
+    chains: ['Sui'],
+    url: 'https://deepbook.xyz',
+    bestFor: 'Selling or buying SUI at a price you name, for up to 7 days',
+    integration: 'executes',
+    capability:
+      'Places, reads, cancels and collects SUI orders against USDC, and checks every transaction before you sign. Filled tokens wait in your DeepBook account until you collect them.',
+  },
+  {
     id: 'springsui',
     family: 'sui',
     name: 'SpringSui',

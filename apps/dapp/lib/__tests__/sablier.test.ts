@@ -614,6 +614,8 @@ describe('submit', () => {
     return {
       tokenBalance: async () => BigInt(0),
       nativeBalance: async () => BigInt(0),
+      allowance: async () => BigInt(0),
+      code: async () => undefined,
       waitForReceipt: async () =>
         ({ status: 'success', from: ME, to: LOCKUP, logs: [], ...receipt }) as EvmReceipt,
       transaction: async () => ({ value: BigInt(0), input: data }),

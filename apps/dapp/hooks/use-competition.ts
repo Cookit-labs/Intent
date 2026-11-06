@@ -12,7 +12,7 @@ import type {
 import { DECIDE_AT, RACE_DURATION, WINDOW_SECONDS, revealFloor } from '../lib/agents/competition'
 import { decodeFrame } from '../lib/agents/events'
 import type { ChainActionRequest } from '../lib/chains/types'
-import { routeFigures, routeSource } from '../lib/agents/chain-race'
+import { routeFigures, routeRestCost, routeSource } from '../lib/agents/chain-race'
 import { setAttributedRace } from '../lib/api/network-fetch'
 import { planDecision, planFinalReveal, planReveal, planTalkReveal } from '../lib/agents/pacing'
 import type { ThreadItem } from '../lib/agents/talk-lines'
@@ -371,6 +371,9 @@ export function useCompetition(
                   reasoning: frame.proposal.reasoning,
                   ...(source !== undefined ? { source } : {}),
                   ...(figures !== undefined ? { figures } : {}),
+                  ...(routeRestCost(frame.route) !== undefined
+                    ? { restCost: routeRestCost(frame.route) as { amount: string; symbol: string } }
+                    : {}),
                   sliceCount: frame.proposal.sliceCount,
                   horizonMinutes: frame.proposal.horizonMinutes,
                   executionMode: frame.proposal.executionMode,

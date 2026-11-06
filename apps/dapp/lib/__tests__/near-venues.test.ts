@@ -26,7 +26,7 @@ const CATEGORIES: readonly VenueCategory[] = [
 
 describe('the NEAR venue list', () => {
   it('has every row of the report, with the fields filled in', () => {
-    expect(nearVenues).toHaveLength(14)
+    expect(nearVenues).toHaveLength(15)
     for (const venue of nearVenues) {
       expect(venue.family).toBe('near')
       expect(venue.chains).toEqual(['NEAR'])

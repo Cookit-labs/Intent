@@ -56,6 +56,8 @@ export interface AgentProposalView {
   executionMode?: 'fill' | 'rest' | 'split'
   splitPct?: number
   restPriceUsd?: number
+  /** The one-off cost of resting, when the chosen route is a resting order. */
+  restCost?: { amount: string; symbol: string }
   thenAction?: 'lend' | 'offramp'
   thenVenue?: string
   /**

@@ -11,4 +11,5 @@ export const solanaCapabilities: ChainCapability[] = [
   { kind: 'stake', venue: 'Jito', symbol: 'SOL' },
   { kind: 'unstake', venue: 'Jito', symbol: 'JitoSOL' },
   { kind: 'claim', venue: 'Solayer', symbol: 'SOL' },
+  { kind: 'limit', venue: 'Kamino', symbol: 'SOL' },
 ]

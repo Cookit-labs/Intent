@@ -306,6 +306,7 @@ describe('the module', () => {
       'springsui',
       'aftermath',
       'walrus',
+      'deepbook-limit',
       'send',
     ])
   })
@@ -321,6 +322,7 @@ describe('the module', () => {
       ['springsui', ['stake', 'unstake']],
       ['aftermath', ['stake', 'unstake']],
       ['walrus', ['stake', 'unstake', 'claim']],
+      ['deepbook-limit', ['limit']],
     ])
     expect(suiModule.defaultVenue).toEqual({
       swap: 'cetus',
@@ -331,7 +333,10 @@ describe('the module', () => {
       stake: 'springsui',
       unstake: 'springsui',
       send: 'send',
+      limit: 'deepbook-limit',
     })
+    expect(suiModule.limitBook).toBeDefined()
+    expect(suiModule.venues.find((v) => v.id === 'deepbook-limit')?.name).toBe('DeepBook')
   })
 
   it('offers one capability per wired kind', () => {
@@ -344,14 +349,15 @@ describe('the module', () => {
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
       { kind: 'unstake', venue: 'SpringSui', symbol: 'sSUI' },
       { kind: 'claim', venue: 'Walrus', symbol: 'WAL' },
+      { kind: 'limit', venue: 'DeepBook', symbol: 'SUI' },
     ])
   })
 })
 
 describe('the venue list', () => {
   it('has every row of the report', () => {
-    expect(suiVenues).toHaveLength(16)
-    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(16)
+    expect(suiVenues).toHaveLength(17)
+    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(17)
   })
 
   it('is all Sui, with a real link and an honest reason', () => {
@@ -370,6 +376,19 @@ describe('the venue list', () => {
     const claimed = suiVenues.filter((v) => v.integration === 'executes')
     expect(claimed.map((v) => v.id).sort()).toEqual(wired)
     for (const venue of claimed) expect(venue.capability).toBeTruthy()
+  })
+
+  it('lists DeepBook twice, its swaps and its limit orders, both running', () => {
+    expect(suiVenues.filter((v) => v.name.startsWith('DeepBook'))).toEqual([
+      expect.objectContaining({ id: 'deepbook', integration: 'executes' }),
+      expect.objectContaining({
+        id: 'deepbook-limit',
+        name: 'DeepBook Limit Orders',
+        category: 'orderbook',
+        integration: 'executes',
+        url: 'https://deepbook.xyz',
+      }),
+    ])
   })
 
   it('leaves Linq listed', () => {

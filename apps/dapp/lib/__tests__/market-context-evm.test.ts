@@ -27,9 +27,11 @@ describe('the market on EVM chains that share a family', () => {
     const ids = (chain: string): string[] =>
       buildMarketContext(chain, {}, 'mainnet').venues.map((v) => v.id)
     expect(ids('avalanche')).toContain('on-avalanche')
+    expect(ids('avalanche')).toContain('cow-limit')
     expect(ids('avalanche')).not.toContain('on-monad')
     expect(ids('avalanche')).not.toContain('aave-monad')
     expect(ids('monad')).toContain('on-monad')
+    expect(ids('monad')).not.toContain('cow-limit')
     expect(ids('monad')).not.toContain('on-avalanche')
     expect(ids('monad')).not.toContain('aave-avalanche')
   })

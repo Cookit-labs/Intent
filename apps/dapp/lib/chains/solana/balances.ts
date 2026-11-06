@@ -18,7 +18,11 @@ const SOL = SOLANA_TOKENS[0]!
 /** The node answered, but refused the call. Anything else, a timeout included, is not caught here. */
 class RpcRefused extends Error {}
 
-async function rpc(method: string, params: unknown[], signal: AbortSignal): Promise<unknown> {
+export async function rpc(
+  method: string,
+  params: unknown[],
+  signal: AbortSignal
+): Promise<unknown> {
   const url = process.env['SOLANA_RPC_URL']?.trim() || DEFAULT_RPC_URL
   const response = await fetch(url, {
     method: 'POST',

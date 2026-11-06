@@ -542,6 +542,13 @@ export function oneClickOriginVenue(chain: OneClickOriginChain): ChainVenue {
         error: `${why} so it can't be followed from here. Your wallet may already have sent it${hash === undefined ? '' : ` as ${hash}`}, so check its activity before trying again.`,
       }
     }
+    // A signed message can't have moved anything, whatever wallet signed it.
+    if (signed.family === 'evm-typed') {
+      return {
+        ok: false,
+        error: 'That is a signed message, not a transaction, so nothing was sent.',
+      }
+    }
     if (signed.family !== origin.family) {
       return sends
         ? notFollowed(`That is not ${withArticle(origin.chainName)} transaction,`)

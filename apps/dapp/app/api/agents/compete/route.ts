@@ -23,6 +23,8 @@ import {
   assertKnownTokens,
   assertNativeReserve,
 } from '../../../../lib/chains/prepare'
+import { limitPair } from '../../../../lib/chains/limit'
+import { restOption, restRoute } from '../../../../lib/agents/rest-option'
 import { chainModule } from '../../../../lib/chains/registry'
 import {
   ChainActionRefused,
@@ -172,8 +174,18 @@ async function chainRaceFacts(
   // The chain's market already leaves out Stellar's assets, prices, lending
   // rates and anchors; see `buildMarketContext`.
   const base = await buildMarketContextAsync(chain)
+  const pair = action.kind === 'swap' ? limitPair(action.tokenIn, action.tokenOut ?? '') : undefined
+  const baseToken = chainApi.tokens.find((t) => t.symbol.toUpperCase() === pair?.base)
+  const marketUsd =
+    pair === undefined || baseToken === undefined
+      ? undefined
+      : pair.selling
+        ? price
+        : await chainApi.priceUsd(baseToken).catch(() => undefined)
+  const rest = marketUsd === undefined ? undefined : restOption(chainApi, action, marketUsd)
   const market: MarketContext = {
     ...base,
+    ...(rest !== undefined ? { rest } : {}),
     prices: price !== undefined && tokenIn !== undefined ? { [tokenIn.symbol]: price } : {},
     venues: chainApi.venues
       .filter((v) => routes.some((r) => r.id === `${v.id}-1`))
@@ -519,19 +531,31 @@ export async function POST(request: Request): Promise<Response> {
       const settleAndMeasure = (proposal: AgentProposalResult): AgentProposalResult => {
         const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
         return measured(
-          chainFacts === undefined ? settlePlan(proposal, intent, book) : settleChainPlan(proposal),
+          chainFacts === undefined
+            ? settlePlan(proposal, intent, book)
+            : settleChainPlan(proposal, own !== undefined ? market.rest : undefined),
           own?.quote as SwapQuote | ChainRouteQuote | undefined,
           market.prices
         )
       }
 
+      // A plan that rests an order signs the order, not the swap it was measured against.
       const sendProposal = (proposal: AgentProposalResult): void => {
         const own = (market.routes ?? []).find((r) => r.id === proposal.routeId)
         send({
           type: 'competition:proposal',
           competitionId,
           proposal,
-          ...(own !== undefined ? { route: own.quote } : {}),
+          ...(own !== undefined
+            ? {
+                route:
+                  proposal.executionMode === 'rest' &&
+                  market.rest !== undefined &&
+                  proposal.restPriceUsd !== undefined
+                    ? restRoute(own.quote as ChainRouteQuote, market.rest, proposal.restPriceUsd)
+                    : own.quote,
+              }
+            : {}),
         })
       }
 
@@ -740,7 +764,11 @@ export async function POST(request: Request): Promise<Response> {
         ...(unmeasuredRoutes.length > 0 ? { unmeasuredRoutes } : {}),
       }
 
-      const scored = scoreProposals(proposals, { competitionId, plan })
+      const scored = scoreProposals(proposals, {
+        competitionId,
+        plan,
+        ...(chainFacts !== undefined ? { restsBelowFills: true } : {}),
+      })
       // An agent that held off has no plan to score.
       const heldOff = new Set(proposals.filter((p) => p.held === true).map((p) => p.agent))
       const winner = pickWinner(scored)

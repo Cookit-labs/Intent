@@ -343,6 +343,13 @@ export function createSendVenue(chain: ChainWithActions): ChainVenue {
       }
     }
 
+    // A signed message can't have moved anything, whatever wallet signed it.
+    if (signed.family === 'evm-typed') {
+      return {
+        ok: false,
+        error: 'That is a signed message, not a transaction, so nothing was sent.',
+      }
+    }
     if (signed.family !== mover.family) {
       return sends ? unconfirmed() : { ok: false, error: NOT_THE_TRANSFER }
     }

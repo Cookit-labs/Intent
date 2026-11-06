@@ -3,7 +3,13 @@ import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils'
 
 import { ChainActionRefused } from '../types'
 import { cetusOverlay, MAX_SLIPPAGE_BPS } from './cetus-rules'
-import { moveTarget, type ParsedCall, type PtbPolicy, type ReadPure } from './safety'
+import {
+  moveTarget,
+  type ParsedCall,
+  type PtbPolicy,
+  type ReadObject,
+  type ReadPure,
+} from './safety'
 import { SUI_TOKENS } from './tokens'
 
 /**
@@ -167,4 +173,150 @@ export const CETUS_POLICY: PtbPolicy = {
 export const NAVI_POLICY: PtbPolicy = {
   venueName: 'NAVI',
   allowedCalls: new Set([moveTarget(NAVI_PACKAGE, 'incentive_v3', 'entry_deposit')]),
+}
+
+/**
+ * DeepBook core, version 9: the latest package, which is what calls target. `@mysten/deepbook-v3`
+ * 2.10.1's `mainnetPackageIds`, and calling it succeeded in simulation on 5 November 2026. An upgrade
+ * blocks this venue until the new id is checked and added here.
+ */
+export const DEEPBOOK_PACKAGE = '0xbca0cefe720330e7bb4f2283438b68de6a0e656688db4ac90d61e71fe6151fe8'
+/** The original package, which is where the types are defined, so where objects say they are from. */
+const DEEPBOOK_TYPES = '0x2c8d603bc51326b8c13cef9dd07031a408a48dddb541963357661df5d3204809'
+export const DEEPBOOK_MANAGER_TYPE = `${DEEPBOOK_TYPES}::balance_manager::BalanceManager`
+export const DEEPBOOK_REGISTRY =
+  '0xaf16199a2dff736e9f07a845f23c5da6df6f756eddb631aed9d24a93efc4549d'
+export const DEEPBOOK_REGISTRY_VERSION = '336155480'
+/** SUI/USDC, the one pool used. Read off the SDK's `mainnetPools` and checked on chain. */
+export const DEEPBOOK_POOL = '0xe05dafb5133bcffb8d59f4e12465dc0e9faeaa05e3e342a08fe135800e3e4407'
+export const DEEPBOOK_POOL_VERSION = '389750322'
+export const DEEPBOOK_SUI = normalizeStructTag('0x2::sui::SUI')
+export const DEEPBOOK_USDC = normalizeStructTag(
+  '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC'
+)
+/** The Move constant `POST_ONLY`: the order aborts rather than fill any part at once. */
+export const DEEPBOOK_POST_ONLY = 3
+/** The Move constant `SELF_MATCHING_ALLOWED`. It only governs a fill, and this order never takes one. */
+export const DEEPBOOK_SELF_MATCHING = 0
+/** Seven days, as built, plus room for the time between building it and it landing. */
+const DEEPBOOK_MAX_EXPIRY_MS = 8 * 24 * 60 * 60 * 1000
+
+export const DEEPBOOK_CALLS = {
+  newManager: moveTarget(DEEPBOOK_PACKAGE, 'balance_manager', 'new'),
+  deposit: moveTarget(DEEPBOOK_PACKAGE, 'balance_manager', 'deposit'),
+  proof: moveTarget(DEEPBOOK_PACKAGE, 'balance_manager', 'generate_proof_as_owner'),
+  register: moveTarget(DEEPBOOK_PACKAGE, 'balance_manager', 'register_balance_manager'),
+  withdrawAll: moveTarget(DEEPBOOK_PACKAGE, 'balance_manager', 'withdraw_all'),
+  place: moveTarget(DEEPBOOK_PACKAGE, 'pool', 'place_limit_order'),
+  cancel: moveTarget(DEEPBOOK_PACKAGE, 'pool', 'cancel_order'),
+  settle: moveTarget(DEEPBOOK_PACKAGE, 'pool', 'withdraw_settled_amounts'),
+  share: moveTarget('0x2', 'transfer', 'public_share_object'),
+} as const
+
+function normalizedTypes(types: readonly string[]): string[] | undefined {
+  try {
+    return types.map((t) => normalizeStructTag(t))
+  } catch {
+    return undefined
+  }
+}
+
+function assertDeepbookPool(call: ParsedCall, readObject: ReadObject): void {
+  if (readObject(call.arguments[0]) !== DEEPBOOK_POOL) {
+    fail('This order is on a different market than the one you asked for.')
+  }
+  const [base, quote, ...rest] = normalizedTypes(call.typeArguments) ?? []
+  if (base !== DEEPBOOK_SUI || quote !== DEEPBOOK_USDC || rest.length !== 0) {
+    fail('This order trades other tokens than SUI and USDC.')
+  }
+}
+
+function deepbookNumber(read: ReadPure, call: ParsedCall, index: number, what: string): bigint {
+  const bytes = read(call.arguments[index])
+  if (bytes === undefined) return fail(`I couldn't read the ${what} on this order.`)
+  try {
+    return BigInt(bcs.u64().parse(bytes))
+  } catch {
+    return fail(`I couldn't read the ${what} on this order.`)
+  }
+}
+
+/**
+ * What holds for every DeepBook call whatever was asked. Who owns the manager is not in the bytes, and
+ * a deposit, proof or withdrawal aborts for anyone but its owner. `deepbookAssertSafe` then holds the
+ * transaction to the figures it was built with.
+ */
+function checkDeepbookCall(
+  call: ParsedCall,
+  read: ReadPure,
+  _account: string,
+  readObject: ReadObject
+): void {
+  switch (call.target) {
+    case DEEPBOOK_CALLS.place: {
+      assertDeepbookPool(call, readObject)
+      const orderType = read(call.arguments[4])
+      if (
+        orderType === undefined ||
+        orderType.length !== 1 ||
+        orderType[0] !== DEEPBOOK_POST_ONLY
+      ) {
+        fail('This order could fill at once, and it must only rest.')
+      }
+      const matching = read(call.arguments[5])
+      if (
+        matching === undefined ||
+        matching.length !== 1 ||
+        matching[0] !== DEEPBOOK_SELF_MATCHING
+      ) {
+        fail('This order matches against your own in a way I did not check.')
+      }
+      const payWithDeep = read(call.arguments[9])
+      if (payWithDeep === undefined || payWithDeep.length !== 1 || payWithDeep[0] !== 0) {
+        fail('This order pays its fee in a way I did not check.')
+      }
+      const expiry = deepbookNumber(read, call, 10, 'expiry')
+      if (expiry > BigInt(Date.now() + DEEPBOOK_MAX_EXPIRY_MS)) {
+        fail('This order lasts past the 8 days I allow.')
+      }
+      return
+    }
+    case DEEPBOOK_CALLS.cancel:
+    case DEEPBOOK_CALLS.settle:
+      assertDeepbookPool(call, readObject)
+      return
+    case DEEPBOOK_CALLS.deposit:
+    case DEEPBOOK_CALLS.withdrawAll: {
+      const [coin, ...rest] = normalizedTypes(call.typeArguments) ?? []
+      if ((coin !== DEEPBOOK_SUI && coin !== DEEPBOOK_USDC) || rest.length !== 0) {
+        fail('This order trades other tokens than SUI and USDC.')
+      }
+      return
+    }
+    case DEEPBOOK_CALLS.register:
+      if (readObject(call.arguments[1]) !== DEEPBOOK_REGISTRY) {
+        fail('This transaction writes to a different DeepBook registry.')
+      }
+      return
+    case DEEPBOOK_CALLS.share: {
+      const [shared, ...rest] = normalizedTypes(call.typeArguments) ?? []
+      if (shared !== normalizeStructTag(DEEPBOOK_MANAGER_TYPE) || rest.length !== 0) {
+        fail('This transaction shares something other than your DeepBook account.')
+      }
+      return
+    }
+    default:
+      return
+  }
+}
+
+/**
+ * Exactly what placing, cancelling and collecting use. Left out, because each hands control of a
+ * manager to another address: `mint_trade_cap`, `mint_deposit_cap`, `mint_withdraw_cap` and
+ * `new_with_custom_owner`. The framework's `public_share_object` is allowed only for a manager.
+ */
+export const DEEPBOOK_POLICY: PtbPolicy = {
+  venueName: 'DeepBook',
+  allowedCalls: new Set(Object.values(DEEPBOOK_CALLS)),
+  checkCall: checkDeepbookCall,
 }

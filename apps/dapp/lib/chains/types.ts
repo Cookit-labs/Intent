@@ -1,4 +1,6 @@
 import type { ChainSlug } from '@intent/types'
+import type { CowOrder } from './evm/cow-rules'
+import type { LimitBook } from './limit'
 
 /**
  * Doing something on a chain that is not Stellar, in three moves: prepare on the
@@ -13,6 +15,8 @@ export type ChainActionKind =
   | 'supply'
   | 'stake'
   | 'send'
+  /** Resting an order at a price the person names, until it fills or expires. */
+  | 'limit'
   | 'withdraw'
   | 'unstake'
   | 'borrow'
@@ -75,6 +79,8 @@ export interface ChainActionRequest {
    * money goes, so it is checked and never changed.
    */
   recipient?: string | undefined
+  /** Limit orders only: the price of the non-stable token in the stable one, as typed. */
+  limitPrice?: string | undefined
   /** Streams only: whole days the amount is paid over. */
   durationDays?: string | undefined
   /** Invoices only: when it is due, as YYYY-MM-DD. */
@@ -105,17 +111,26 @@ export type SigningPayload =
       /** An ERC-20 `approve` the wallet sends and sees confirmed first, when the call pulls a token. */
       approval?: { to: string; data: string } | undefined
     }
+  /** A message, not a transaction: signing it moves nothing until the venue's server posts it. */
+  | {
+      family: 'evm-typed'
+      chainId: number
+      account: string
+      typedData: { domain: object; types: object; primaryType: 'Order'; message: CowOrder }
+    }
   | { family: 'stellar'; xdr: string; account: string }
 
 /**
  * What a wallet gives back. Solana, Sui and Stellar wallets return signed bytes the
- * server checks and submits. NEAR and EVM wallets send the transactions themselves.
+ * server checks and submits. NEAR and EVM wallets send the transactions themselves. A typed EVM
+ * message comes back as a signature the server checks and posts.
  */
 export type SignedPayload =
   | { family: 'solana'; signedTransaction: string }
   | { family: 'sui'; transaction: string; signature: string }
   | { family: 'near'; hashes: string[] }
   | { family: 'evm'; hash: string }
+  | { family: 'evm-typed'; signature: string }
   | { family: 'stellar'; signedXdr: string }
 
 export type SignedOutcome =
@@ -138,6 +153,8 @@ export interface PreparedAction {
   signing: SigningPayload
   /** Returned unchanged at submit, for venues whose submit step needs it. */
   context?: Record<string, string> | undefined
+  /** A setup step: the same request must be prepared again once this one settles. */
+  thenPrepareAgain?: true
 }
 
 export interface SubmitInput {
@@ -203,7 +220,10 @@ export interface ChainVenue {
    * venue's API and the browser are both outside what this server controls.
    *
    * `context` is what `prepare` issued, handed back by the browser. A venue that reads it
-   * must prove the server wrote it before believing any of it.
+   * must prove the server wrote it before believing any of it. The exception is a venue that only
+   * compares it with the signed bytes, and whose submit does nothing else with it, as Kamino's limit
+   * orders do: anyone holding the wallet's signature can broadcast those bytes directly, so a proof
+   * would stop nothing.
    */
   assertSafe: (
     payload: SigningPayload,
@@ -217,6 +237,18 @@ export interface ChainVenue {
    * only: nothing is built. A venue without this can't follow a swap.
    */
   assertCanFollow?: ((step: FollowOnStep, account: string) => Promise<void>) | undefined
+  /** A limit order's one-off setup cost in the native coin, kept back on top of the fee reserve. */
+  limitCost?: { amount: string; symbol: string } | undefined
+  /**
+   * For a venue whose setup is paid once per account: what this one still owes, or nothing. Takes the
+   * place of `limitCost` in the reserve, which there is only the most it can come to.
+   */
+  limitCostNow?:
+    | ((
+        request: ChainActionRequest,
+        account: string
+      ) => Promise<{ amount: string; symbol: string } | undefined>)
+    | undefined
 }
 
 /** A step that would follow a swap. The amount isn't known until the swap has delivered it. */
@@ -287,6 +319,7 @@ export interface ChainModule {
   balances: (account: string, signal?: AbortSignal) => Promise<WalletBalances>
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
+  limitBook?: LimitBook
 }
 
 /** "an Avalanche", "a Monad". */

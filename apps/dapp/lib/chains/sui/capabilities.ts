@@ -10,4 +10,5 @@ export const suiCapabilities: ChainCapability[] = [
   { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
   { kind: 'unstake', venue: 'SpringSui', symbol: 'sSUI' },
   { kind: 'claim', venue: 'Walrus', symbol: 'WAL' },
+  { kind: 'limit', venue: 'DeepBook', symbol: 'SUI' },
 ]

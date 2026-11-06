@@ -19,6 +19,7 @@ const Body = z.object({
       'supply',
       'stake',
       'send',
+      'limit',
       'withdraw',
       'unstake',
       'borrow',
@@ -37,6 +38,7 @@ const Body = z.object({
     tokenOut: z.string().min(1).max(16).optional(),
     venue: z.string().min(1).max(40).optional(),
     recipient: z.string().min(1).max(128).optional(),
+    limitPrice: z.string().min(1).max(40).optional(),
     durationDays: z
       .string()
       .regex(/^[1-9]\d{0,4}$/)
@@ -81,6 +83,7 @@ export async function POST(
       tokenOut,
       venue,
       recipient,
+      limitPrice,
       durationDays,
       dueDate,
       invoiceId,
@@ -95,6 +98,7 @@ export async function POST(
         ...(tokenOut !== undefined ? { tokenOut } : {}),
         ...(venue !== undefined ? { venue } : {}),
         ...(recipient !== undefined ? { recipient } : {}),
+        ...(limitPrice !== undefined ? { limitPrice } : {}),
         ...(durationDays !== undefined ? { durationDays } : {}),
         ...(dueDate !== undefined ? { dueDate } : {}),
         ...(invoiceId !== undefined ? { invoiceId } : {}),

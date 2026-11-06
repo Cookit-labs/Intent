@@ -245,6 +245,10 @@ export async function confirmEvmCall(
   client: EvmClient = evmClient(policy.chain)
 ): Promise<SubmitResult> {
   const { name, chain } = EVM_CHAINS[policy.chain]
+  // A signed message can't have moved anything, whatever wallet signed it.
+  if (signed.family === 'evm-typed') {
+    return { ok: false, error: 'That is a signed message, not a transaction, so nothing was sent.' }
+  }
   if (signed.family !== 'evm' || !EVM_HASH.test(signed.hash)) {
     return pending(
       "The wallet didn't return a transaction this app can follow. Check your wallet's activity before trying again, in case it was sent."

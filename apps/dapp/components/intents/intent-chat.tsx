@@ -185,6 +185,7 @@ import { parseStellarExit, whereReply, type StellarExit } from '../../lib/lend/p
 import type { BlendPositions } from '../../lib/lend/position'
 import { suppliableReserve } from '../../lib/lend/reserves'
 import { lendingVenueName } from '../../lib/lend/venues'
+import { ChainOrdersCard } from './chain-orders-card'
 import { IntentConfirm, type UnderstoodIntent } from './intent-confirm'
 import { resolveAsset, toBaseUnits } from '../../lib/swap/assets'
 import { toPriceFraction } from '../../lib/swap/limit-price'
@@ -393,6 +394,8 @@ export function IntentChat({
   // to catch a misread instruction is before the agents spend a minute arguing
   // about a trade that was never the one asked for.
   const [pending, setPending] = useState<UnderstoodIntent | null>(null)
+  /** The message that asked for the resting limit orders, while their list is on screen. */
+  const [ordersShown, setOrdersShown] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   // The conversation around the open intent. `thread` holds the turns that came
   // before it, kept in view so the chat reads as one; `notes` are things the
@@ -2201,6 +2204,7 @@ export function IntentChat({
       return
     }
 
+    setOrdersShown(null)
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
     const capabilities = chainCapabilities(slug)
     const chainRead =
@@ -2275,8 +2279,19 @@ export function IntentChat({
         startCashout(chainRead.route, text)
         return
       }
-      if (chainRead.kind === 'action') {
+      if (chainRead.kind === 'action' || chainRead.kind === 'limit') {
         startChainAction(chainRead.action, text)
+        return
+      }
+      if (chainRead.kind === 'orders') {
+        setClarifying(null)
+        setMessage(text)
+        resetTurnState()
+        setParsed(null)
+        setTurnId(null)
+        clearChainRace()
+        chainAction.reset()
+        setOrdersShown(text)
         return
       }
       // A step 2 card still unsigned goes too, and the run's button is what brings it back.
@@ -2494,7 +2509,12 @@ export function IntentChat({
     // sentence goes, and only what the person typed themselves can be signed.
     if (chainCaps !== undefined) {
       const shown = turns[0]?.content ?? text
-      const route = chainRouteFromReading(answer.read, answer.instruction, said)
+      const route = chainRouteFromReading(
+        answer.read,
+        answer.instruction,
+        said,
+        slug as ChainWithActions
+      )
       if (route !== null && 'sequence' in route) {
         leaveSequence()
         startChainSequence(route.sequence, shown)
@@ -3561,6 +3581,9 @@ export function IntentChat({
                     typedStep={typedStep}
                   />
                 </div>
+              ) : null}
+              {ordersShown !== null ? (
+                <ChainOrdersCard action={chainAction} asked={ordersShown} />
               ) : null}
 
               {cashout.session !== null ? (

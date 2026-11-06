@@ -5,6 +5,9 @@ import {
   routeCashout,
   type CashoutRoute,
 } from '../weave/parse-cashout'
+import { LIMIT_NOT_HERE } from './limit'
+import { ordersAsked } from './orders-view'
+import { LIMIT_EXAMPLES, limitSaid, limitShapeRefusal, parseChainLimit } from './parse-limit'
 import { AMOUNT, amountOf, chainTokenWord, dollarsOn, parseChainAction } from './parse-action'
 import {
   SEQUENCE_CASHOUT_CHAINS,
@@ -112,6 +115,8 @@ export type ChainMessageRead =
   | { kind: 'refusal'; refusal: string }
   | { kind: 'sequence'; request: ChainSequenceRequest }
   | { kind: 'action'; action: ChainActionRequest }
+  | { kind: 'limit'; action: ChainActionRequest }
+  | { kind: 'orders' }
   | { kind: 'cashout'; route: CashoutGoes }
   | { kind: 'model' }
 
@@ -161,6 +166,19 @@ export function readChainMessage(
   }
   const currency = swapIntoCurrency(text, chain, chainName)
   if (currency !== undefined) return currency
+  // Before the plain parser, which would read "swap 50 USDC to SOL at 90" as a swap on a venue "90".
+  const notHere = LIMIT_NOT_HERE[chain]
+  const limit = parseChainLimit(text)
+  if (limit !== null) {
+    return notHere === undefined
+      ? { kind: 'limit', action: limit }
+      : { kind: 'refusal', refusal: notHere }
+  }
+  const shape = limitShapeRefusal(text)
+  if (shape !== undefined) return { kind: 'refusal', refusal: notHere ?? shape }
+  if (ordersAsked(text)) {
+    return notHere === undefined ? { kind: 'orders' } : { kind: 'refusal', refusal: notHere }
+  }
   const action = parseChainAction(text)
   return action === null ? { kind: 'model' } : { kind: 'action', action }
 }
@@ -178,7 +196,7 @@ export function messageStartsAction(route: CashoutRoute, read: ChainMessageRead 
   if (cashoutStarts(route)) return true
   if (read === null) return false
   if (read.kind === 'cashout') return cashoutStarts(read.route)
-  return read.kind === 'sequence' || read.kind === 'action'
+  return read.kind === 'sequence' || read.kind === 'action' || read.kind === 'limit'
 }
 
 /**
@@ -195,6 +213,8 @@ export interface ReadSwap {
   followOn: { kind: string; venue: string; venueNamed?: true; recipient?: string } | null
   /** A follow-on the server read and this chain can't honour. It must not become a plain swap. */
   followOnRefused?: { kind: 'lend' | 'offramp'; venue: string } | undefined
+  /** How the model read the order: a `limit` must never run as a market swap. */
+  style?: string | undefined
 }
 
 const EXAMPLE_AFTER: Record<string, string> = {
@@ -413,6 +433,34 @@ export type ChainRoute =
   | { action: ChainActionRequest }
   | { refusal: string }
 
+/** A limit order a model read, held to the person's words, or why not. Nothing when it is no limit. */
+function limitRouteFromReading(
+  read: ReadSwap,
+  instruction: string,
+  said: readonly string[],
+  chain: ChainWithActions | undefined
+): ChainRoute | undefined {
+  const limit = parseChainLimit(instruction)
+  const notHere = chain === undefined ? undefined : LIMIT_NOT_HERE[chain]
+  if (limit !== null) {
+    if (notHere !== undefined) return { refusal: notHere }
+    if (limitSaid(limit, said)) return { action: limit }
+    return {
+      refusal: `I could not find that amount, token and price in what you typed, and only your own words decide what is signed. Say it in full, ${LIMIT_EXAMPLES}. Nothing was signed or sent.`,
+    }
+  }
+  const shape = limitShapeRefusal(instruction)
+  if (shape !== undefined) return { refusal: notHere ?? shape }
+  if (read.style === 'limit') {
+    return {
+      refusal:
+        notHere ??
+        `I could not read that as a limit order. Say it in full, ${LIMIT_EXAMPLES}. Nothing was signed or sent.`,
+    }
+  }
+  return undefined
+}
+
 /**
  * Where an orchestrator reading goes off Stellar, so it never reaches Stellar's swap card.
  *
@@ -426,8 +474,11 @@ export type ChainRoute =
 export function chainRouteFromReading(
   read: ReadSwap & { action: string },
   instruction: string,
-  said: readonly string[]
+  said: readonly string[],
+  chain?: ChainWithActions
 ): ChainRoute | null {
+  const limit = limitRouteFromReading(read, instruction, said, chain)
+  if (limit !== undefined) return limit
   if (read.followOn !== null || read.followOnRefused !== undefined) {
     const out = sequenceFromReading(read, said)
     return out === null ? null : 'refusal' in out ? out : { sequence: out }

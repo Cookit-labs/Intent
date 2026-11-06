@@ -199,7 +199,10 @@ export function cleanIdentifier(text: string): string {
 
 type SigningFamily = SigningPayload['family']
 
-/** These wallets broadcast for themselves, so an error back may follow a transfer that went out. */
+/**
+ * These wallets broadcast for themselves, so an error back may follow a transfer that went out. A
+ * typed EVM message is only signed, and goes nowhere until the server posts it.
+ */
 export function walletSends(family: SigningFamily): boolean {
   return family === 'near' || family === 'evm'
 }

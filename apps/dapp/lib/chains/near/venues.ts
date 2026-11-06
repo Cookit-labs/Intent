@@ -34,6 +34,18 @@ export const nearVenues: Venue[] = [
   },
   rheaDexListing,
   {
+    id: 'rhea-limit',
+    family: 'near',
+    name: 'Rhea',
+    category: 'orderbook',
+    chains: NEAR,
+    bestFor: 'Selling or buying NEAR at a price you name, until it fills or you cancel it',
+    url: 'https://rhea.finance',
+    integration: 'executes',
+    capability:
+      'Places, reads, cancels and collects NEAR orders against USDC, and checks every transaction before you sign. What fills waits on Rhea until you collect it. Mainnet only. No order has been signed through this app yet.',
+  },
+  {
     id: 'rnear',
     family: 'near',
     name: 'rNEAR',

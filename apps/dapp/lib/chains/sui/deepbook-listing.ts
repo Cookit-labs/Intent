@@ -10,5 +10,5 @@ export const deepbookListing: Venue = {
   bestFor: "Swaps straight against Sui's on-chain order book",
   integration: 'executes',
   capability:
-    'Swaps SUI, USDC and USDsui at market, and USDT when its thin book can fill. Limit orders are not connected yet',
+    'Swaps SUI, USDC and USDsui at market, and USDT when its thin book can fill. Limit orders are listed apart, as DeepBook Limit Orders',
 }

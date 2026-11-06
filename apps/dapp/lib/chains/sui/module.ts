@@ -5,6 +5,7 @@ import { aftermathVenue } from './aftermath'
 import { readSuiBalances } from './balances'
 import { cetusVenue } from './cetus'
 import { deepbookVenue } from './deepbook'
+import { deepbookBook, deepbookLimitVenue } from './deepbook-limit'
 import { momentumVenue } from './momentum'
 import { naviVenue } from './navi'
 import { priceFromLlama } from './price'
@@ -29,6 +30,7 @@ export function buildSuiVenues(
     springsuiVenue,
     aftermathVenue,
     walrusVenue,
+    deepbookLimitVenue,
     ...(canIssueOneClick(env) ? [createSendVenue('sui')] : []),
   ]
 }
@@ -46,6 +48,7 @@ export const suiModule: ChainModule = {
     stake: 'springsui',
     unstake: 'springsui',
     send: SEND_VENUE_ID,
+    limit: 'deepbook-limit',
   },
   venueForToken: {
     stake: { WAL: 'walrus' },
@@ -54,4 +57,5 @@ export const suiModule: ChainModule = {
   priceUsd: (token) => priceFromLlama(token),
   submit: (input) => submitSui(input),
   balances: readSuiBalances,
+  limitBook: deepbookBook(),
 }

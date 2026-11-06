@@ -1,5 +1,6 @@
 import type { ParsedIntent } from '../parse-intent'
 import type { PerpFacts } from '../perps/market-facts'
+import type { RestOption } from './rest-option'
 
 /**
  * The seam between the competition flow and whatever produces agent proposals.
@@ -48,6 +49,8 @@ export interface MarketContext {
   prices: Record<string, number>
   /** Venues the agent may name, already filtered to the active chain. */
   venues: { id: string; name: string; category: string }[]
+  /** A resting order the agents may propose instead of filling. Off Stellar only. */
+  rest?: RestOption
   volatilityHint: 'low' | 'normal' | 'elevated'
   gasHint: 'cheap' | 'normal' | 'expensive'
   /**

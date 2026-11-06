@@ -96,7 +96,16 @@ Return your answer by calling the submit_proposal tool. Do not reply with prose.
 
 Your reasoning is shown directly to the user in a chat bubble: at most two sentences and under 300 characters, no preamble, no restating the question. Never use an em dash or an en dash; use a period or a comma. Decide quickly and commit. Do not enumerate alternatives you are not going to choose, and do not re-derive the same figure twice.`
 
+/**
+ * Added only when the market context lists a resting option. The plan stays a single fill unless
+ * the agent judges that resting is worth its cost.
+ */
+const REST_ADDENDUM = `
+
+The market context lists a resting option. Besides filling now, you may propose resting: the person's order waits on the book at your price and may never fill, and placing it costs the amount stated there, so weigh that cost against the amount being traded. A very small swap should fill. To rest, set executionMode "rest" and restPriceUsd to a price inside the range the market context gives, still choosing the route you would take to fill. Any price outside that range, and any split, becomes a fill. The person reviews and signs the order themselves.`
+
 /** The brief for this chain. Stellar's is exactly the one it has always had. */
-export function systemPromptFor(chain: string): string {
-  return chain === 'stellar' ? SYSTEM_PROMPT : CHAIN_BRIEF
+export function systemPromptFor(chain: string, withRest: boolean = false): string {
+  if (chain === 'stellar') return SYSTEM_PROMPT
+  return withRest ? `${CHAIN_BRIEF}${REST_ADDENDUM}` : CHAIN_BRIEF
 }

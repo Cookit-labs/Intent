@@ -36,6 +36,11 @@ export interface SolanaVenuePolicy {
   programs: Readonly<Record<string, { discriminators?: readonly string[] }>>
   /** Whether wrapping SOL (a transfer to the account's own wrapped SOL account) is expected. */
   mayWrapSol: boolean
+  /**
+   * The one extra signer a venue may ask for: a brand new account this same transaction creates,
+   * paid for by the wallet, at exactly this size and rent, and owned by this program.
+   */
+  createsSigner?: { owner: string; space: bigint; lamports: bigint }
   /** Whether closing an empty token account of the person's, rent back to them, is expected. */
   mayCloseOwnAccounts?: boolean
 }
@@ -119,28 +124,31 @@ export function decodeSolanaTransaction(base64: string): DecodedSolanaTransactio
 }
 
 /**
- * The owner's token account for a mint. Written out rather than taken from the
- * kit's async derivation because `assertSafe` is synchronous by contract.
+ * A program's derived address. Written out rather than taken from the kit's async
+ * derivation because `assertSafe` is synchronous by contract.
  */
-export function associatedTokenAccount(owner: string, mint: string): string {
-  const encoder = getAddressEncoder()
+export function programAddress(seeds: readonly Uint8Array[], program: string): string {
   const decoder = getAddressDecoder()
-  const seeds = [
-    encoder.encode(owner as Address),
-    encoder.encode(TOKEN_PROGRAM as Address),
-    encoder.encode(mint as Address),
-  ]
-  const program = encoder.encode(ASSOCIATED_TOKEN_PROGRAM as Address)
+  const programBytes = Uint8Array.from(getAddressEncoder().encode(program as Address))
   for (let bump = 255; bump >= 0; bump -= 1) {
     const hash = createHash('sha256')
-    for (const seed of seeds) hash.update(Uint8Array.from(seed))
+    for (const seed of seeds) hash.update(seed)
     hash.update(Uint8Array.of(bump))
-    hash.update(Uint8Array.from(program))
+    hash.update(programBytes)
     hash.update('ProgramDerivedAddress')
     const candidate = decoder.decode(hash.digest())
     if (isOffCurveAddress(candidate)) return candidate
   }
-  throw new Error('No program address for this owner.')
+  throw new Error('No program address for these seeds.')
+}
+
+/** The owner's token account for a mint. */
+export function associatedTokenAccount(owner: string, mint: string): string {
+  const encoder = getAddressEncoder()
+  return programAddress(
+    [owner, TOKEN_PROGRAM, mint].map((part) => Uint8Array.from(encoder.encode(part as Address))),
+    ASSOCIATED_TOKEN_PROGRAM
+  )
 }
 
 export function ownWrappedSolAccount(owner: string): string {
@@ -183,6 +191,30 @@ function checkComputeBudget(instructions: readonly DecodedInstruction[]): void {
   if ((price * limit) / BigInt(1_000_000) > MAX_PRIORITY_FEE_LAMPORTS) {
     refuse('This transaction would pay an unusually large priority fee from your SOL.')
   }
+}
+
+/** Whether this is the policy's one permitted account creation, paid for by the wallet. */
+function createsExtraSigner(
+  transaction: DecodedSolanaTransaction,
+  instruction: DecodedInstruction,
+  account: string,
+  policy: SolanaVenuePolicy,
+  extraSigner: string | undefined
+): boolean {
+  const { data } = instruction
+  const allowed = policy.createsSigner
+  return (
+    allowed !== undefined &&
+    extraSigner !== undefined &&
+    data.length === 52 &&
+    readLittleEndian(data, 0, 4) === BigInt(0) &&
+    instruction.accounts.length === 2 &&
+    staticAccount(transaction, instruction, 0) === account &&
+    staticAccount(transaction, instruction, 1) === extraSigner &&
+    readLittleEndian(data, 4, 8) === allowed.lamports &&
+    readLittleEndian(data, 12, 8) === allowed.space &&
+    getAddressDecoder().decode(data.subarray(20)) === allowed.owner
+  )
 }
 
 function checkSystem(
@@ -262,9 +294,12 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
     if (transaction.feePayer !== account) {
       refuse(`This transaction’s network fee would not be paid by your wallet, ${account}.`)
     }
-    if (transaction.signerCount !== 1 || transaction.readonlySignerCount !== 0) {
+    const mayHaveExtra = policy.createsSigner !== undefined && transaction.signerCount === 2
+    if ((transaction.signerCount !== 1 && !mayHaveExtra) || transaction.readonlySignerCount !== 0) {
       refuse('This transaction needs a signature from someone other than you.')
     }
+    const extraSigner = mayHaveExtra ? transaction.staticAccounts[1] : undefined
+    let created = 0
 
     const budget: DecodedInstruction[] = []
     for (const instruction of transaction.instructions) {
@@ -273,8 +308,14 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
         refuse('This transaction calls a program hidden in a lookup table.')
       }
       if (program === COMPUTE_BUDGET_PROGRAM) budget.push(instruction)
-      else if (program === SYSTEM_PROGRAM) checkSystem(transaction, instruction, account, policy)
-      else if (program === TOKEN_PROGRAM) checkToken(transaction, instruction, account, policy)
+      else if (
+        program === SYSTEM_PROGRAM &&
+        createsExtraSigner(transaction, instruction, account, policy, extraSigner)
+      ) {
+        created += 1
+      } else if (program === SYSTEM_PROGRAM) {
+        checkSystem(transaction, instruction, account, policy)
+      } else if (program === TOKEN_PROGRAM) checkToken(transaction, instruction, account, policy)
       else if (program === ASSOCIATED_TOKEN_PROGRAM) {
         checkAssociatedToken(transaction, instruction, account)
       } else {
@@ -288,6 +329,9 @@ export function solanaAssertSafe(policy: SolanaVenuePolicy) {
           refuse(`This transaction asks ${policy.venueName} for an instruction I didn’t expect.`)
         }
       }
+    }
+    if (mayHaveExtra && created !== 1) {
+      refuse('This transaction needs a signature from someone other than you.')
     }
     checkComputeBudget(budget)
   }

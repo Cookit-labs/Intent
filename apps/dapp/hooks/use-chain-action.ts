@@ -9,6 +9,7 @@ import {
   afterSubmitting,
   attemptNotice,
   attemptStorage,
+  continueSource,
   earlierAttempt,
   latchBeforeSign,
   noteSubmitAnswer,
@@ -17,6 +18,7 @@ import {
   quoteExpiredBeforeSigning,
   recordAttempt,
   submitSigned,
+  type ActionSource,
   type AttemptNotice,
   type SignAttempt,
 } from '../lib/chains/signing-flow'
@@ -49,6 +51,8 @@ export interface ChainActionState {
   raceId?: string
   /** This same action was already started recently, perhaps before a reload. */
   earlier?: AttemptNotice
+  /** What this card was built from, so a setup step can build the next one again. */
+  source?: ActionSource
 }
 
 export interface ChainAction extends ChainActionState {
@@ -68,6 +72,12 @@ export interface ChainAction extends ChainActionState {
   prepare: (request: ChainActionRequest, asked: string, raceId?: string) => void
   /** Shows a message in the card without building anything, for what can't be read. */
   refuse: (message: string, asked: string) => void
+  /** Builds the cancel or the collect of a resting order. */
+  prepareExit: (orderId: string, action: 'cancel' | 'collect', asked: string) => void
+  /** After a setup step settled: builds what it was a step toward. Nothing while building. */
+  continueSetup: () => void
+  /** A setup step has settled and the next card is one press away. */
+  canContinue: boolean
   confirm: () => void
   reset: () => void
 }
@@ -103,8 +113,9 @@ export function useChainAction(): ChainAction {
     setState({ phase: 'failed', asked, error: message })
   }, [])
 
-  const prepare = useCallback(
-    (request: ChainActionRequest, asked: string, raceId?: string) => {
+  const build = useCallback(
+    (source: ActionSource, continuing: boolean, raceId?: string) => {
+      const asked = source.asked
       if (address === undefined) {
         setState({ phase: 'failed', asked, error: 'Connect a wallet first.' })
         return
@@ -112,14 +123,27 @@ export function useChainAction(): ChainAction {
       const account = address
       generation.current += 1
       const mine = generation.current
+      const exit = source.kind === 'exit' ? `${source.action}:${source.orderId}` : undefined
 
       async function run(): Promise<void> {
-        setState({ phase: 'building', asked, building: request.kind })
-        const res = await fetch(`/api/chain/${slug}/prepare`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ account, request }),
+        setState({
+          phase: 'building',
+          asked,
+          building: source.kind === 'request' ? source.request.kind : 'swap',
+          source,
         })
+        const res =
+          source.kind === 'request'
+            ? await fetch(`/api/chain/${slug}/prepare`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account, request: source.request }),
+              })
+            : await fetch(`/api/chain/${slug}/orders`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account, orderId: source.orderId, action: source.action }),
+              })
         const body = (await res.json()) as { prepared?: PreparedAction; error?: string }
         if (generation.current !== mine) return
         if (body.prepared === undefined) {
@@ -130,17 +154,22 @@ export function useChainAction(): ChainAction {
           })
           return
         }
-        const earlier = earlierAttempt(attemptStorage(), {
-          chain: slug,
-          account,
-          tokenIn: body.prepared.pay.symbol,
-          amount: body.prepared.pay.amount,
-        })
+        // A step after a setup step is the same request again, which is no second attempt.
+        const earlier = continuing
+          ? undefined
+          : earlierAttempt(attemptStorage(), {
+              chain: slug,
+              account,
+              tokenIn: body.prepared.pay.symbol,
+              amount: body.prepared.pay.amount,
+              ...(exit !== undefined ? { exit } : {}),
+            })
         setState({
           phase: 'review',
           asked,
           prepared: body.prepared,
           account,
+          source,
           ...(raceId !== undefined ? { raceId } : {}),
           ...(earlier !== undefined ? { earlier: attemptNotice(earlier) } : {}),
         })
@@ -153,6 +182,24 @@ export function useChainAction(): ChainAction {
     },
     [address, slug]
   )
+
+  const prepare = useCallback(
+    (request: ChainActionRequest, asked: string, raceId?: string) =>
+      build({ kind: 'request', request, asked }, false, raceId),
+    [build]
+  )
+
+  const prepareExit = useCallback(
+    (orderId: string, action: 'cancel' | 'collect', asked: string) =>
+      build({ kind: 'exit', orderId, action, asked }, false),
+    [build]
+  )
+
+  const next = continueSource(state.phase, state.prepared, state.source)
+  const raceOfCard = state.raceId
+  const continueSetup = useCallback(() => {
+    if (next !== undefined) build(next, true, raceOfCard)
+  }, [next, build, raceOfCard])
 
   const confirm = useCallback(() => {
     const prepared = state.prepared
@@ -188,6 +235,9 @@ export function useChainAction(): ChainAction {
         tokenIn: prepared.pay.symbol,
         amount: prepared.pay.amount,
         at: Date.now(),
+        ...(state.source?.kind === 'exit'
+          ? { exit: `${state.source.action}:${state.source.orderId}` }
+          : {}),
       }
       recordAttempt(storage, attempt)
       // A wallet that sends for itself may send and then report an error, so
@@ -258,7 +308,19 @@ export function useChainAction(): ChainAction {
           "This could not be confirmed. Check your wallet's activity before trying again, in case it went through.",
       }))
     })
-  }, [state.prepared, state.account, state.raceId, adapter, slug])
+  }, [state.prepared, state.account, state.raceId, state.source, adapter, slug])
 
-  return { ...state, signed, requested, release, prepare, refuse, confirm, reset }
+  return {
+    ...state,
+    signed,
+    requested,
+    release,
+    prepare,
+    prepareExit,
+    continueSetup,
+    canContinue: next !== undefined,
+    refuse,
+    confirm,
+    reset,
+  }
 }

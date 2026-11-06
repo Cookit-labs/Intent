@@ -1,6 +1,7 @@
 import type { AgentProposalResult } from './brain'
 import type { ChainRouteQuote } from './chain-routes'
 import { measureChainRoute } from './measure'
+import { priceInBand, type RestOption } from './rest-option'
 
 /**
  * A plan on a chain other than Stellar is one fill and nothing after it.
@@ -10,7 +11,19 @@ import { measureChainRoute } from './measure'
  * keeps its route and its reasoning; only the shape of the plan is corrected,
  * so scoring never rewards or punishes a choice that could not happen.
  */
-export function settleChainPlan(proposal: AgentProposalResult): AgentProposalResult {
+export function settleChainPlan(
+  proposal: AgentProposalResult,
+  restOption?: RestOption
+): AgentProposalResult {
+  if (
+    restOption !== undefined &&
+    proposal.executionMode === 'rest' &&
+    proposal.restPriceUsd !== undefined &&
+    priceInBand(proposal.restPriceUsd, restOption)
+  ) {
+    const { splitPct: _split, thenAction: _then, thenVenue: _venue, ...resting } = proposal
+    return { ...resting, executionMode: 'rest', sliceCount: 1 }
+  }
   const {
     restPriceUsd: _rest,
     splitPct: _split,

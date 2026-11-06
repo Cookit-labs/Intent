@@ -13,6 +13,7 @@ import type {
 import { configuredLendingVenues } from '../../lend/venues'
 import { anchorOn, anchorsOn } from '../../offramp/anchors'
 import { systemPromptFor } from '../brief'
+import { restContextLines } from '../rest-option'
 import type { ChainRouteQuote } from '../chain-routes'
 import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
@@ -146,7 +147,7 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
     .join(', ')
 
   return [
-    { role: 'system', content: systemPromptFor(req.chain) },
+    { role: 'system', content: systemPromptFor(req.chain, req.market.rest !== undefined) },
     {
       role: 'system',
       content: [
@@ -197,6 +198,7 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
           : []),
         ...perpLines(req),
         ...routeLines(req),
+        ...(req.market.rest !== undefined ? restContextLines(req.market.rest) : []),
       ].join('\n'),
     },
     {

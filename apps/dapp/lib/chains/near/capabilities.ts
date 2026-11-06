@@ -14,4 +14,5 @@ export const nearCapabilities: ChainCapability[] = [
   { kind: 'withdraw', venue: 'Rhea Lend', symbol: 'USDC' },
   { kind: 'borrow', venue: 'Rhea Lend', symbol: 'USDC' },
   { kind: 'repay', venue: 'Rhea Lend', symbol: 'USDC' },
+  { kind: 'limit', venue: 'Rhea', symbol: 'NEAR' },
 ]

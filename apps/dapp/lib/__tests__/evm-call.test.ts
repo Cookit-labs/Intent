@@ -195,6 +195,8 @@ function fakeClient(
   return {
     tokenBalance: async () => BigInt(0),
     nativeBalance: async () => BigInt(0),
+    allowance: async () => BigInt(0),
+    code: async () => undefined,
     waitForReceipt: async () => {
       if (receipt instanceof Error) throw receipt
       return { status: 'success', from: ACCOUNT, to: CONTRACT, logs: [], ...receipt } as EvmReceipt

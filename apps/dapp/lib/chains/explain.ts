@@ -6,6 +6,7 @@ const EXAMPLE: Record<ChainActionKind, (symbol: string, venue: string) => string
   supply: (_symbol, venue) => `supply 25 USDC on ${venue}`,
   stake: (symbol, venue) => `stake 1 ${symbol} with ${venue}`,
   send: (symbol) => `send 5 ${symbol} to an address`,
+  limit: (symbol) => `sell 1 ${symbol} at $110`,
   withdraw: (symbol, venue) => `withdraw 25 ${symbol} from ${venue}`,
   unstake: (symbol, venue) => `unstake 1 ${symbol} from ${venue}`,
   borrow: (symbol, venue) => `borrow 25 ${symbol} on ${venue}`,
@@ -50,7 +51,10 @@ export function chainHelp(chainName: string, capabilities: readonly ChainCapabil
   ) {
     examples.push(`"${EXAMPLE.send('USDC', '')}"`)
   }
-  return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.`
+  const orders = capabilities.some((c) => c.kind === 'limit')
+    ? ' Say "my orders" to see, cancel or collect a limit order.'
+    : ''
+  return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.${orders}`
 }
 
 export const RATE_LIMITED = "You're sending messages quickly. Wait a minute and try again."
