@@ -1,12 +1,13 @@
 import type { Venue } from '@intent/types'
+import { rheaDexListing, rheaLendListing } from './rhea-listing'
 
 const NEAR = ['NEAR']
 
 /**
  * The NEAR table from the integration report, in its order. Only what can be
  * prepared and signed through this app says `executes`; every other row is listed.
- * Rhea Lend stays listed on purpose, after its April 2026 exploit and at about 86%
- * stablecoin utilisation. 1Click into Linq stays listed because a failed bank
+ * Rhea Lend runs because it is the only way to borrow on NEAR, and its card says what its
+ * April 2026 exploit means. 1Click into Linq stays listed because a failed bank
  * payout has no clean refund path.
  */
 export const nearVenues: Venue[] = [
@@ -31,15 +32,7 @@ export const nearVenues: Venue[] = [
     bestFor: 'A route from NEAR USDC to naira, untested end to end',
     url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/about-1click-api',
   },
-  {
-    id: 'rhea-dex',
-    family: 'near',
-    name: 'Rhea DEX',
-    category: 'swap',
-    chains: NEAR,
-    bestFor: 'The main on-chain DEX on NEAR, for retail-sized trades',
-    url: 'https://rhea.finance',
-  },
+  rheaDexListing,
   {
     id: 'rhea-limit',
     family: 'near',
@@ -62,7 +55,7 @@ export const nearVenues: Venue[] = [
     url: 'https://rhea.finance',
     integration: 'executes',
     capability:
-      'Stakes NEAR for rNEAR on lst.rhealab.near, showing the rate Rhea publishes. Mainnet only. No stake has been signed through this app yet.',
+      'Stakes NEAR for rNEAR on lst.rhealab.near, showing the rate Rhea publishes, and unstakes it with a wait and then a claim. Mainnet only. Nothing has been signed through this app yet.',
   },
   {
     id: '1click-earn',
@@ -74,17 +67,9 @@ export const nearVenues: Venue[] = [
     url: 'https://docs.near-intents.org/integration/distribution-channels/1click-api/earn',
     integration: 'executes',
     capability:
-      'Puts USDC or USDT into Gauntlet USDC Prime on Base, held in your NEAR Intents balance. Quotes start around $20. This app cannot show or withdraw the position yet. Mainnet only. No deposit has been signed through this app yet.',
+      'Puts USDC or USDT into Gauntlet USDC Prime on Base, held in your NEAR Intents balance. Quotes start around $20. Taking it out sells the share back into your NEAR Intents balance, then a claim pays you. Mainnet only. No deposit has been signed through this app yet.',
   },
-  {
-    id: 'rhea-lend',
-    family: 'near',
-    name: 'Rhea Lend',
-    category: 'lending',
-    chains: NEAR,
-    bestFor: 'Lending on NEAR. Exploited for about $18.4M in April 2026, and exits can be limited',
-    url: 'https://rhea.finance',
-  },
+  rheaLendListing,
   {
     id: 'metapool',
     family: 'near',
@@ -95,7 +80,7 @@ export const nearVenues: Venue[] = [
     url: 'https://metapool.app',
     integration: 'executes',
     capability:
-      'Stakes NEAR for stNEAR on meta-pool.near, from 1 NEAR. Mainnet only. No stake has been signed through this app yet.',
+      'Stakes NEAR for stNEAR on meta-pool.near, from 1 NEAR, and unstakes it with a wait and then a claim. Mainnet only. Nothing has been signed through this app yet.',
   },
   {
     id: 'near-agent-api',

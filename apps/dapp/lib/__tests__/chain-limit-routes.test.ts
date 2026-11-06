@@ -99,13 +99,6 @@ describe('limit orders are checked before any venue is called', () => {
     expect(venuePrepare).not.toHaveBeenCalled()
   })
 
-  it('holds a limit order to the dollar cap', async () => {
-    await expect(
-      prepareChainAction(module(), limit({ amount: '1000' }), ACCOUNT, {})
-    ).rejects.toThrow(/caps each trade/)
-    expect(venuePrepare).not.toHaveBeenCalled()
-  })
-
   it('refuses when no venue does limit orders', async () => {
     const m = module({ venues: [], defaultVenue: {} })
     await expect(prepareChainAction(m, limit(), ACCOUNT)).rejects.toThrow(ChainActionRefused)

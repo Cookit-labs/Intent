@@ -1,4 +1,5 @@
 import type { CashoutCurrencyCode } from '../weave/parse-cashout'
+import { closedCashoutReply } from '../weave/types'
 import { sendRefusal } from './recipient'
 import type { ChainActionRequest, ChainVenue, ChainWithActions } from './types'
 
@@ -70,9 +71,8 @@ export function followOnRefusal(
   tokenOut?: string
 ): string | undefined {
   if (followOn.kind === 'cashout') {
-    if (chain === 'near') {
-      return `Weave's NEAR deposits are unavailable right now, so a cash-out can't run from NEAR. ${NOTHING_MOVED}`
-    }
+    const closed = closedCashoutReply(chain)
+    if (closed !== undefined) return closed
     if (!SEQUENCE_CASHOUT_CHAINS.includes(chain)) {
       return `Cash-outs don't run on ${chainName}. ${NOTHING_MOVED}`
     }

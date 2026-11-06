@@ -10,8 +10,8 @@ export interface OtherStellarNetwork {
 /**
  * The Stellar network a deployment does not serve, and where to find it.
  *
- * A deployment is fixed to one network, because the trade cap, the venue
- * lists, the sponsor and the session gate are all decided for that network.
+ * A deployment is fixed to one network, because the venue lists, the
+ * sponsor and the session gate are all decided for that network.
  * So the other network is a separate deployment, reached by a link. The
  * address comes from configuration and is used only if it is http or https,
  * so a bad value cannot become a `javascript:` link in the menu. A mainnet

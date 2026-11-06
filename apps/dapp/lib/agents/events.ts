@@ -1,4 +1,5 @@
 import type { AgentKey, AgentProposalResult, BrainErrorCode } from './brain'
+import type { TalkLine } from './talk-lines'
 
 /**
  * The wire format between the competition route and the client.
@@ -39,6 +40,27 @@ export interface CompetitionProposalFrame {
    * winner's meant clicking any other agent signed the winner's trade.
    */
   route?: unknown
+}
+
+/**
+ * An agent's first take, made before it has seen any other.
+ *
+ * No route: it may still change, so it can't be reviewed. `source` is only the
+ * venue's name, so the thread can say where it fills. `competition:proposal`
+ * is an agent's final plan, in a race that talks as in one that doesn't.
+ */
+export interface CompetitionTakeFrame {
+  type: 'competition:take'
+  competitionId: string
+  proposal: AgentProposalResult
+  source?: string
+}
+
+/** Something that happened between agents. Frames arrive in the order it happened. */
+export interface CompetitionTalkFrame {
+  type: 'competition:talk'
+  competitionId: string
+  line: TalkLine
 }
 
 export interface CompetitionFailedFrame {
@@ -101,6 +123,8 @@ export interface CompetitionErrorFrame {
 export type CompetitionFrame =
   | CompetitionStartedFrame
   | CompetitionProposalFrame
+  | CompetitionTakeFrame
+  | CompetitionTalkFrame
   | CompetitionFailedFrame
   | CompetitionWinnerFrame
   | CompetitionErrorFrame

@@ -169,30 +169,30 @@ describe('prepareChainAction', () => {
   const swap = { kind: 'swap', amount: '10', tokenIn: 'usdc', tokenOut: 'SOL' } as const
 
   it('prepares a valid action', async () => {
-    await expect(prepareChainAction(moduleWith(), swap, 'acct', {})).resolves.toBe(prepared)
+    await expect(prepareChainAction(moduleWith(), swap, 'acct')).resolves.toBe(prepared)
   })
 
   it('refuses a token it does not know', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, tokenOut: 'SCAM' }, 'acct', {})
+      prepareChainAction(moduleWith(), { ...swap, tokenOut: 'SCAM' }, 'acct')
     ).rejects.toThrow(/verified token/)
   })
 
-  it('refuses a trade it cannot price, even when the Stellar default is testnet', async () => {
+  it('builds a trade it cannot price, since nothing here depends on a dollar value', async () => {
     await expect(
-      prepareChainAction(moduleWith({ priceUsd: async () => undefined }), swap, 'acct', {})
-    ).rejects.toThrow(/could not be valued/)
+      prepareChainAction(moduleWith({ priceUsd: async () => undefined }), swap, 'acct')
+    ).resolves.toBeDefined()
   })
 
-  it('refuses a trade over the cap', async () => {
+  it('takes a trade of any size', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, amount: '501' }, 'acct', {})
-    ).rejects.toThrow(/caps each trade/)
+      prepareChainAction(moduleWith(), { ...swap, amount: '5000000' }, 'acct')
+    ).resolves.toBeDefined()
   })
 
   it('refuses a venue that cannot do this', async () => {
     await expect(
-      prepareChainAction(moduleWith(), { ...swap, venue: 'nope' }, 'acct', {})
+      prepareChainAction(moduleWith(), { ...swap, venue: 'nope' }, 'acct')
     ).rejects.toThrow(/can't swap here/)
   })
 
@@ -200,7 +200,7 @@ describe('prepareChainAction', () => {
     const unsafe = (): void => {
       throw new ChainActionRefused('unexpected program')
     }
-    await expect(prepareChainAction(moduleWith({}, unsafe), swap, 'acct', {})).rejects.toThrow(
+    await expect(prepareChainAction(moduleWith({}, unsafe), swap, 'acct')).rejects.toThrow(
       /unexpected program/
     )
   })

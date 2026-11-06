@@ -12,6 +12,8 @@ import { evmDeposit } from './evm/deposit'
 import { EVM_HASH } from './evm/submit'
 import { EVM_CHAINS, evmExplorerUrl, type EvmChain } from './evm/tokens'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './near/account'
+import { resolveRecipient } from './names/resolve'
+import { recipientName } from './names/tlds'
 import { isRegistered } from './near/rpc'
 import { assertTokenTransferSafe } from './near/safety'
 import { buildDepositTransaction } from './near/swap'
@@ -37,9 +39,10 @@ import {
 } from './types'
 
 /**
- * Moves one token to an address a person typed. It can't be undone, so nothing here decides what a
- * transfer is. Each chain's deposit builder builds and checks exactly one, as it does for a Weave
- * order and a 1Click swap, with the recipient standing where the deposit address does.
+ * Moves one token to an address a person typed, or one a name they typed was read to before this
+ * was asked. It can't be undone, so nothing here decides what a transfer is. Each chain's deposit
+ * builder builds and checks exactly one, as it does for a Weave order and a 1Click swap, with the
+ * recipient standing where the deposit address does.
  *
  * The browser carries `context` between prepare and submit, so the recipient, token and amount in
  * it are believed only once `readIssued` proves this server wrote them. With no secret no proof can
@@ -269,6 +272,10 @@ export function createSendVenue(chain: ChainWithActions): ChainVenue {
     }
     const refusal = sendRefusal(chain, symbol, recipient, account)
     if (refusal !== undefined) throw new ChainActionRefused(refusal)
+    // Names are read before a venue is asked. One that got here unread must not be built on.
+    if (recipientName(recipient) !== undefined) {
+      throw new ChainActionRefused(`A send needs an address to go to. ${NOTHING_MOVED}`)
+    }
     return recipient
   }
 
@@ -390,7 +397,11 @@ export function createSendVenue(chain: ChainWithActions): ChainVenue {
     submit,
     assertCanFollow: async ({ tokenIn, recipient }, account) => {
       if (secret() === undefined) throw new ChainActionRefused(UNAVAILABLE)
-      const to = assertSendable(tokenIn, recipient, account)
+      const named =
+        recipient === undefined
+          ? undefined
+          : await resolveRecipient(chain, tokenIn, recipient, account)
+      const to = assertSendable(tokenIn, named?.address ?? recipient, account)
       await inSendWords(async () => mover.assertReceiver?.(to, tokenFor(tokenIn)))
     },
   }

@@ -1,533 +1,283 @@
-import { bcs } from '@mysten/sui/bcs'
 import { Transaction } from '@mysten/sui/transactions'
-import { isValidSuiAddress, normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils'
+import { normalizeSuiAddress } from '@mysten/sui/utils'
 
-import type { LimitBook, RestingOrder } from '../limit'
-import {
-  ChainActionRefused,
-  type ChainActionRequest,
-  type ChainVenue,
-  type PreparedAction,
+import type {
+  ChainActionRequest,
+  ChainVenue,
+  PreparedAction,
+  SigningPayload,
+  VenueQuote,
 } from '../types'
-import { buildUnsigned, suiClient, withTimeout } from './client'
+import { assertSuiAccount } from './client'
 import {
-  addExit,
-  addPlace,
-  decodeIds,
-  decodeManager,
-  decodeOrderId,
-  decodeOrders,
-  decodeSettled,
-  deepbookAssertSafe,
-  deepbookPair,
-  DEEPBOOK_READS,
-  orderFigures,
-  quoteOf,
-  type BookOrder,
-  type ManagerRef,
-  type PoolBook,
-} from './deepbook-rules'
-import {
-  DEEPBOOK_MANAGER_TYPE,
-  DEEPBOOK_POOL,
-  DEEPBOOK_POOL_VERSION,
-  DEEPBOOK_REGISTRY,
-  DEEPBOOK_REGISTRY_VERSION,
-  DEEPBOOK_SUI,
-  DEEPBOOK_USDC,
-} from './policies'
+  bridgeNote,
+  CLOCK,
+  CLOCK_SHARED_VERSION,
+  dataOf,
+  judgeFill,
+  LIVE_SWAP_IO,
+  literalU64,
+  minimumOut,
+  moveCallsNamed,
+  pairTokens,
+  readOrRefuse,
+  refuse,
+  resultOf,
+  sameType,
+  sharedObjectId,
+  slippageNote,
+  tokenType,
+  u64At,
+  unspentNote,
+  type Fill,
+  type SwapIo,
+} from './direct-swap'
+import { assertPtbSafe, moveTarget, type ParsedCall, type PtbPolicy } from './safety'
 import { displayAmount } from './tokens'
 
 /**
- * What simulating on mainnet settled on 5 November 2026, for a public funded wallet and with nothing
- * signed (`sui-deepbook.live.test.ts`):
- *
- * 1. `new`, `deposit`, `generate_proof_as_owner`, `place_limit_order` and `public_share_object` run in
- *    one transaction, so first use is one signature and `thenPrepareAgain` is never set here.
- * 2. `pay_with_deep = false` is accepted on POST_ONLY, for both sides, with exactly the order's amount
- *    deposited and no DEEP anywhere. The Move comment saying it must be true is out of date. The
- *    pool's maker fee is 0 today, so nothing is owed in any coin; `prepare` refuses if that changes.
- * 3. `register_balance_manager` is allowed. Its Move source checks the sender is the manager's owner,
- *    then only adds the manager's id to that owner's set in the registry. In simulation it created one
- *    registry entry and moved nothing. That is how a new device finds the manager, and it is why a
- *    stranger can't plant one: nobody else can register a manager for this account.
+ * DeepBook core, version 9. `DEEPBOOK_PACKAGE_ID` in @mysten/deepbook-v3 2.10.1
+ * (utils/constants.ts), and the Move Registry's @deepbook/core resolves to it. On chain, the
+ * UpgradeCap 0xdadf253c...4483 names this package at version 9, and the book takes calls from it.
  */
+export const DEEPBOOK_PACKAGE = '0xbca0cefe720330e7bb4f2283438b68de6a0e656688db4ac90d61e71fe6151fe8'
 
-const VENUE_ID = 'deepbook-limit'
+/** `DEEP.type` in the same file, and what `swap_exact_base_for_quote`'s signature asks for on chain. */
+export const DEEP_TYPE =
+  '0xdeeb7a4662eec9f2f3def03fb937a663dddaa2e215b8078a284d026b7946c270::deep::DEEP'
+
+export interface DeepbookPool {
+  id: string
+  initialSharedVersion: number
+  base: string
+  quote: string
+}
+
+/**
+ * `mainnetPools` in the same file. On chain each object is a `pool::Pool<Base, Quote>` of these
+ * coins, and `pool::get_pool_id_by_asset` on the registry 0xaf16199a...549d returns this id.
+ */
+export const DEEPBOOK_POOLS: readonly DeepbookPool[] = [
+  {
+    id: '0xe05dafb5133bcffb8d59f4e12465dc0e9faeaa05e3e342a08fe135800e3e4407',
+    initialSharedVersion: 389750322,
+    base: 'SUI',
+    quote: 'USDC',
+  },
+  {
+    id: '0xfc28a2fb22579c16d672a1152039cbf671e5f4b9f103feddff4ea06ef3c2bc25',
+    initialSharedVersion: 646905478,
+    base: 'USDT',
+    quote: 'USDC',
+  },
+  {
+    id: '0x826eeacb2799726334aa580396338891205a41cf9344655e526aae6ddd5dc03f',
+    initialSharedVersion: 804805725,
+    base: 'SUI',
+    quote: 'USDsui',
+  },
+  {
+    id: '0xa374264d43e6baa5aa8b35ff18ff24fdba7443b4bcb884cb4c2f568d32cdac36',
+    initialSharedVersion: 804805725,
+    base: 'USDsui',
+    quote: 'USDC',
+  },
+]
+
 const VENUE_NAME = 'DeepBook'
-const SUI_DECIMALS = 9
-const USDC_DECIMALS = 6
-const READ_TIMEOUT_MS = 10_000
-const EXPIRY_MS = 7 * 24 * 60 * 60 * 1000
-const MAX_U128 = (BigInt(1) << BigInt(128)) - BigInt(1)
-const ZERO = BigInt(0)
-const WAITING_NOTE = 'This is in your DeepBook account, not your wallet, until you press Collect.'
+const SELL_BASE = moveTarget(DEEPBOOK_PACKAGE, 'pool', 'swap_exact_base_for_quote')
+const BUY_BASE = moveTarget(DEEPBOOK_PACKAGE, 'pool', 'swap_exact_quote_for_base')
+const ZERO_COIN = moveTarget('0x2', 'coin', 'zero')
+/** DeepBook scales its fee rates and prices by this. */
+const FLOAT_SCALING = 1e9
+/** `FEE_PENALTY_MULTIPLIER` in DeepBook's constants.move: paying in the input coin costs 25% more. */
+const INPUT_FEE_MULTIPLIER = 1.25
 
-function refused(sentence: string): never {
-  throw new ChainActionRefused(`${sentence} Nothing was signed or sent.`)
-}
-
-function assertAccount(account: string): void {
-  if (!isValidSuiAddress(account)) refused('That is not a Sui address.')
-}
-
-const sui = (raw: bigint): string => displayAmount(raw.toString(), SUI_DECIMALS, SUI_DECIMALS)
-const usdc = (raw: bigint): string => displayAmount(raw.toString(), USDC_DECIMALS, USDC_DECIMALS)
-
-const poolInput = (tx: Transaction) =>
-  tx.sharedObjectRef({
-    objectId: DEEPBOOK_POOL,
-    initialSharedVersion: DEEPBOOK_POOL_VERSION,
-    mutable: false,
-  })
-
-const managerInput = (tx: Transaction, manager: ManagerRef) =>
-  tx.sharedObjectRef({
-    objectId: manager.id,
-    initialSharedVersion: manager.version,
-    mutable: false,
-  })
-
-const POOL_TYPES = { typeArguments: [DEEPBOOK_SUI, DEEPBOOK_USDC] }
-
-/** Each command's return values, from a simulation that signs nothing and changes nothing. */
-async function readCalls(
-  account: string,
-  build: (tx: Transaction) => void,
-  signal?: AbortSignal
-): Promise<Uint8Array[][]> {
-  const tx = new Transaction()
-  tx.setSender(account)
-  build(tx)
-  const result = await withTimeout(
-    suiClient().core.simulateTransaction({
-      transaction: tx,
-      include: { commandResults: true },
-      ...(signal === undefined ? {} : { signal }),
-    }),
-    READ_TIMEOUT_MS,
-    'Reading DeepBook'
-  )
-  if (result.$kind !== 'Transaction') throw new Error('A DeepBook read failed.')
-  return (result.commandResults ?? []).map((c) => c.returnValues.map((v) => v.bcs))
-}
-
-function returned(results: Uint8Array[][], command: number, value = 0): Uint8Array {
-  const bytes = results[command]?.[value]
-  if (bytes === undefined) throw new Error('A DeepBook read came back short.')
-  return bytes
-}
-
-const u64Of = (bytes: Uint8Array): bigint => BigInt(bcs.u64().parse(bytes))
-
-/** A read needed before anything can be built. Failing means building nothing, said in words. */
-async function mustRead<T>(work: () => Promise<T>, what: string): Promise<T> {
-  try {
-    return await work()
-  } catch (e) {
-    if (e instanceof ChainActionRefused) throw e
-    return refused(`I couldn’t read ${what} just now, so try again in a moment.`)
-  }
-}
-
-interface PoolState {
-  book: PoolBook
-  makerFee: bigint
-}
-
-async function readPool(account: string): Promise<PoolState> {
-  const results = await readCalls(account, (tx) => {
-    tx.moveCall({
-      target: DEEPBOOK_READS.bookParams,
-      ...POOL_TYPES,
-      arguments: [poolInput(tx)],
-    })
-    tx.moveCall({
-      target: DEEPBOOK_READS.tradeParams,
-      ...POOL_TYPES,
-      arguments: [poolInput(tx)],
-    })
-  })
-  return {
-    book: {
-      tick: u64Of(returned(results, 0, 0)),
-      lot: u64Of(returned(results, 0, 1)),
-      min: u64Of(returned(results, 0, 2)),
-    },
-    makerFee: u64Of(returned(results, 1, 1)),
-  }
-}
-
-interface Manager extends ManagerRef {
-  owner: string
-  caps: string[]
-}
-
-/**
- * The manager at this id, or nothing if the object there isn't one, isn't shared, or can't be read on
- * its own, as a manager held inside a margin account can't. A failed read still throws.
- */
-async function readManager(id: string): Promise<Manager | undefined> {
-  const object = await withTimeout(
-    suiClient().core.getObject({ objectId: id, include: { content: true } }),
-    READ_TIMEOUT_MS,
-    'Reading DeepBook'
-  ).then(
-    (reply) => reply.object,
-    (e: unknown) => {
-      if (e instanceof Error && /not found/i.test(e.message)) return undefined
-      throw e
-    }
-  )
-  if (object === undefined) return undefined
-  const owner = object.owner
+function requirePair(swap: ParsedCall['typeArguments'], id: string | undefined): void {
+  const pool = DEEPBOOK_POOLS.find((p) => normalizeSuiAddress(p.id) === id)
   if (
-    owner.$kind !== 'Shared' ||
-    normalizeStructTag(object.type) !== normalizeStructTag(DEEPBOOK_MANAGER_TYPE)
+    pool === undefined ||
+    !sameType(swap[0], tokenType(pool.base)) ||
+    !sameType(swap[1], tokenType(pool.quote))
   ) {
-    return undefined
-  }
-  return {
-    id: normalizeSuiAddress(id),
-    version: owner.Shared.initialSharedVersion,
-    ...decodeManager(object.content),
+    refuse('This swap uses a DeepBook pool I have not confirmed for these tokens.')
   }
 }
 
-async function registeredManagers(
-  account: string,
-  signal?: AbortSignal
-): Promise<(Manager | undefined)[]> {
-  const results = await readCalls(
-    account,
-    (tx) => {
-      tx.moveCall({
-        target: DEEPBOOK_READS.managerIds,
-        arguments: [
-          tx.sharedObjectRef({
-            objectId: DEEPBOOK_REGISTRY,
-            initialSharedVersion: DEEPBOOK_REGISTRY_VERSION,
-            mutable: false,
-          }),
-          tx.pure.address(account),
-        ],
-      })
-    },
-    signal
-  )
-  return Promise.all(decodeIds(returned(results, 0)).map(readManager))
+export const DEEPBOOK_POLICY: PtbPolicy = {
+  venueName: VENUE_NAME,
+  allowedCalls: new Set([SELL_BASE, BUY_BASE, ZERO_COIN]),
+  checkCall: (call) => {
+    if (call.target === ZERO_COIN && !sameType(call.typeArguments[0], DEEP_TYPE)) {
+      refuse('This swap makes an empty coin of something other than DEEP.')
+    }
+  },
 }
 
 /**
- * The manager to deposit into. Its owner is read off the object, whatever the registry says. One with
- * a cap minted on it is passed over, since whoever holds that cap could trade or withdraw what goes
- * in, and a clean one is opened instead.
+ * Exactly one swap, on a pinned pool of the coins it names, with a stated minimum and an empty DEEP
+ * coin, so the fee comes out of the input and nothing else in the wallet is touched.
  */
-async function managerFor(account: string): Promise<Manager | 'new'> {
-  const me = normalizeSuiAddress(account)
-  const managers = await mustRead(() => registeredManagers(account), 'your DeepBook account')
-  const held = managers.filter((m): m is Manager => m !== undefined)
-  if (held.some((m) => m.owner !== me)) {
-    refused('A DeepBook account registered here belongs to another wallet.')
+function assertOneMarketSwap(payload: SigningPayload): void {
+  const data = dataOf(payload)
+  const swaps = [...moveCallsNamed(data, SELL_BASE), ...moveCallsNamed(data, BUY_BASE)]
+  const [swap] = swaps
+  if (swap === undefined || swaps.length !== 1) {
+    return refuse('This transaction should make exactly one swap.')
   }
-  return held.find((m) => m.caps.length === 0) ?? 'new'
+  const { call } = swap
+  requirePair(call.typeArguments, sharedObjectId(data, call.arguments[0]))
+
+  const [, , deep, minimum, clock, ...extra] = call.arguments
+  if (extra.length > 0 || sharedObjectId(data, clock) !== normalizeSuiAddress(CLOCK)) {
+    refuse('This swap does not match what DeepBook takes.')
+  }
+  const fromCommand = resultOf(deep)?.[0]
+  const zero = moveCallsNamed(data, ZERO_COIN).find((z) => z.at === fromCommand)
+  if (zero === undefined) refuse('This swap would spend DEEP from your wallet.')
+
+  const floor = literalU64(data, minimum)
+  if (floor === undefined || floor === BigInt(0)) {
+    refuse('This swap has no minimum amount out.')
+  }
 }
 
-/** A failed build has already been put in words, which here also say that nothing happened. */
-async function built(tx: Transaction, symbol: string): Promise<string> {
-  try {
-    return await buildUnsigned(tx, suiClient(), symbol)
-  } catch (e) {
-    if (e instanceof ChainActionRefused) refused(e.message)
-    throw e
-  }
-}
+/** The book's own dry run, with the fee paid from the input, as the swap below pays it. */
+async function readFill(request: ChainActionRequest, account: string, io: SwapIo) {
+  assertSuiAccount(account)
+  const pairs = DEEPBOOK_POOLS.map((p) => [p.base, p.quote] as const)
+  const { pairIndex, ...tokens } = pairTokens(VENUE_NAME, pairs, request)
+  const pool = DEEPBOOK_POOLS[pairIndex]
+  if (pool === undefined) return refuse('DeepBook has no pool for this pair.')
+  const sellsBase = tokens.inIsFirst
+  const typeArguments = [tokenType(pool.base), tokenType(pool.quote)]
 
-async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
-  assertAccount(account)
-  if (request.kind !== 'limit')
-    refused(`${VENUE_NAME} only rests orders. It can’t ${request.kind}.`)
-  const { input, output, selling } = deepbookPair(request.tokenIn, request.tokenOut ?? '')
-
-  const { book, makerFee } = await mustRead(() => readPool(account), 'DeepBook')
-  if (makerFee !== ZERO) {
-    refused('DeepBook now charges a fee to rest an order, which I haven’t checked this against.')
-  }
-  const figures = orderFigures({
-    amount: request.amount,
-    price: request.limitPrice ?? '',
-    selling,
-    book,
+  const tx = new Transaction()
+  tx.setSender(account)
+  const object = tx.sharedObjectRef({
+    objectId: pool.id,
+    initialSharedVersion: pool.initialSharedVersion,
+    mutable: false,
   })
-  const manager = await managerFor(account)
-  const expiry = Date.now() + EXPIRY_MS
+  const clock = tx.sharedObjectRef({
+    objectId: CLOCK,
+    initialSharedVersion: CLOCK_SHARED_VERSION,
+    mutable: false,
+  })
+  tx.moveCall({
+    target: `${DEEPBOOK_PACKAGE}::pool::${sellsBase ? 'get_quote_quantity_out_input_fee' : 'get_base_quantity_out_input_fee'}`,
+    typeArguments,
+    arguments: [object, tx.pure.u64(tokens.amountIn), clock],
+  })
+  tx.moveCall({
+    target: `${DEEPBOOK_PACKAGE}::pool::mid_price`,
+    typeArguments,
+    arguments: [object, clock],
+  })
+  tx.moveCall({
+    target: `${DEEPBOOK_PACKAGE}::pool::pool_trade_params`,
+    typeArguments,
+    arguments: [object],
+  })
+  const views = await readOrRefuse(io, tx, VENUE_NAME)
 
-  const tx = new Transaction()
-  tx.setSender(account)
-  addPlace(tx, { manager, selling, figures, expiry })
-  const transaction = await built(tx, input.symbol)
-
-  const pay = selling ? sui(figures.deposit) : usdc(figures.deposit)
-  const receive = selling ? usdc(figures.receive) : sui(figures.receive)
-  return {
-    venueId: VENUE_ID,
+  // Both directions return (base, quote, DEEP required): one is what's left, the other what's bought.
+  const unspent = u64At(views, 0, sellsBase ? 0 : 1)
+  const out = u64At(views, 0, sellsBase ? 1 : 0)
+  const spent = BigInt(tokens.amountIn) - BigInt(unspent)
+  const mid = Number(u64At(views, 1, 0)) / FLOAT_SCALING
+  const paid = sellsBase ? Number(out) / Number(spent) : Number(spent) / Number(out)
+  const fill: Fill = {
     venueName: VENUE_NAME,
-    kind: 'limit',
-    summary: `Offer ${pay} ${input.symbol} on DeepBook for ${receive} ${output.symbol}, at ${usdc(figures.price)} USDC per SUI.`,
-    pay: { amount: pay, symbol: input.symbol },
-    receive: { amount: receive, symbol: output.symbol, approximate: false },
-    notes: [
-      ...(manager === 'new'
-        ? ['This opens a DeepBook account that only you control, to hold the order’s tokens.']
-        : []),
-      'Filled tokens stay in your DeepBook account until you press Collect, which needs a second signature. Cancelling brings back what is left in one signature.',
-      'Expires in 7 days. After that, cancel it to bring back what is left.',
-      'It never fills at once. If the price has already passed yours, placing it fails and nothing moves.',
-      // Read on chain on 5 November 2026: the `UpgradeCap` is policy 0, compatible, at 0x37f187e1...64d2,
-      // and version 9 was signed as a multisig. The Move source sets no policy, and whose keys those
-      // are isn't on chain, so this doesn't name anyone.
-      "DeepBook's contracts can be upgraded by the multisig that holds their upgrade key, so your deposit carries that risk.",
-    ],
-    signing: { family: 'sui', transaction },
-    context: {
-      manager: manager === 'new' ? 'new' : manager.id,
-      side: selling ? 'sell' : 'buy',
-      price: figures.price.toString(),
-      quantity: figures.quantity.toString(),
-      deposit: figures.deposit.toString(),
-      expiry: String(expiry),
-    },
+    tokens,
+    unspent,
+    out,
+    impact: paid / mid - 1,
   }
+  await judgeFill(io, fill)
+  const feeRate = (Number(u64At(views, 2, 0)) / FLOAT_SCALING) * INPUT_FEE_MULTIPLIER
+  return { fill, pool, sellsBase, typeArguments, feeRate }
 }
 
-/**
- * `limitCost` is what a first order costs in storage, with room to spare: simulated on 5 November 2026
- * at 0.0099 SUI net for a new manager and its registry entry, and a budget of 0.009 SUI. Storage is
- * charged net of a rebate on the pool's objects it rewrites, so most of the gross 0.074 SUI comes back
- * in the same transaction.
- */
-export const deepbookVenue: ChainVenue = {
-  id: VENUE_ID,
-  name: VENUE_NAME,
-  kinds: ['limit'],
-  prepare,
-  assertSafe: deepbookAssertSafe,
-  limitCost: { amount: '0.02', symbol: 'SUI' },
-}
-
-interface ManagerHoldings {
-  orders: BookOrder[]
-  /** In the manager, or settled in the pool's record for it. Either way, not in the wallet. */
-  base: bigint
-  quote: bigint
-}
-
-async function readHoldings(
-  account: string,
-  manager: ManagerRef,
-  signal?: AbortSignal
-): Promise<ManagerHoldings> {
-  const first = await readCalls(
-    account,
-    (tx) => {
-      const held = managerInput(tx, manager)
-      tx.moveCall({
-        target: DEEPBOOK_READS.accountExists,
-        ...POOL_TYPES,
-        arguments: [poolInput(tx), held],
-      })
-      for (const coin of [DEEPBOOK_SUI, DEEPBOOK_USDC]) {
-        tx.moveCall({
-          target: DEEPBOOK_READS.balance,
-          typeArguments: [coin],
-          arguments: [held],
-        })
-      }
-    },
-    signal
-  )
-  const base = u64Of(returned(first, 1))
-  const quote = u64Of(returned(first, 2))
-  if (!bcs.bool().parse(returned(first, 0))) return { orders: [], base, quote }
-
-  const second = await readCalls(
-    account,
-    (tx) => {
-      const held = managerInput(tx, manager)
-      tx.moveCall({
-        target: DEEPBOOK_READS.account,
-        ...POOL_TYPES,
-        arguments: [poolInput(tx), held],
-      })
-      tx.moveCall({
-        target: DEEPBOOK_READS.orders,
-        ...POOL_TYPES,
-        arguments: [poolInput(tx), held],
-      })
-    },
-    signal
-  )
-  const settled = decodeSettled(returned(second, 0))
-  return {
-    orders: decodeOrders(returned(second, 1)),
-    base: base + settled.base,
-    quote: quote + settled.quote,
-  }
-}
-
-function restingOrder(manager: string, order: BookOrder): RestingOrder {
-  const { isBid, price } = decodeOrderId(order.id)
-  const remaining = order.quantity - order.filled
-  const filled = order.filled > ZERO
-  const note =
-    order.expires <= Date.now()
-      ? 'It has expired and can no longer fill. Cancel brings back what is left.'
-      : filled
-        ? 'What has filled so far is in your DeepBook account, not your wallet, until you collect it.'
-        : undefined
-  return {
-    id: `${manager}:${order.id}`,
-    venueId: VENUE_ID,
-    tokenIn: isBid ? 'USDC' : 'SUI',
-    tokenOut: isBid ? 'SUI' : 'USDC',
-    amountIn: isBid ? usdc(quoteOf(order.quantity, price)) : sui(order.quantity),
-    remainingIn: isBid ? usdc(quoteOf(remaining, price)) : sui(remaining),
-    receivedOut: isBid ? sui(order.filled) : usdc(quoteOf(order.filled, price)),
-    limitPrice: usdc(price),
-    status: filled ? 'partly' : 'open',
-    expiresAt: order.expires,
-    ...(note === undefined ? {} : { note }),
-  }
-}
-
-function waitingRow(manager: string, base: bigint, quote: bigint): RestingOrder | undefined {
-  const collectable = [
-    ...(quote > ZERO ? [{ amount: usdc(quote), symbol: 'USDC' }] : []),
-    ...(base > ZERO ? [{ amount: sui(base), symbol: 'SUI' }] : []),
-  ]
-  const [first] = collectable
-  if (first === undefined) return undefined
-  return {
-    id: manager,
-    venueId: VENUE_ID,
-    tokenIn: first.symbol === 'USDC' ? 'SUI' : 'USDC',
-    tokenOut: first.symbol,
-    amountIn: '0',
-    remainingIn: '0',
-    receivedOut: first.amount,
-    collectable,
-    status: 'filled',
-    note: WAITING_NOTE,
-  }
-}
-
-async function openOrders(account: string, signal?: AbortSignal): Promise<RestingOrder[]> {
-  assertAccount(account)
-  const me = normalizeSuiAddress(account)
-  const managers = (await registeredManagers(account, signal)).filter(
-    (m): m is Manager => m !== undefined && m.owner === me
-  )
-  const rows = await Promise.all(
-    managers.map(async (manager) => {
-      const { orders, base, quote } = await readHoldings(account, manager, signal)
-      const waiting = waitingRow(manager.id, base, quote)
-      return [
-        ...orders.map((order) => restingOrder(manager.id, order)),
-        ...(waiting === undefined ? [] : [waiting]),
-      ]
-    })
-  )
-  return rows.flat()
-}
-
-/** An order's id here: its manager, then the order. The manager alone is the row of waiting money. */
-function parseOrderKey(orderId: string): { manager: string; order?: bigint } {
-  const match = /^(0x[0-9a-fA-F]{64})(?::(\d{1,39}))?$/.exec(orderId)
-  const manager = match?.[1]
-  if (manager === undefined) refused('That is not a DeepBook order.')
-  const order = match?.[2] === undefined ? undefined : BigInt(match[2])
-  if (order !== undefined && order > MAX_U128) refused('That is not a DeepBook order.')
-  return { manager: normalizeSuiAddress(manager), ...(order === undefined ? {} : { order }) }
-}
-
-function amounts(base: bigint, quote: bigint): string {
-  return [
-    ...(base > ZERO ? [`${sui(base)} SUI`] : []),
-    ...(quote > ZERO ? [`${usdc(quote)} USDC`] : []),
-  ].join(' and ')
-}
-
-async function prepareExit(
-  account: string,
-  orderId: string,
-  action: 'cancel' | 'collect'
-): Promise<PreparedAction> {
-  assertAccount(account)
-  const key = parseOrderKey(orderId)
-  const manager = await mustRead(() => readManager(key.manager), 'that order')
-  if (manager === undefined) refused('That is not a DeepBook order.')
-  if (manager.owner !== normalizeSuiAddress(account)) {
-    refused('That order belongs to another wallet.')
-  }
-  const { orders, base, quote } = await mustRead(() => readHoldings(account, manager), 'that order')
-
-  const tx = new Transaction()
-  tx.setSender(account)
-  const signing = (transaction: string) => ({ family: 'sui' as const, transaction })
-
-  if (action === 'collect') {
-    if (base === ZERO && quote === ZERO) {
-      refused('There is nothing waiting in that DeepBook account to collect.')
-    }
-    addExit(tx, { account, manager })
-    const inSui = base > ZERO
+export function createDeepbookVenue(io: SwapIo = LIVE_SWAP_IO): ChainVenue {
+  async function quote(request: ChainActionRequest, account: string): Promise<VenueQuote> {
+    const { fill } = await readFill(request, account, io)
+    const { tokenOut } = fill.tokens
     return {
-      venueId: VENUE_ID,
-      venueName: VENUE_NAME,
-      kind: 'limit',
-      summary: `Move ${amounts(base, quote)} from your DeepBook account to your wallet.`,
-      pay: { amount: '0', symbol: inSui ? 'SUI' : 'USDC' },
-      receive: {
-        amount: inSui ? sui(base) : usdc(quote),
-        symbol: inSui ? 'SUI' : 'USDC',
-        approximate: false,
-      },
-      notes: ['Any order still open on this account stays open.'],
-      signing: signing(await built(tx, 'SUI')),
+      receive: { amount: displayAmount(fill.out, tokenOut.decimals), symbol: tokenOut.symbol },
     }
   }
 
-  if (key.order === undefined) {
-    refused('That is money waiting in your DeepBook account, so there is nothing to cancel.')
+  async function prepare(request: ChainActionRequest, account: string): Promise<PreparedAction> {
+    const { fill, pool, sellsBase, typeArguments, feeRate } = await readFill(request, account, io)
+    const { tokens } = fill
+    const { tokenIn, tokenOut } = tokens
+
+    const tx = new Transaction()
+    tx.setSender(account)
+    const input = io.spend(tx, tokenIn, tokens.amountIn)
+    const [emptyDeep] = tx.moveCall({ target: ZERO_COIN, typeArguments: [DEEP_TYPE] })
+    if (emptyDeep === undefined) throw new Error('An empty coin returned nothing.')
+    const [base, quoteCoin, deep] = tx.moveCall({
+      target: sellsBase ? SELL_BASE : BUY_BASE,
+      typeArguments,
+      arguments: [
+        tx.sharedObjectRef({
+          objectId: pool.id,
+          initialSharedVersion: pool.initialSharedVersion,
+          mutable: true,
+        }),
+        input,
+        emptyDeep,
+        tx.pure.u64(minimumOut(fill.out)),
+        tx.sharedObjectRef({
+          objectId: CLOCK,
+          initialSharedVersion: CLOCK_SHARED_VERSION,
+          mutable: false,
+        }),
+      ],
+    })
+    if (base === undefined || quoteCoin === undefined || deep === undefined) {
+      throw new Error('The swap returned nothing.')
+    }
+    tx.moveCall({
+      target: '0x2::coin::destroy_zero',
+      typeArguments: [DEEP_TYPE],
+      arguments: [deep],
+    })
+    tx.transferObjects([base, quoteCoin], account)
+    const transaction = await io.build(tx, tokenIn.symbol)
+
+    const receive = displayAmount(fill.out, tokenOut.decimals)
+    return {
+      venueId: 'deepbook',
+      venueName: VENUE_NAME,
+      kind: 'swap',
+      summary: `Swap ${request.amount} ${tokenIn.symbol} for about ${receive} ${tokenOut.symbol} on DeepBook's order book.`,
+      pay: { amount: request.amount, symbol: tokenIn.symbol },
+      receive: { amount: receive, symbol: tokenOut.symbol, approximate: true },
+      notes: [
+        slippageNote(),
+        `This trades at the market on an order book. The fee is about ${Number((feeRate * 100).toFixed(4))}%, taken from what you pay, which costs 25% more than paying it in DEEP.`,
+        ...unspentNote(fill),
+        "A multisig account can upgrade DeepBook's contracts, and contracts can fail. DefiLlama lists no exploit of DeepBook as of November 2026.",
+        ...bridgeNote(tokens),
+      ],
+      signing: { family: 'sui', transaction },
+    }
   }
-  const order = orders.find((o) => o.id === key.order)
-  if (order === undefined) {
-    refused('That order is no longer open. If it filled, Collect brings the money back.')
-  }
-  const { isBid, price } = decodeOrderId(order.id)
-  const left = order.quantity - order.filled
-  const backBase = isBid ? base : base + left
-  const backQuote = isBid ? quote + quoteOf(left, price) : quote
-  addExit(tx, { account, manager, order: order.id })
+
   return {
-    venueId: VENUE_ID,
-    venueName: VENUE_NAME,
-    kind: 'limit',
-    summary: `Cancel your DeepBook order and bring ${amounts(backBase, backQuote)} back to your wallet.`,
-    pay: { amount: '0', symbol: isBid ? 'USDC' : 'SUI' },
-    receive: {
-      amount: isBid ? usdc(quoteOf(left, price)) : sui(left),
-      symbol: isBid ? 'USDC' : 'SUI',
-      approximate: false,
+    id: 'deepbook',
+    name: VENUE_NAME,
+    kinds: ['swap'],
+    quote,
+    prepare,
+    assertSafe: (payload: SigningPayload, account: string) => {
+      assertPtbSafe(payload, account, DEEPBOOK_POLICY)
+      assertOneMarketSwap(payload)
     },
-    notes: [
-      'This also brings back anything else waiting in this DeepBook account.',
-      'It could fill before this lands. Whatever filled comes back to your wallet too.',
-    ],
-    signing: signing(await built(tx, 'SUI')),
   }
 }
 
-export function deepbookBook(): LimitBook {
-  return { openOrders, prepareExit }
-}
+export const deepbookVenue = createDeepbookVenue()

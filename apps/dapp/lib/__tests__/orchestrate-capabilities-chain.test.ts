@@ -24,7 +24,7 @@ describe('capabilitySheet per chain', () => {
   it('says agents compete on Solana and Sui now their venues can be quoted', () => {
     expect(capabilitySheet('solana')).toContain('Agents compete')
     expect(capabilitySheet('sui')).toContain('Agents compete')
-    expect(capabilitySheet('solana')).not.toContain('Stake:')
+    expect(capabilitySheet('solana')).toContain('Stake:')
   })
 
   it('leaves a chain with no module as it was', () => {
@@ -48,21 +48,22 @@ describe('capabilitySheet reads what the chain can run on this server', () => {
     return (await import('../orchestrate/capabilities')).capabilitySheet
   }
 
-  it('promises nothing on Avalanche and Monad with no secret to issue a deposit', async () => {
+  it('promises only the onchain venues on Avalanche and Monad with no secret', async () => {
     const sheet = await sheetWith('')
     for (const chain of ['avalanche', 'monad']) {
-      expect(sheet(chain)).toBe(
-        '- Nothing can be swapped, supplied or staked on this chain right now.'
-      )
+      expect(sheet(chain)).toContain('Swap:')
+      expect(sheet(chain)).toContain('Supply:')
+      expect(sheet(chain)).not.toContain('Send:')
     }
-  })
+  }, 60_000)
 
   it('promises the race on them once the secret is set', async () => {
     const sheet = await sheetWith('x'.repeat(48))
     for (const chain of ['avalanche', 'monad']) {
       expect(sheet(chain)).toContain('Swap:')
       expect(sheet(chain)).toContain('Agents compete')
-      expect(sheet(chain)).not.toMatch(/Supply:|Stake:/)
+      expect(sheet(chain)).toContain('Supply:')
+      expect(sheet(chain)).toContain('Borrow and repay:')
     }
   }, 60_000)
 
@@ -123,12 +124,13 @@ describe('capabilitySheet multi-step forms', () => {
     expect(near).toMatch(/stake after a swap is not available on NEAR/i)
   }, 60_000)
 
-  it('says Monad runs swap and send, and not cash-out or deposit', async () => {
+  it('says Monad runs swap then deposit or send, and not cash-out', async () => {
     const sheet = await sheetWith('k')
     const monad = sheet('monad')
     expect(monad).toMatch(/Swap then send:/)
-    expect(monad).not.toMatch(/Swap then (cash out|deposit):/)
-    expect(monad).toMatch(/Cash out and deposit after a swap do not run on Monad/)
+    expect(monad).toMatch(/Swap then deposit:/)
+    expect(monad).not.toMatch(/Swap then cash out:/)
+    expect(monad).toMatch(/Cash out does not run from Monad/)
   }, 60_000)
 
   it('says which native coins cannot be sent yet', async () => {
@@ -179,9 +181,9 @@ describe('the orchestrator prompt', () => {
   it('is byte for byte what it was on Stellar', async () => {
     vi.stubEnv('WEAVE_SECRET_KEY', '')
     const system = await systemFor('stellar')
-    expect(system.length).toBe(6270)
+    expect(system.length).toBe(6452)
     expect(createHash('sha256').update(system).digest('hex')).toBe(
-      '06762643ae6b219a91581fc48e65b67563bb70062f2761e60a8a5d3aeae9be1b'
+      'a6ed692eb9f9ebc325842f13f0b6417c6b4ee970922535a1fa9c8c497c63edfc'
     )
   })
 

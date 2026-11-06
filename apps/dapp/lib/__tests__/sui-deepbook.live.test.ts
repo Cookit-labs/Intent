@@ -4,7 +4,7 @@ import { fromBase64, normalizeStructTag } from '@mysten/sui/utils'
 import { describe, expect, it } from 'vitest'
 
 import { suiClient } from '../chains/sui/client'
-import { deepbookBook, deepbookVenue } from '../chains/sui/deepbook'
+import { deepbookBook, deepbookLimitVenue } from '../chains/sui/deepbook-limit'
 import { decodeSettled, DEEPBOOK_READS } from '../chains/sui/deepbook-rules'
 import { DEEPBOOK_CALLS } from '../chains/sui/policies'
 import type { PreparedAction } from '../chains/types'
@@ -292,11 +292,11 @@ describe.skipIf(process.env['SKIP_LIVE'] === '1')('DeepBook on mainnet', () => {
     'builds %s to %s for a funded wallet, and it passes its own check and simulates clean',
     async (tokenIn, tokenOut, amount, selling) => {
       const { mid } = await poolParams()
-      const prepared = await deepbookVenue.prepare(
+      const prepared = await deepbookLimitVenue.prepare(
         { kind: 'limit', amount, tokenIn, tokenOut, limitPrice: display(away(mid, selling)) },
         FUNDED
       )
-      deepbookVenue.assertSafe(prepared.signing, FUNDED, prepared.context)
+      deepbookLimitVenue.assertSafe(prepared.signing, FUNDED, prepared.context)
       const { held, usdc } = await dryRun(prepared, FUNDED)
       if (prepared.signing.family !== 'sui') throw new Error('Expected Sui.')
       const data = Transaction.from(prepared.signing.transaction).getData()
@@ -325,7 +325,7 @@ describe.skipIf(process.env['SKIP_LIVE'] === '1')('DeepBook on mainnet', () => {
     'refuses %s, because POST_ONLY would abort',
     async (name, tokenIn, tokenOut, amount, above) => {
       const { mid } = await poolParams()
-      const refusal = await deepbookVenue
+      const refusal = await deepbookLimitVenue
         .prepare(
           { kind: 'limit', amount, tokenIn, tokenOut, limitPrice: display(away(mid, above)) },
           FUNDED
@@ -380,7 +380,7 @@ describe.skipIf(process.env['SKIP_LIVE'] === '1')('DeepBook on mainnet', () => {
         const order = open[0]
         if (order === undefined) continue
         const prepared = await deepbookBook().prepareExit(owner, `${manager}:${order}`, 'cancel')
-        deepbookVenue.assertSafe(prepared.signing, owner, prepared.context)
+        deepbookLimitVenue.assertSafe(prepared.signing, owner, prepared.context)
         const { held: run, sui, usdc } = await dryRun(prepared, owner)
         console.log('cancel', {
           owner,
@@ -551,7 +551,7 @@ describe.skipIf(process.env['SKIP_LIVE'] === '1')('DeepBook on mainnet', () => {
         const waiting = rows.find((row) => row.collectable !== undefined)
         if (waiting === undefined) continue
         const prepared = await deepbookBook().prepareExit(owner, waiting.id, 'collect')
-        deepbookVenue.assertSafe(prepared.signing, owner, prepared.context)
+        deepbookLimitVenue.assertSafe(prepared.signing, owner, prepared.context)
         const { held, sui, usdc } = await dryRun(prepared, owner)
         console.log('collect', {
           owner,

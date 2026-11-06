@@ -9,7 +9,13 @@ import {
 import type { ChainDescriptor } from '@intent/types'
 import { type Address, type Hex } from 'viem'
 import { useAccount, useBalance, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
-import { getAccount, sendTransaction, signTypedData, switchChain } from 'wagmi/actions'
+import {
+  getAccount,
+  sendTransaction,
+  signTypedData,
+  switchChain,
+  waitForTransactionReceipt,
+} from 'wagmi/actions'
 import { avalanche, monad } from 'viem/chains'
 
 import type { ChainAdapter, ChainWallet } from '../chain-adapter'
@@ -123,6 +129,24 @@ function signOn(name: string, chainId: 43114 | 143): NonNullable<ChainAdapter['s
     try {
       if (walletChain !== chainId) {
         await switchChain(wagmiConfig, { chainId })
+      }
+      if (payload.approval !== undefined) {
+        const approval = await sendTransaction(wagmiConfig, {
+          to: payload.approval.to as Address,
+          data: payload.approval.data as Hex,
+          chainId,
+        })
+        const { status: approved } = await waitForTransactionReceipt(wagmiConfig, {
+          hash: approval,
+          chainId,
+        })
+        if (approved !== 'success') {
+          return {
+            ok: false,
+            reason: 'wallet_error',
+            detail: `The approval failed on ${name}, so the next step was not sent.`,
+          }
+        }
       }
       const hash = await sendTransaction(wagmiConfig, {
         to: payload.to as Address,

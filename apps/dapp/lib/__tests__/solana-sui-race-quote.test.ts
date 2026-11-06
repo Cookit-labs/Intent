@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentProposalResult } from '../agents/brain'
 import { quoteChainRoutes, type ChainRouteQuote } from '../agents/chain-routes'
+import { racesFirst } from '../chains/parse-action'
 import { planScore } from '../agents/plan-scoring'
 import { applyChainMeasure, isUnmeasuredSwap } from '../agents/settle-chain-plan'
 import { clearTokenCache } from '../chains/near/oneclick'
@@ -426,14 +427,13 @@ describe('the race on these chains', () => {
     expect(buildSuiVenues(env).map((v) => v.id)).not.toContain('1click-sui')
   })
 
-  it('gives every venue on these chains a quote to race with, but a transfer or a limit', () => {
+  it('gives every venue that races a quote, and none to one with no price to race on', () => {
     const lulo = createLuloVenue({ apiKey: 'k' })
     const env = { AUTH_SECRET: 'x'.repeat(48) }
     for (const venue of [...buildSolanaVenues(env), lulo, ...buildSuiVenues(env)]) {
-      // A limit order names its own price, so it never races.
-      if (venue.kinds.includes('send') || venue.kinds.includes('limit')) {
-        expect(venue.quote, venue.id).toBeUndefined()
-      } else expect(venue.quote, venue.id).toBeTypeOf('function')
+      const races = venue.kinds.some((kind) => racesFirst({ kind }))
+      if (races) expect(venue.quote, venue.id).toBeTypeOf('function')
+      else expect(venue.quote, venue.id).toBeUndefined()
     }
   })
 
@@ -458,7 +458,7 @@ describe('the race on these chains', () => {
   it('says agents compete on Solana and Sui, and nothing these chains cannot do', () => {
     const solana = capabilitySheet('solana')
     expect(solana).toContain('Agents compete')
-    expect(solana).not.toMatch(/Stake:|Send:|limit order/)
+    expect(solana).not.toMatch(/Send:|limit order/)
     const onSui = capabilitySheet('sui')
     expect(onSui).toContain('Agents compete')
     expect(onSui).toContain('Stake:')

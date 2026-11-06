@@ -1122,7 +1122,7 @@ describe('wiring', () => {
   })
 
   it('changes nothing about who answers for the other kinds', () => {
-    expect(nearModule.defaultVenue.swap).toBe('1click')
+    expect(nearModule.defaultVenue.swap).toBe('rhea-dex')
     expect(nearModule.defaultVenue.stake).toBe('metapool')
     expect(nearModule.defaultVenue.supply).toBe('1click-earn')
   })

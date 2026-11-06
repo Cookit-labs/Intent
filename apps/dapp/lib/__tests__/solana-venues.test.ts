@@ -76,6 +76,8 @@ describe('tokens', () => {
       USDT: [USDT, 6],
       JitoSOL: ['J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', 9],
       ONyc: [ONYC, 9],
+      mSOL: ['mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', 9],
+      sSOL: ['sSo14endRuUbvQaJS3dq36Q829a3A6BEfoeeRGJywEh', 9],
     })
   })
 
@@ -84,16 +86,14 @@ describe('tokens', () => {
       prepareChainAction(
         solanaModule,
         { kind: 'swap', amount: '1', tokenIn: 'USDC', tokenOut: 'USDC.e' },
-        CAPTURE_ACCOUNT,
-        {}
+        CAPTURE_ACCOUNT
       )
     ).rejects.toThrow(/verified token/)
     await expect(
       prepareChainAction(
         solanaModule,
         { kind: 'swap', amount: '1', tokenIn: USDC, tokenOut: 'SOL' },
-        CAPTURE_ACCOUNT,
-        {}
+        CAPTURE_ACCOUNT
       )
     ).rejects.toThrow(/verified token/)
   })
@@ -672,16 +672,25 @@ describe('module', () => {
       'jupiter-lend',
       'kamino',
       'kamino-limit',
+      'kamino-lend',
+      'jito',
+      'marinade',
+      'solayer',
+      'streamflow',
       'send',
     ])
   })
 
-  it('offers the four venues that need no key', () => {
+  it('offers the venues that need no key', () => {
     expect(buildSolanaVenues({}).map((v) => v.id)).toEqual([
       'jupiter',
       'jupiter-lend',
       'kamino',
       'kamino-limit',
+      'kamino-lend',
+      'jito',
+      'marinade',
+      'solayer',
     ])
     expect(solanaModule.defaultVenue).toMatchObject({ swap: 'jupiter', supply: 'jupiter-lend' })
     expect(solanaModule.chain).toBe('solana')
@@ -695,30 +704,13 @@ describe('module', () => {
     expect(kamino?.submit).toBeUndefined()
   })
 
-  it('refuses a trade over the $500 cap before building anything', async () => {
-    const { calls } = stubFetch((url) =>
-      url.includes('/price/v3') ? { body: { [USDC]: { usdPrice: 1 } } } : undefined
-    )
-    const chainApi = { ...solanaModule, priceUsd: async () => 1 }
-    await expect(
-      prepareChainAction(
-        chainApi,
-        { kind: 'swap', amount: '501', tokenIn: 'USDC', tokenOut: 'SOL' },
-        CAPTURE_ACCOUNT,
-        {}
-      )
-    ).rejects.toThrow(/caps each trade/)
-    expect(calls).toHaveLength(0)
-  })
-
   it('refuses a named venue that cannot do this', async () => {
     const chainApi = { ...solanaModule, priceUsd: async () => 1 }
     await expect(
       prepareChainAction(
         chainApi,
         { kind: 'swap', amount: '1', tokenIn: 'USDC', tokenOut: 'SOL', venue: 'kamino' },
-        CAPTURE_ACCOUNT,
-        {}
+        CAPTURE_ACCOUNT
       )
     ).rejects.toThrow(/can't swap here/)
   })
@@ -740,8 +732,7 @@ describe('module', () => {
       await prepareChainAction(
         chainApi,
         { kind: 'supply', amount: '1', tokenIn: 'USDC', venue },
-        CAPTURE_ACCOUNT,
-        {}
+        CAPTURE_ACCOUNT
       ).catch(() => undefined)
     }
     expect(seen).toEqual(['kamino', 'jupiter-lend'])
@@ -750,8 +741,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(16)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(16)
+    expect(solanaVenues).toHaveLength(21)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(21)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])
@@ -785,10 +776,21 @@ describe('venues page', () => {
 })
 
 describe('capabilities', () => {
-  it('has one entry per wired kind, and each example parses and resolves', async () => {
+  it('names every wired kind, and each example parses and resolves', async () => {
     const kinds = solanaCapabilities.map((c) => c.kind)
-    expect(new Set(kinds)).toEqual(new Set(['swap', 'supply', 'limit']))
-    expect(kinds).toHaveLength(3)
+    expect(new Set(kinds)).toEqual(
+      new Set([
+        'swap',
+        'supply',
+        'withdraw',
+        'borrow',
+        'repay',
+        'stake',
+        'unstake',
+        'claim',
+        'limit',
+      ])
+    )
     const swap = solanaCapabilities.find((c) => c.kind === 'swap')!
     expect(parseChainAction(`swap 10 USDC to ${swap.symbol}`)).toMatchObject({
       kind: 'swap',

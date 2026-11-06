@@ -7,6 +7,15 @@ const EXAMPLE: Record<ChainActionKind, (symbol: string, venue: string) => string
   stake: (symbol, venue) => `stake 1 ${symbol} with ${venue}`,
   send: (symbol) => `send 5 ${symbol} to an address`,
   limit: (symbol) => `sell 1 ${symbol} at $110`,
+  withdraw: (symbol, venue) => `withdraw 25 ${symbol} from ${venue}`,
+  unstake: (symbol, venue) => `unstake 1 ${symbol} from ${venue}`,
+  borrow: (symbol, venue) => `borrow 25 ${symbol} on ${venue}`,
+  repay: (symbol, venue) => `repay 25 ${symbol} on ${venue}`,
+  stream: (symbol) => `stream 100 ${symbol} to an address over 30 days`,
+  invoice: (symbol) => `invoice an address 100 ${symbol} due 2027-01-31`,
+  pay_invoice: (symbol) => `pay invoice 12 with 100 ${symbol}`,
+  claim: (symbol) => `claim my ${symbol}`,
+  cancel: () => 'cancel stream 12',
 }
 
 /** What can come after a swap, in the words someone types. */

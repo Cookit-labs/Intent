@@ -26,6 +26,7 @@ import {
   DEPOSIT_ADDRESS,
   STORAGE_DEPOSIT_YOCTO,
   STORAGE_GAS,
+  SWAP_CONTRACTS,
   TRANSFER_GAS,
   WRAP_GAS,
 } from './safety'
@@ -122,20 +123,22 @@ function assertQuoteMatches(
     account: string
     recipientType: Destination['recipientType']
     deadline: string
+    fromIntents?: boolean
   }
 ): void {
   const { quote, quoteRequest: asked } = envelope
+  const funding = input.fromIntents === true ? 'INTENTS' : 'ORIGIN_CHAIN'
   const matches =
     asked.dry === input.dry &&
     asked.swapType === 'EXACT_INPUT' &&
-    asked.depositType === 'ORIGIN_CHAIN' &&
+    asked.depositType === funding &&
     asked.originAsset === input.originAsset &&
     asked.destinationAsset === input.destinationAsset &&
     asked.amount === input.amount &&
     asked.recipient === input.account &&
     asked.recipientType === input.recipientType &&
     asked.refundTo === input.account &&
-    asked.refundType === 'ORIGIN_CHAIN' &&
+    asked.refundType === funding &&
     asked.deadline === input.deadline &&
     asked.slippageTolerance <= SLIPPAGE_BPS &&
     quote.amountIn === input.amount &&
@@ -259,7 +262,7 @@ interface DepositFlow {
   extraNotes: string[]
 }
 
-function assertNearAccount(account: string): void {
+export function assertNearAccount(account: string): void {
   if (!NEAR_ACCOUNT.test(account)) {
     throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
   }
@@ -275,7 +278,8 @@ export async function previewOneClick(
   amountText: string,
   origin: QuoteOrigin,
   destination: Destination,
-  account: string
+  account: string,
+  fromIntents = false
 ) {
   const amount = toBaseUnits(amountText, origin.decimals)
   const shared = {
@@ -285,6 +289,7 @@ export async function previewOneClick(
     account,
     recipientType: destination.recipientType,
     slippageBps: SLIPPAGE_BPS,
+    fromIntents,
   }
 
   const dryDeadline = new Date(Date.now() + QUOTE_WINDOW_MS).toISOString()
@@ -390,7 +395,13 @@ export async function prepareOneClickDeposit(
 function swapTokens(request: ChainActionRequest): { tokenIn: ChainToken; tokenOut: ChainToken } {
   const tokenIn = tokenBySymbol(nearTokens, request.tokenIn)
   const tokenOut = tokenBySymbol(nearTokens, request.tokenOut ?? '')
-  if (request.kind !== 'swap' || tokenIn === undefined || tokenOut === undefined) {
+  if (
+    request.kind !== 'swap' ||
+    tokenIn === undefined ||
+    tokenOut === undefined ||
+    !SWAP_CONTRACTS.has(tokenIn.id) ||
+    !SWAP_CONTRACTS.has(tokenOut.id)
+  ) {
     throw new ChainActionRefused('NEAR Intents here swaps between NEAR, USDC and USDT.')
   }
   if (tokenIn.id === tokenOut.id) throw new ChainActionRefused('Those are the same token.')
@@ -497,7 +508,9 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
   }
   if (outcome.state === 'success') {
     const paysDeposit = outcome.calls.some(
-      (c) => c.method === 'ft_transfer' && c.args['receiver_id'] === depositAddress
+      (c) =>
+        (c.method === 'ft_transfer' || c.method === 'mt_transfer') &&
+        c.args['receiver_id'] === depositAddress
     )
     if (outcome.signer !== account || !paysDeposit) {
       return {

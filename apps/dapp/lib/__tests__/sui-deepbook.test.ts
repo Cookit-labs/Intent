@@ -3,7 +3,7 @@ import { Transaction } from '@mysten/sui/transactions'
 import { fromBase64, normalizeStructTag, toBase64 } from '@mysten/sui/utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deepbookBook, deepbookVenue } from '../chains/sui/deepbook'
+import { deepbookBook, deepbookLimitVenue } from '../chains/sui/deepbook-limit'
 import { decodeOrderId, deepbookAssertSafe, orderFigures } from '../chains/sui/deepbook-rules'
 import { ChainActionRefused, type ChainActionRequest, type PreparedAction } from '../chains/types'
 
@@ -369,7 +369,7 @@ function useExistingManager(state: Partial<ManagerState> = {}): void {
 
 describe('placing an order', () => {
   it('sells 2 SUI at 1.10: deposits 2 SUI and places an ask, sharing a new manager last', async () => {
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(stepNames(prepared)).toEqual(FIRST_USE_SELL)
     expect(splitAmounts(prepared)).toEqual(['2000000000'])
     expect(placed(prepared)).toEqual({
@@ -393,12 +393,12 @@ describe('placing an order', () => {
   })
 
   it('takes one signature on first use, so nothing asks to be prepared again', async () => {
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(prepared.thenPrepareAgain).toBeUndefined()
   })
 
   it('buys with 11 USDC at 1.00: deposits 11 USDC and places a bid for 11 SUI', async () => {
-    const prepared = await deepbookVenue.prepare(buy(), ME)
+    const prepared = await deepbookLimitVenue.prepare(buy(), ME)
     expect(splitAmounts(prepared)).toEqual(['11000000'])
     expect(
       callOf(prepared, 'deposit').call.typeArguments.map((t) => normalizeStructTag(t))
@@ -415,7 +415,7 @@ describe('placing an order', () => {
 
   it('uses the manager the wallet already has, and creates and shares nothing', async () => {
     useExistingManager()
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(stepNames(prepared)).toEqual([
       'SplitCoins',
       'deposit',
@@ -432,15 +432,15 @@ describe('placing an order', () => {
   })
 
   it('says it opens a DeepBook account only when it does', async () => {
-    const first = await deepbookVenue.prepare(sell(), ME)
+    const first = await deepbookLimitVenue.prepare(sell(), ME)
     expect(first.notes.join(' ')).toMatch(/opens a DeepBook account/)
     useExistingManager()
-    const again = await deepbookVenue.prepare(sell(), ME)
+    const again = await deepbookLimitVenue.prepare(sell(), ME)
     expect(again.notes.join(' ')).not.toMatch(/opens a DeepBook account/)
   })
 
   it('carries its notes, word for word', async () => {
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(prepared.notes).toEqual(
       expect.arrayContaining([
         'Filled tokens stay in your DeepBook account until you press Collect, which needs a second signature. Cancelling brings back what is left in one signature.',
@@ -452,16 +452,16 @@ describe('placing an order', () => {
   })
 
   it('refuses under the minimum, read from the chain', async () => {
-    await expect(deepbookVenue.prepare(sell('0.9'), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(sell('0.9'), ME)).rejects.toThrow(
       "DeepBook's smallest SUI order is 1 SUI. Nothing was signed or sent."
     )
-    await expect(deepbookVenue.prepare(buy('0.9', '1'), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(buy('0.9', '1'), ME)).rejects.toThrow(
       "DeepBook's smallest SUI order is 1 SUI. Nothing was signed or sent."
     )
   })
 
   it('rounds a sell off the lot down, and the card shows the rounded figure', async () => {
-    const prepared = await deepbookVenue.prepare(sell('2.37'), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell('2.37'), ME)
     expect(placed(prepared).quantity).toBe('2300000000')
     expect(splitAmounts(prepared)).toEqual(['2300000000'])
     expect(prepared.pay).toEqual({ amount: '2.3', symbol: 'SUI' })
@@ -469,7 +469,7 @@ describe('placing an order', () => {
   })
 
   it('rounds a buy off the lot down, and deposits only what that order holds', async () => {
-    const prepared = await deepbookVenue.prepare(buy('11', '1.03'), ME)
+    const prepared = await deepbookLimitVenue.prepare(buy('11', '1.03'), ME)
     expect(placed(prepared).quantity).toBe('10600000000')
     expect(splitAmounts(prepared)).toEqual(['10918000'])
     expect(prepared.pay).toEqual({ amount: '10.918', symbol: 'USDC' })
@@ -477,11 +477,11 @@ describe('placing an order', () => {
   })
 
   it('refuses anything but SUI against USDC', async () => {
-    await expect(deepbookVenue.prepare({ ...sell(), tokenOut: 'USDT' }, ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare({ ...sell(), tokenOut: 'USDT' }, ME)).rejects.toThrow(
       'DeepBook orders here take SUI against USDC only. Nothing was signed or sent.'
     )
     await expect(
-      deepbookVenue.prepare(
+      deepbookLimitVenue.prepare(
         { kind: 'limit', amount: '5', tokenIn: 'USDC', tokenOut: 'USDsui', limitPrice: '1' },
         ME
       )
@@ -492,21 +492,24 @@ describe('placing an order', () => {
 
   it('refuses a kind it does not do', async () => {
     await expect(
-      deepbookVenue.prepare({ kind: 'swap', amount: '2', tokenIn: 'SUI', tokenOut: 'USDC' }, ME)
+      deepbookLimitVenue.prepare(
+        { kind: 'swap', amount: '2', tokenIn: 'SUI', tokenOut: 'USDC' },
+        ME
+      )
     ).rejects.toThrow(/Nothing was signed or sent\.$/)
   })
 
   it('refuses a resting fee it has not been checked against', async () => {
     chain.makerFee = '100000'
-    await expect(deepbookVenue.prepare(sell(), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(sell(), ME)).rejects.toThrow(
       /charges a fee to rest an order.*Nothing was signed or sent\.$/
     )
   })
 
   it('refuses in words when it cannot read the pool, and builds nothing', async () => {
     chain.simulateFails = true
-    await expect(deepbookVenue.prepare(sell(), ME)).rejects.toThrow(ChainActionRefused)
-    await expect(deepbookVenue.prepare(sell(), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(sell(), ME)).rejects.toThrow(ChainActionRefused)
+    await expect(deepbookLimitVenue.prepare(sell(), ME)).rejects.toThrow(
       /couldn’t read DeepBook.*Nothing was signed or sent\.$/
     )
     expect(chain.builds).toBe(0)
@@ -514,20 +517,20 @@ describe('placing an order', () => {
 
   it('ends a refusal from the build in the same words as every other', async () => {
     chain.usdcCoins = [{ id: USDC_COIN, balance: '5' }]
-    await expect(deepbookVenue.prepare(buy(), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(buy(), ME)).rejects.toThrow(
       /enough USDC.*Nothing was signed or sent\.$/
     )
   })
 
   it('counts the first-use storage in what the reserve keeps back', () => {
-    expect(deepbookVenue.limitCost).toEqual({ amount: '0.02', symbol: 'SUI' })
+    expect(deepbookLimitVenue.limitCost).toEqual({ amount: '0.02', symbol: 'SUI' })
   })
 })
 
 describe('an existing manager', () => {
   it('is refused before anything is built when its owner on chain is someone else', async () => {
     useExistingManager({ owner: THIEF })
-    await expect(deepbookVenue.prepare(sell(), ME)).rejects.toThrow(
+    await expect(deepbookLimitVenue.prepare(sell(), ME)).rejects.toThrow(
       /belongs to another wallet.*Nothing was signed or sent\.$/
     )
     expect(chain.builds).toBe(0)
@@ -535,7 +538,7 @@ describe('an existing manager', () => {
 
   it('is passed over, and never deposited into, when the object is not a BalanceManager', async () => {
     useExistingManager({ type: `${TYPES}::balance_manager::Lookalike` })
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(stepNames(prepared)).toEqual(FIRST_USE_SELL)
     expect(prepared.context?.['manager']).toBe('new')
   })
@@ -543,13 +546,13 @@ describe('an existing manager', () => {
   it('is passed over when it can’t be read on its own, as one held inside another object can’t', async () => {
     chain.registered = [OTHER_MANAGER, MANAGER]
     chain.managers[MANAGER] = { owner: ME }
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(prepared.context?.['manager']).toBe(MANAGER)
   })
 
   it('takes no deposit when a cap has been minted on it, and opens a clean one instead', async () => {
     useExistingManager({ caps: [THIEF] })
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(stepNames(prepared)).toEqual(FIRST_USE_SELL)
     expect(prepared.context?.['manager']).toBe('new')
   })
@@ -558,7 +561,7 @@ describe('an existing manager', () => {
     chain.registered = [OTHER_MANAGER, MANAGER]
     chain.managers[OTHER_MANAGER] = { owner: ME, caps: [THIEF] }
     chain.managers[MANAGER] = { owner: ME }
-    const prepared = await deepbookVenue.prepare(sell(), ME)
+    const prepared = await deepbookLimitVenue.prepare(sell(), ME)
     expect(prepared.context?.['manager']).toBe(MANAGER)
   })
 })
@@ -662,7 +665,7 @@ const NOT_SENT = /Nothing was signed or sent\.$/
 
 describe('DEEPBOOK_POLICY on a placed order', () => {
   async function firstUse(request = sell()) {
-    const prepared = await deepbookVenue.prepare(request, ME)
+    const prepared = await deepbookLimitVenue.prepare(request, ME)
     return { base: bytesOf(prepared), context: prepared.context }
   }
 
@@ -686,23 +689,23 @@ describe('DEEPBOOK_POLICY on a placed order', () => {
       { id: USDC_COIN, balance: '5000000' },
       { id: USDC_COIN_2, balance: '15000000' },
     ]
-    const merged = await deepbookVenue.prepare(buy(), ME)
+    const merged = await deepbookLimitVenue.prepare(buy(), ME)
     expect(stepNames(merged).slice(0, 2)).toEqual(['MergeCoins', 'SplitCoins'])
     expect(() => check(bytesOf(merged), merged.context)).not.toThrow()
 
     chain.usdcCoins = [{ id: USDC_COIN, balance: '11000000' }]
-    const exact = await deepbookVenue.prepare(buy(), ME)
+    const exact = await deepbookLimitVenue.prepare(buy(), ME)
     expect(stepNames(exact).slice(0, 2)).toEqual(['SplitCoins', 'destroy_zero'])
     expect(() => check(bytesOf(exact), exact.context)).not.toThrow()
 
     chain.usdcCoins = []
     chain.usdcAddressBalance = '20000000'
-    const fromAddress = await deepbookVenue.prepare(buy(), ME)
+    const fromAddress = await deepbookLimitVenue.prepare(buy(), ME)
     expect(stepNames(fromAddress).slice(0, 3)).toEqual(['redeem_funds', 'SplitCoins', 'send_funds'])
     expect(() => check(bytesOf(fromAddress), fromAddress.context)).not.toThrow()
 
     chain.suiAddressBalance = '5000000000'
-    const suiFromAddress = await deepbookVenue.prepare(sell(), ME)
+    const suiFromAddress = await deepbookLimitVenue.prepare(sell(), ME)
     expect(stepNames(suiFromAddress).slice(0, 3)).toEqual([
       'redeem_funds',
       'SplitCoins',
@@ -1057,7 +1060,9 @@ describe('leaving an order', () => {
     expect(types).toEqual([SUI, USDC])
     const { pure } = callOf(prepared, 'cancel_order')
     expect(bcs.u128().parse(pure(3))).toBe(ORDER.id.toString())
-    expect(() => deepbookVenue.assertSafe(prepared.signing, ME, prepared.context)).not.toThrow()
+    expect(() =>
+      deepbookLimitVenue.assertSafe(prepared.signing, ME, prepared.context)
+    ).not.toThrow()
   })
 
   it('says what a cancel brings back to the wallet, and where it was', async () => {
@@ -1080,7 +1085,9 @@ describe('leaving an order', () => {
     ])
     expect(prepared.summary).toBe('Move 0.55 USDC from your DeepBook account to your wallet.')
     expect(prepared.receive).toEqual({ amount: '0.55', symbol: 'USDC', approximate: false })
-    expect(() => deepbookVenue.assertSafe(prepared.signing, ME, prepared.context)).not.toThrow()
+    expect(() =>
+      deepbookLimitVenue.assertSafe(prepared.signing, ME, prepared.context)
+    ).not.toThrow()
   })
 
   it('collects from an order’s row without touching the order', async () => {

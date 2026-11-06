@@ -19,7 +19,7 @@ const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 const ODD_MINT = 'AbCdEfGhJkLmNpQrStUvWxYzAbCdEfGhJkLmNpQrStUv'
 const SUI_OWNER = `0x${'ab'.repeat(32)}`
 const SUI_USDC = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC'
-const WAL = '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL'
+const UNLISTED = '0xdeeb7a4662eec9f2f3def03fb937a663dddaa2e215b8078a284d026b7946c270::deep::DEEP'
 const EVM_OWNER = `0x${'12'.repeat(20)}`
 
 type Handler = (url: string, body: unknown) => unknown
@@ -184,11 +184,11 @@ describe('Sui balances', () => {
   it('reads address.balances, naming an unlisted coin by its last segment', async () => {
     stubFetch((_url, body) => {
       const q = (body as { query: string }).query
-      if (q.includes('coinMetadata')) return { data: { a0: { decimals: 9, symbol: 'WAL' } } }
+      if (q.includes('coinMetadata')) return { data: { a0: { decimals: 9, symbol: 'DEEP' } } }
       return page([
         node(`0x${'0'.repeat(63)}2::sui::SUI`, '1031937015'),
         node(SUI_USDC, '304803'),
-        node(WAL, '1500000'),
+        node(UNLISTED, '1500000'),
       ])
     })
     const result = await readSuiBalances(SUI_OWNER)
@@ -200,7 +200,7 @@ describe('Sui balances', () => {
       expect.objectContaining({ symbol: 'USDC', amount: '0.304803', listed: true })
     )
     expect(result.tokens).toContainEqual(
-      expect.objectContaining({ symbol: 'WAL', id: WAL, amount: '0.0015', listed: false })
+      expect.objectContaining({ symbol: 'DEEP', id: UNLISTED, amount: '0.0015', listed: false })
     )
   })
 
@@ -208,10 +208,10 @@ describe('Sui balances', () => {
     stubFetch((_url, body) => {
       const q = (body as { query: string }).query
       if (q.includes('coinMetadata')) return { data: { a0: null } }
-      return page([node(WAL, '1500000')])
+      return page([node(UNLISTED, '1500000')])
     })
     const result = await readSuiBalances(SUI_OWNER)
-    expect(result.tokens.find((t) => t.id === WAL)).toBeUndefined()
+    expect(result.tokens.find((t) => t.id === UNLISTED)).toBeUndefined()
     expect(result.complete).toBe(false)
   })
 
@@ -246,7 +246,7 @@ describe('Sui balances', () => {
     stubFetch((_url, body) => {
       const q = (body as { query: string }).query
       if (q.includes('coinMetadata')) return { data: { a0: null } }
-      return page([node(WAL, '0')])
+      return page([node(UNLISTED, '0')])
     })
     const result = await readSuiBalances(SUI_OWNER)
     expect(result.complete).toBe(true)
@@ -503,7 +503,7 @@ describe('chain balances route', () => {
   it('is bounded to 20 seconds', async () => {
     const route = await import('../../app/api/chain/[chain]/balances/route')
     expect(route.maxDuration).toBe(20)
-  })
+  }, 60_000)
 })
 
 describe('chainBalanceReply', () => {

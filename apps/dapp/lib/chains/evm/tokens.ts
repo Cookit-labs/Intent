@@ -4,9 +4,9 @@ import type { Chain } from 'viem'
 import type { ChainToken } from '../types'
 
 /**
- * Avalanche and Monad, which swap only through 1Click. Each contract here is matched against
- * 1Click's list by `oneClickAssetId` on chain, contract and decimals, so a wrong entry finds no
- * route rather than a wrong token.
+ * Avalanche and Monad. Each contract here is matched against 1Click's list by `oneClickAssetId` on
+ * chain, contract and decimals, so a wrong entry finds no route rather than a wrong token. The
+ * wrapped coins and shMON aren't on that list, and their sources are at the venues that use them.
  */
 
 export type EvmChain = 'avalanche' | 'monad'
@@ -30,6 +30,18 @@ export const AVALANCHE_TOKENS: readonly ChainToken[] = [
     decimals: 6,
     name: 'Tether USD',
   },
+  {
+    symbol: 'WAVAX',
+    id: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7',
+    decimals: 18,
+    name: 'Wrapped AVAX',
+  },
+  {
+    symbol: 'WETH.e',
+    id: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB',
+    decimals: 18,
+    name: 'Wrapped Ether (bridged)',
+  },
 ]
 
 export const MONAD_TOKENS: readonly ChainToken[] = [
@@ -45,6 +57,24 @@ export const MONAD_TOKENS: readonly ChainToken[] = [
     id: '0xe7cd86e13AC4309349F30B3435a9d337750fC82D',
     decimals: 6,
     name: 'USDT0',
+  },
+  {
+    symbol: 'WMON',
+    id: '0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A',
+    decimals: 18,
+    name: 'Wrapped MON',
+  },
+  {
+    symbol: 'WETH',
+    id: '0xEE8c0E9f1BFFb4Eb878d8f15f368A02a35481242',
+    decimals: 18,
+    name: 'Wrapped Ether',
+  },
+  {
+    symbol: 'shMON',
+    id: '0x1B68626dCa36c7fE922fD2d55E4f631d962dE19c',
+    decimals: 18,
+    name: 'ShMonad',
   },
 ]
 

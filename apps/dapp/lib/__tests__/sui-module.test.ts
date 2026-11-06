@@ -37,6 +37,17 @@ describe('the token list', () => {
         6,
       ],
       ['USDT', '0x375f70cf2ae4c00bf37117d0c85a2c71545e6ee05c4a5c7d282cd66a4504b068::usdt::USDT', 6],
+      ['WAL', '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL', 9],
+      [
+        'sSUI',
+        '0x83556891f4a0f233ce7b05cfe7f957d4020492a34f5405b2cb9377d060bef4bf::spring_sui::SPRING_SUI',
+        9,
+      ],
+      [
+        'afSUI',
+        '0xf325ce1300e8dac124071d3152c5c5ee6174914f8bc2161e88329cf579246efc::afsui::AFSUI',
+        9,
+      ],
     ])
   })
 
@@ -286,25 +297,41 @@ describe('the module', () => {
   it('adds 1Click once the secret that protects its deposits is there', () => {
     expect(buildSuiVenues({ AUTH_SECRET: 'x'.repeat(48) }).map((v) => v.id)).toEqual([
       'cetus',
+      'deepbook',
+      'momentum',
       '1click-sui',
       'navi',
+      'suilend',
+      'scallop',
       'springsui',
+      'aftermath',
+      'walrus',
       'deepbook-limit',
       'send',
     ])
   })
 
-  it('wires swap, supply, stake and limit, to Cetus, NAVI, SpringSui and DeepBook', () => {
+  it('wires each venue to what it does, and a default for each kind', () => {
     expect(buildSuiVenues({}).map((v) => [v.id, v.kinds])).toEqual([
       ['cetus', ['swap']],
-      ['navi', ['supply']],
-      ['springsui', ['stake']],
+      ['deepbook', ['swap']],
+      ['momentum', ['swap']],
+      ['navi', ['supply', 'withdraw', 'borrow', 'repay']],
+      ['suilend', ['supply', 'withdraw', 'borrow', 'repay']],
+      ['scallop', ['supply', 'withdraw', 'borrow', 'repay']],
+      ['springsui', ['stake', 'unstake']],
+      ['aftermath', ['stake', 'unstake']],
+      ['walrus', ['stake', 'unstake', 'claim']],
       ['deepbook-limit', ['limit']],
     ])
     expect(suiModule.defaultVenue).toEqual({
       swap: 'cetus',
       supply: 'navi',
+      withdraw: 'navi',
+      borrow: 'navi',
+      repay: 'navi',
       stake: 'springsui',
+      unstake: 'springsui',
       send: 'send',
       limit: 'deepbook-limit',
     })
@@ -316,7 +343,12 @@ describe('the module', () => {
     expect(suiCapabilities).toEqual([
       { kind: 'swap', venue: 'Cetus', symbol: 'SUI', then: ['cashout', 'supply', 'send'] },
       { kind: 'supply', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'withdraw', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'borrow', venue: 'NAVI', symbol: 'USDC' },
+      { kind: 'repay', venue: 'NAVI', symbol: 'USDC' },
       { kind: 'stake', venue: 'SpringSui', symbol: 'SUI' },
+      { kind: 'unstake', venue: 'SpringSui', symbol: 'sSUI' },
+      { kind: 'claim', venue: 'Walrus', symbol: 'WAL' },
       { kind: 'limit', venue: 'DeepBook', symbol: 'SUI' },
     ])
   })
@@ -324,8 +356,8 @@ describe('the module', () => {
 
 describe('the venue list', () => {
   it('has every row of the report', () => {
-    expect(suiVenues).toHaveLength(15)
-    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(15)
+    expect(suiVenues).toHaveLength(17)
+    expect(new Set(suiVenues.map((v) => v.id)).size).toBe(17)
   })
 
   it('is all Sui, with a real link and an honest reason', () => {
@@ -346,10 +378,12 @@ describe('the venue list', () => {
     for (const venue of claimed) expect(venue.capability).toBeTruthy()
   })
 
-  it('lists DeepBook once, as the limit venue that runs', () => {
-    expect(suiVenues.filter((v) => v.name === 'DeepBook')).toEqual([
+  it('lists DeepBook twice, its swaps and its limit orders, both running', () => {
+    expect(suiVenues.filter((v) => v.name.startsWith('DeepBook'))).toEqual([
+      expect.objectContaining({ id: 'deepbook', integration: 'executes' }),
       expect.objectContaining({
         id: 'deepbook-limit',
+        name: 'DeepBook Limit Orders',
         category: 'orderbook',
         integration: 'executes',
         url: 'https://deepbook.xyz',

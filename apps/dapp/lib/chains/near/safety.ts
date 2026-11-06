@@ -27,19 +27,18 @@ import { METAPOOL_CONTRACT, RNEAR_CONTRACT, TGAS, USDC_NEAR, USDT_NEAR, WRAP_NEA
  * - Storage attaches exactly 0.00125 NEAR, the `storage_balance_bounds` minimum on
  *   every token here. Rhea's DCL contract is the exception: its minimum is 0.5 NEAR,
  *   and `assertDclOrderSafe` holds it to that as a cap.
- * - A stake or wrap attaches at most 1,000 NEAR. Stablecoin transfers carry at most
- *   10,000 tokens. Dollar caps run earlier, in `prepareChainAction`. These ceilings
- *   only stop a payload far outside any trade that cap would pass.
  * - Gas is limited per method below, and to 300 TGas for a whole transaction.
+ * - An exit attaches nothing but the 1 yoctoNEAR `intents.near` requires, and what it pays
+ *   out goes to the signer: the staking contracts pay the caller, and a withdrawal
+ *   from `intents.near` must name the signer as its receiver.
  *
  * What this cannot do: a 1Click deposit address comes from 1Click's API, and any
  * 64-hex account looks the same as another. This limits what leaves and in what
  * shape. It cannot prove the address belongs to the swap, or where funds land.
  */
 
+export const INTENTS_CONTRACT = 'intents.near'
 export const STORAGE_DEPOSIT_YOCTO = '1250000000000000000000'
-export const MAX_NEAR_YOCTO = BigInt(1_000) * BigInt('1000000000000000000000000')
-export const MAX_STABLE_UNITS = BigInt(10_000) * BigInt(1000000)
 export const MAX_TX_GAS = BigInt(300) * TGAS
 export const STORAGE_GAS = BigInt(30) * TGAS
 export const WRAP_GAS = BigInt(30) * TGAS
@@ -48,11 +47,17 @@ export const TRANSFER_GAS = BigInt(30) * TGAS
 export const RNEAR_STAKE_GAS = BigInt(200) * TGAS
 /** Meta Pool's SDK uses 50 TGas. Doubled for margin, and unused gas comes back. */
 export const METAPOOL_STAKE_GAS = BigInt(100) * TGAS
+/** `rnear-sdk` uses 200 TGas for `unstake`, `unstake_all` and `withdraw_all`. */
+export const RNEAR_EXIT_GAS = BigInt(200) * TGAS
+/** The same margin as a Meta Pool stake. Unused gas comes back. */
+export const METAPOOL_EXIT_GAS = BigInt(100) * TGAS
+/** A generous limit: `ft_withdraw` spends what it needs on the transfer and its resolve. */
+export const INTENTS_CALL_GAS = BigInt(100) * TGAS
 
 /** Every 1Click deposit address seen on NEAR is a 64-hex implicit account. */
 export const DEPOSIT_ADDRESS = /^[0-9a-f]{64}$/
 
-const SWAP_CONTRACTS = new Set([WRAP_NEAR, USDC_NEAR, USDT_NEAR])
+export const SWAP_CONTRACTS: ReadonlySet<string> = new Set([WRAP_NEAR, USDC_NEAR, USDT_NEAR])
 
 function refuse(reason: string): never {
   throw new ChainActionRefused(
@@ -198,9 +203,6 @@ export function assertTokenTransferSafe(
   const amount = BigInt(amountText)
   if (amount === BigInt(0)) refuse('the token transfer moves nothing')
   const isWrapped = transaction.receiverId === WRAP_NEAR
-  if (amount > (isWrapped ? MAX_NEAR_YOCTO : MAX_STABLE_UNITS)) {
-    refuse('the token transfer is larger than this app allows')
-  }
 
   const before = calls.slice(0, -1)
   const wrapIndex = before.findIndex((c) => c.method === 'near_deposit')
@@ -229,22 +231,57 @@ export function assertTokenTransferSafe(
   if (new Set(paidFor).size !== paidFor.length) refuse('it pays for the same storage twice')
 }
 
-function assertStake(
+interface StakeVenueLimits {
+  contract: string
+  stakeGas: bigint
+  allowStorage: boolean
+  exitGas: bigint
+  /** The one method that collects a finished unstake: it pays the caller everything that is ready. */
+  claimMethod: string
+}
+
+/** One call, with nothing attached. Both contracts pay only their caller. */
+function assertStakeExit(calls: Call[], limits: StakeVenueLimits): void {
+  const exit = calls[0] as Call
+  if (calls.length !== 1) refuse('it contains more than one step of an exit')
+  assertGas(exit, limits.exitGas)
+  if (exit.deposit !== BigInt(0)) refuse(`${exit.method} attaches money it should not`)
+  if (exit.method === 'unstake') {
+    const amount = exit.args['amount']
+    if (!hasExactKeys(exit.args, ['amount']) || !isDigits(amount)) {
+      refuse('unstake has unexpected arguments')
+    }
+    if (BigInt(amount) === BigInt(0)) refuse('the unstake moves nothing')
+    return
+  }
+  if (Object.keys(exit.args).length !== 0) refuse(`${exit.method} has unexpected arguments`)
+}
+
+function assertStakeVenue(
   payload: SigningPayload,
   account: string,
-  contract: string,
-  stakeGas: bigint,
-  allowStorage: boolean
+  limits: StakeVenueLimits
 ): void {
   const transaction = readSingleTransaction(payload, account)
-  if (transaction.receiverId !== contract) refuse(`${transaction.receiverId} is not this venue`)
+  if (transaction.receiverId !== limits.contract) {
+    refuse(`${transaction.receiverId} is not this venue`)
+  }
   const { calls } = transaction
+  const last = calls[calls.length - 1] as Call
+  if (['unstake', 'unstake_all', limits.claimMethod].includes(last.method)) {
+    assertStakeExit(calls, limits)
+    return
+  }
+  assertStake(calls, account, limits)
+}
+
+function assertStake(calls: Call[], account: string, limits: StakeVenueLimits): void {
+  const { stakeGas, allowStorage } = limits
   const stake = calls[calls.length - 1] as Call
   if (stake.method !== 'deposit_and_stake') refuse('it does not end in a stake')
   assertGas(stake, stakeGas)
   if (Object.keys(stake.args).length !== 0) refuse('deposit_and_stake has unexpected arguments')
   if (stake.deposit === BigInt(0)) refuse('the stake attaches nothing')
-  if (stake.deposit > MAX_NEAR_YOCTO) refuse('the stake is larger than this app allows')
 
   const before = calls.slice(0, -1)
   if (before.length > (allowStorage ? 1 : 0)) refuse('it contains more than a stake')
@@ -254,17 +291,109 @@ function assertStake(
   }
 }
 
-/** [storage_deposit(you)?, deposit_and_stake] on `lst.rhealab.near`. */
+/**
+ * On `lst.rhealab.near`: [storage_deposit(you)?, deposit_and_stake], [unstake(amount)],
+ * [unstake_all] or [withdraw_all].
+ */
 export function assertRnearSafe(payload: SigningPayload, account: string): void {
-  assertStake(payload, account, RNEAR_CONTRACT, RNEAR_STAKE_GAS, true)
+  assertStakeVenue(payload, account, {
+    contract: RNEAR_CONTRACT,
+    stakeGas: RNEAR_STAKE_GAS,
+    allowStorage: true,
+    exitGas: RNEAR_EXIT_GAS,
+    claimMethod: 'withdraw_all',
+  })
 }
 
 /**
- * [deposit_and_stake] on `meta-pool.near`. Its NEP-145 methods are empty stubs and
- * a new account's storage comes out of the first stake, so no storage call is allowed.
+ * On `meta-pool.near`: [deposit_and_stake], [unstake(amount)], [unstake_all] or
+ * [withdraw_unstaked]. Its NEP-145 methods are empty stubs and a new account's storage
+ * comes out of the first stake, so no storage call is allowed.
  */
 export function assertMetapoolSafe(payload: SigningPayload, account: string): void {
-  assertStake(payload, account, METAPOOL_CONTRACT, METAPOOL_STAKE_GAS, false)
+  assertStakeVenue(payload, account, {
+    contract: METAPOOL_CONTRACT,
+    stakeGas: METAPOOL_STAKE_GAS,
+    allowStorage: false,
+    exitGas: METAPOOL_EXIT_GAS,
+    claimMethod: 'withdraw_unstaked',
+  })
+}
+
+function assertOneYocto(call: Call): void {
+  assertGas(call, INTENTS_CALL_GAS)
+  if (call.deposit !== BigInt(1)) refuse(`${call.method} does not attach exactly 1 yoctoNEAR`)
+}
+
+function positiveDigits(value: unknown): boolean {
+  return isDigits(value) && BigInt(value) > BigInt(0)
+}
+
+/**
+ * Selling a share out of a NEAR Intents balance: one [mt_transfer] on `intents.near` of exactly
+ * this token to a 1Click deposit address. The contract moves it from the caller's own balance.
+ */
+export function assertIntentsSaleSafe(
+  payload: SigningPayload,
+  account: string,
+  tokenId: string
+): void {
+  const { receiverId, calls } = readSingleTransaction(payload, account)
+  if (receiverId !== INTENTS_CONTRACT) refuse(`${receiverId} is not NEAR Intents`)
+  const sale = calls[0] as Call
+  if (calls.length !== 1 || sale.method !== 'mt_transfer') refuse('it is not a single share sale')
+  assertOneYocto(sale)
+  if (!hasExactKeys(sale.args, ['receiver_id', 'token_id', 'amount'])) {
+    refuse('the share sale has unexpected arguments')
+  }
+  const receiver = sale.args['receiver_id']
+  if (typeof receiver !== 'string' || !DEPOSIT_ADDRESS.test(receiver) || receiver === account) {
+    refuse('the share sale does not go to a deposit address')
+  }
+  if (sale.args['token_id'] !== tokenId) refuse('the share sale moves some other token')
+  if (!positiveDigits(sale.args['amount'])) refuse('the share sale has a malformed amount')
+}
+
+/**
+ * Bringing a token out of a NEAR Intents balance to the signer's own wallet: [ft_withdraw] on
+ * `intents.near`, after a registration on that token if the signer has none. Both are separate
+ * transactions because they go to different contracts.
+ */
+export function assertIntentsWithdrawalSafe(
+  payload: SigningPayload,
+  account: string,
+  token: string
+): void {
+  if (payload.family !== 'near') refuse('it is not a NEAR transaction')
+  if (!NEAR_ACCOUNT.test(account)) refuse('the account is not a NEAR account')
+  const { transactions } = payload
+  if (!Array.isArray(transactions) || (transactions.length !== 1 && transactions.length !== 2)) {
+    refuse('it is not the expected number of transactions')
+  }
+  const steps = transactions.map(readTransaction)
+  const { receiverId, calls } = steps[steps.length - 1] as NearTransaction & { calls: Call[] }
+  if (receiverId !== INTENTS_CONTRACT) refuse(`${receiverId} is not NEAR Intents`)
+  const withdrawal = calls[0] as Call
+  if (calls.length !== 1 || withdrawal.method !== 'ft_withdraw') {
+    refuse('it is not a single withdrawal')
+  }
+  assertOneYocto(withdrawal)
+  if (!hasExactKeys(withdrawal.args, ['token', 'receiver_id', 'amount'])) {
+    refuse('the withdrawal has unexpected arguments')
+  }
+  if (withdrawal.args['token'] !== token) refuse('the withdrawal moves some other token')
+  if (withdrawal.args['receiver_id'] !== account) refuse('the withdrawal pays someone else')
+  if (!positiveDigits(withdrawal.args['amount'])) refuse('the withdrawal has a malformed amount')
+
+  if (steps.length === 2) {
+    const first = steps[0] as NearTransaction & { calls: Call[] }
+    if (first.receiverId !== token) refuse('the registration is on some other token')
+    const registration = first.calls[0] as Call
+    if (first.calls.length !== 1 || registration.method !== 'storage_deposit') {
+      refuse('the step before the withdrawal is not a registration')
+    }
+    assertStorageDeposit(registration, [account])
+  }
 }
 
 export interface DclOrderExpected {
@@ -338,9 +467,6 @@ function assertDclPlacement(
   }
   const amount = BigInt(amountText)
   if (amount === BigInt(0)) refuse('the order sells nothing')
-  if (amount > (isWrapped ? MAX_NEAR_YOCTO : MAX_STABLE_UNITS)) {
-    refuse('the order is larger than this app allows')
-  }
   // Whole text against whole text: pool, buy token, point, client id and any extra key all at once.
   if (transfer.args['msg'] !== dclOrderMsg(buyToken, expected.point)) {
     refuse('the order is not the one that was asked for')

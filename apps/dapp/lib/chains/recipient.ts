@@ -6,8 +6,9 @@ import { AVALANCHE_TOKENS, EVM_NATIVE_ID, MONAD_TOKENS } from './evm/tokens'
 import { NEAR_ACCOUNT } from './near/account'
 import { nearTokens } from './near/tokens'
 import { SOLANA_TOKENS } from './solana/tokens'
+import { recipientName, NAME_TLDS, type RecipientName } from './names/tlds'
 import { SUI_TOKENS } from './sui/tokens'
-import type { ChainWithActions } from './types'
+import { withArticle, type ChainWithActions } from './types'
 
 /** Client-safe: the chat refuses from here before any swap, and the server checks again. */
 
@@ -55,9 +56,11 @@ const SUI_PACKAGES = SUI_TOKENS.map((token) => {
  * Whether money can be sent to this address on this chain, exactly as typed. An EVM address may be
  * all lower case, which carries no checksum, but one with mixed case must pass its checksum: a
  * wrong one means a typo, and a typo here can't be undone. Zero addresses and the token contracts
- * this app knows are refused, since funds sent to either are gone.
+ * this app knows are refused, since funds sent to either are gone. A name is never an address, even
+ * where it fits the shape: `ada.sol` is a well-formed NEAR account, and paying that would be a guess.
  */
 export function isValidRecipient(chain: ChainWithActions, address: string): boolean {
+  if (recipientName(address) !== undefined) return false
   switch (chain) {
     case 'solana':
       return (
@@ -92,9 +95,27 @@ function isSameAccount(a: string, b: string): boolean {
   return a.startsWith('0x') ? a.toLowerCase() === b.toLowerCase() : a === b
 }
 
+/** The sentence for a name this chain can't read, or nothing. Asked with no read at all. */
+function nameRefusal(chain: ChainWithActions, typed: RecipientName): string | undefined {
+  const { name } = typed
+  if (!NAME_TLDS[chain].includes(typed.tld)) {
+    const home = CHAIN_NAME[typed.chain]
+    const here = CHAIN_NAME[chain]
+    return `${name} is ${withArticle(home)} name, and this is on ${here}, so it can't be read here. Switch to ${home}, or use ${withArticle(here)} address. ${NOTHING_MOVED}`
+  }
+  if (!typed.readable) {
+    return `${name} can't be read as a name here. Use the wallet address instead. ${NOTHING_MOVED}`
+  }
+  if (typed.sub) {
+    return `${name} is a subname, and those can't be paid by name here. Use the wallet address instead. ${NOTHING_MOVED}`
+  }
+  return undefined
+}
+
 /**
  * The sentence for a send that can't go, or nothing. `symbol` and `account` are left out where they
- * aren't known yet, and the check runs again where they are.
+ * aren't known yet, and the check runs again where they are. A name its chain can read passes here,
+ * and the same check runs again on the address it reads to, before anything is built.
  */
 export function sendRefusal(
   chain: ChainWithActions,
@@ -103,11 +124,17 @@ export function sendRefusal(
   account?: string
 ): string | undefined {
   const name = CHAIN_NAME[chain]
-  if (!isValidRecipient(chain, recipient)) {
-    return `That is not an address that can receive on ${name}, so I won't send to it. Check the address. ${NOTHING_MOVED}`
-  }
-  if (account !== undefined && isSameAccount(recipient, account)) {
-    return `That address is your own wallet, so there is nothing to send. ${NOTHING_MOVED}`
+  const typed = recipientName(recipient)
+  if (typed !== undefined) {
+    const refusal = nameRefusal(chain, typed)
+    if (refusal !== undefined) return refusal
+  } else {
+    if (!isValidRecipient(chain, recipient)) {
+      return `That is not an address that can receive on ${name}, so I won't send to it. Check the address. ${NOTHING_MOVED}`
+    }
+    if (account !== undefined && isSameAccount(recipient, account)) {
+      return `That address is your own wallet, so there is nothing to send. ${NOTHING_MOVED}`
+    }
   }
   if (symbol === undefined) return undefined
   const wanted = symbol.trim().toUpperCase()

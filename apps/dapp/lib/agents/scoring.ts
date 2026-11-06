@@ -100,8 +100,9 @@ export function scoreProposals(
     })
 }
 
+/** An agent that held off proposed nothing to do, so it can't be recommended. */
 export function pickWinner(scored: ScoredProposal[]): AgentKey | null {
-  return scored[0]?.agent ?? null
+  return scored.find((s) => s.proposal.held !== true)?.agent ?? null
 }
 
 /**
@@ -116,6 +117,8 @@ export function unanimousChoice(scored: ScoredProposal[]): boolean {
   const executable = scored.filter((s) => s.executable)
   const first = executable[0]
   if (executable.length < 2 || first === undefined) return false
+  // One agent saying not to do this at all is the opposite of agreeing with the rest.
+  if (scored.some((s) => s.proposal.held === true)) return false
 
   return executable.every(
     (s) =>

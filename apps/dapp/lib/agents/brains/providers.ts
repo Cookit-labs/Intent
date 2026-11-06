@@ -67,6 +67,13 @@ export interface ProviderConfig {
    * occasionally wrong about capitalisation.
    */
   displayNames?: Record<string, string>
+  /**
+   * How a short talk turn is sent. A turn has seconds, so where a provider can
+   * turn a model's reasoning off, `body` does. Measured in `evals/RESULTS.md`:
+   * with reasoning on and a small limit, a model often spends the whole limit
+   * thinking and returns no tool call at all.
+   */
+  talk?: { body?: Record<string, unknown>; maxTokens: number }
 }
 
 /**
@@ -121,6 +128,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     pricing: { 'claude-sonnet-5-5': { input: 2, output: 10 } },
     defaultPricing: { input: 2, output: 10 },
     displayNames: { 'claude-sonnet-5-5': 'Claude Sonnet 5.5' },
+    talk: { maxTokens: 1024 },
   },
 
   deepseek: {
@@ -141,6 +149,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
       'deepseek-v4-flash': 'DeepSeek V4 Flash',
       'deepseek-v4-pro': 'DeepSeek V4 Pro',
     },
+    talk: { body: { thinking: { type: 'disabled' } }, maxTokens: 400 },
   },
 
   /**
@@ -171,6 +180,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     pricing: {},
     defaultPricing: { input: 0, output: 0 },
     displayNames: { 'qwen/qwen3.8-27b': 'Qwen3.8 27B' },
+    talk: { maxTokens: 300 },
   },
 
   /**
@@ -236,6 +246,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
       'poolside/laguna-xs-2.1:free': 'Laguna XS 2.1',
       'cohere/north-mini-code:free': 'North Mini Code',
     },
+    talk: { body: { reasoning: { enabled: false } }, maxTokens: 400 },
   },
 }
 
