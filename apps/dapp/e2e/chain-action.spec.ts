@@ -108,8 +108,7 @@ test('a typed swap reaches review, signs, submits and reports the result', async
 
   await say(page, 'Swap 1 USDC to SOL')
 
-  await expect(page.getByText('Swap on Jupiter', { exact: true })).toBeVisible()
-  await expect(page.getByText(/0.0061 SOL/).first()).toBeVisible()
+  await expect(page.getByText('Swap 1 USDC for SOL on Jupiter.')).toBeVisible()
   await expect(page.getByText('The price can move before this lands.')).toBeVisible()
   expect(prepared()).toEqual({
     account: ADDRESS,

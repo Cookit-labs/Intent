@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, cn } from '@intent/ui'
+import { Button, Card, cn } from '@intent/ui'
 import { Check, Loader2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
@@ -14,49 +14,20 @@ import {
   stepMarks,
   type StepMark,
 } from '../../lib/chains/sequence-flow'
-import { toolCard } from './bubble'
 
-const MARK_WORD: Record<StepMark, string> = {
-  done: 'done',
-  now: 'in progress',
-  waiting: 'next',
-  stopped: 'stopped',
-}
-
-/** One step as a bar with its name under it, as the payout card shows its own progress. */
-function Step({ mark, label }: { mark: StepMark; label: string }): JSX.Element {
+function Mark({ mark, number }: { mark: StepMark; number: number }): JSX.Element {
   return (
-    <li className="flex min-w-0 flex-1 flex-col gap-2">
-      <span
-        aria-hidden="true"
-        className={cn(
-          'h-1.5 rounded-full transition-colors',
-          mark === 'done'
-            ? 'bg-brand'
-            : mark === 'now'
-              ? 'bg-brand/40 motion-safe:animate-pulse'
-              : 'bg-muted'
-        )}
-      />
-      <span
-        className={cn(
-          'flex items-start gap-1.5 text-xs leading-snug [overflow-wrap:anywhere]',
-          mark === 'done' || mark === 'now' ? 'font-medium' : 'text-muted-foreground'
-        )}
-      >
-        {mark === 'done' ? (
-          <Check className="text-brand mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        ) : null}
-        {mark === 'now' ? (
-          <span
-            aria-hidden="true"
-            className="bg-brand ring-brand/25 mx-1 mt-[0.3rem] h-1.5 w-1.5 shrink-0 rounded-full ring-4"
-          />
-        ) : null}
-        {label}
-        <span className="sr-only">, {MARK_WORD[mark]}</span>
-      </span>
-    </li>
+    <span
+      aria-hidden="true"
+      className={cn(
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-medium',
+        mark === 'now' || mark === 'done'
+          ? 'bg-bubble-me text-bubble-me-foreground'
+          : 'border-border text-muted-foreground border'
+      )}
+    >
+      {mark === 'done' ? <Check className="h-3 w-3" /> : number}
+    </span>
   )
 }
 
@@ -93,10 +64,30 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
 
   return (
     <div ref={ref}>
-      <div className={cn(toolCard, 'gap-4 px-5 py-4')}>
-        <ol className="flex gap-3">
-          <Step mark={firstMark} label={first} />
-          <Step mark={secondMark} label={second} />
+      <Card className="flex flex-col gap-3 p-5">
+        <ol className="flex flex-col gap-2.5 text-sm">
+          <li className="flex items-center gap-2.5">
+            <Mark mark={firstMark} number={1} />
+            <span
+              className={cn(
+                '[overflow-wrap:anywhere]',
+                firstMark === 'now' ? 'font-medium' : 'text-muted-foreground'
+              )}
+            >
+              {first}
+            </span>
+          </li>
+          <li className="flex items-center gap-2.5">
+            <Mark mark={secondMark} number={2} />
+            <span
+              className={cn(
+                '[overflow-wrap:anywhere]',
+                secondMark === 'now' ? 'font-medium' : 'text-muted-foreground'
+              )}
+            >
+              {second}
+            </span>
+          </li>
         </ol>
 
         {stage === 'swap' ? (
@@ -149,7 +140,7 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
             {error}
           </p>
         ) : null}
-      </div>
+      </Card>
     </div>
   )
 }

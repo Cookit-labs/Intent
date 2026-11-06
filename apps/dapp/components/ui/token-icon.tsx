@@ -1,4 +1,3 @@
-import { ChainMark, type ChainLogoProps } from '@intent/ui'
 import Image from 'next/image'
 
 /**
@@ -18,15 +17,6 @@ const LOGOS: Record<string, string> = {
   USDC: '/images/usdc-logo.webp',
 }
 
-/** A chain's own coin is drawn with the chain's mark, on a light disc so it reads in either theme. */
-const NATIVE: Record<string, ChainLogoProps['chain']> = {
-  SUI: 'sui',
-  SOL: 'solana',
-  AVAX: 'avalanche',
-  MON: 'monad',
-  NEAR: 'near',
-}
-
 export function TokenIcon({
   symbol,
   size = 20,
@@ -40,19 +30,6 @@ export function TokenIcon({
 
   const code = symbol.toUpperCase()
   const src = LOGOS[code]
-  const native = NATIVE[code]
-
-  if (src === undefined && native !== undefined) {
-    return (
-      <span
-        className={`inline-flex shrink-0 items-center justify-center rounded-full bg-white text-black ring-1 ring-black/5 ${className}`}
-        style={{ width: size, height: size }}
-        aria-hidden
-      >
-        <ChainMark chain={native} className="h-[58%] w-[58%]" />
-      </span>
-    )
-  }
 
   if (src === undefined) {
     return (
