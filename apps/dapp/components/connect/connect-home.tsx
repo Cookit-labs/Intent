@@ -12,7 +12,7 @@ import type { ChainSlug } from '@intent/types'
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-import { installNetworkFetch } from '../../lib/api/network-fetch'
+import { installPageFetch } from '../../lib/api/network-fetch'
 import { rememberChain } from '../../lib/wallet/chain-cookie'
 import { screenAfterConnect } from '../../lib/wallet/chain-path'
 
@@ -37,7 +37,7 @@ export function ConnectHome(): JSX.Element {
   const network = parseChainSegment(stellarHome)?.network ?? defaultNetwork()
   if (typeof window !== 'undefined') {
     setClientNetwork(network)
-    if (isMultiNetwork()) installNetworkFetch(network)
+    installPageFetch(network)
   }
 
   function onConnected(slug: ChainSlug): void {
