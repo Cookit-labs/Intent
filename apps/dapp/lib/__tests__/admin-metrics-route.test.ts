@@ -59,6 +59,7 @@ function repo(): MetricsRepo {
         rows: [
           {
             id: '1',
+            chain: 'stellar',
             hash: 'ab'.repeat(32),
             account: 'G',
             kind: 'swap',
@@ -73,6 +74,7 @@ function repo(): MetricsRepo {
           },
           {
             id: '2',
+            chain: 'stellar',
             hash: null,
             account: 'G',
             kind: 'swap',
@@ -129,7 +131,7 @@ describe('GET /api/admin/metrics', () => {
   })
 
   it('answers the overview for the network and range asked for', async () => {
-    const res = await GET(get('view=overview&network=testnet&range=7d'))
+    const res = await GET(get('view=overview&chain=stellar&network=testnet&range=7d'))
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     const body = await res.json()
@@ -140,13 +142,27 @@ describe('GET /api/admin/metrics', () => {
       overview: { transactions: 4 },
     })
     expect(
-      state.calls.every((c) => JSON.stringify(c.scope) === '{"network":"testnet","range":"7d"}')
+      state.calls.every(
+        (c) => JSON.stringify(c.scope) === '{"network":"testnet","chain":"stellar","range":"7d"}'
+      )
     ).toBe(true)
   })
 
-  it('defaults to mainnet and thirty days', async () => {
+  it('defaults to every chain on mainnet over thirty days', async () => {
     await GET(get('view=overview'))
-    expect(state.calls[0]?.scope).toEqual({ network: 'mainnet', range: '30d' })
+    expect(state.calls[0]?.scope).toEqual({ network: 'mainnet', chain: 'all', range: '30d' })
+  })
+
+  it('reads one chain when asked for it', async () => {
+    const body = await (await GET(get('view=overview&chain=solana'))).json()
+    expect(body).toMatchObject({ tracked: true, chain: 'solana' })
+    expect(state.calls[0]?.scope).toEqual({ network: 'mainnet', chain: 'solana', range: '30d' })
+  })
+
+  it('refuses testnet for any chain but stellar, which are mainnet only', async () => {
+    expect((await GET(get('view=overview&network=testnet'))).status).toBe(400)
+    expect((await GET(get('view=overview&chain=solana&network=testnet'))).status).toBe(400)
+    expect(state.calls).toEqual([])
   })
 
   it('rejects a view, network or range it does not know', async () => {
@@ -187,7 +203,7 @@ describe('GET /api/admin/metrics', () => {
   })
 
   it('links testnet transactions to the testnet explorer', async () => {
-    const body = await (await GET(get('view=transactions&network=testnet'))).json()
+    const body = await (await GET(get('view=transactions&chain=stellar&network=testnet'))).json()
     expect(body.rows[0].explorerUrl).toContain('/explorer/testnet/tx/')
   })
 

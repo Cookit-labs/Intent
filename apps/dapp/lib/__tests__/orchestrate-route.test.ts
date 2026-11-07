@@ -119,9 +119,17 @@ describe('POST /api/intent/orchestrate', () => {
     expect(await (await POST(post({ turns: turns('what is in my wallet') }))).json()).toEqual({
       outcome: 'balance',
     })
-    expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'balance' })
+    expect(logIntentRead).toHaveBeenCalledWith({
+      chain: 'stellar',
+      understood: true,
+      action: 'balance',
+    })
     // Understood and declined, so the admin read rate is not dragged down by it.
-    expect(logIntentRead).toHaveBeenCalledWith({ understood: true, action: 'out_of_scope' })
+    expect(logIntentRead).toHaveBeenCalledWith({
+      chain: 'stellar',
+      understood: true,
+      action: 'out_of_scope',
+    })
   })
 
   it('hands the earlier conversation to the model', async () => {

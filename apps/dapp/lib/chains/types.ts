@@ -155,6 +155,8 @@ export interface PreparedAction {
   context?: Record<string, string> | undefined
   /** A setup step: the same request must be prepared again once this one settles. */
   thenPrepareAgain?: true
+  /** What this sells, signed by the server, returned unchanged at submit so the usage log can count it. */
+  receipt?: string | undefined
 }
 
 export interface SubmitInput {

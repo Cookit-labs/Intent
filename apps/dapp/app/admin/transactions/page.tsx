@@ -1,11 +1,12 @@
 'use client'
 
-import { Badge, Button, cn } from '@intent/ui'
+import { Badge, Button, ChainMark, cn } from '@intent/ui'
+import type { ChainSlug } from '@intent/types'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { EmptyNote, PageTitle, Panel } from '../../../components/admin/parts'
-import { useScope } from '../../../components/admin/scope'
+import { scopeQuery, useScope } from '../../../components/admin/scope'
 import {
   KIND_LABELS,
   formatCount,
@@ -16,6 +17,7 @@ import {
 
 interface Row {
   id: string
+  chain: string
   hash: string | null
   account: string
   kind: string
@@ -61,21 +63,18 @@ export default function AdminTransactionsPage(): JSX.Element {
   const [data, setData] = useState<Page | null>(null)
   const [error, setError] = useState<string | undefined>(undefined)
 
-  const network = scope.network
-  const tracked = scope.chain === 'stellar' && network !== null
+  const query = scopeQuery(scope)
+  const tracked = query !== undefined
 
-  useEffect(() => setPage(1), [kind, outcome, network, range])
+  useEffect(() => setPage(1), [kind, outcome, query, range])
 
   useEffect(() => {
-    if (!tracked) return
+    if (query === undefined) return
     const controller = new AbortController()
-    const params = new URLSearchParams({
-      view: 'transactions',
-      chain: 'stellar',
-      network,
-      range,
-      page: String(page),
-    })
+    const params = new URLSearchParams(query)
+    params.set('view', 'transactions')
+    params.set('range', range)
+    params.set('page', String(page))
     if (kind !== '') params.set('kind', kind)
     if (outcome !== 'all') params.set('ok', outcome)
     setError(undefined)
@@ -89,7 +88,7 @@ export default function AdminTransactionsPage(): JSX.Element {
         setError('Transactions could not be loaded. Try again in a moment.')
       })
     return () => controller.abort()
-  }, [tracked, network, range, kind, outcome, page])
+  }, [query, range, kind, outcome, page])
 
   const pages = data === null ? 1 : Math.max(Math.ceil(data.total / data.pageSize), 1)
 
@@ -102,10 +101,7 @@ export default function AdminTransactionsPage(): JSX.Element {
 
       {!tracked ? (
         <Panel title={`${scope.name} transactions`}>
-          <EmptyNote>
-            Intent does not record usage on {scope.name} yet. Stellar Mainnet and Testnet are
-            counted today.
-          </EmptyNote>
+          <EmptyNote>Intent does not record usage on {scope.name} yet.</EmptyNote>
         </Panel>
       ) : (
         <>
@@ -170,7 +166,15 @@ export default function AdminTransactionsPage(): JSX.Element {
                         <td className="text-muted-foreground whitespace-nowrap py-2.5 pr-4">
                           {when(r.at)}
                         </td>
-                        <td className="py-2.5 pr-4">{kindLabel(r.kind)}</td>
+                        <td className="py-2.5 pr-4">
+                          <span className="inline-flex items-center gap-2">
+                            <ChainMark
+                              chain={r.chain as ChainSlug}
+                              className="h-3.5 w-3.5 shrink-0"
+                            />
+                            {kindLabel(r.kind)}
+                          </span>
+                        </td>
                         <td className="py-2.5 pr-4 font-mono" title={r.account}>
                           {shortAddress(r.account)}
                         </td>

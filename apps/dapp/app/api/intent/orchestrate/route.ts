@@ -111,15 +111,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     // the reason. Saying so lets the chat ask which token was meant.
     const hint = onChain === undefined ? undefined : tokenHintIn(chain, latest)
     if (hint !== undefined) {
-      await logIntentRead({ understood: false, reason: 'unclear' })
+      await logIntentRead({ chain, understood: false, reason: 'unclear' })
       return NextResponse.json({ outcome: 'unclear', reply: hint })
     }
     const unknown = onChain === undefined ? unknownTickers(latest) : []
     if (unknown.length > 0) {
-      await logIntentRead({ understood: false, reason: 'unknown_token' })
+      await logIntentRead({ chain, understood: false, reason: 'unknown_token' })
       return NextResponse.json({ outcome: 'unavailable', reason: 'unknown_token', tokens: unknown })
     }
-    await logIntentRead({ understood: false, reason: 'unreadable' })
+    await logIntentRead({ chain, understood: false, reason: 'unreadable' })
     return NextResponse.json({ outcome: 'unavailable', reason: 'unreadable' })
   }
 
@@ -128,25 +128,25 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ outcome: 'ask', question: result.question })
 
     case 'help':
-      await logIntentRead({ understood: true, action: 'help' })
+      await logIntentRead({ chain, understood: true, action: 'help' })
       return NextResponse.json({
         outcome: 'help',
         ...(result.reply !== undefined ? { reply: result.reply } : {}),
       })
 
     case 'balance':
-      await logIntentRead({ understood: true, action: 'balance' })
+      await logIntentRead({ chain, understood: true, action: 'balance' })
       return NextResponse.json({ outcome: 'balance' })
 
     case 'out_of_scope':
-      await logIntentRead({ understood: true, action: 'out_of_scope' })
+      await logIntentRead({ chain, understood: true, action: 'out_of_scope' })
       return NextResponse.json({
         outcome: 'out_of_scope',
         ...(result.reply !== undefined ? { reply: result.reply } : {}),
       })
 
     case 'unclear':
-      await logIntentRead({ understood: false, reason: 'unclear' })
+      await logIntentRead({ chain, understood: false, reason: 'unclear' })
       return NextResponse.json({
         outcome: 'unclear',
         ...(result.reply !== undefined ? { reply: result.reply } : {}),
@@ -162,11 +162,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         reading.action === 'swap' &&
         (lendableOnly.includes(reading.tokenIn) || lendableOnly.includes(reading.tokenOut))
       ) {
-        await logIntentRead({ understood: false, reason: 'not_tradeable' })
+        await logIntentRead({ chain, understood: false, reason: 'not_tradeable' })
         return NextResponse.json({ outcome: 'unavailable', reason: 'not_tradeable' })
       }
 
       await logIntentRead({
+        chain,
         understood: true,
         action: reading.action,
         tokenIn: reading.tokenIn,

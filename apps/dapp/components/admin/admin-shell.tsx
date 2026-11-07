@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  Layers,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -21,7 +22,14 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 
 import { ThemeToggle } from '../layout/theme-toggle'
 
-import { RANGE_OPTIONS, SCOPES, ScopeProvider, useScope, type AdminRange } from './scope'
+import {
+  RANGE_OPTIONS,
+  SCOPES,
+  ScopeProvider,
+  useScope,
+  type AdminRange,
+  type ScopeOption,
+} from './scope'
 import { StatsProvider, useStats } from './stats'
 import { BrandMark } from '../layout/brand-mark'
 
@@ -41,6 +49,20 @@ const NAV: NavItem[] = [
   { href: '/admin/payouts', label: 'Payouts', icon: Banknote },
   { href: '/admin/waitlist', label: 'Waitlist', icon: ListChecks, chainless: true },
 ]
+
+function ScopeMark({
+  chain,
+  className,
+}: {
+  chain: ScopeOption['chain']
+  className: string
+}): JSX.Element {
+  return chain === 'all' ? (
+    <Layers aria-hidden="true" className={className} />
+  ) : (
+    <ChainMark chain={chain} className={className} />
+  )
+}
 
 function ScopeSwitcher(): JSX.Element {
   const { scope, setScopeKey } = useScope()
@@ -73,7 +95,7 @@ function ScopeSwitcher(): JSX.Element {
         aria-label={`Showing ${scope.name} ${scope.label}. Change chain`}
         className="border-border bg-card hover:bg-muted/60 inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors"
       >
-        <ChainMark chain={scope.chain} className="h-4 w-4" />
+        <ScopeMark chain={scope.chain} className="h-4 w-4" />
         {scope.name}
         <span className="text-muted-foreground font-normal">{scope.label}</span>
         <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
@@ -100,7 +122,7 @@ function ScopeSwitcher(): JSX.Element {
                   option.key === scope.key ? 'bg-muted font-medium' : 'hover:bg-muted/60'
                 )}
               >
-                <ChainMark chain={option.chain} className="h-4 w-4 shrink-0" />
+                <ScopeMark chain={option.chain} className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col leading-tight">
                   <span>{option.name}</span>
                   <span className="text-muted-foreground text-xs">{option.label}</span>
@@ -113,7 +135,7 @@ function ScopeSwitcher(): JSX.Element {
                 aria-disabled="true"
                 className="text-muted-foreground flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm"
               >
-                <ChainMark chain={option.chain} className="h-4 w-4 shrink-0" />
+                <ScopeMark chain={option.chain} className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col leading-tight">
                   <span>{option.name}</span>
                   <span className="text-xs">{option.label}</span>

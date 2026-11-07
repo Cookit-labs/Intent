@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { withReceipt } from '../../../../../lib/chains/receipt'
 import { chainModule } from '../../../../../lib/chains/registry'
 import { BALANCE_DEADLINE_MS, ChainActionRefused } from '../../../../../lib/chains/types'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
@@ -83,7 +84,7 @@ export async function POST(
       )
     }
     venue.assertSafe(prepared.signing, account, prepared.context)
-    return NextResponse.json({ prepared })
+    return NextResponse.json({ prepared: await withReceipt(chainApi, account, prepared) })
   } catch (e) {
     if (e instanceof ChainActionRefused) {
       return NextResponse.json({ error: e.message }, { status: 422 })

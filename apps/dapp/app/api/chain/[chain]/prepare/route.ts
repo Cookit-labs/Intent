@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { prepareChainAction } from '../../../../../lib/chains/prepare'
+import { withReceipt } from '../../../../../lib/chains/receipt'
 import { chainModule } from '../../../../../lib/chains/registry'
 import { ChainActionRefused } from '../../../../../lib/chains/types'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
@@ -106,7 +107,9 @@ export async function POST(
       },
       parsed.data.account
     )
-    return NextResponse.json({ prepared })
+    return NextResponse.json({
+      prepared: await withReceipt(chainApi, parsed.data.account, prepared),
+    })
   } catch (e) {
     if (e instanceof ChainActionRefused) {
       return NextResponse.json({ error: e.message }, { status: 422 })
