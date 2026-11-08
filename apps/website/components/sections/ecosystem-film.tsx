@@ -89,7 +89,7 @@ const AGENTS: Agent[] = [
 const SHADOW = AGENTS.find((a) => a.recommended)!
 const SETTLE_STEPS = [
   'Execution submitted',
-  'Validated on Arc L1',
+  'Validated on Stellar',
   'USDC settled',
   'Reputation updated',
 ]
@@ -253,7 +253,7 @@ export function EcosystemFilm() {
     })
     at(13900, () => {
       setPhase('launch')
-      push({ kind: 'system', text: "Executing Shadow's route on Arc L1", icon: 'radio' })
+      push({ kind: 'system', text: "Executing Shadow's route on Stellar", icon: 'radio' })
     })
     at(14800, () => {
       setPhase('settle')
@@ -544,7 +544,7 @@ export function EcosystemFilm() {
         </div>
       </div>
 
-      {/* Connective rail — value travelling Intent → Arc, outside the window */}
+      {/* Connective rail — value travelling Intent → Stellar, outside the window */}
       <div className="mt-16 px-1 md:mt-20">
         <div className="flex items-center gap-2 sm:gap-4 md:gap-8">
           <motion.span
@@ -610,7 +610,7 @@ export function EcosystemFilm() {
             animate={{ opacity: progress >= 1 ? 1 : 0.7, scale: progress >= 1 ? 1.05 : 1 }}
             transition={{ duration: 0.4 }}
           >
-            <ChainMark chain="arc" className="h-full w-full object-contain" />
+            <ChainMark chain="stellar" className="text-foreground h-full w-full object-contain" />
           </motion.div>
         </div>
 
@@ -651,11 +651,11 @@ function captionFor(phase: Phase): string {
     case 'launch':
       return 'Executing on-chain'
     case 'settle':
-      return 'Settling on Arc L1'
+      return 'Settling on Stellar'
     case 'done':
       return 'Settled with finality'
     default:
-      return 'Every winning execution lands on Arc'
+      return 'Every winning execution lands on Stellar'
   }
 }
 

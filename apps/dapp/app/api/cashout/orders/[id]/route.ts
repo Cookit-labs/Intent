@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { createLinqClient } from '../../../../../lib/linq/client'
 import { createWeaveClient } from '../../../../../lib/weave/client'
 import { guardCashout } from '../../../../../lib/weave/guard'
 import { getWeaveOrderRepo, syncOrder, toPublic } from '../../../../../lib/weave/orders'
@@ -24,6 +25,6 @@ export async function GET(
   const row = await repo.getForEmail((await context.params).id, guard.email)
   if (row === undefined) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  const synced = await syncOrder(repo, row, createWeaveClient())
+  const synced = await syncOrder(repo, row, createWeaveClient(), createLinqClient())
   return NextResponse.json({ order: toPublic(synced.row) })
 }

@@ -21,7 +21,7 @@ import type {
   WalletRow,
 } from '../../lib/server/admin-metrics'
 
-import { useScope } from './scope'
+import { scopeQuery, useScope } from './scope'
 
 export interface Stats {
   overview: Overview
@@ -55,8 +55,8 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [error, setError] = useState<string | undefined>(undefined)
   const [tick, setTick] = useState(0)
 
-  const network = scope.network
-  const tracked = scope.chain === 'stellar' && network !== null
+  const query = scopeQuery(scope)
+  const tracked = query !== undefined
 
   useEffect(() => {
     setStats(null)
@@ -68,10 +68,9 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
     setLoading(true)
     const controller = new AbortController()
     const get = async (view: string): Promise<Record<string, unknown>> => {
-      const res = await fetch(
-        `/api/admin/metrics?view=${view}&chain=stellar&network=${network}&range=${range}`,
-        { signal: controller.signal }
-      )
+      const res = await fetch(`/api/admin/metrics?view=${view}&${query}&range=${range}`, {
+        signal: controller.signal,
+      })
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(body.error ?? 'unavailable')
@@ -104,7 +103,7 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [network, range, tracked, tick])
+  }, [query, range, tracked, tick])
 
   useEffect(() => {
     if (!tracked) return
@@ -158,6 +157,13 @@ export const KIND_LABELS: Record<string, string> = {
   lend: 'Lending',
   offramp: 'Cash-outs',
   perp: 'Perpetuals',
+  withdraw: 'Withdrawals',
+  borrow: 'Borrows',
+  claim: 'Claims',
+  cancel: 'Cancellations',
+  invoice: 'Invoices',
+  setup: 'Setup steps',
+  unknown: 'Type not recorded',
 }
 
 export function kindLabel(kind: string): string {

@@ -11,7 +11,7 @@ import { formatCount, formatPercent, formatUsd, kindLabel } from '../../componen
  * the donut silently dropped them, and a period that was 97% cash-outs by
  * dollar value read as "100% Swaps".
  */
-const COUNTED = ['swap', 'plan', 'offer', 'send', 'offramp']
+const COUNTED = ['swap', 'plan', 'offer', 'send', 'offramp', 'unknown']
 
 export default function AdminOverviewPage(): JSX.Element {
   return (

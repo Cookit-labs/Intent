@@ -1,9 +1,14 @@
 import { stellarDescriptorFor, type StellarNetworkName } from '@intent/config'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 
+import { evmExplorerUrl } from '../../../../lib/chains/evm/tokens'
+import { explorerUrl as nearExplorerUrl } from '../../../../lib/chains/near/tokens'
+import { explorerUrl as solanaExplorerUrl } from '../../../../lib/chains/solana/submit'
 import { isAdminRequest } from '../../../../lib/server/admin-session'
+import { valuePastTransactions } from '../../../../lib/server/backfill-values'
 import {
   getMetricsRepo,
+  isAdminChain,
   isRange,
   type MetricsRepo,
   type RangeKey,
@@ -26,11 +31,43 @@ const VIEWS = [
 type View = (typeof VIEWS)[number]
 
 const PAGE = 25
-const KINDS = ['swap', 'plan', 'offer', 'send', 'lend', 'offramp', 'perp']
+const KINDS = [
+  'swap',
+  'plan',
+  'offer',
+  'send',
+  'lend',
+  'offramp',
+  'perp',
+  'withdraw',
+  'borrow',
+  'claim',
+  'cancel',
+  'invoice',
+  'setup',
+  'unknown',
+]
 
 const isView = (v: string | null): v is View =>
   v !== null && (VIEWS as readonly string[]).includes(v)
 const isNetwork = (v: string | null): v is StellarNetworkName => v === 'mainnet' || v === 'testnet'
+
+/** Where a transaction can be looked up, on the chain it ran on. */
+function txUrl(chain: string, network: StellarNetworkName, hash: string): string {
+  switch (chain) {
+    case 'solana':
+      return solanaExplorerUrl(hash)
+    case 'sui':
+      return `https://suiscan.xyz/mainnet/tx/${hash}`
+    case 'near':
+      return nearExplorerUrl(hash)
+    case 'avalanche':
+    case 'monad':
+      return evmExplorerUrl(chain, hash)
+    default:
+      return `${stellarDescriptorFor(network).blockExplorerUrl}/tx/${hash}`
+  }
+}
 
 function flag(value: string | null): boolean | undefined {
   return value === 'true' ? true : value === 'false' ? false : undefined
@@ -64,7 +101,6 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
     case 'transactions': {
       const page = Math.max(Number(params.get('page')) || 1, 1)
       const kind = params.get('kind')
-      const explorer = stellarDescriptorFor(scope.network).blockExplorerUrl
       const { total, rows } = await repo.transactions(scope, {
         ...(kind !== null && KINDS.includes(kind) ? { kind } : {}),
         ...(flag(params.get('ok')) === undefined ? {} : { ok: flag(params.get('ok')) as boolean }),
@@ -80,7 +116,7 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
         pageSize: PAGE,
         rows: rows.map((r) => ({
           ...r,
-          explorerUrl: r.hash === null ? null : `${explorer}/tx/${r.hash}`,
+          explorerUrl: r.hash === null ? null : txUrl(r.chain, scope.network, r.hash),
         })),
       }
     }
@@ -109,10 +145,12 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
 }
 
 /**
- * The numbers behind the admin dashboard, for one chain, network and date range.
+ * The numbers behind the admin dashboard, for one chain or all of them, a network
+ * and a date range.
  *
  * Admin only, and read only. Chains that are not recorded yet answer `tracked:
- * false` rather than an empty chart, so the page can say so.
+ * false` rather than an empty chart, so the page can say so. All chains, and
+ * every chain but Stellar, are mainnet only.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   if (!isAdminRequest(request)) {
@@ -121,7 +159,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const params = new URL(request.url).searchParams
   const view = params.get('view')
-  const chain = params.get('chain') ?? 'stellar'
+  const chain = params.get('chain') ?? 'all'
   const network = params.get('network') ?? 'mainnet'
   const range = params.get('range') ?? '30d'
 
@@ -131,8 +169,10 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const headers = { 'Cache-Control': 'no-store' }
 
-  if (chain !== 'stellar' && view !== 'waitlist') {
-    return NextResponse.json({ tracked: false, chain }, { headers })
+  if (!isAdminChain(chain)) {
+    if (view !== 'waitlist') return NextResponse.json({ tracked: false, chain }, { headers })
+  } else if (chain !== 'stellar' && network !== 'mainnet') {
+    return NextResponse.json({ error: 'invalid_network' }, { status: 400, headers })
   }
 
   const repo = await getMetricsRepo().catch((e: unknown) => {
@@ -143,8 +183,17 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'no_database' }, { status: 503, headers })
   }
 
+  // Transactions logged without their value are read back from their chain a batch at a time,
+  // after the answer has gone, so the overview's totals fill in over its next few refreshes.
+  if (view === 'overview') after(() => valuePastTransactions())
+
   try {
-    const data = await read(repo, view, { network, range: range as RangeKey }, params)
+    const data = await read(
+      repo,
+      view,
+      { network, chain: isAdminChain(chain) ? chain : 'all', range: range as RangeKey },
+      params
+    )
     return NextResponse.json({ tracked: true, chain, network, range, view, ...data }, { headers })
   } catch (e) {
     reportError('admin/metrics', e, { view })

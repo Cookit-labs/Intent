@@ -2,7 +2,6 @@
 
 import {
   defaultNetwork,
-  isMultiNetwork,
   parseChainSegment,
   setClientNetwork,
   type StellarNetworkName,
@@ -10,7 +9,7 @@ import {
 import type { ChainDescriptor, ChainSlug } from '@intent/types'
 import { createContext, useContext, useMemo } from 'react'
 
-import { installNetworkFetch } from '../lib/api/network-fetch'
+import { installPageFetch } from '../lib/api/network-fetch'
 import type { ChainAdapter } from '../lib/chain-adapter'
 import { adapterFor } from '../lib/adapters'
 
@@ -46,7 +45,7 @@ export function ChainProvider({
   // server renders overlap, and a shared variable would leak between requests.
   if (typeof window !== 'undefined') {
     setClientNetwork(network ?? defaultNetwork())
-    if (isMultiNetwork()) installNetworkFetch(network ?? defaultNetwork())
+    installPageFetch(network ?? defaultNetwork())
   }
 
   const value = useMemo<ChainContextValue>(() => {

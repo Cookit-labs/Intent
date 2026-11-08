@@ -6,7 +6,7 @@ import { BadgeCheck } from 'lucide-react'
 import { GlassPanel } from '../glass-panel'
 import { AmbientBlob } from '../ambient-blob'
 
-const STEPS = ['Execution submitted', 'Validated on Arc L1', 'USDC settled', 'Reputation updated']
+const STEPS = ['Execution submitted', 'Validated on Stellar', 'USDC settled', 'Reputation updated']
 const SEGMENT_LEFT = [12.5, 37.5, 62.5]
 const VERIFIED_BLUE = '#1D9BF0'
 

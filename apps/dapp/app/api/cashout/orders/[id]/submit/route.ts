@@ -5,6 +5,7 @@ import { ChainActionRefused, type SignedPayload } from '../../../../../../lib/ch
 import { logExecution } from '../../../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
 import { reportError } from '../../../../../../lib/server/report'
+import { createLinqClient } from '../../../../../../lib/linq/client'
 import { createWeaveClient } from '../../../../../../lib/weave/client'
 import { depositChain } from '../../../../../../lib/weave/deposit'
 import { chainRefusal, guardCashout } from '../../../../../../lib/weave/guard'
@@ -113,7 +114,7 @@ export async function POST(
   }
 
   const sentAlready = walletSent(signed)
-  const synced = await syncOrder(repo, row, createWeaveClient())
+  const synced = await syncOrder(repo, row, createWeaveClient(), createLinqClient())
   // A wallet that sends for itself has already moved the money, and Weave may have
   // seen it by now, so this only confirms and records it whatever the order's status.
   const refused = !sentAlready || row.depositHash !== undefined ? payRefusal(synced) : undefined
@@ -169,6 +170,7 @@ export async function POST(
 
     await logExecution({
       kind: 'offramp',
+      chain: row.chain,
       account: row.account,
       feeSponsored: false,
       network: 'mainnet',
@@ -178,7 +180,19 @@ export async function POST(
         : pending
           ? { ...result, reason: 'pending' }
           : result,
-      ...(signed.family === 'stellar' && !reused ? { signedXdr: signed.signedXdr } : {}),
+      // Off Stellar there is no envelope to read, but the deposit is the order's own USDC amount.
+      ...(reused
+        ? {}
+        : signed.family === 'stellar'
+          ? { signedXdr: signed.signedXdr }
+          : {
+              flow: {
+                assetIn: 'USDC',
+                amountIn: row.amount,
+                assetOut: null,
+                volumeUsd: Number.isFinite(Number(row.amount)) ? Number(row.amount) : null,
+              },
+            }),
     })
 
     if (reused) {

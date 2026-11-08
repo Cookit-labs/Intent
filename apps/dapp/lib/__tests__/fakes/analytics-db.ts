@@ -23,6 +23,7 @@ export interface FakeExecution {
   asset_out: string | null
   amount_in: string | null
   volume_usd: number | null
+  chain: string
   race_id: string | null
 }
 
@@ -36,6 +37,7 @@ export interface FakeIntentRead {
   token_out: string | null
   size_usd: number | null
   reason: string | null
+  chain: string
 }
 
 export interface FakeRace {
@@ -106,7 +108,10 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
         sql.startsWith('CREATE TABLE') ||
         sql.startsWith('CREATE INDEX') ||
         sql.startsWith('CREATE UNIQUE INDEX') ||
-        sql.startsWith('ALTER TABLE')
+        sql.startsWith('ALTER TABLE') ||
+        // The backfills only touch rows from before the chain was recorded, which no test writes.
+        sql.startsWith('UPDATE usage_executions SET chain') ||
+        sql.startsWith('DO $$')
       ) {
         return { rows: [] }
       }
@@ -146,7 +151,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           amountIn,
           volumeUsd,
           raceId,
-          raceChain,
+          chain,
         ] = p as [
           string,
           string,
@@ -181,23 +186,26 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           asset_out: assetOut,
           amount_in: amountIn,
           volume_usd: volumeUsd,
-          race_id: matchRace(raceId, network, submittedAt, raceChain),
+          chain,
+          race_id: matchRace(raceId, network, submittedAt, chain),
         })
         return { rows: [{ id }] }
       }
 
       if (sql.startsWith('INSERT INTO intent_reads')) {
-        const [id, network, readAt, understood, action, tokenIn, tokenOut, sizeUsd, reason] = p as [
-          string,
-          string,
-          string,
-          boolean,
-          string | null,
-          string | null,
-          string | null,
-          number | null,
-          string | null,
-        ]
+        const [id, network, readAt, understood, action, tokenIn, tokenOut, sizeUsd, reason, chain] =
+          p as [
+            string,
+            string,
+            string,
+            boolean,
+            string | null,
+            string | null,
+            string | null,
+            number | null,
+            string | null,
+            string,
+          ]
         intentReads.push({
           id,
           network,
@@ -208,6 +216,7 @@ export function fakeAnalyticsDb(): FakeAnalyticsDb {
           token_out: tokenOut,
           size_usd: sizeUsd,
           reason,
+          chain,
         })
         return { rows: [{ id }] }
       }

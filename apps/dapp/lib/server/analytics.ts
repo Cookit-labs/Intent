@@ -97,6 +97,34 @@ export const ANALYTICS_DDL: readonly string[] = [
   `ALTER TABLE agent_proposals ADD COLUMN IF NOT EXISTS reasoning TEXT`,
   // Races from before other chains ran are all Stellar's, which the default says.
   `ALTER TABLE agent_races ADD COLUMN IF NOT EXISTS chain TEXT NOT NULL DEFAULT 'stellar'`,
+  // The chain each transaction ran on. Left null on rows from before it was
+  // recorded, then filled below from what those rows already say.
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS chain TEXT`,
+  `CREATE INDEX IF NOT EXISTS usage_executions_chain_idx ON usage_executions (network, chain, submitted_at)`,
+  // Other chains' transactions used to be logged under their chain's name as the kind,
+  // which said where they ran and not what they did.
+  `UPDATE usage_executions SET chain = kind, kind = 'unknown'
+     WHERE chain IS NULL AND kind IN ('solana', 'sui', 'near', 'avalanche', 'monad')`,
+  // A cash-out names its chain only in its order, matched on the deposit hash, which
+  // also says how much USDC it paid in when the row could not price it.
+  `DO $$ BEGIN
+     IF to_regclass('weave_orders') IS NOT NULL THEN
+       UPDATE usage_executions e SET
+         chain = w.chain,
+         asset_in = coalesce(e.asset_in, 'USDC'),
+         amount_in = coalesce(e.amount_in, w.amount::numeric),
+         volume_usd = coalesce(e.volume_usd, w.amount::numeric)
+       FROM weave_orders w
+       WHERE e.chain IS NULL AND e.kind = 'offramp' AND e.hash IS NOT NULL
+         AND w.deposit_hash = e.hash AND w.amount ~ '^[0-9]+([.][0-9]+)?$';
+     END IF;
+   END $$`,
+  `UPDATE usage_executions SET chain = 'stellar' WHERE chain IS NULL`,
+  // Set once a transaction logged without a value has been read back from its chain: 'chain'
+  // when it was, 'unreadable' when its chain had no record of what it sold. See backfill-values.ts.
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS looked_up TEXT`,
+  // Reads from before this was recorded stay null: which chain they were typed on is not known.
+  `ALTER TABLE intent_reads ADD COLUMN IF NOT EXISTS chain TEXT`,
 ]
 
 export type ExecutionKind =
@@ -107,16 +135,24 @@ export type ExecutionKind =
   | 'lend'
   | 'offramp'
   | 'perp'
-  // Actions on other chains, by chain: the row's network column is a Stellar
-  // network, so the kind is what keeps these apart from Stellar's numbers.
-  | 'solana'
-  | 'sui'
-  | 'near'
-  | 'avalanche'
-  | 'monad'
+  // Actions only other chains run, kept apart so none is counted as volume.
+  | 'withdraw'
+  | 'borrow'
+  | 'claim'
+  | 'cancel'
+  | 'invoice'
+  /** A wrap, approval or storage step a later transaction needs. Moves nothing worth counting. */
+  | 'setup'
+  /** A transaction whose action could not be read back, so it is counted but never valued. */
+  | 'unknown'
+
+/** Where a transaction ran. Every chain but Stellar runs on mainnet only. */
+export type ExecutionChain = 'stellar' | 'solana' | 'sui' | 'near' | 'avalanche' | 'monad'
 
 export interface ExecutionRecord {
   network: StellarNetworkName
+  /** Stellar when omitted. */
+  chain?: ExecutionChain
   account: string
   kind: ExecutionKind
   feeSponsored: boolean
@@ -141,13 +177,6 @@ export interface SubmitLike {
   hash?: string
   reason?: string
   code?: string
-}
-
-const OTHER_CHAINS: readonly ExecutionKind[] = ['solana', 'sui', 'near', 'avalanche', 'monad']
-
-/** The chain an execution happened on, which is what a race it follows must have run on. */
-function raceChainOf(kind: ExecutionKind): string {
-  return OTHER_CHAINS.includes(kind) ? kind : 'stellar'
 }
 
 const CODE = /^[a-z][a-z0-9_]{0,39}$/
@@ -306,6 +335,8 @@ export function raceRecordFrom(input: RaceInput): RaceRecord {
 
 export interface IntentReadRecord {
   network: StellarNetworkName
+  /** The chain the instruction was typed on. */
+  chain?: string
   understood: boolean
   action?: string
   tokenIn?: string
@@ -365,8 +396,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       await query(
         `INSERT INTO usage_executions
            (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
-            asset_in, asset_out, amount_in, volume_usd, race_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            asset_in, asset_out, amount_in, volume_usd, chain, race_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $15,
            (SELECT id FROM agent_races
              WHERE id = $14::uuid AND network = $2 AND winner IS NOT NULL
                AND chain = $15
@@ -388,7 +419,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.amountIn ?? null,
           r.flow?.volumeUsd ?? null,
           r.raceId ?? null,
-          raceChainOf(r.kind),
+          r.chain ?? 'stellar',
         ]
       )
     },
@@ -396,8 +427,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
     async recordIntentRead(r) {
       await query(
         `INSERT INTO intent_reads
-           (id, network, read_at, understood, action, token_in, token_out, size_usd, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           (id, network, read_at, understood, action, token_in, token_out, size_usd, reason, chain)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           randomUUID(),
           r.network,
@@ -408,6 +439,7 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.tokenOut ?? null,
           typeof r.sizeUsd === 'number' && Number.isFinite(r.sizeUsd) ? r.sizeUsd : null,
           r.reason ?? null,
+          r.chain ?? 'stellar',
         ]
       )
     },
@@ -541,11 +573,15 @@ export async function getAnalyticsRepo(): Promise<AnalyticsRepo> {
 
 export interface LogExecutionInput {
   kind: ExecutionKind
+  /** Stellar when omitted. */
+  chain?: ExecutionChain
   account: string
   feeSponsored: boolean
   result: SubmitLike
   /** The signed envelope that was sent, so what it moved can be recorded. */
   signedXdr?: string
+  /** What it moved, where the caller already knows and there is no Stellar envelope to read. */
+  flow?: ExecutionFlow
   /** Set for actions on other chains, which only run on mainnet. Defaults to the page's Stellar network. */
   network?: StellarNetworkName
 }
@@ -566,7 +602,9 @@ async function raceFromRequest(): Promise<string | undefined> {
 
 /** What the transaction sold, or nothing: a failure to read it must never cost the row itself. */
 async function readFlowSafely(input: LogExecutionInput): Promise<ExecutionFlow | undefined> {
-  if (!input.result.ok || input.signedXdr === undefined) return undefined
+  if (!input.result.ok) return undefined
+  if (input.flow !== undefined) return input.flow
+  if (input.signedXdr === undefined) return undefined
   try {
     return await describeExecution(input.signedXdr)
   } catch (e) {
@@ -588,6 +626,7 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
     const raceId = await raceFromRequest()
     await repo.recordExecution({
       network: input.network ?? activeNetwork(),
+      chain: input.chain ?? 'stellar',
       account: input.account,
       kind: input.kind,
       feeSponsored: input.feeSponsored,
@@ -608,7 +647,9 @@ export async function logIntentRead(input: Omit<IntentReadRecord, 'network'>): P
   if (!databaseConfigured()) return
   try {
     const repo = await getAnalyticsRepo()
-    await repo.recordIntentRead({ network: activeNetwork(), ...input })
+    const offStellar = input.chain !== undefined && input.chain !== 'stellar'
+    // Other chains run on mainnet only, whatever Stellar network this deployment defaults to.
+    await repo.recordIntentRead({ network: offStellar ? 'mainnet' : activeNetwork(), ...input })
   } catch (e) {
     reportError('analytics/intent', e, { understood: input.understood })
   }

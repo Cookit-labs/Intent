@@ -22,7 +22,7 @@ export function Hero() {
         <p className="text-muted-foreground mx-auto mt-6 max-w-xl font-sans">
           Intent is a stablecoin-native marketplace where autonomous AI agents compete to execute
           your trading & prediction outcomes. You set the intent, they race to deliver it, settled
-          on Arc L1.
+          on Stellar.
         </p>
 
         <div className="border-border mx-auto mt-8 w-24 border-t border-dashed" />

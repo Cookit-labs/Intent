@@ -2,6 +2,7 @@ import { CHAIN_DESCRIPTORS } from '@intent/config'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { loggedAction } from '../../../../../lib/chains/receipt'
 import { chainModule } from '../../../../../lib/chains/registry'
 import { withoutWalletGuards } from '../../../../../lib/chains/solana/wallet-guards'
 import { ChainActionRefused, type SigningPayload } from '../../../../../lib/chains/types'
@@ -36,6 +37,7 @@ const Body = z.object({
   venueId: z.string().min(1).max(40),
   signed: Signed,
   context: z.record(z.string().max(2048)).optional(),
+  receipt: z.string().max(2048).optional(),
 })
 
 /**
@@ -54,7 +56,7 @@ export async function POST(
 
   const parsed = Body.safeParse(await request.json().catch(() => undefined))
   if (!parsed.success) return NextResponse.json({ error: 'invalid_body' }, { status: 400 })
-  const { account, venueId, signed, context } = parsed.data
+  const { account, venueId, signed, context, receipt } = parsed.data
   if (!isWalletAddress(account)) {
     return NextResponse.json({ error: 'invalid_account' }, { status: 400 })
   }
@@ -98,7 +100,8 @@ export async function POST(
     const input = { account, venueId, signed, ...(context !== undefined ? { context } : {}) }
     const result = await (venue.submit ?? chainApi.submit)(input)
     await logExecution({
-      kind: chainApi.chain,
+      ...loggedAction(chainApi.chain, account, venueId, receipt),
+      chain: chainApi.chain,
       account,
       feeSponsored: false,
       network: 'mainnet',

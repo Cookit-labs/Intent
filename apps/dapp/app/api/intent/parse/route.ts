@@ -74,10 +74,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     // the sentence silently going to a parser that cannot read it either.
     const unknown = unknownTickers(body.text)
     if (unknown.length > 0) {
-      await logIntentRead({ understood: false, reason: 'unknown_token' })
+      await logIntentRead({ chain, understood: false, reason: 'unknown_token' })
       return NextResponse.json({ understood: false, reason: 'unknown_token', tokens: unknown })
     }
-    await logIntentRead({ understood: false, reason: 'unreadable' })
+    await logIntentRead({ chain, understood: false, reason: 'unreadable' })
     return NextResponse.json({ understood: false, reason: 'unreadable' })
   }
 
@@ -91,11 +91,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     lendableOnly.includes(read.tokenIn) || lendableOnly.includes(read.tokenOut)
 
   if (isTrade && namesLendableOnly) {
-    await logIntentRead({ understood: false, reason: 'not_tradeable' })
+    await logIntentRead({ chain, understood: false, reason: 'not_tradeable' })
     return NextResponse.json({ understood: false, reason: 'not_tradeable' })
   }
 
   await logIntentRead({
+    chain,
     understood: true,
     action: read.action,
     tokenIn: read.tokenIn,

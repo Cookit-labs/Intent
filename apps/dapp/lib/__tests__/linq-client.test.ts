@@ -137,6 +137,63 @@ describe('linq client', () => {
     expect(none.calls).toHaveLength(0)
   })
 
+  it('orders USDC on Sui, held to the chain, a Sui address and exactly the USDC asked', async () => {
+    const SUI_DEPOSIT = `0x${'ab'.repeat(32)}`
+    const sui = { ...usdcBase, chain: 'sui' as const, amountStableCoin: 1.25 }
+    const good = server(() => ({
+      status: 201,
+      body: goodOrder({
+        chain: 'sui',
+        coin: 'usdc',
+        walletAddress: SUI_DEPOSIT,
+        amountStableCoin: 1.25,
+        amountNGN: 1710.48,
+      }),
+    }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: good.fetchImpl }).createOrder(sui)
+    ).toMatchObject({
+      ok: true,
+      value: { depositAddress: SUI_DEPOSIT, amountCoin: 1.25, amountNGN: 1710.48 },
+    })
+    expect(JSON.parse(good.calls[0]?.init.body ?? '{}')).toMatchObject({
+      chain: 'sui',
+      coin: 'usdc',
+      amountStableCoin: 1.25,
+      manualDeposit: true,
+    })
+
+    for (const wrong of [
+      { chain: 'stellar', walletAddress: SUI_DEPOSIT },
+      { walletAddress: DEPOSIT },
+      { walletAddress: `0x${'ab'.repeat(31)}` },
+      { amountStableCoin: 1.26 },
+    ]) {
+      const bad = server(() => ({
+        status: 201,
+        body: goodOrder({
+          chain: 'sui',
+          coin: 'usdc',
+          walletAddress: SUI_DEPOSIT,
+          amountStableCoin: 1.25,
+          ...wrong,
+        }),
+      }))
+      expect(
+        await createLinqClient({ ...config, fetchImpl: bad.fetchImpl }).createOrder(sui)
+      ).toMatchObject({ ok: false, code: 'unexpected_order' })
+    }
+
+    const xlm = server(() => ({ status: 201, body: goodOrder() }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: xlm.fetchImpl }).createOrder({
+        ...orderInput,
+        chain: 'sui',
+      })
+    ).toMatchObject({ ok: false, code: 'rejected' })
+    expect(xlm.calls).toHaveLength(0)
+  })
+
   it('checks a USDC trustline, and treats an unreachable ledger as unknown', async () => {
     const yes = server(() => ({ status: 200, body: { valid: true, trustsUSDC: true } }))
     expect(

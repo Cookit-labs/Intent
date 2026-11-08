@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
+  installPageFetch,
   networkFetch,
   setAttributedRace,
   setConnectedWallet,
@@ -110,5 +111,25 @@ describe('networkFetch wallet header', () => {
     expect(seen[0]?.get('x-intent-wallet')).toBe('GWALLET')
     expect(seen[0]?.get('content-type')).toBe('application/json')
     expect(seen[1]?.get('x-intent-wallet')).toBeNull()
+  })
+})
+
+describe('installPageFetch', () => {
+  it('names the wallet on every call to this app, on a deployment that serves one network', async () => {
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORKS', 'mainnet')
+    const { base, calls } = spy()
+    const page = { fetch: base, location: { origin: ORIGIN } } as unknown as Window
+    vi.stubGlobal('window', page)
+    try {
+      setConnectedWallet('GWALLET')
+      installPageFetch('mainnet')
+      await page.fetch(`${ORIGIN}/api/naira/orders`)
+      await page.fetch(`${ORIGIN}/api/naira/rate`)
+    } finally {
+      setConnectedWallet(undefined)
+      vi.unstubAllGlobals()
+      vi.unstubAllEnvs()
+    }
+    expect(calls.map((c) => c.headers.get('x-intent-wallet'))).toEqual(['GWALLET', 'GWALLET'])
   })
 })

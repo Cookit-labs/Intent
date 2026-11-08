@@ -71,6 +71,17 @@ export function walletFetch(input: string, init?: RequestInit): Promise<Response
 
 const BASE_KEY = '__intentBaseFetch'
 
+/**
+ * Every page's own API calls carry the connected wallet, whatever the deployment serves.
+ *
+ * Installing only where several networks are served left a one-network deployment
+ * sending no wallet at all: with sign-in paused, every route that keys records by
+ * wallet answered "connect your wallet" to a connected one, and showed no history.
+ */
+export function installPageFetch(network: StellarNetworkName): void {
+  installNetworkFetch(network)
+}
+
 /** Browser only. Safe to call again with another network; it wraps the original, never the wrapper. */
 export function installNetworkFetch(network: StellarNetworkName): void {
   if (typeof window === 'undefined') return

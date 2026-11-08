@@ -224,7 +224,7 @@ function PayoutProgress({
             ? formatPayout(paid, order.currency)
             : done
               ? 'Confirming the amount paid…'
-              : `≈ ${formatPayout(order.estimatedDest, order.currency)}`}
+              : `${order.exactDest === true ? '' : '≈ '}${formatPayout(order.estimatedDest, order.currency)}`}
         </span>
       </div>
 
@@ -525,11 +525,16 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
   ) {
     const busy = phase !== 'review'
     const destination = Number(order.estimatedDest)
+    const about = order.exactDest === true ? '' : '≈ '
     return (
       <div className={cn(SHELL, 'gap-5')}>
         <CardHeader
           title="Review payout"
-          subtitle="An estimate after the provider’s fees. What lands can be a few percent lower, and the receipt shows the exact amount paid."
+          subtitle={
+            order.exactDest === true
+              ? 'The exact amount this account receives, after the provider’s fees. The provider has locked it.'
+              : 'An estimate after the provider’s fees. What lands can be a few percent lower, and the receipt shows the exact amount paid.'
+          }
         />
 
         <div className="bg-background/60 flex flex-col items-center gap-1 rounded-2xl px-4 py-5 text-center tabular-nums dark:bg-[#121212]">
@@ -546,7 +551,8 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
             {isRealHolderName(order.accountName) ? order.accountName : 'This account'} receives
           </span>
           <span className="text-3xl font-semibold tracking-tight">
-            ≈ {formatPayout(destination, order.currency)}
+            {about}
+            {formatPayout(destination, order.currency)}
           </span>
         </div>
 
@@ -555,7 +561,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
             [
               [
                 'Rate',
-                `≈ ${formatPayout(destination / Number(order.amount), order.currency)} per USDC`,
+                `${about}${formatPayout(destination / Number(order.amount), order.currency)} per USDC`,
               ],
               [
                 'Account holder',

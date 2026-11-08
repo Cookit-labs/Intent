@@ -1,7 +1,7 @@
 import type { StellarNetworkName } from '@intent/config'
 
 import { getNairaOrderRepo } from '../naira/orders'
-import { getAnalyticsRepo } from './analytics'
+import { getAnalyticsRepo, type ExecutionChain } from './analytics'
 import { databaseConfigured, getPool, withTimeout, type QueryFn } from './db'
 import { reportError } from './report'
 
@@ -10,12 +10,14 @@ import { reportError } from './report'
  *
  * Every query is for one network and one date range, and takes both as
  * parameters: nothing here can add testnet to mainnet, because there is no
- * statement without a network in it.
+ * statement without a network in it. A scope is one chain, or all of them
+ * together; every chain but Stellar runs on mainnet only, so all chains is
+ * always mainnet.
  *
  * Definitions, fixed here so the page and any export agree:
  *   - a transaction counts only if the network accepted it;
  *   - headline volume is the dollar value of what the user sold, sent or cashed
- *     out, for swaps, plans, offers, sends and cash-outs. Each transaction is
+ *     out, for swaps, plans, offers, sends, cash-outs and transactions whose type is unknown. Each transaction is
  *     counted at its own value, so a convert-first payout appears as its swap
  *     and its deposit, as two transactions. Lending is its own line and is not
  *     added to it;
@@ -26,7 +28,9 @@ export type RangeKey = '7d' | '30d' | '90d' | 'all'
 
 export const RANGES: readonly RangeKey[] = ['7d', '30d', '90d', 'all']
 
-export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp'] as const
+// 'unknown' is a transaction whose type could not be read but whose value could: money left the
+// wallet all the same, so it is in the total like the rest.
+export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp', 'unknown'] as const
 
 const DAY_MS = 86_400_000
 
@@ -37,9 +41,48 @@ const DAY_MS = 86_400_000
  */
 const VALUE_USD = `coalesce(volume_usd, CASE WHEN asset_in = 'USDC' THEN amount_in END)`
 
+export type AdminChain = 'all' | ExecutionChain
+
+export const ADMIN_CHAINS: readonly AdminChain[] = [
+  'all',
+  'stellar',
+  'solana',
+  'sui',
+  'near',
+  'avalanche',
+  'monad',
+]
+
+export function isAdminChain(value: unknown): value is AdminChain {
+  return typeof value === 'string' && (ADMIN_CHAINS as readonly string[]).includes(value)
+}
+
 export interface Scope {
   network: StellarNetworkName
+  /** Every chain when omitted. */
+  chain?: AdminChain
   range: RangeKey
+}
+
+/** Fixed text per chain, so a chain is never written into a statement from anything a request said. */
+const CHAIN_SQL: Record<ExecutionChain, string> = {
+  stellar: `'stellar'`,
+  solana: `'solana'`,
+  sui: `'sui'`,
+  near: `'near'`,
+  avalanche: `'avalanche'`,
+  monad: `'monad'`,
+}
+
+function onChain(scope: Scope, alias = ''): string {
+  const chain = scope.chain ?? 'all'
+  return chain === 'all' ? '' : ` AND ${alias}chain = ${CHAIN_SQL[chain]}`
+}
+
+/** Naira payouts run on Stellar only. */
+function nairaOn(scope: Scope): string {
+  const chain = scope.chain ?? 'all'
+  return chain === 'all' || chain === 'stellar' ? '' : ' AND false'
 }
 
 /** The first instant of a range, or null for all time. Whole days, in UTC. */
@@ -113,6 +156,7 @@ export interface WalletRow {
 
 export interface TransactionRow {
   id: string
+  chain: string
   hash: string | null
   account: string
   kind: string
@@ -272,20 +316,20 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
              count(DISTINCT account) FILTER (WHERE ok)                          AS wallets,
              count(*) FILTER (WHERE ok AND fee_sponsored)                       AS sponsored
            FROM usage_executions
-           WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
+           WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
           [scope.network, from, headline]
         ),
         query(
           `SELECT count(*) AS n FROM (
              SELECT account, min(submitted_at) AS first_seen
-             FROM usage_executions WHERE network = $1 AND ok GROUP BY account
+             FROM usage_executions WHERE network = $1${onChain(scope)} AND ok GROUP BY account
            ) f
            WHERE $2::timestamptz IS NULL OR f.first_seen >= $2`,
           [scope.network, from]
         ),
         query(
           `SELECT count(*) AS n FROM agent_races
-           WHERE network = $1 AND ($2::timestamptz IS NULL OR started_at >= $2)`,
+           WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR started_at >= $2)`,
           [scope.network, from]
         ),
         query(
@@ -293,7 +337,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
              count(*) FILTER (WHERE understood)     AS understood,
              count(*) FILTER (WHERE NOT understood) AS unreadable
            FROM intent_reads
-           WHERE network = $1 AND ($2::timestamptz IS NULL OR read_at >= $2)`,
+           WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR read_at >= $2)`,
           [scope.network, from]
         ),
       ])
@@ -327,7 +371,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                 coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = ANY($3)), 0)  AS volume,
                 count(DISTINCT account) FILTER (WHERE ok)                          AS wallets
          FROM usage_executions
-         WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+         WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY 1 ORDER BY 1`,
         [scope.network, from, headline]
       )
@@ -351,7 +395,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                 count(*) FILTER (WHERE NOT ok)                  AS failed,
                 coalesce(sum(${VALUE_USD}) FILTER (WHERE ok), 0)  AS volume
          FROM usage_executions
-         WHERE network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+         WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY kind ORDER BY volume DESC, txs DESC`,
         [scope.network, since(scope, now)]
       )
@@ -367,7 +411,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       const { rows } = await query(
         `SELECT asset_in, asset_out, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume
          FROM usage_executions
-         WHERE network = $1 AND ok AND asset_in IS NOT NULL AND kind = ANY($3)
+         WHERE network = $1${onChain(scope)} AND ok AND asset_in IS NOT NULL AND kind = ANY($3)
            AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY asset_in, asset_out ORDER BY volume DESC, txs DESC LIMIT 8`,
         [scope.network, since(scope, now), headline]
@@ -385,7 +429,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         `SELECT account, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume,
                 min(submitted_at) AS first_seen, max(submitted_at) AS last_seen
          FROM usage_executions
-         WHERE network = $1 AND ok AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+         WHERE network = $1${onChain(scope)} AND ok AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          GROUP BY account ORDER BY volume DESC, txs DESC, account LIMIT 10`,
         [scope.network, since(scope, now)]
       )
@@ -406,14 +450,14 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         filter.ok ?? null,
         filter.sponsored ?? null,
       ]
-      const where = `network = $1 AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+      const where = `network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR submitted_at >= $2)
          AND ($3::text IS NULL OR kind = $3)
          AND ($4::boolean IS NULL OR ok = $4)
          AND ($5::boolean IS NULL OR fee_sponsored = $5)`
       const [count, page] = await Promise.all([
         query(`SELECT count(*) AS n FROM usage_executions WHERE ${where}`, params),
         query(
-          `SELECT id, hash, account, kind, ok, failure, fee_sponsored, submitted_at,
+          `SELECT id, chain, hash, account, kind, ok, failure, fee_sponsored, submitted_at,
                   asset_in, asset_out, amount_in, ${VALUE_USD} AS volume_usd
            FROM usage_executions WHERE ${where}
            ORDER BY submitted_at DESC, id LIMIT $6 OFFSET $7`,
@@ -424,6 +468,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         total: num(count.rows[0]?.['n']),
         rows: page.rows.map((r) => ({
           id: String(r['id']),
+          chain: String(r['chain'] ?? 'stellar'),
           hash: r['hash'] === null ? null : String(r['hash']),
           account: String(r['account']),
           kind: String(r['kind']),
@@ -441,7 +486,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
 
     async agents(scope, now) {
       const params = [scope.network, since(scope, now)]
-      const range = `r.network = $1 AND ($2::timestamptz IS NULL OR r.started_at >= $2)`
+      const range = `r.network = $1${onChain(scope, 'r.')} AND ($2::timestamptz IS NULL OR r.started_at >= $2)`
       const [summary, agents, failures, executed] = await Promise.all([
         query(
           `SELECT count(*) AS races,
@@ -473,7 +518,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         query(
           `SELECT r.winner AS agent, count(*) AS n, coalesce(sum(${VALUE_USD}), 0) AS usd
            FROM usage_executions e JOIN agent_races r ON r.id = e.race_id
-           WHERE e.network = $1 AND e.ok AND r.winner IS NOT NULL
+           WHERE e.network = $1${onChain(scope, 'e.')} AND e.ok AND r.winner IS NOT NULL
              AND ($2::timestamptz IS NULL OR e.submitted_at >= $2)
            GROUP BY r.winner`,
           params
@@ -515,14 +560,14 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       const [types, rules, reads] = await Promise.all([
         query(
           `SELECT intent_type AS type, count(*) AS n FROM agent_races
-           WHERE network = $1 AND ($2::timestamptz IS NULL OR started_at >= $2)
+           WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR started_at >= $2)
            GROUP BY 1 ORDER BY n DESC`,
           [scope.network, from]
         ),
         orEmpty(
           query(
             `SELECT status, count(*) AS n FROM standing_rules
-             WHERE network = $1 AND ($2::timestamptz IS NULL OR created_at >= $2)
+             WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR created_at >= $2)
              GROUP BY 1 ORDER BY n DESC`,
             [scope.network, from]
           )
@@ -531,7 +576,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
           `SELECT count(*) FILTER (WHERE understood) AS understood,
                   count(*) FILTER (WHERE NOT understood) AS unreadable
            FROM intent_reads
-           WHERE network = $1 AND ($2::timestamptz IS NULL OR read_at >= $2)`,
+           WHERE network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR read_at >= $2)`,
           [scope.network, from]
         ),
       ])
@@ -548,7 +593,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
     async naira(scope, now) {
       const from = since(scope, now)
       const params = [scope.network, from]
-      const inRange = `network = $1 AND ($2::timestamptz IS NULL OR created_at >= $2)`
+      const inRange = `network = $1${nairaOn(scope)} AND ($2::timestamptz IS NULL OR created_at >= $2)`
       const [status, coin, cashed, attention] = await Promise.all([
         query(
           `SELECT status, count(*) AS n,
@@ -569,7 +614,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
                   coalesce(sum(${VALUE_USD}) FILTER (WHERE ok), 0) AS usd,
                   count(*) FILTER (WHERE ok AND ${VALUE_USD} IS NULL) AS unvalued
            FROM usage_executions
-           WHERE network = $1 AND kind = 'offramp'
+           WHERE network = $1${onChain(scope)} AND kind = 'offramp'
              AND ($2::timestamptz IS NULL OR submitted_at >= $2)`,
           params
         ),
@@ -577,7 +622,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
           `SELECT id, created_at, status, coin, amount_xlm AS amount, amount_ngn, bank_name,
                   right(account_number, 4) AS tail, payment_hash
            FROM naira_orders
-           WHERE network = $1 AND payment_hash IS NOT NULL AND status <> 'paid'
+           WHERE network = $1${nairaOn(scope)} AND payment_hash IS NOT NULL AND status <> 'paid'
            ORDER BY created_at LIMIT 50`,
           [scope.network]
         ),

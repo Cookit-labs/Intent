@@ -212,6 +212,7 @@ describe('logIntentRead', () => {
     expect(Object.keys(state.db.intentReads[0] ?? {}).sort()).toEqual(
       [
         'action',
+        'chain',
         'id',
         'network',
         'read_at',

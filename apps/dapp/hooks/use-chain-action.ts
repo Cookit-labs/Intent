@@ -280,6 +280,7 @@ export function useChainAction(): ChainAction {
           venueId: prepared.venueId,
           signed: step.signed,
           ...(prepared.context !== undefined ? { context: prepared.context } : {}),
+          ...(prepared.receipt !== undefined ? { receipt: prepared.receipt } : {}),
         },
         raceId
       )

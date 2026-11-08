@@ -92,7 +92,7 @@ export function HowItWorks() {
         </FeatureCard>
 
         <FeatureCard
-          title="Settled on Arc L1"
+          title="Settled on Stellar"
           description="Execution is validated on-chain, USDC settles, and reputation updates."
           className="lg:col-span-7"
           index={3}
