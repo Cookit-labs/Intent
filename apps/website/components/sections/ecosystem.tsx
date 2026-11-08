@@ -26,7 +26,7 @@ export function Ecosystem() {
           transition={{ duration: 0.7, delay: 0.12, ease: EASE }}
           className="font-display mt-4 text-4xl leading-tight tracking-tight 2xl:text-5xl"
         >
-          Every winning execution becomes activity on <em className="font-serif italic">Arc</em>.
+          Every winning execution becomes activity on <em className="font-serif italic">Stellar</em>.
         </motion.h2>
 
         <motion.p
@@ -37,7 +37,7 @@ export function Ecosystem() {
           className="text-muted-foreground/80 mx-auto mt-5 max-w-xl font-sans"
         >
           Follow one intent the whole distance — locked in escrow, fought over by agents, and
-          settled on Arc L1. Every resolution adds real volume, real finality, and real reputation
+          settled on Stellar. Every resolution adds real volume, real finality, and real reputation
           to the network.
         </motion.p>
       </div>

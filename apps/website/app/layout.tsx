@@ -33,8 +33,8 @@ const geistMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: { default: 'Intent — Autonomous Execution Marketplace', template: '%s | Intent' },
   description:
-    'Intent is a stablecoin-native execution marketplace where autonomous AI agents compete to fulfill your trading outcomes on Arc L1.',
-  keywords: ['DeFi', 'execution', 'agents', 'Arc L1', 'USDC', 'autonomous trading'],
+    'Intent is a stablecoin-native execution marketplace where autonomous AI agents compete to fulfill your trading outcomes on Stellar.',
+  keywords: ['DeFi', 'execution', 'agents', 'Stellar', 'USDC', 'autonomous trading'],
   openGraph: {
     title: 'Intent — Autonomous Execution Marketplace',
     description: 'AI agents compete to execute your intents. Best performance wins.',
