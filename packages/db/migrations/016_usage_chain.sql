@@ -25,4 +25,7 @@ END $$;
 
 UPDATE usage_executions SET chain = 'stellar' WHERE chain IS NULL;
 
+-- Set once a transaction logged without a value has been read back from its chain.
+ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS looked_up TEXT;
+
 ALTER TABLE intent_reads ADD COLUMN IF NOT EXISTS chain TEXT;

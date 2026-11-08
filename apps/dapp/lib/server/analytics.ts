@@ -120,6 +120,9 @@ export const ANALYTICS_DDL: readonly string[] = [
      END IF;
    END $$`,
   `UPDATE usage_executions SET chain = 'stellar' WHERE chain IS NULL`,
+  // Set once a transaction logged without a value has been read back from its chain: 'chain'
+  // when it was, 'unreadable' when its chain had no record of what it sold. See backfill-values.ts.
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS looked_up TEXT`,
   // Reads from before this was recorded stay null: which chain they were typed on is not known.
   `ALTER TABLE intent_reads ADD COLUMN IF NOT EXISTS chain TEXT`,
 ]

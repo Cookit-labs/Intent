@@ -32,7 +32,7 @@ interface Receipt {
 }
 
 /** How each action is counted, so the admin's types mean the same on every chain. */
-const LOGGED_KIND: Record<ChainActionKind, ExecutionKind> = {
+export const LOGGED_KIND: Record<ChainActionKind, ExecutionKind> = {
   swap: 'swap',
   send: 'send',
   pay_invoice: 'send',

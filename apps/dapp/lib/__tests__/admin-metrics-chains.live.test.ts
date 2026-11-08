@@ -13,6 +13,9 @@ import {
   type Scope,
 } from '../server/admin-metrics'
 import { ANALYTICS_DDL } from '../server/analytics'
+import { backfillBatch } from '../server/backfill-values'
+import type { Movement } from '../server/chain-lookup'
+import { SOLANA_TOKENS } from '../chains/solana/tokens'
 import { WEAVE_DDL } from '../weave/orders'
 
 /**
@@ -176,5 +179,62 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
     }
     expect((await repo.naira(scope('solana'))).cashedOut.count).toBe(0)
     expect((await repo.naira(scope('sui'))).cashedOut).toMatchObject({ count: 1, usd: 25 })
+  })
+
+  it('values past transactions from their chain once, and leaves a failed lookup to retry', async () => {
+    const query = async (sql: string, params?: unknown[]) => ({
+      rows: (await client.query(sql, params)).rows as Record<string, unknown>[],
+    })
+    const unreadable = hash()
+    const flaky = hash()
+    for (const h of [unreadable, flaky]) {
+      await client.query(
+        `INSERT INTO usage_executions
+           (id, network, hash, account, kind, fee_sponsored, ok, submitted_at, chain)
+         VALUES ($1, 'mainnet', $2, 'W-sol', 'unknown', false, true, now(), 'solana')`,
+        [randomUUID(), h]
+      )
+    }
+    const swap: Movement = {
+      ok: true,
+      mine: new Map([
+        ['So11111111111111111111111111111111111111112', BigInt(-2_000_000_000)],
+        ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', BigInt(300_000_000)],
+      ]),
+      others: [],
+    }
+    const reads: string[] = []
+    const deps = {
+      read: async (_chain: string, h: string) => {
+        reads.push(h)
+        if (h === flaky) throw new Error('node down')
+        return h === unreadable ? undefined : swap
+      },
+      tokens: () => SOLANA_TOKENS,
+      price: async () => 150,
+    }
+
+    const first = await backfillBatch(query, deps)
+    expect(first).toEqual({ looked: 3, valued: 1, unreadable: 1, retry: 1, remaining: 1 })
+    const { rows } = await client.query(
+      `SELECT kind, asset_in, asset_out, amount_in::text AS amount, volume_usd::float AS usd, looked_up
+       FROM usage_executions WHERE account = 'W-old' AND chain = 'solana'`
+    )
+    expect(rows).toEqual([
+      {
+        kind: 'swap',
+        asset_in: 'SOL',
+        asset_out: 'USDC',
+        amount: '2',
+        usd: 300,
+        looked_up: 'chain',
+      },
+    ])
+    expect((await repo.overview(scope('solana'))).volumeUsd).toBe(75 + 300)
+
+    reads.length = 0
+    const second = await backfillBatch(query, deps)
+    expect(reads).toEqual([flaky])
+    expect(second.remaining).toBe(1)
   })
 })
