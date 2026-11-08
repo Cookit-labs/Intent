@@ -57,19 +57,25 @@ export type LinqPlacement =
         | 'locked_lower'
     }
 
+/** The chains where a naira cash-out can go to Linq or Weave. Stellar naira has its own Linq form. */
+export function comparesLinq(chain: CashoutChain): chain is 'sui' | 'solana' {
+  return chain === 'sui' || chain === 'solana'
+}
+
 /**
- * Places a Sui naira cash-out with Linq when Linq pays more than Weave, and says why not otherwise.
+ * Places a Sui or Solana naira cash-out with Linq when Linq pays more than Weave, and says why not
+ * otherwise.
  *
  * Every step that can't be confirmed hands the cash-out back to Weave. An order Linq made but this
  * app doesn't keep is never shown to anyone, so nothing can be paid into it.
  */
 export async function placeWithLinq(input: LinqPlacementInput): Promise<LinqPlacement> {
-  const { linq } = input
-  if (input.currency !== 'NGN' || input.chain !== 'sui' || !linq.configured) {
+  const { linq, chain } = input
+  if (input.currency !== 'NGN' || !comparesLinq(chain) || !linq.configured) {
     return { skipped: 'not_offered' }
   }
 
-  const offers = await nairaOffers(input.chain, input.amount, {
+  const offers = await nairaOffers(chain, input.amount, {
     linqRate: async () => {
       const rate = await linq.getRate()
       return rate.ok ? rate.value.ngnPerUsd : undefined
@@ -90,7 +96,7 @@ export async function placeWithLinq(input: LinqPlacementInput): Promise<LinqPlac
   }
 
   const made = await linq.createOrder({
-    chain: 'sui',
+    chain,
     coin: 'usdc',
     amountStableCoin: Number(input.amount),
     bankCode: bank.code,

@@ -81,7 +81,7 @@ export async function GET(request: Request): Promise<Response> {
  * stored before the response, so a deposit address is never in a person's hands
  * without a record of it.
  *
- * A naira cash-out from Sui goes to Linq instead when Linq pays more, at a rate it locks.
+ * A naira cash-out from Sui or Solana goes to Linq instead when Linq pays more, at a rate it locks.
  * Anything about Linq's order that can't be confirmed leaves the cash-out with Weave.
  */
 export async function POST(request: Request): Promise<Response> {

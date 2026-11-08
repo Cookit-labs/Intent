@@ -17,14 +17,15 @@ export interface PayoutOffer {
 /**
  * Where each provider can take a deposit and pay naira today, as seen on its own orders.
  *
- * Linq's docs list Sui (USDC, USDSUI) and Solana (USDC) besides Stellar. Linq's team says Sui runs
- * as Stellar does, so Sui is in; its orders are held to the shape Stellar's return. Solana waits.
+ * Linq's docs list Sui (USDC, USDSUI) and Solana (USDC) besides Stellar, and Linq's team says Sui
+ * runs as Stellar does, so both are in. Their orders are held to the shape Stellar's return, and
+ * no real order has run on either yet.
  *
  * Weave's Stellar orders route through LI.FI and come back with no deposit address, which nothing
  * here can pay (Weave's own order history, 4 November 2026). NEAR is closed in `types.ts`.
  */
 export const PAYS_NAIRA: Readonly<Record<PayoutProvider, readonly CashoutChain[]>> = {
-  linq: ['stellar', 'sui'],
+  linq: ['stellar', 'sui', 'solana'],
   weave: ['solana', 'avalanche', 'sui'],
 }
 
