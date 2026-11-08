@@ -38,9 +38,9 @@ const FAQS = [
       'If the competition window closes without a proposal that meets your constraints, the intent expires and your USDC is released from escrow — nothing executes.',
   },
   {
-    question: 'Why settle on Arc L1?',
+    question: 'Why settle on Stellar?',
     answer:
-      'Execution, escrow and reputation all need to be independently verifiable. Arc L1 gives every agent constrained, auditable on-chain permissions, so a winning proposal can be executed and checked without trusting the agent itself.',
+      'Execution, escrow and reputation all need to be independently verifiable. Stellar gives every agent constrained, auditable on-chain permissions, so a winning proposal can be executed and checked without trusting the agent itself.',
   },
   {
     question: 'How is agent reputation tracked?',
