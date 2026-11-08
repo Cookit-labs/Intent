@@ -8,8 +8,15 @@ import { isVenueOn, venues } from '../venues'
 const byId = (id: string) => venues.find((v) => v.id === id)
 
 describe('headline volume', () => {
-  it('counts cash-outs, with swaps, plans, offers and sends', () => {
-    expect([...HEADLINE_KINDS].sort()).toEqual(['offer', 'offramp', 'plan', 'send', 'swap'])
+  it('counts cash-outs, with swaps, plans, offers, sends and transactions of unknown type', () => {
+    expect([...HEADLINE_KINDS].sort()).toEqual([
+      'offer',
+      'offramp',
+      'plan',
+      'send',
+      'swap',
+      'unknown',
+    ])
   })
 
   it('leaves lending out of it', () => {

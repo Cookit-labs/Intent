@@ -1,22 +1,27 @@
 import { LOGGED_KIND } from '../chains/receipt'
 import { chainModule } from '../chains/registry'
 import type { ChainToken, ChainWithActions } from '../chains/types'
-import { describeMovement, readMovement, type Movement } from './chain-lookup'
-import type { QueryFn } from './db'
+import { describeMovement, NotFound, readMovement, type Movement } from './chain-lookup'
+import { databaseConfigured, getPool, withTimeout, type QueryFn } from './db'
+import { reportError } from './report'
 
 /**
  * Values the transactions on other chains that were logged before submit recorded what they
  * sold. Each is read back from its chain by hash, priced at today's price (no history is kept
  * for every token), and marked as looked up, so it is never read twice. One that its chain has
- * no record of, or that sold nothing this app can price, is marked unreadable and keeps no value.
+ * no record of, or that sold nothing this app can price, is marked and keeps no value. One whose
+ * chain did not answer is left to try again.
  *
- * Run from the admin, a batch at a time, because each lookup is a call to a public node.
+ * Runs by itself, a batch at a time after the admin overview is read, until none are left.
  */
 
 const CHAINS = ['solana', 'sui', 'near', 'avalanche', 'monad'] as const
 
+// 'unreadable' was also written when a node refused to answer, which says nothing about the
+// transaction, so rows marked that way are read again; a real miss is now 'not_found'.
+const OPEN = `(e.looked_up IS NULL OR e.looked_up = 'unreadable')`
 const PENDING = `e.chain = ANY($1) AND e.ok AND e.hash IS NOT NULL AND e.kind = 'unknown'
-  AND e.volume_usd IS NULL AND e.looked_up IS NULL`
+  AND e.volume_usd IS NULL AND ${OPEN}`
 
 export interface BackfillReport {
   looked: number
@@ -28,7 +33,8 @@ export interface BackfillReport {
 }
 
 export interface BackfillDeps {
-  read: (chain: ChainWithActions, hash: string, account: string) => Promise<Movement | undefined>
+  /** Throws NotFound when the chain has no such transaction, anything else to try again later. */
+  read: (chain: ChainWithActions, hash: string, account: string) => Promise<Movement>
   tokens: (chain: ChainWithActions) => readonly ChainToken[]
   price: (chain: ChainWithActions, token: ChainToken) => Promise<number | undefined>
 }
@@ -78,17 +84,19 @@ export async function backfillBatch(
     let movement: Movement | undefined
     try {
       movement = await deps.read(chain, String(row['hash']), String(row['account']))
-    } catch {
-      report.retry += 1
-      continue
+    } catch (e) {
+      if (!(e instanceof NotFound)) {
+        report.retry += 1
+        continue
+      }
     }
     const found =
       movement === undefined ? undefined : describeMovement(chain, deps.tokens(chain), movement)
     if (found === undefined) {
-      await query(
-        `UPDATE usage_executions SET looked_up = 'unreadable' WHERE id = $1 AND looked_up IS NULL`,
-        [id]
-      )
+      await query(`UPDATE usage_executions e SET looked_up = $2 WHERE e.id = $1 AND ${OPEN}`, [
+        id,
+        movement === undefined ? 'not_found' : 'no_value',
+      ])
       report.unreadable += 1
       continue
     }
@@ -101,10 +109,10 @@ export async function backfillBatch(
     const price = await prices.get(key)
     const usd = price === undefined ? null : Math.round(Number(found.amountIn) * price * 100) / 100
     await query(
-      `UPDATE usage_executions
+      `UPDATE usage_executions e
        SET kind = $2, asset_in = $3, asset_out = $4, amount_in = $5, volume_usd = $6,
            looked_up = 'chain'
-       WHERE id = $1 AND looked_up IS NULL`,
+       WHERE e.id = $1 AND ${OPEN}`,
       [
         id,
         raceKind(row['intent_type']) ?? found.kind,
@@ -119,4 +127,30 @@ export async function backfillBatch(
 
   report.remaining = await remainingToValue(query)
   return report
+}
+
+const globalForBackfill = globalThis as unknown as { intentBackfill?: Promise<void> }
+
+/**
+ * One batch, unless one is already running on this instance. Never throws: it runs after the
+ * admin's answer has gone, and a failure is only reported, for the next read to try again.
+ */
+export function valuePastTransactions(): Promise<void> {
+  if (!databaseConfigured()) return Promise.resolve()
+  if (globalForBackfill.intentBackfill !== undefined) return globalForBackfill.intentBackfill
+  const pool = getPool()
+  const query: QueryFn = async (sql, params) => {
+    const result = await withTimeout(pool.query(sql, params), 8_000)
+    return { rows: result.rows as Record<string, unknown>[] }
+  }
+  globalForBackfill.intentBackfill = (async () => {
+    try {
+      if ((await remainingToValue(query)) > 0) await backfillBatch(query)
+    } catch (e) {
+      reportError('admin/backfill', e)
+    } finally {
+      delete globalForBackfill.intentBackfill
+    }
+  })()
+  return globalForBackfill.intentBackfill
 }

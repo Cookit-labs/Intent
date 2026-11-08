@@ -14,7 +14,7 @@ import {
 } from '../server/admin-metrics'
 import { ANALYTICS_DDL } from '../server/analytics'
 import { backfillBatch } from '../server/backfill-values'
-import type { Movement } from '../server/chain-lookup'
+import { NotFound, type Movement } from '../server/chain-lookup'
 import { SOLANA_TOKENS } from '../chains/solana/tokens'
 import { WEAVE_DDL } from '../weave/orders'
 
@@ -143,7 +143,8 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
     expect(await repo.overview(scope('solana'))).toMatchObject({
       transactions: 2,
       volumeUsd: 75,
-      unvalued: 0,
+      // The old row whose type and value were never recorded: counted, and said to have no price.
+      unvalued: 1,
       wallets: 2,
       intents: 1,
       reads: { understood: 1, unreadable: 0 },
@@ -181,18 +182,24 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
     expect((await repo.naira(scope('sui'))).cashedOut).toMatchObject({ count: 1, usd: 25 })
   })
 
-  it('values past transactions from their chain once, and leaves a failed lookup to retry', async () => {
+  it('values past transactions from their chain once, and leaves a node that did not answer to retry', async () => {
     const query = async (sql: string, params?: unknown[]) => ({
       rows: (await client.query(sql, params)).rows as Record<string, unknown>[],
     })
     const unreadable = hash()
     const flaky = hash()
-    for (const h of [unreadable, flaky]) {
+    const wronglyGivenUp = hash()
+    for (const [h, marked] of [
+      [unreadable, null],
+      [flaky, null],
+      // Marked unreadable by the first version when a node refused, which proved nothing.
+      [wronglyGivenUp, 'unreadable'],
+    ] as const) {
       await client.query(
         `INSERT INTO usage_executions
-           (id, network, hash, account, kind, fee_sponsored, ok, submitted_at, chain)
-         VALUES ($1, 'mainnet', $2, 'W-sol', 'unknown', false, true, now(), 'solana')`,
-        [randomUUID(), h]
+           (id, network, hash, account, kind, fee_sponsored, ok, submitted_at, chain, looked_up)
+         VALUES ($1, 'mainnet', $2, 'W-sol', 'unknown', false, true, now(), 'solana', $3)`,
+        [randomUUID(), h, marked]
       )
     }
     const swap: Movement = {
@@ -208,14 +215,24 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
       read: async (_chain: string, h: string) => {
         reads.push(h)
         if (h === flaky) throw new Error('node down')
-        return h === unreadable ? undefined : swap
+        if (h === unreadable) throw new NotFound(h)
+        return swap
       },
       tokens: () => SOLANA_TOKENS,
       price: async () => 150,
     }
 
     const first = await backfillBatch(query, deps)
-    expect(first).toEqual({ looked: 3, valued: 1, unreadable: 1, retry: 1, remaining: 1 })
+    expect(first).toEqual({ looked: 4, valued: 2, unreadable: 1, retry: 1, remaining: 1 })
+    const marks = await client.query(
+      `SELECT hash, looked_up FROM usage_executions WHERE hash = ANY($1) ORDER BY looked_up NULLS FIRST`,
+      [[unreadable, flaky, wronglyGivenUp]]
+    )
+    expect(marks.rows).toEqual([
+      { hash: flaky, looked_up: null },
+      { hash: wronglyGivenUp, looked_up: 'chain' },
+      { hash: unreadable, looked_up: 'not_found' },
+    ])
     const { rows } = await client.query(
       `SELECT kind, asset_in, asset_out, amount_in::text AS amount, volume_usd::float AS usd, looked_up
        FROM usage_executions WHERE account = 'W-old' AND chain = 'solana'`
@@ -230,7 +247,7 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
         looked_up: 'chain',
       },
     ])
-    expect((await repo.overview(scope('solana'))).volumeUsd).toBe(75 + 300)
+    expect((await repo.overview(scope('solana'))).volumeUsd).toBe(75 + 300 + 300)
 
     reads.length = 0
     const second = await backfillBatch(query, deps)

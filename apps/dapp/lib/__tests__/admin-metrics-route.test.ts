@@ -5,6 +5,7 @@ import type { MetricsRepo } from '../server/admin-metrics'
 const state = vi.hoisted(() => ({
   repo: undefined as unknown,
   calls: [] as { fn: string; scope: unknown; filter?: unknown }[],
+  after: [] as (() => unknown)[],
 }))
 
 vi.mock('../server/admin-metrics', async (original) => ({
@@ -12,6 +13,11 @@ vi.mock('../server/admin-metrics', async (original) => ({
   getMetricsRepo: async () => state.repo,
 }))
 vi.mock('../server/report', () => ({ reportError: vi.fn() }))
+vi.mock('next/server', async (original) => ({
+  ...(await original<typeof import('next/server')>()),
+  after: (task: () => unknown) => state.after.push(task),
+}))
+vi.mock('../server/backfill-values', () => ({ valuePastTransactions: async () => undefined }))
 
 import { GET } from '../../app/api/admin/metrics/route'
 
@@ -113,6 +119,7 @@ function get(query: string, headers: Record<string, string> = { 'x-admin-token':
 beforeEach(() => {
   state.repo = repo()
   state.calls = []
+  state.after = []
   vi.stubEnv('ADMIN_TOKEN', TOKEN)
   vi.stubEnv('AUTH_SECRET', 'a'.repeat(40))
 })
@@ -151,6 +158,14 @@ describe('GET /api/admin/metrics', () => {
   it('defaults to every chain on mainnet over thirty days', async () => {
     await GET(get('view=overview'))
     expect(state.calls[0]?.scope).toEqual({ network: 'mainnet', chain: 'all', range: '30d' })
+  })
+
+  it('looks up past values after the overview, and only after the overview', async () => {
+    await GET(get('view=overview'))
+    expect(state.after).toHaveLength(1)
+    await GET(get('view=transactions'))
+    await GET(get('view=overview', {}))
+    expect(state.after).toHaveLength(1)
   })
 
   it('reads one chain when asked for it', async () => {

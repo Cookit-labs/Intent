@@ -1,10 +1,11 @@
 import { stellarDescriptorFor, type StellarNetworkName } from '@intent/config'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 
 import { evmExplorerUrl } from '../../../../lib/chains/evm/tokens'
 import { explorerUrl as nearExplorerUrl } from '../../../../lib/chains/near/tokens'
 import { explorerUrl as solanaExplorerUrl } from '../../../../lib/chains/solana/submit'
 import { isAdminRequest } from '../../../../lib/server/admin-session'
+import { valuePastTransactions } from '../../../../lib/server/backfill-values'
 import {
   getMetricsRepo,
   isAdminChain,
@@ -181,6 +182,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (repo === undefined) {
     return NextResponse.json({ error: 'no_database' }, { status: 503, headers })
   }
+
+  // Transactions logged without their value are read back from their chain a batch at a time,
+  // after the answer has gone, so the overview's totals fill in over its next few refreshes.
+  if (view === 'overview') after(() => valuePastTransactions())
 
   try {
     const data = await read(

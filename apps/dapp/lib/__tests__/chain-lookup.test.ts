@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SOLANA_TOKENS } from '../chains/solana/tokens'
-import { describeMovement, displayAmount, solanaMovement } from '../server/chain-lookup'
+import {
+  describeMovement,
+  displayAmount,
+  NotFound,
+  readMovement,
+  solanaMovement,
+} from '../server/chain-lookup'
 
 const ME = 'Me11111111111111111111111111111111111111111'
 const POOL = 'Poo1111111111111111111111111111111111111111'
@@ -82,5 +88,37 @@ describe('what a transaction sold, read from what it moved', () => {
     expect(displayAmount(BigInt('1500000'), 6)).toBe('1.5')
     expect(displayAmount(BigInt('7'), 9)).toBe('0.000000007')
     expect(displayAmount(BigInt('200000000'), 6)).toBe('200')
+  })
+})
+
+describe('asking the nodes', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const answer = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+  it('asks the next node when one refuses, as public nodes refuse cloud servers', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      asked.push(url)
+      return asked.length === 1
+        ? answer(429, {})
+        : answer(200, { result: tx({ pre: 1_000_005_000, post: 5_000 }, []) })
+    })
+    const moved = await readMovement('solana', 'sig', ME)
+    expect(asked).toHaveLength(2)
+    expect(moved.mine.get(SOL)).toBe(BigInt(-999_995_000))
+  })
+
+  it('throws to be tried again when no node answers, never that the transaction is missing', async () => {
+    vi.stubGlobal('fetch', async () => answer(403, {}))
+    const error = await readMovement('solana', 'sig', ME).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).not.toBeInstanceOf(NotFound)
+  })
+
+  it('says missing only when a node answered and has no such transaction', async () => {
+    vi.stubGlobal('fetch', async () => answer(200, { result: null }))
+    await expect(readMovement('solana', 'sig', ME)).rejects.toBeInstanceOf(NotFound)
   })
 })
