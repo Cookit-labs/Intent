@@ -1,6 +1,8 @@
 import { getPool, withTimeout, type QueryFn } from '../server/db'
+import type { LinqClient } from '../linq/client'
+import type { PayoutProvider as CashoutProvider } from './best-payout'
 import type { WeaveClient, WeaveOrder } from './client'
-import { isFinal, mapProviderStatus, nextStatus, type WeaveStatus } from './status'
+import { isFinal, mapProviderStatus, nextLinqStatus, nextStatus, type WeaveStatus } from './status'
 import {
   weaveAssetKey,
   weaveChainId,
@@ -46,6 +48,8 @@ export const WEAVE_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS weave_orders_account_idx ON weave_orders (account, created_at)`,
   // What a paid order actually paid out, which can differ from the estimate it was made with.
   `ALTER TABLE weave_orders ADD COLUMN IF NOT EXISTS paid_dest TEXT`,
+  // Who holds the order: Weave, or Linq where it pays more naira. Rows from before are Weave's.
+  `ALTER TABLE weave_orders ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'weave'`,
 ]
 
 /** Said wherever a deposit may already be on its way, so nobody pays twice. */
@@ -58,6 +62,8 @@ export interface WeaveOrderRow {
   email: string
   account: string
   providerOrder: string
+  /** Who holds the order. Older rows have none, and are Weave's. */
+  provider?: CashoutProvider | undefined
   idempotencyKey: string
   currency: string
   institutionCode: string
@@ -92,6 +98,8 @@ export interface WeaveOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** Linq locks the naira when the order is made, so its figure is what is paid. */
+  exactDest?: boolean | undefined
   /** What it actually paid out, once Weave says so. */
   paidDest?: string | undefined
   institutionName: string
@@ -113,6 +121,7 @@ export function toPublic(row: WeaveOrderRow): WeaveOrderView {
     currency: row.currency,
     amount: row.amount,
     estimatedDest: row.estimatedDest,
+    ...(row.provider === 'linq' ? { exactDest: true } : {}),
     ...(row.paidDest !== undefined ? { paidDest: row.paidDest } : {}),
     institutionName: row.institutionName,
     accountName: row.accountName,
@@ -145,6 +154,7 @@ function fromDb(r: Record<string, unknown>): WeaveOrderRow {
     email: String(r['email']),
     account: String(r['account']),
     providerOrder: String(r['provider_order']),
+    provider: r['provider'] === 'linq' ? 'linq' : 'weave',
     idempotencyKey: String(r['idempotency_key']),
     currency: String(r['currency']),
     institutionCode: String(r['institution_code']),
@@ -225,8 +235,8 @@ export function createWeaveOrderRepo(query: QueryFn): WeaveOrderRepo {
         `INSERT INTO weave_orders
           (id, chain, email, account, provider_order, idempotency_key, currency, institution_code,
            institution_name, account_identifier, account_name, deposit_address, deposit_memo,
-           amount, estimated_dest, expires_at, status, provider_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+           amount, estimated_dest, expires_at, status, provider_status, provider)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           o.id,
           o.chain,
@@ -246,6 +256,7 @@ export function createWeaveOrderRepo(query: QueryFn): WeaveOrderRepo {
           o.expiresAt ?? null,
           o.status,
           o.providerStatus,
+          o.provider ?? 'weave',
         ]
       )
     },
@@ -473,17 +484,45 @@ export interface SyncedOrder {
  * last thing this app was told, and a webhook can be missed. What an order expects is never
  * written back: it is what it was made for. What a paid order paid out is kept beside it.
  */
+/** An order's live status and paid amount, from whichever provider holds it. */
+async function readLive(
+  row: WeaveOrderRow,
+  weave: Pick<WeaveClient, 'getOrder'>,
+  linq: Pick<LinqClient, 'getStatus'> | undefined
+): Promise<
+  { ok: true; value: { status: string; destAmount?: number | undefined } } | { ok: false }
+> {
+  if (row.provider !== 'linq') return weave.getOrder(row.providerOrder)
+  if (linq === undefined) return { ok: false }
+  const res = await linq.getStatus(row.providerOrder)
+  if (!res.ok) return { ok: false }
+  // Linq states the naira when the order is made and pays exactly that.
+  const naira = res.value.amountNGN
+  return {
+    ok: true,
+    value: { status: res.value.status, ...(naira > 0 ? { destAmount: naira } : {}) },
+  }
+}
+
 export async function syncOrder(
   repo: Pick<WeaveOrderRepo, 'setStatus' | 'setPaid'>,
   row: WeaveOrderRow,
-  weave: Pick<WeaveClient, 'getOrder'>
+  weave: Pick<WeaveClient, 'getOrder'>,
+  linq?: Pick<LinqClient, 'getStatus'>
 ): Promise<SyncedOrder> {
   // A paid order is asked once more for what it paid out, which a webhook does not carry.
   const paidUnread = row.status === 'paid' && row.paidDest === undefined
   if (isFinal(row.status) && !paidUnread) return { row, reached: true }
-  const live = await weave.getOrder(row.providerOrder)
+  const live = await readLive(row, weave, linq)
   if (!live.ok) return { row, reached: false }
-  const status = nextStatus(row.status, live.value.status)
+  const status =
+    row.provider === 'linq'
+      ? nextLinqStatus(
+          row.status,
+          live.value.status,
+          row.depositHash !== undefined || row.sendStarted
+        )
+      : nextStatus(row.status, live.value.status)
   if (status !== row.status || live.value.status !== row.providerStatus) {
     await repo.setStatus(row.providerOrder, status, live.value.status)
   }

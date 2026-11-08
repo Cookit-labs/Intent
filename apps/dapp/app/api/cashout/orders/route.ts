@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
+import { createLinqClient } from '../../../../lib/linq/client'
 import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
@@ -10,6 +11,7 @@ import { createWeaveClient, quoteCostPercent } from '../../../../lib/weave/clien
 import { isCurrencyAllowed } from '../../../../lib/weave/corridors'
 import { depositChain } from '../../../../lib/weave/deposit'
 import { chainRefusal, guardCashout } from '../../../../lib/weave/guard'
+import { placeWithLinq } from '../../../../lib/weave/linq-cashout'
 import {
   cleanMemo,
   getWeaveOrderRepo,
@@ -19,6 +21,7 @@ import {
   readUsdcAmount,
   safeForReport,
   toPublic,
+  type WeaveOrderRow,
 } from '../../../../lib/weave/orders'
 import { nextStatus } from '../../../../lib/weave/status'
 import { closedCashoutReply, isCashoutChain } from '../../../../lib/weave/types'
@@ -77,6 +80,9 @@ export async function GET(request: Request): Promise<Response> {
  * is checked against what was asked before it is stored or shown, and the row is
  * stored before the response, so a deposit address is never in a person's hands
  * without a record of it.
+ *
+ * A naira cash-out from Sui goes to Linq instead when Linq pays more, at a rate it locks.
+ * Anything about Linq's order that can't be confirmed leaves the cash-out with Weave.
  */
 export async function POST(request: Request): Promise<Response> {
   const guard = guardCashout(request)
@@ -187,9 +193,83 @@ export async function POST(request: Request): Promise<Response> {
     accountName = verified.value.accountName
   }
 
+  const record = async (
+    row: Omit<WeaveOrderRow, 'depositHash' | 'sendStarted' | 'createdAt'>
+  ): Promise<Response> => {
+    try {
+      await repo.insert(row)
+    } catch (e) {
+      reportError('cashout/orders', safeForReport(e, row), {
+        chain,
+        currency,
+        providerOrder: row.providerOrder,
+      })
+      return refusal(
+        'not_recorded',
+        'This cash-out could not be recorded, so nothing was signed or sent. Review it again to start a new one.',
+        503
+      )
+    }
+    return NextResponse.json({
+      order: toPublic({
+        ...row,
+        depositHash: undefined,
+        sendStarted: false,
+        createdAt: new Date().toISOString(),
+      }),
+    })
+  }
+
   const quote = await weave.quote({ chain, currency, amount })
+  const weaveCost = quote.ok ? quoteCostPercent(amount, quote.value.netUsd) : undefined
+  const viaLinq = await placeWithLinq({
+    linq: createLinqClient(),
+    chain,
+    currency,
+    amount,
+    weaveNaira:
+      quote.ok && weaveCost !== undefined && weaveCost <= MAX_COST_PERCENT
+        ? quote.value.destAmount
+        : undefined,
+    institutionName: institution.name,
+    accountIdentifier: input.accountIdentifier,
+    accountName,
+    refundAddress: input.account,
+    customerRef: guard.email,
+    idempotencyKey: input.idempotencyKey,
+  })
+  if ('placed' in viaLinq) {
+    const order = viaLinq.placed
+    return record({
+      id: randomUUID(),
+      chain,
+      email: guard.email,
+      account: input.account,
+      providerOrder: order.id,
+      provider: 'linq',
+      idempotencyKey: input.idempotencyKey,
+      currency,
+      institutionCode: input.institution,
+      institutionName: institution.name,
+      accountIdentifier: input.accountIdentifier,
+      accountName,
+      depositAddress: order.depositAddress,
+      depositMemo: undefined,
+      // Linq's client has held the order to exactly this amount of USDC.
+      amount,
+      // The naira Linq locked for this order: what reaches the account, not an estimate.
+      estimatedDest: String(order.amountNGN),
+      expiresAt: undefined,
+      status: 'waiting',
+      providerStatus: order.status,
+    })
+  }
+  if (viaLinq.skipped === 'order_unknown' || viaLinq.skipped === 'order_unexpected') {
+    reportError('cashout/orders', new Error(`linq_${viaLinq.skipped}`), { chain, currency })
+  }
+
   if (!quote.ok) return fail(quote.code, quote.message)
-  if (quoteCostPercent(amount, quote.value.netUsd) > MAX_COST_PERCENT) {
+  if (weaveCost !== undefined && weaveCost > MAX_COST_PERCENT) {
     return refusal(
       'too_costly',
       `This cash-out would cost more than ${MAX_COST_PERCENT}% of the amount right now, so it was not started. Nothing was signed or sent.`,
@@ -246,12 +326,13 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  const row = {
+  return record({
     id: randomUUID(),
     chain,
     email: guard.email,
     account: input.account,
     providerOrder: order.id,
+    provider: 'weave',
     idempotencyKey: input.idempotencyKey,
     currency,
     institutionCode: input.institution,
@@ -267,28 +348,5 @@ export async function POST(request: Request): Promise<Response> {
     expiresAt: order.deposit.expiresAt,
     status: nextStatus('waiting', order.status),
     providerStatus: order.status,
-  }
-  try {
-    await repo.insert(row)
-  } catch (e) {
-    reportError('cashout/orders', safeForReport(e, row), {
-      chain,
-      currency,
-      providerOrder: order.id,
-    })
-    return refusal(
-      'not_recorded',
-      'This cash-out could not be recorded, so nothing was signed or sent. Review it again to start a new one.',
-      503
-    )
-  }
-
-  return NextResponse.json({
-    order: toPublic({
-      ...row,
-      depositHash: undefined,
-      sendStarted: false,
-      createdAt: new Date().toISOString(),
-    }),
   })
 }
