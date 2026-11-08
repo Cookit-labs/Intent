@@ -1,11 +1,12 @@
 'use client'
 
-import { Badge, Button, cn } from '@intent/ui'
+import { Badge, Button, ChainMark, cn } from '@intent/ui'
+import type { ChainSlug } from '@intent/types'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { EmptyNote, PageTitle, Panel } from '../../../components/admin/parts'
-import { useScope } from '../../../components/admin/scope'
+import { scopeQuery, useScope } from '../../../components/admin/scope'
 import {
   KIND_LABELS,
   formatCount,
@@ -16,6 +17,7 @@ import {
 
 interface Row {
   id: string
+  chain: string
   hash: string | null
   account: string
   kind: string
@@ -53,6 +55,84 @@ function when(iso: string): string {
   })
 }
 
+interface Batch {
+  looked: number
+  valued: number
+  unreadable: number
+  retry: number
+  remaining: number
+}
+
+/**
+ * Offers, once, to read past transactions on other chains back from their chain, which were
+ * logged before their value was. Hidden when none are left.
+ */
+function PastValues({ onDone }: { onDone: () => void }): JSX.Element | null {
+  const [remaining, setRemaining] = useState<number | undefined>(undefined)
+  const [running, setRunning] = useState(false)
+  const [done, setDone] = useState({ valued: 0, unreadable: 0 })
+  const [note, setNote] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    fetch('/api/admin/backfill')
+      .then(async (res) => {
+        const body = (await res.json()) as { remaining?: number }
+        setRemaining(body.remaining ?? 0)
+      })
+      .catch(() => setRemaining(0))
+  }, [])
+
+  async function run(): Promise<void> {
+    setRunning(true)
+    setNote(undefined)
+    let stalled = 0
+    try {
+      for (;;) {
+        const res = await fetch('/api/admin/backfill', { method: 'POST' })
+        if (!res.ok) throw new Error('unavailable')
+        const batch = (await res.json()) as Batch
+        setRemaining(batch.remaining)
+        setDone((d) => ({
+          valued: d.valued + batch.valued,
+          unreadable: d.unreadable + batch.unreadable,
+        }))
+        stalled = batch.looked - batch.retry > 0 ? 0 : stalled + 1
+        if (batch.remaining === 0 || stalled >= 3) break
+      }
+      if (stalled >= 3) setNote('Some chains did not answer. Try again in a few minutes.')
+    } catch {
+      setNote('The lookup stopped. Try again in a moment.')
+    } finally {
+      setRunning(false)
+      onDone()
+    }
+  }
+
+  const tried = done.valued + done.unreadable > 0
+  if (remaining === undefined || (remaining === 0 && !tried)) return null
+  return (
+    <Panel
+      title="Past transactions on other chains"
+      hint="Logged before their value was. Read back from each chain by hash, at today's prices."
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-muted-foreground text-sm">
+          {remaining > 0 ? `${formatCount(remaining)} still have no value.` : 'All looked up.'}
+          {tried
+            ? ` ${formatCount(done.valued)} valued, ${formatCount(done.unreadable)} could not be read.`
+            : ''}
+          {note !== undefined ? ` ${note}` : ''}
+        </p>
+        {remaining > 0 ? (
+          <Button size="sm" disabled={running} onClick={() => void run()}>
+            {running ? 'Looking up…' : 'Look up past values'}
+          </Button>
+        ) : null}
+      </div>
+    </Panel>
+  )
+}
+
 export default function AdminTransactionsPage(): JSX.Element {
   const { scope, range } = useScope()
   const [kind, setKind] = useState('')
@@ -60,22 +140,20 @@ export default function AdminTransactionsPage(): JSX.Element {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<Page | null>(null)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [reload, setReload] = useState(0)
 
-  const network = scope.network
-  const tracked = scope.chain === 'stellar' && network !== null
+  const query = scopeQuery(scope)
+  const tracked = query !== undefined
 
-  useEffect(() => setPage(1), [kind, outcome, network, range])
+  useEffect(() => setPage(1), [kind, outcome, query, range])
 
   useEffect(() => {
-    if (!tracked) return
+    if (query === undefined) return
     const controller = new AbortController()
-    const params = new URLSearchParams({
-      view: 'transactions',
-      chain: 'stellar',
-      network,
-      range,
-      page: String(page),
-    })
+    const params = new URLSearchParams(query)
+    params.set('view', 'transactions')
+    params.set('range', range)
+    params.set('page', String(page))
     if (kind !== '') params.set('kind', kind)
     if (outcome !== 'all') params.set('ok', outcome)
     setError(undefined)
@@ -89,7 +167,7 @@ export default function AdminTransactionsPage(): JSX.Element {
         setError('Transactions could not be loaded. Try again in a moment.')
       })
     return () => controller.abort()
-  }, [tracked, network, range, kind, outcome, page])
+  }, [query, range, kind, outcome, page, reload])
 
   const pages = data === null ? 1 : Math.max(Math.ceil(data.total / data.pageSize), 1)
 
@@ -102,13 +180,11 @@ export default function AdminTransactionsPage(): JSX.Element {
 
       {!tracked ? (
         <Panel title={`${scope.name} transactions`}>
-          <EmptyNote>
-            Intent does not record usage on {scope.name} yet. Stellar Mainnet and Testnet are
-            counted today.
-          </EmptyNote>
+          <EmptyNote>Intent does not record usage on {scope.name} yet.</EmptyNote>
         </Panel>
       ) : (
         <>
+          {scope.chain !== 'stellar' ? <PastValues onDone={() => setReload((n) => n + 1)} /> : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="bg-muted/60 flex w-fit max-w-full overflow-x-auto rounded-lg p-1">
               {OUTCOMES.map((o) => (
@@ -170,7 +246,15 @@ export default function AdminTransactionsPage(): JSX.Element {
                         <td className="text-muted-foreground whitespace-nowrap py-2.5 pr-4">
                           {when(r.at)}
                         </td>
-                        <td className="py-2.5 pr-4">{kindLabel(r.kind)}</td>
+                        <td className="py-2.5 pr-4">
+                          <span className="inline-flex items-center gap-2">
+                            <ChainMark
+                              chain={r.chain as ChainSlug}
+                              className="h-3.5 w-3.5 shrink-0"
+                            />
+                            {kindLabel(r.kind)}
+                          </span>
+                        </td>
                         <td className="py-2.5 pr-4 font-mono" title={r.account}>
                           {shortAddress(r.account)}
                         </td>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { EmptyNote, Kpi, PageTitle, Panel } from '../../../components/admin/parts'
-import { useScope } from '../../../components/admin/scope'
+import { scopeQuery, useScope } from '../../../components/admin/scope'
 import { formatCount, formatUsd } from '../../../components/admin/stats'
 import type { NairaAttentionRow, NairaReport } from '../../../lib/server/admin-metrics'
 
@@ -41,15 +41,16 @@ export default function AdminPayoutsPage(): JSX.Element {
   const [error, setError] = useState<string | undefined>(undefined)
   const [tick, setTick] = useState(0)
 
-  const network = scope.network
-  const tracked = scope.chain === 'stellar' && network !== null
+  // Naira payouts run on Stellar only, so all chains shows Stellar's.
+  const query = scope.chain === 'stellar' || scope.chain === 'all' ? scopeQuery(scope) : undefined
+  const tracked = query !== undefined
 
   useEffect(() => {
     setReport(null)
     setError(undefined)
     if (!tracked) return
     const controller = new AbortController()
-    fetch(`/api/admin/metrics?view=payouts&chain=stellar&network=${network}&range=${range}`, {
+    fetch(`/api/admin/metrics?view=payouts&${query}&range=${range}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -66,7 +67,7 @@ export default function AdminPayoutsPage(): JSX.Element {
         )
       })
     return () => controller.abort()
-  }, [network, range, tracked, tick])
+  }, [query, range, tracked, tick])
 
   useEffect(() => {
     if (!tracked) return

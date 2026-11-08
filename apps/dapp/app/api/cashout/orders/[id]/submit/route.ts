@@ -169,6 +169,7 @@ export async function POST(
 
     await logExecution({
       kind: 'offramp',
+      chain: row.chain,
       account: row.account,
       feeSponsored: false,
       network: 'mainnet',
@@ -178,7 +179,19 @@ export async function POST(
         : pending
           ? { ...result, reason: 'pending' }
           : result,
-      ...(signed.family === 'stellar' && !reused ? { signedXdr: signed.signedXdr } : {}),
+      // Off Stellar there is no envelope to read, but the deposit is the order's own USDC amount.
+      ...(reused
+        ? {}
+        : signed.family === 'stellar'
+          ? { signedXdr: signed.signedXdr }
+          : {
+              flow: {
+                assetIn: 'USDC',
+                amountIn: row.amount,
+                assetOut: null,
+                volumeUsd: Number.isFinite(Number(row.amount)) ? Number(row.amount) : null,
+              },
+            }),
     })
 
     if (reused) {

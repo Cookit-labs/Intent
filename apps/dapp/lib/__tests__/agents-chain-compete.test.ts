@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { networkFetch, setAttributedRace } from '../api/network-fetch'
 import { needsDirectRoute, reviewChainRoute } from '../agents/chain-race'
 import { submitSigned } from '../chains/signing-flow'
+import type { ChainModule } from '../chains/types'
 import { fakeAnalyticsDb, type FakeAnalyticsDb } from './fakes/analytics-db'
 
 /**
@@ -385,7 +386,8 @@ describe('GET /api/agents/history', () => {
       await repo.recordExecution({
         network: 'mainnet',
         account,
-        kind: chain,
+        kind: 'swap',
+        chain,
         feeSponsored: false,
         ok: true,
         hash: `HASH-${chain}`,
@@ -442,7 +444,7 @@ describe('POST /api/chain/near/submit and the race it came from', () => {
   const RACE = raceInput().id
   const submit = vi.fn(async () => ({ ok: true, hash: 'H1' }))
 
-  const send = async (): Promise<Response> => {
+  const send = async (extra: Record<string, unknown> = {}): Promise<Response> => {
     const { POST } = await import('../../app/api/chain/[chain]/submit/route')
     return POST(
       new Request('http://localhost/api/chain/near/submit', {
@@ -451,6 +453,7 @@ describe('POST /api/chain/near/submit and the race it came from', () => {
           account: 'alice.near',
           venueId: 'ref',
           signed: { family: 'near', hashes: ['h1'] },
+          ...extra,
         }),
       }),
       { params: Promise.resolve({ chain: 'near' }) }
@@ -476,7 +479,39 @@ describe('POST /api/chain/near/submit and the race it came from', () => {
     const res = await send()
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true, hash: 'H1' })
-    expect(state.db.executions.map((e) => [e.kind, e.race_id])).toEqual([['near', RACE]])
+    expect(state.db.executions.map((e) => [e.chain, e.race_id])).toEqual([['near', RACE]])
+  })
+
+  it('records what its receipt says it sold, on the chain it ran on', async () => {
+    vi.stubEnv('AUTH_SECRET', 'k'.repeat(40))
+    const { withReceipt } = await import('../chains/receipt')
+    const near = {
+      chain: 'near',
+      tokens: [{ symbol: 'NEAR', id: 'wrap.near', decimals: 24 }],
+      priceUsd: async () => 3,
+    } as unknown as ChainModule
+    const { receipt } = await withReceipt(near, 'alice.near', {
+      venueId: 'ref',
+      venueName: 'Rhea',
+      kind: 'swap',
+      summary: 'Swap 2 NEAR for USDC.',
+      pay: { amount: '2', symbol: 'NEAR' },
+      receive: { amount: '6', symbol: 'USDC', approximate: true },
+      notes: [],
+      signing: { family: 'near', transactions: [] },
+    })
+    expect((await send({ receipt })).status).toBe(200)
+    expect(state.db.executions).toMatchObject([
+      { chain: 'near', network: 'mainnet', kind: 'swap', asset_in: 'NEAR', volume_usd: 6 },
+    ])
+  })
+
+  it('still counts a transaction whose receipt it cannot believe, with no value', async () => {
+    vi.stubEnv('AUTH_SECRET', 'k'.repeat(40))
+    expect((await send({ receipt: 'made.up' })).status).toBe(200)
+    expect(state.db.executions).toMatchObject([
+      { chain: 'near', kind: 'unknown', asset_in: null, volume_usd: null },
+    ])
   })
 
   it('does not link a race that ran on another chain', async () => {

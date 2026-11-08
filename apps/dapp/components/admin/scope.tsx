@@ -4,7 +4,15 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 export type AdminNetwork = 'mainnet' | 'testnet'
 export type AdminRange = '7d' | '30d' | '90d' | 'all'
-export type AdminChainId = 'stellar' | 'arc' | 'solana' | 'avalanche'
+export type AdminChainId =
+  | 'all'
+  | 'stellar'
+  | 'arc'
+  | 'solana'
+  | 'sui'
+  | 'near'
+  | 'avalanche'
+  | 'monad'
 
 export interface ScopeOption {
   key: string
@@ -12,19 +20,26 @@ export interface ScopeOption {
   network: AdminNetwork | null
   name: string
   label: string
-  /** Whether Intent records usage for it yet. Planned chains are listed but not selectable. */
+  /** Whether it can be chosen. */
   available: boolean
+  /** Whether Intent records usage for it. */
+  tracked: boolean
 }
 
+/** Every chain but Stellar runs on mainnet only, so all of them together is mainnet too. */
+const mainnet = (chain: AdminChainId, name: string): ScopeOption => ({
+  key: chain,
+  chain,
+  network: 'mainnet',
+  name,
+  label: 'Mainnet',
+  available: true,
+  tracked: true,
+})
+
 export const SCOPES: readonly ScopeOption[] = [
-  {
-    key: 'stellar-mainnet',
-    chain: 'stellar',
-    network: 'mainnet',
-    name: 'Stellar',
-    label: 'Mainnet',
-    available: true,
-  },
+  mainnet('all', 'All chains'),
+  { ...mainnet('stellar', 'Stellar'), key: 'stellar-mainnet' },
   {
     key: 'stellar-testnet',
     chain: 'stellar',
@@ -32,25 +47,29 @@ export const SCOPES: readonly ScopeOption[] = [
     name: 'Stellar',
     label: 'Testnet',
     available: true,
+    tracked: true,
   },
-  { key: 'arc', chain: 'arc', network: null, name: 'Arc', label: 'Testnet', available: true },
+  mainnet('solana', 'Solana'),
+  mainnet('sui', 'Sui'),
+  mainnet('near', 'NEAR'),
+  mainnet('avalanche', 'Avalanche'),
+  mainnet('monad', 'Monad'),
   {
-    key: 'solana',
-    chain: 'solana',
+    key: 'arc',
+    chain: 'arc',
     network: null,
-    name: 'Solana',
-    label: 'Coming soon',
-    available: false,
-  },
-  {
-    key: 'avalanche',
-    chain: 'avalanche',
-    network: null,
-    name: 'Avalanche',
-    label: 'Coming soon',
-    available: false,
+    name: 'Arc',
+    label: 'Testnet',
+    available: true,
+    tracked: false,
   },
 ]
+
+/** The query that asks the metrics route for this scope, or nothing for one Intent does not record. */
+export function scopeQuery(scope: ScopeOption): string | undefined {
+  if (!scope.tracked || scope.network === null) return undefined
+  return `chain=${scope.chain}&network=${scope.network}`
+}
 
 export const RANGE_OPTIONS: { value: AdminRange; label: string }[] = [
   { value: '7d', label: '7 days' },
@@ -66,7 +85,8 @@ interface ScopeState {
   setRange: (range: AdminRange) => void
 }
 
-const STORAGE = 'intent-admin-scope'
+// Renamed when all chains became the default, so an earlier saved choice does not hide it.
+const STORAGE = 'intent-admin-scope-v2'
 
 const Context = createContext<ScopeState | undefined>(undefined)
 
@@ -82,7 +102,7 @@ function read(): { key?: string; range?: AdminRange } {
 }
 
 export function ScopeProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [key, setKey] = useState('stellar-mainnet')
+  const [key, setKey] = useState('all')
   const [range, setRange] = useState<AdminRange>('30d')
 
   useEffect(() => {
