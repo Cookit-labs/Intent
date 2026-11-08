@@ -1,14 +1,21 @@
-import { erc20Abi, parseEventLogs, type Hash, type Log } from 'viem'
+import {
+  erc20Abi,
+  http,
+  parseEventLogs,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
+  type Hash,
+  type Log,
+} from 'viem'
 
 import { evmReader } from '../chains/evm/client'
 import { EVM_NATIVE_ID } from '../chains/evm/tokens'
 import { WRAP_NEAR } from '../chains/near/tokens'
-import { rpc as solanaRpc } from '../chains/solana/balances'
 import type { ChainToken, ChainWithActions } from '../chains/types'
 
 /**
  * What one transaction moved for one wallet, read back from its chain by hash. Used once, for
- * transactions logged before their value was recorded at submit: see backfill-values.ts.
+ * transactions logged without their value: see backfill-values.ts.
  *
  * Every reader comes down to the same shape: the wallet's net change in each token, by the
  * token's id in this app's tables, and what other owners gained, so a send can be told apart.
@@ -330,13 +337,44 @@ export function describeMovement(
 
 // ---- Reading the chains -----------------------------------------------------------------
 
+/**
+ * A node that refuses, rate-limits or times out says nothing about the transaction, so the next
+ * node is asked, and if none answers the lookup throws to be tried again later. Only a node that
+ * answers and has no such transaction makes it unreadable.
+ */
+export class NotFound extends Error {}
+
 const LOOKUP_MS = 10_000
 const SUI_GRAPHQL = 'https://graphql.mainnet.sui.io/graphql'
-const NEAR_ARCHIVAL = 'https://archival-rpc.mainnet.fastnear.com'
 const SUI_QUERY =
   'query($d:String!){transaction(digest:$d){sender{address} effects{status balanceChanges(first:50){nodes{owner{address} amount coinType{repr}}} gasEffects{gasSummary{computationCost storageCost storageRebate}}}}}'
 
-async function postJson(url: string, body: unknown): Promise<unknown> {
+const configured = (name: string): string[] => {
+  const value = process.env[name]?.trim()
+  return value === undefined || value === '' ? [] : [value]
+}
+
+/** Public nodes, after any the deployment names. Cloud servers are refused by some of them. */
+const SOLANA_NODES = (): string[] => [
+  ...configured('SOLANA_RPC_URL'),
+  'https://api.mainnet-beta.solana.com',
+  'https://solana-rpc.publicnode.com',
+]
+const NEAR_NODES = (): string[] => [
+  ...configured('NEAR_ARCHIVAL_RPC_URL'),
+  'https://archival-rpc.mainnet.fastnear.com',
+  'https://archival-rpc.mainnet.near.org',
+]
+const EVM_NODES: Record<'avalanche' | 'monad', () => (string | undefined)[]> = {
+  avalanche: () => [
+    ...configured('AVALANCHE_RPC_URL'),
+    undefined,
+    'https://avalanche-c-chain-rpc.publicnode.com',
+  ],
+  monad: () => [...configured('MONAD_RPC_URL'), undefined],
+}
+
+async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -344,51 +382,97 @@ async function postJson(url: string, body: unknown): Promise<unknown> {
     signal: AbortSignal.timeout(LOOKUP_MS),
   })
   if (!response.ok) throw new Error(`answered ${response.status}`)
-  return response.json()
+  return (await response.json()) as Record<string, unknown>
 }
 
-/** What the transaction moved for this wallet, or nothing if its chain has no record of it. */
+/** The first node's answer; NotFound if one answered that it has no such transaction. */
+async function firstAnswer<T>(
+  nodes: (string | undefined)[],
+  ask: (node: string | undefined) => Promise<T>
+): Promise<T> {
+  let missing = false
+  for (const node of nodes) {
+    try {
+      return await ask(node)
+    } catch (e) {
+      if (e instanceof NotFound) missing = true
+    }
+  }
+  if (missing) throw new NotFound('no such transaction')
+  throw new Error('no node answered')
+}
+
+/**
+ * What the transaction moved for this wallet. Throws NotFound when its chain has no record of
+ * it, and any other error when no node could be asked, so the caller tries again later.
+ */
 export async function readMovement(
   chain: ChainWithActions,
   hash: string,
   account: string
-): Promise<Movement | undefined> {
+): Promise<Movement> {
   switch (chain) {
-    case 'solana': {
-      const tx = (await solanaRpc(
-        'getTransaction',
-        [
-          hash,
-          { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' },
-        ],
-        AbortSignal.timeout(LOOKUP_MS)
-      ).catch(() => undefined)) as SolTransaction | null | undefined
-      return tx === null || tx === undefined ? undefined : solanaMovement(tx, account)
-    }
-    case 'sui': {
-      const body = (await postJson(SUI_GRAPHQL, { query: SUI_QUERY, variables: { d: hash } })) as {
-        data?: { transaction?: SuiTransaction | null }
-      }
-      const tx = body.data?.transaction
-      return tx === null || tx === undefined ? undefined : suiMovement(tx, account)
-    }
-    case 'near': {
-      const body = (await postJson(process.env['NEAR_ARCHIVAL_RPC_URL']?.trim() || NEAR_ARCHIVAL, {
-        jsonrpc: '2.0',
-        id: 'intent',
-        method: 'EXPERIMENTAL_tx_status',
-        params: { tx_hash: hash, sender_account_id: account, wait_until: 'NONE' },
-      })) as { result?: NearTransaction }
-      return body.result === undefined ? undefined : nearMovement(body.result, account)
-    }
+    case 'solana':
+      return firstAnswer(SOLANA_NODES(), async (url) => {
+        const body = await postJson(url as string, {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'getTransaction',
+          params: [
+            hash,
+            { encoding: 'jsonParsed', maxSupportedTransactionVersion: 1, commitment: 'confirmed' },
+          ],
+        })
+        if (body['error'] !== undefined) throw new Error('refused')
+        const tx = body['result'] as SolTransaction | null | undefined
+        if (tx === null || tx === undefined) throw new NotFound(hash)
+        return solanaMovement(tx, account)
+      })
+    case 'sui':
+      return firstAnswer([SUI_GRAPHQL], async (url) => {
+        const body = await postJson(url as string, { query: SUI_QUERY, variables: { d: hash } })
+        if (body['errors'] !== undefined) throw new Error('refused')
+        const tx = (body['data'] as { transaction?: SuiTransaction | null } | undefined)
+          ?.transaction
+        if (tx === null || tx === undefined) throw new NotFound(hash)
+        return suiMovement(tx, account)
+      })
+    case 'near':
+      return firstAnswer(NEAR_NODES(), async (url) => {
+        const body = await postJson(url as string, {
+          jsonrpc: '2.0',
+          id: 'intent',
+          method: 'EXPERIMENTAL_tx_status',
+          params: { tx_hash: hash, sender_account_id: account, wait_until: 'NONE' },
+        })
+        const error = body['error'] as { cause?: { name?: string }; name?: string } | undefined
+        if (error !== undefined) {
+          if ((error.cause?.name ?? error.name) === 'UNKNOWN_TRANSACTION') throw new NotFound(hash)
+          throw new Error('refused')
+        }
+        const tx = body['result'] as NearTransaction | undefined
+        if (tx === undefined) throw new NotFound(hash)
+        return nearMovement(tx, account)
+      })
     case 'avalanche':
-    case 'monad': {
-      const client = evmReader(chain)
-      const [receipt, tx] = await Promise.all([
-        client.getTransactionReceipt({ hash: hash as Hash }),
-        client.getTransaction({ hash: hash as Hash }),
-      ])
-      return evmMovement(receipt, tx, account)
-    }
+    case 'monad':
+      return firstAnswer(EVM_NODES[chain](), async (url) => {
+        const client = evmReader(chain, http(url, { timeout: LOOKUP_MS, retryCount: 0 }))
+        try {
+          const [receipt, tx] = await Promise.all([
+            client.getTransactionReceipt({ hash: hash as Hash }),
+            client.getTransaction({ hash: hash as Hash }),
+          ])
+          return evmMovement(receipt, tx, account)
+        } catch (e) {
+          if (
+            e instanceof TransactionReceiptNotFoundError ||
+            e instanceof TransactionNotFoundError
+          ) {
+            throw new NotFound(hash)
+          }
+          throw e
+        }
+      })
   }
 }

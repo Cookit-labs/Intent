@@ -55,84 +55,6 @@ function when(iso: string): string {
   })
 }
 
-interface Batch {
-  looked: number
-  valued: number
-  unreadable: number
-  retry: number
-  remaining: number
-}
-
-/**
- * Offers, once, to read past transactions on other chains back from their chain, which were
- * logged before their value was. Hidden when none are left.
- */
-function PastValues({ onDone }: { onDone: () => void }): JSX.Element | null {
-  const [remaining, setRemaining] = useState<number | undefined>(undefined)
-  const [running, setRunning] = useState(false)
-  const [done, setDone] = useState({ valued: 0, unreadable: 0 })
-  const [note, setNote] = useState<string | undefined>(undefined)
-
-  useEffect(() => {
-    fetch('/api/admin/backfill')
-      .then(async (res) => {
-        const body = (await res.json()) as { remaining?: number }
-        setRemaining(body.remaining ?? 0)
-      })
-      .catch(() => setRemaining(0))
-  }, [])
-
-  async function run(): Promise<void> {
-    setRunning(true)
-    setNote(undefined)
-    let stalled = 0
-    try {
-      for (;;) {
-        const res = await fetch('/api/admin/backfill', { method: 'POST' })
-        if (!res.ok) throw new Error('unavailable')
-        const batch = (await res.json()) as Batch
-        setRemaining(batch.remaining)
-        setDone((d) => ({
-          valued: d.valued + batch.valued,
-          unreadable: d.unreadable + batch.unreadable,
-        }))
-        stalled = batch.looked - batch.retry > 0 ? 0 : stalled + 1
-        if (batch.remaining === 0 || stalled >= 3) break
-      }
-      if (stalled >= 3) setNote('Some chains did not answer. Try again in a few minutes.')
-    } catch {
-      setNote('The lookup stopped. Try again in a moment.')
-    } finally {
-      setRunning(false)
-      onDone()
-    }
-  }
-
-  const tried = done.valued + done.unreadable > 0
-  if (remaining === undefined || (remaining === 0 && !tried)) return null
-  return (
-    <Panel
-      title="Past transactions on other chains"
-      hint="Logged before their value was. Read back from each chain by hash, at today's prices."
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-muted-foreground text-sm">
-          {remaining > 0 ? `${formatCount(remaining)} still have no value.` : 'All looked up.'}
-          {tried
-            ? ` ${formatCount(done.valued)} valued, ${formatCount(done.unreadable)} could not be read.`
-            : ''}
-          {note !== undefined ? ` ${note}` : ''}
-        </p>
-        {remaining > 0 ? (
-          <Button size="sm" disabled={running} onClick={() => void run()}>
-            {running ? 'Looking up…' : 'Look up past values'}
-          </Button>
-        ) : null}
-      </div>
-    </Panel>
-  )
-}
-
 export default function AdminTransactionsPage(): JSX.Element {
   const { scope, range } = useScope()
   const [kind, setKind] = useState('')
@@ -140,7 +62,6 @@ export default function AdminTransactionsPage(): JSX.Element {
   const [page, setPage] = useState(1)
   const [data, setData] = useState<Page | null>(null)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [reload, setReload] = useState(0)
 
   const query = scopeQuery(scope)
   const tracked = query !== undefined
@@ -167,7 +88,7 @@ export default function AdminTransactionsPage(): JSX.Element {
         setError('Transactions could not be loaded. Try again in a moment.')
       })
     return () => controller.abort()
-  }, [query, range, kind, outcome, page, reload])
+  }, [query, range, kind, outcome, page])
 
   const pages = data === null ? 1 : Math.max(Math.ceil(data.total / data.pageSize), 1)
 
@@ -184,7 +105,6 @@ export default function AdminTransactionsPage(): JSX.Element {
         </Panel>
       ) : (
         <>
-          {scope.chain !== 'stellar' ? <PastValues onDone={() => setReload((n) => n + 1)} /> : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="bg-muted/60 flex w-fit max-w-full overflow-x-auto rounded-lg p-1">
               {OUTCOMES.map((o) => (

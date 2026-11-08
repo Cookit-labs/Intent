@@ -5,7 +5,7 @@ import { nearTokens } from '../chains/near/tokens'
 import { SOLANA_TOKENS } from '../chains/solana/tokens'
 import { SUI_TOKENS } from '../chains/sui/tokens'
 import type { ChainToken, ChainWithActions } from '../chains/types'
-import { describeMovement, readMovement } from '../server/chain-lookup'
+import { describeMovement, NotFound, readMovement } from '../server/chain-lookup'
 
 /**
  * The backfill's readers against real mainnet transactions, read back by hash from each chain.
@@ -64,8 +64,7 @@ describe.skipIf(SKIP)('reading past transactions back from their chain', () => {
   for (const c of CASES) {
     it(`reads what a ${c.chain} transaction sold`, async () => {
       const movement = await readMovement(c.chain, c.hash, c.account)
-      expect(movement).toBeDefined()
-      const found = describeMovement(c.chain, c.tokens, movement!)
+      const found = describeMovement(c.chain, c.tokens, movement)
       expect({
         kind: found?.kind,
         symbol: found?.token.symbol,
@@ -75,6 +74,8 @@ describe.skipIf(SKIP)('reading past transactions back from their chain', () => {
   }
 
   it('finds nothing for a hash its chain has never seen', async () => {
-    expect(await readMovement('solana', '1'.repeat(88), CASES[0]!.account)).toBeUndefined()
+    await expect(
+      readMovement('solana', `${CASES[0]!.hash.slice(0, -4)}2222`, CASES[0]!.account)
+    ).rejects.toBeInstanceOf(NotFound)
   }, 60_000)
 })

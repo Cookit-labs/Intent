@@ -17,7 +17,7 @@ import { reportError } from './report'
  * Definitions, fixed here so the page and any export agree:
  *   - a transaction counts only if the network accepted it;
  *   - headline volume is the dollar value of what the user sold, sent or cashed
- *     out, for swaps, plans, offers, sends and cash-outs. Each transaction is
+ *     out, for swaps, plans, offers, sends, cash-outs and transactions whose type is unknown. Each transaction is
  *     counted at its own value, so a convert-first payout appears as its swap
  *     and its deposit, as two transactions. Lending is its own line and is not
  *     added to it;
@@ -28,7 +28,9 @@ export type RangeKey = '7d' | '30d' | '90d' | 'all'
 
 export const RANGES: readonly RangeKey[] = ['7d', '30d', '90d', 'all']
 
-export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp'] as const
+// 'unknown' is a transaction whose type could not be read but whose value could: money left the
+// wallet all the same, so it is in the total like the rest.
+export const HEADLINE_KINDS = ['swap', 'plan', 'offer', 'send', 'offramp', 'unknown'] as const
 
 const DAY_MS = 86_400_000
 
