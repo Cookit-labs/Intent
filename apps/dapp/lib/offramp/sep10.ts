@@ -18,7 +18,7 @@ import type { AnchorToml } from './toml'
  * transaction at all and have it signed.
  *
  * Hand-rolled because the official wallet SDK's client signer is synchronous
- * and requires a local secret, and Freighter is neither. The whole exchange
+ * and requires a local secret, and Varial is neither. The whole exchange
  * is one GET, one signature, one POST.
  *
  * Shapes below were verified against the installed SDK build: decoded
@@ -116,7 +116,7 @@ export function verifyChallenge(xdr: string, expect: ChallengeExpectation): Tran
   return tx
 }
 
-/** Signs a challenge envelope and returns the signed XDR. The hook adapts Freighter. */
+/** Signs a challenge envelope and returns the signed XDR. The hook adapts Varial. */
 export type ChallengeSigner = (xdr: string) => Promise<string>
 
 export interface AuthSession {

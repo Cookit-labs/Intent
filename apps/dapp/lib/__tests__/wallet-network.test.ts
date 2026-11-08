@@ -86,10 +86,10 @@ describe('the prompt when the wallet is on the other network', () => {
     expect(mismatchPrompt('testnet', 'mainnet').title).toBe('Your wallet is on Stellar mainnet')
   })
 
-  it('gives Freighter its own steps and every other wallet a plain instruction', async () => {
+  it('gives Varial its own steps and every other wallet a plain instruction', async () => {
     const { switchSteps } = await on('mainnet')
-    expect(switchSteps('Freighter', 'mainnet')).toMatch(/Freighter.*Network.*Mainnet/i)
-    expect(switchSteps('Freighter', 'testnet')).toMatch(/Testnet/)
+    expect(switchSteps('Varial', 'mainnet')).toMatch(/Varial.*menu.*Network.*Mainnet/i)
+    expect(switchSteps('Varial', 'testnet')).toMatch(/Testnet/)
     expect(switchSteps('xBull', 'mainnet')).toMatch(/xBull/)
     expect(switchSteps(undefined, 'testnet')).toMatch(/wallet.*Stellar testnet/i)
   })

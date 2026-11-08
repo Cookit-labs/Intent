@@ -8,11 +8,13 @@ import { HanaModule } from '@creit.tech/stellar-wallets-kit/modules/hana'
 import { xBullModule } from '@creit.tech/stellar-wallets-kit/modules/xbull'
 import { Networks } from '@creit.tech/stellar-wallets-kit/types'
 
+import { asVarial } from './varial'
+
 /**
  * The Stellar wallet kit, initialised once.
  *
  * This replaces the direct `@stellar/freighter-api` calls the adapter used to
- * make. Freighter is one Stellar wallet among many, and hardcoding it excluded
+ * make. Varial is one Stellar wallet among many, and hardcoding it excluded
  * everyone on xBull, Lobstr, Rabet, Albedo or Hana — the kit is the Stellar
  * equivalent of what RainbowKit does for EVM, including the picker modal.
  *
@@ -27,7 +29,7 @@ export function ensureKit(): void {
 
   StellarWalletsKit.init({
     modules: [
-      new FreighterModule(),
+      asVarial(new FreighterModule()),
       new xBullModule(),
       new LobstrModule(),
       new RabetModule(),

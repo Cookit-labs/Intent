@@ -34,7 +34,7 @@ function short(address: string): string {
   return `${address.slice(0, 4)}…${address.slice(-4)}`
 }
 
-/** The connected wallet's own mark (Freighter, Lobstr…), shown as it is. */
+/** The connected wallet's own mark (Varial, Lobstr…), shown as it is. */
 function WalletBadge({
   icon,
   className,

@@ -9,7 +9,7 @@ import { useChain } from '../providers/chain-provider'
  * Wallet state for the active chain.
  *
  * This used to call wagmi directly. It now delegates to the chain's adapter, so
- * a component asking for the wallet gets Arc's EVM wallet or Stellar's Freighter
+ * a component asking for the wallet gets Arc's EVM wallet or Stellar's Varial
  * wallet without knowing which — the two share no underlying machinery.
  *
  * Balance is always the chain's *native* asset (Arc: USDC, Stellar: XLM), with

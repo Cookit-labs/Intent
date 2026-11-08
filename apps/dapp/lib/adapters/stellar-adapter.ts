@@ -213,7 +213,7 @@ export const stellarConnector: WalletConnector = {
 }
 
 /**
- * Stellar wallet, via the Stellar Wallets Kit (Freighter, xBull, Lobstr, Rabet,
+ * Stellar wallet, via the Stellar Wallets Kit (Varial, xBull, Lobstr, Rabet,
  * Albedo, Hana).
  *
  * Three things differ from the EVM side:
@@ -418,7 +418,7 @@ function useStellarWallet(): ChainWallet {
 /**
  * Hands a prepared transaction to whichever wallet the user connected with.
  *
- * The kit already routes this to Freighter, xBull, Lobstr, Rabet, Albedo or
+ * The kit already routes this to Varial, xBull, Lobstr, Rabet, Albedo or
  * Hana, so nothing here is wallet-specific. A user declining is an ordinary
  * outcome and is reported as `rejected` rather than thrown: cancelling a swap
  * is not an error.

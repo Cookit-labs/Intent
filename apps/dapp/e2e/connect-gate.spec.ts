@@ -164,7 +164,7 @@ test('each chain lists its own wallets, ready ones first', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Choose another chain' }).click()
   await dialog(page).getByRole('button', { name: 'Stellar' }).click()
-  await expect(dialog(page).getByText('Freighter')).toBeVisible()
+  await expect(dialog(page).getByText('Varial')).toBeVisible()
 })
 
 test('NEAR lists wallets from its manifest', async ({ page }) => {

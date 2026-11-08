@@ -133,7 +133,7 @@ make dev
 | Website | http://localhost:3000  |
 | dApp    | https://localhost:3001 |
 
-The dApp's dev server runs over HTTPS with a local certificate, because Freighter
+The dApp's dev server runs over HTTPS with a local certificate, because Varial
 refuses to sign for a site without one. The first run downloads `mkcert` and
 Windows asks to trust its root certificate (`mkcert -uninstall` removes it). The
 dApp needs Postgres and Redis for sessions, limits and the sponsor ledger, so

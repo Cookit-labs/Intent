@@ -6,7 +6,7 @@ import { toBase64Signature } from '../api/auth'
  * Normalising whatever shape a wallet returns a signature in.
  *
  * Wallets disagree and the kit does not settle it: Bitget hands back hex,
- * Freighter passes a string through untouched and base64-encodes only when it
+ * Varial passes a string through untouched and base64-encodes only when it
  * receives bytes. Every one of them is typed `string`, so nothing catches the
  * difference until the server rejects it — and it rejects with "signature did
  * not verify for this account", which points at the wrong account rather than
@@ -35,7 +35,7 @@ describe('the shapes wallets actually return', () => {
     expect(toBase64Signature(HEX.toUpperCase())).toBe(BASE64)
   })
 
-  it('converts raw bytes, which Freighter can hand back', () => {
+  it('converts raw bytes, which Varial can hand back', () => {
     expect(toBase64Signature(RAW)).toBe(BASE64)
   })
 

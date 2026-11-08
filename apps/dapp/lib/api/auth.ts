@@ -95,7 +95,7 @@ const SIGNATURE_BYTES = 64
  * A wallet's signature, as base64 of exactly 64 bytes.
  *
  * Wallets disagree about how to return a signature and the kit does not settle
- * it. Bitget hands back hex; Freighter passes a string through untouched and
+ * it. Bitget hands back hex; Varial passes a string through untouched and
  * base64-encodes only when it receives bytes. The type is `string` either way,
  * so nothing catches the difference until the server rejects it — which reads
  * as "wrong account" rather than "wrong encoding", and sends you looking in the

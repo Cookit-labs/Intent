@@ -61,8 +61,8 @@ export function mismatchPrompt(
 /** Where in a wallet the network is changed. An app cannot change it for the user. */
 export function switchSteps(walletName: string | undefined, target: StellarNetworkName): string {
   const label = target === 'mainnet' ? 'Mainnet' : 'Testnet'
-  if (walletName === 'Freighter') {
-    return `In Freighter, open the menu, choose Network, then pick ${label}.`
+  if (walletName === 'Varial') {
+    return `In Varial, open the menu, choose Network, then pick ${label}.`
   }
   if (walletName !== undefined) {
     return `In ${walletName}, open its settings and change the network to ${label}.`

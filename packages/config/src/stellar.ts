@@ -6,7 +6,7 @@ import { activeNetwork, defaultNetwork, type StellarNetworkName } from './networ
 export interface StellarNetwork {
   network: SupportedNetwork
   name: string
-  /** Freighter reports its active network with this label. */
+  /** Varial reports its active network with this label. */
   freighterNetwork: 'TESTNET' | 'PUBLIC'
   networkPassphrase: string
   horizonUrl: string

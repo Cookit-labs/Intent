@@ -8,7 +8,7 @@ import type { SignedOutcome, SigningPayload } from './chains/types'
  *
  * The point of this interface is that Arc and Stellar share no machinery: Arc
  * goes through wagmi/viem/RainbowKit with `0x` addresses and a numeric chain
- * id, while Stellar goes through Freighter and Horizon with `G...` addresses
+ * id, while Stellar goes through Varial and Horizon with `G...` addresses
  * and a network passphrase. Without a common shape, every screen would branch
  * on the chain. With it, screens call `useWallet()` and stay chain-blind.
  *
@@ -84,7 +84,7 @@ export interface ChainAdapter {
   /**
    * React hook returning live wallet state. A hook rather than a plain object
    * because both implementations subscribe to external state (wagmi store,
-   * Freighter polling) and must re-render on change.
+   * Varial polling) and must re-render on change.
    */
   useWallet: () => ChainWallet
   /** Explorer link for an account on this chain. */
