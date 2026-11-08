@@ -1,16 +1,17 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
+import { isAddress } from '@solana/kit'
 import { StrKey } from '@stellar/stellar-sdk'
 
 /**
- * Server-side client for the Linq B2B off-ramp: XLM in, naira to a bank.
+ * Server-side client for the Linq B2B off-ramp: XLM or USDC in, naira to a bank.
  *
  * The API key can create orders that pay real naira, so this must only be
  * reached from route handlers. Nothing here is imported by a client component.
  *
- * Every order is on Stellar with `manualDeposit: true`, in native XLM or USDC,
- * so the payout follows what actually arrives and a short payment is never a
- * loss for the operator.
+ * Every order has `manualDeposit: true`, in native XLM or USDC on Stellar and
+ * USDC on Sui and Solana, so the payout follows what actually arrives and a
+ * short payment is never a loss for the operator.
  */
 
 const DEFAULT_TIMEOUT_MS = 20_000
@@ -29,16 +30,22 @@ export type LinqResult<T> = { ok: true; value: T } | LinqFailure
 export type LinqCoin = 'xlm' | 'usdc'
 
 /**
- * Where a Linq order takes its deposit. Linq's dashboard docs list `sui` (USDSUI, USDC) and
- * `stellar` (USDC, XLM) among others; only these two are ordered from here.
+ * Where a Linq order takes its deposit. Linq's dashboard docs list `sui` (USDSUI, USDC), `solana`
+ * (USDC) and `stellar` (USDC, XLM) among others; only these three are ordered from here.
  */
-export type LinqChain = 'stellar' | 'sui'
+export type LinqChain = 'stellar' | 'sui' | 'solana'
 
 /** A Sui account or object address: 0x and 64 hex digits. */
 const SUI_ADDRESS = /^0x[0-9a-fA-F]{64}$/
 
+const IS_DEPOSIT_ADDRESS: Readonly<Record<LinqChain, (address: string) => boolean>> = {
+  stellar: (address) => StrKey.isValidEd25519PublicKey(address),
+  sui: (address) => SUI_ADDRESS.test(address),
+  solana: (address) => isAddress(address),
+}
+
 export interface LinqOrderInput {
-  /** Stellar unless said. A Sui order is USDC only, sent from the user's own wallet. */
+  /** Stellar unless said. An order on any other chain is USDC only, sent from the user's own wallet. */
   chain?: LinqChain
   /**
    * The asset the user deposits. XLM is ordered by the naira the recipient
@@ -281,8 +288,8 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       }
 
       const chain: LinqChain = input.chain ?? 'stellar'
-      if (chain === 'sui' && input.coin !== 'usdc') {
-        return { ok: false, code: 'rejected', message: 'A Sui payout is ordered in USDC only.' }
+      if (chain !== 'stellar' && input.coin !== 'usdc') {
+        return { ok: false, code: 'rejected', message: 'This payout is ordered in USDC only.' }
       }
       const res = await call('/b2b/offramp', {
         method: 'POST',
@@ -309,14 +316,12 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       const body = res.value
       const address = str(body['walletAddress'])
       const amountCoin = num(body['amountStableCoin'])
-      // On Sui the order must also be for exactly the USDC asked: that is what the wallet signs.
-      const validAddress =
-        chain === 'sui' ? SUI_ADDRESS.test(address) : StrKey.isValidEd25519PublicKey(address)
-      const exactAmount = chain !== 'sui' || amountCoin === input.amountStableCoin
+      // Off Stellar the order must also be for exactly the USDC asked: that is what the wallet signs.
+      const exactAmount = chain === 'stellar' || amountCoin === input.amountStableCoin
       const matches =
         str(body['chain']).toLowerCase() === chain &&
         str(body['coin']).toLowerCase() === input.coin &&
-        validAddress &&
+        IS_DEPOSIT_ADDRESS[chain](address) &&
         exactAmount &&
         amountCoin > 0 &&
         str(body['id']) !== ''

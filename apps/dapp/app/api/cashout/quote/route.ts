@@ -7,6 +7,7 @@ import { createWeaveClient, quoteCostPercent } from '../../../../lib/weave/clien
 import { isCurrencyAllowed } from '../../../../lib/weave/corridors'
 import { depositChain } from '../../../../lib/weave/deposit'
 import { guardCashout } from '../../../../lib/weave/guard'
+import { comparesLinq } from '../../../../lib/weave/linq-cashout'
 import { MAX_COST_PERCENT, readUsdcAmount } from '../../../../lib/weave/orders'
 import { isCashoutChain } from '../../../../lib/weave/types'
 
@@ -20,8 +21,8 @@ function refuse(error: string, message: string): Response {
 /**
  * What a cash-out would pay, what it would cost, and how long it should take.
  *
- * A naira cash-out from Sui is priced by whichever of Weave and Linq pays more, as the order route
- * places it. Linq's figure is the naira it pays; it states no fee of its own.
+ * A naira cash-out from Sui or Solana is priced by whichever of Weave and Linq pays more, as the
+ * order route places it. Linq's figure is the naira it pays; it states no fee of its own.
  */
 export async function GET(request: Request): Promise<Response> {
   const query = new URL(request.url).searchParams
@@ -45,7 +46,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await createWeaveClient().quote({ chain, currency, amount })
   const linq = createLinqClient()
-  if (chain === 'sui' && currency === 'NGN' && linq.configured) {
+  if (comparesLinq(chain) && currency === 'NGN' && linq.configured) {
     const weaveCost = result.ok ? quoteCostPercent(amount, result.value.netUsd) : undefined
     const offers = await nairaOffers(chain, amount, {
       linqRate: async () => {

@@ -65,18 +65,24 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
   return (
     <div ref={ref}>
       <Card className="flex flex-col gap-3 p-5">
-        <ol className="flex flex-col gap-2 text-sm">
-          <li className="flex items-center gap-2">
+        <ol className="flex flex-col gap-2.5 text-sm">
+          <li className="flex items-center gap-2.5">
             <Mark mark={firstMark} number={1} />
-            <span className={firstMark === 'now' ? 'font-medium' : undefined}>{first}</span>
+            <span
+              className={cn(
+                '[overflow-wrap:anywhere]',
+                firstMark === 'now' ? 'font-medium' : 'text-muted-foreground'
+              )}
+            >
+              {first}
+            </span>
           </li>
-          <li className="flex items-center gap-2">
+          <li className="flex items-center gap-2.5">
             <Mark mark={secondMark} number={2} />
             <span
               className={cn(
                 '[overflow-wrap:anywhere]',
-                secondMark === 'now' && 'font-medium',
-                secondMark !== 'now' && secondMark !== 'done' && 'text-muted-foreground'
+                secondMark === 'now' ? 'font-medium' : 'text-muted-foreground'
               )}
             >
               {second}

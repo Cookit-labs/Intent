@@ -35,7 +35,7 @@ export const suiVenues: Venue[] = [
     'Linq (Sui USDC, USDsui)',
     'offramp',
     'https://switch.uselinq.xyz',
-    'Naira cash-out from Sui. Not connected yet: needs Linq to confirm Sui and a separate payment path'
+    'Naira cash-out from Sui, used when it pays more than Weave'
   ),
   {
     id: 'cetus',

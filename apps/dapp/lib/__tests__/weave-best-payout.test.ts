@@ -15,11 +15,11 @@ describe('nairaOffers', () => {
     ])
     expect(onStellar.weaveNaira).not.toHaveBeenCalled()
 
-    const onSolana = sources(1368.39, 916.44)
-    expect(await nairaOffers('solana', '0.689418', onSolana)).toEqual([
+    const onAvalanche = sources(1368.39, 916.44)
+    expect(await nairaOffers('avalanche', '0.689418', onAvalanche)).toEqual([
       { provider: 'weave', naira: 916.44, exact: false },
     ])
-    expect(onSolana.linqRate).not.toHaveBeenCalled()
+    expect(onAvalanche.linqRate).not.toHaveBeenCalled()
   })
 
   it('gives no offer for a provider that cannot be read, rather than a guess', async () => {
@@ -43,8 +43,15 @@ describe('nairaOffers', () => {
     ])
   })
 
-  it('pays naira from Linq on Stellar and Sui, and from Weave nowhere on Stellar or NEAR', () => {
-    expect(PAYS_NAIRA.linq).toEqual(['stellar', 'sui'])
+  it('asks both on Solana, where each can pay, best first', async () => {
+    expect(await nairaOffers('solana', '1', sources(1368.39, 1329.82))).toEqual([
+      { provider: 'linq', naira: 1368.39, exact: true },
+      { provider: 'weave', naira: 1329.82, exact: false },
+    ])
+  })
+
+  it('pays naira from Linq on Stellar, Sui and Solana, and from Weave nowhere on Stellar or NEAR', () => {
+    expect(PAYS_NAIRA.linq).toEqual(['stellar', 'sui', 'solana'])
     expect(PAYS_NAIRA.weave).not.toContain('stellar')
     expect(PAYS_NAIRA.weave).not.toContain('near')
   })

@@ -112,7 +112,7 @@ export const solanaVenues: Venue[] = [
     name: 'Linq (Solana USDC)',
     category: 'offramp',
     chains: ['Solana'],
-    bestFor: 'Naira cash-out from Solana, once Linq confirms it and a payment path exists',
+    bestFor: 'Naira cash-out from Solana, used when it pays more than Weave',
     url: 'https://switch.uselinq.xyz',
   },
   {
