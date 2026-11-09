@@ -148,7 +148,9 @@ function positionLine(position: VenuePosition, venue: VenueHoldings): string {
         : `${held}, ready ${when}.`
     return words === undefined ? timing : `${timing} Then type "${words}"`
   }
-  return words === undefined ? `${held}. ${NO_NEXT_STEP}` : `${held}: type "${words}"`
+  const warning = position.warning === undefined ? '' : ` ${position.warning}`
+  if (words === undefined) return `${held}. ${NO_NEXT_STEP}${warning}`
+  return warning === '' ? `${held}: type "${words}"` : `${held}: type "${words}".${warning}`
 }
 
 interface ReplyParts {

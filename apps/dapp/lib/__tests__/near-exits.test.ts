@@ -13,6 +13,7 @@ import {
   type NearTransaction,
   type SigningPayload,
 } from '../chains/types'
+import type { NearFunctionCall } from '../chains/types'
 
 /** Every path here ends in a NEAR wallet that sends what it signs. Nothing signs or sends in tests. */
 
@@ -180,7 +181,10 @@ function txs(prepared: { signing: SigningPayload }): NearTransaction[] {
 
 function call(prepared: { signing: SigningPayload }) {
   const [tx] = txs(prepared)
-  return { receiverId: tx?.receiverId, params: tx?.actions[0]?.params }
+  return {
+    receiverId: tx?.receiverId,
+    params: (tx?.actions[0] as NearFunctionCall | undefined)?.params,
+  }
 }
 
 describe('unstaking from Meta Pool', () => {
@@ -539,7 +543,9 @@ describe('bringing USDC out of the NEAR Intents balance', () => {
     const prepared = await earnVenue.prepare(claim, ME)
     const [first, second] = txs(prepared)
     expect(first?.receiverId).toBe(USDC_NEAR)
-    expect(first?.actions[0]?.params.methodName).toBe('storage_deposit')
+    expect((first?.actions[0] as NearFunctionCall | undefined)?.params.methodName).toBe(
+      'storage_deposit'
+    )
     expect(second?.receiverId).toBe(INTENTS_CONTRACT)
     expect(() => earnVenue.assertSafe(prepared.signing, ME)).not.toThrow()
   })

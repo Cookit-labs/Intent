@@ -11,6 +11,7 @@ import {
   USDT_NEAR,
   WRAP_NEAR,
 } from '../chains/near/tokens'
+import type { NearFunctionCall } from '../chains/types'
 
 /**
  * The real contracts, read-only: RPC view calls and a read of each contract's code.
@@ -112,7 +113,9 @@ describe.skipIf(SKIP)('stake venues against the live contracts', () => {
     if (prepared.signing.family !== 'near') throw new Error('wrong family')
     const [tx] = prepared.signing.transactions
     expect(tx?.receiverId).toBe('lst.rhealab.near')
-    expect(tx?.actions.at(-1)?.params.gas).toBe(RNEAR_STAKE_GAS.toString())
+    expect((tx?.actions.at(-1) as NearFunctionCall | undefined)?.params.gas).toBe(
+      RNEAR_STAKE_GAS.toString()
+    )
     expect(Number(prepared.receive?.amount)).toBeGreaterThan(1)
     expect(Number(prepared.receive?.amount)).toBeLessThan(2)
     expect(prepared.apy?.basePercent).toBeGreaterThan(0)
@@ -128,7 +131,9 @@ describe.skipIf(SKIP)('stake venues against the live contracts', () => {
     const [tx] = prepared.signing.transactions
     expect(tx?.receiverId).toBe('meta-pool.near')
     expect(tx?.actions).toHaveLength(1)
-    expect(tx?.actions[0]?.params.gas).toBe(METAPOOL_STAKE_GAS.toString())
+    expect((tx?.actions[0] as NearFunctionCall | undefined)?.params.gas).toBe(
+      METAPOOL_STAKE_GAS.toString()
+    )
     expect(Number(prepared.receive?.amount)).toBeGreaterThan(1)
     expect(Number(prepared.receive?.amount)).toBeLessThan(2)
   }, 60_000)

@@ -187,6 +187,31 @@ export async function assertFollowOnCanRun(
     throw new ChainActionRefused(`${venue.name} can't follow a swap yet.`)
   }
   await venue.assertCanFollow(step, account)
+  await assertFeesForBothSteps(chainApi, step, account)
+}
+
+/**
+ * A step spending the native coin spends all that arrived, so what pays for the fees has to be there
+ * already. Found out after the swap, it would strand the person halfway. Enough for two reserves,
+ * since the swap's own fee comes out first. A failed read lets it through, as it does everywhere.
+ */
+async function assertFeesForBothSteps(
+  chainApi: ChainModule,
+  step: FollowOnStep,
+  account: string
+): Promise<void> {
+  if (step.tokenIn.toUpperCase() !== NATIVE_SYMBOL[chainApi.chain]) return
+  const reading = await readBalancesBriefly(chainApi, account)
+  const native = reading?.tokens.find((t) => t.native)
+  if (native === undefined) return
+  const held = toBase(native.amount, native.decimals)
+  const reserve = toBase(NATIVE_FEE_RESERVE[chainApi.chain], native.decimals)
+  if (held === undefined || reserve === undefined) return
+  const needed = reserve * BigInt(2)
+  if (held >= needed) return
+  throw new ChainActionRefused(
+    `Keep at least ${fromBase(needed, native.decimals)} ${native.symbol} in your wallet before this, to pay the fees on both steps. You have ${native.amount}. Nothing was signed or sent.`
+  )
 }
 
 export { LIMIT_NOT_HERE }
@@ -270,6 +295,18 @@ export async function prepareChainAction(
   }
 
   const tokenIn = assertKnownTokens(chainApi, typed)
+  const crossing = chainApi.crossChainSend
+  if (
+    typed.kind === 'send' &&
+    typed.recipient !== undefined &&
+    crossing?.reaches(typed.recipient)
+  ) {
+    assertValidAmount(typed)
+    await assertHeldForSend(chainApi, typed, tokenIn, account)
+    const prepared = await crossing.venue.prepare(typed, account)
+    crossing.venue.assertSafe(prepared.signing, account, prepared.context)
+    return prepared
+  }
   const named = await assertRecipientRule(chainApi, typed, tokenIn, account)
   const asked = named === undefined ? typed : { ...typed, recipient: named.address }
 

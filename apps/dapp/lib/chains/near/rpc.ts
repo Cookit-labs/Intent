@@ -1,39 +1,88 @@
-const DEFAULT_RPC_URL = 'https://free.rpc.fastnear.com'
+/**
+ * Free RPCs rate limit by address, and one Rhea prepare costs about 12 reads, so one alone answered
+ * 429 in the middle of a swap. Measured 9 November 2026: dRPC passed all 30 Rhea live checks when
+ * FastNEAR was refusing, while Lava answered 410 and 1RPC failed them all.
+ */
+const PUBLIC_RPC_URLS = ['https://free.rpc.fastnear.com', 'https://near.drpc.org']
 const VIEW_TIMEOUT_MS = 8_000
+/** A read waits this long on an RPC with another behind it, inside the shortest budget that reads. */
+const FAILOVER_ATTEMPT_MS = 2_500
+/** What each byte of an account's storage holds back, set by the protocol. */
+const YOCTO_PER_STORAGE_BYTE = BigInt('10000000000000000000')
+/** Errors about the node that answered. Another node can still answer. */
+const NODE_TROUBLE: ReadonlySet<string> = new Set([
+  'TIMEOUT_ERROR',
+  'INTERNAL_ERROR',
+  'UNAVAILABLE_SHARD',
+  'NO_SYNCED_BLOCKS',
+  'GARBAGE_COLLECTED_BLOCK',
+  'UNKNOWN_BLOCK',
+])
 const TX_ATTEMPT_TIMEOUT_MS = 8_000
 const TX_POLL_INTERVAL_MS = 1_500
 
 export class NearRpcError extends Error {}
 
-function rpcUrl(): string {
+function rpcUrls(): string[] {
   const configured = process.env['NEAR_RPC_URL']?.trim()
-  return configured === undefined || configured === '' ? DEFAULT_RPC_URL : configured
+  return configured === undefined || configured === ''
+    ? PUBLIC_RPC_URLS
+    : [configured, ...PUBLIC_RPC_URLS.filter((url) => url !== configured)]
 }
 
-async function rpcCall(
+interface RpcBody {
+  result?: unknown
+  error?: { cause?: { name?: string }; name?: string; message?: string }
+}
+
+/**
+ * One call, asked of each RPC until one answers. An RPC that refuses, can't be reached or reports
+ * trouble of its own says nothing about the chain, so the next is asked. Any other error in an
+ * answer is the chain speaking, and every RPC would repeat it.
+ */
+export async function rpcCall(
   method: string,
   params: unknown,
   timeoutMs: number,
   signal?: AbortSignal
 ): Promise<unknown> {
-  const response = await fetch(rpcUrl(), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 'intent', method, params }),
-    signal:
-      signal === undefined
-        ? AbortSignal.timeout(timeoutMs)
-        : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
-  })
-  if (!response.ok) throw new NearRpcError(`rpc responded ${response.status}`)
-  const body = (await response.json()) as {
-    result?: unknown
-    error?: { cause?: { name?: string }; name?: string; message?: string }
+  let failure: unknown
+  const urls = rpcUrls()
+  for (const [index, url] of urls.entries()) {
+    const attemptMs =
+      method === 'query' && index < urls.length - 1
+        ? Math.min(timeoutMs, FAILOVER_ATTEMPT_MS)
+        : timeoutMs
+    let body: RpcBody
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'intent', method, params }),
+        signal:
+          signal === undefined
+            ? AbortSignal.timeout(attemptMs)
+            : AbortSignal.any([AbortSignal.timeout(attemptMs), signal]),
+      })
+      if (!response.ok) {
+        failure = new NearRpcError(`rpc responded ${response.status}`)
+        continue
+      }
+      body = (await response.json()) as RpcBody
+    } catch (e) {
+      if (signal?.aborted === true) throw e
+      failure = e
+      continue
+    }
+    if (body.error !== undefined) {
+      const error = new NearRpcError(body.error.cause?.name ?? body.error.name ?? 'rpc_error')
+      if (!NODE_TROUBLE.has(error.message)) throw error
+      failure = error
+      continue
+    }
+    return body.result
   }
-  if (body.error !== undefined) {
-    throw new NearRpcError(body.error.cause?.name ?? body.error.name ?? 'rpc_error')
-  }
-  return body.result
+  throw failure
 }
 
 /** A read-only contract call. Throws `NearRpcError` when the network or the contract answers badly. */
@@ -73,15 +122,24 @@ export interface ExecutedCall {
   deposit: string
 }
 
+interface ExecutedFacts {
+  /** Who the action ran as: the sender of a delegate action, if the wallet used one. */
+  signer: string
+  receiver: string
+  calls: ExecutedCall[]
+  /** Yocto moved by each plain Transfer. Only a send of native NEAR reads this. */
+  transfers?: string[]
+}
+
 export type TxOutcome =
-  /** `signer` is who the action ran as: the sender of a delegate action, if the wallet used one. */
-  | { state: 'success'; signer: string; receiver: string; calls: ExecutedCall[] }
-  | { state: 'failed'; signer: string; receiver: string; calls: ExecutedCall[] }
+  | ({ state: 'success' } & ExecutedFacts)
+  | ({ state: 'failed' } & ExecutedFacts)
   /** Not seen as finished before the wait ended. Says nothing about whether it will succeed. */
   | { state: 'unknown' }
 
 interface RawAction {
   FunctionCall?: { method_name: string; args: string; deposit: string }
+  Transfer?: { deposit: string }
   Delegate?: { delegate_action: RawDelegate }
 }
 
@@ -113,6 +171,12 @@ function callsOf(actions: (RawAction | string)[]): ExecutedCall[] {
   })
 }
 
+function transfersOf(actions: (RawAction | string)[]): string[] {
+  return actions.flatMap((action) =>
+    typeof action === 'string' || action.Transfer === undefined ? [] : [action.Transfer.deposit]
+  )
+}
+
 function readOutcome(result: RawTxResult): TxOutcome {
   const { status, transaction } = result
   if (transaction === undefined || typeof status !== 'object' || status === null) {
@@ -121,23 +185,24 @@ function readOutcome(result: RawTxResult): TxOutcome {
   const delegate = transaction.actions.flatMap((a) =>
     typeof a !== 'string' && a.Delegate !== undefined ? [a.Delegate.delegate_action] : []
   )[0]
-  const facts =
-    delegate !== undefined
+  const inner = delegate?.actions.map((a) =>
+    'NonDelegateAction' in a && a.NonDelegateAction !== undefined
+      ? a.NonDelegateAction
+      : (a as RawAction)
+  )
+  const facts: ExecutedFacts =
+    delegate !== undefined && inner !== undefined
       ? {
           signer: delegate.sender_id,
           receiver: delegate.receiver_id,
-          calls: callsOf(
-            delegate.actions.map((a) =>
-              'NonDelegateAction' in a && a.NonDelegateAction !== undefined
-                ? a.NonDelegateAction
-                : (a as RawAction)
-            )
-          ),
+          calls: callsOf(inner),
+          transfers: transfersOf(inner),
         }
       : {
           signer: transaction.signer_id,
           receiver: transaction.receiver_id,
           calls: callsOf(transaction.actions),
+          transfers: transfersOf(transaction.actions),
         }
   if ('Failure' in status) return { state: 'failed', ...facts }
   if ('SuccessValue' in status) return { state: 'success', ...facts }
@@ -178,4 +243,24 @@ export async function accountBalance(account: string, signal?: AbortSignal): Pro
   )) as { amount?: unknown }
   if (typeof result.amount !== 'string') throw new NearRpcError('account balance unreadable')
   return result.amount
+}
+
+/**
+ * Yocto of NEAR an account can move. Its balance also pays for its storage, and a transfer that
+ * dips into that fails, so what storage needs comes off, less anything staked that already covers it.
+ */
+export async function spendableBalance(account: string, signal?: AbortSignal): Promise<string> {
+  const result = (await rpcCall(
+    'query',
+    { request_type: 'view_account', finality: 'final', account_id: account },
+    VIEW_TIMEOUT_MS,
+    signal
+  )) as { amount?: unknown; locked?: unknown; storage_usage?: unknown }
+  if (typeof result.amount !== 'string') throw new NearRpcError('account balance unreadable')
+  const held = BigInt(result.amount)
+  const locked = typeof result.locked === 'string' ? BigInt(result.locked) : BigInt(0)
+  const bytes = typeof result.storage_usage === 'number' ? BigInt(result.storage_usage) : BigInt(0)
+  const storage = bytes * YOCTO_PER_STORAGE_BYTE
+  const short = storage > locked ? storage - locked : BigInt(0)
+  return (held > short ? held - short : BigInt(0)).toString()
 }

@@ -23,6 +23,7 @@ import {
   type PreparedAction,
   type SigningPayload,
 } from '../chains/types'
+import type { NearFunctionCall } from '../chains/types'
 
 const ME = 'alice.near'
 const THIEF = 'mallory.near'
@@ -320,7 +321,9 @@ describe('first use', () => {
   it('never carries storage and the order in one signature', async () => {
     firstUse()
     const prepared = await rheaVenue.prepare(selling(), ME)
-    const methods = txs(prepared).flatMap((t) => t.actions.map((a) => a.params.methodName))
+    const methods = txs(prepared).flatMap((t) =>
+      t.actions.map((a) => (a as NearFunctionCall).params.methodName)
+    )
     expect(methods).not.toContain('ft_transfer_call')
     expect(methods).not.toContain('near_deposit')
   })

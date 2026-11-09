@@ -19,6 +19,12 @@ export const nearTokens: readonly ChainToken[] = [
   { symbol: 'rNEAR', id: RNEAR_CONTRACT, decimals: 24, name: 'Rhea Staked NEAR' },
 ]
 
+/**
+ * The coin itself, as a balance read reports it. The table above lists NEAR by the wrapped contract
+ * it trades through, and a wallet's wNEAR is a different holding from its NEAR.
+ */
+export const NATIVE_NEAR: ChainToken = { symbol: 'NEAR', id: 'near', decimals: 24, name: 'NEAR' }
+
 export const YOCTO_PER_NEAR = BigInt('1000000000000000000000000')
 export const TGAS = BigInt('1000000000000')
 

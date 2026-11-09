@@ -32,7 +32,7 @@ const CHAIN_NAME: Record<ChainWithActions, string> = {
 export const SENDABLE: Record<ChainWithActions, readonly string[]> = {
   solana: ['USDC', 'USDT', 'JitoSOL', 'ONyc'],
   sui: ['USDC', 'USDT', 'USDsui'],
-  near: ['USDC'],
+  near: ['USDC', 'NEAR'],
   avalanche: ['AVAX', 'USDC', 'USDT'],
   monad: ['MON', 'USDC', 'USDT0'],
 }

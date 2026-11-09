@@ -12,6 +12,7 @@ vi.mock('../chains/near/quote-signature', () => ({
 }))
 
 import { verifyQuoteSignature } from '../chains/near/quote-signature'
+import type { NearFunctionCall } from '../chains/types'
 
 const ME = 'alice.near'
 const DEPOSIT = 'dc2c3034e3ebefa1af9a2c419f896d7b761a056244099eefcd09aeb7efc1b86d'
@@ -206,8 +207,11 @@ describe('preparing a 1Click swap', () => {
     const prepared = await oneClickVenue.prepare(swap(), ME)
     const tx = txOf(prepared)
     expect(tx.receiverId).toBe(USDC_NEAR)
-    expect(tx.actions.map((a) => a.params.methodName)).toEqual(['storage_deposit', 'ft_transfer'])
-    expect(tx.actions[1]?.params).toMatchObject({
+    expect(tx.actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
+      'storage_deposit',
+      'ft_transfer',
+    ])
+    expect((tx.actions[1] as NearFunctionCall | undefined)?.params).toMatchObject({
       args: { receiver_id: DEPOSIT, amount: '1000000' },
       deposit: '1',
     })
@@ -218,7 +222,9 @@ describe('preparing a 1Click swap', () => {
   it('skips the storage payment when the deposit address is already registered', async () => {
     sim.registered.add(`${USDC_NEAR}|${DEPOSIT}`)
     const tx = txOf(await oneClickVenue.prepare(swap(), ME))
-    expect(tx.actions.map((a) => a.params.methodName)).toEqual(['ft_transfer'])
+    expect(tx.actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
+      'ft_transfer',
+    ])
   })
 
   it('wraps NEAR first, and registers an unregistered sender before wrapping', async () => {
@@ -226,22 +232,28 @@ describe('preparing a 1Click swap', () => {
     const prepared = await oneClickVenue.prepare(request, ME)
     const tx = txOf(prepared)
     expect(tx.receiverId).toBe(WRAP_NEAR)
-    expect(tx.actions.map((a) => a.params.methodName)).toEqual([
+    expect(tx.actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
       'storage_deposit',
       'near_deposit',
       'storage_deposit',
       'ft_transfer',
     ])
-    expect(tx.actions[0]?.params.args).toMatchObject({ account_id: ME })
-    expect(tx.actions[1]?.params.deposit).toBe('1000000000000000000000000')
-    expect(tx.actions[2]?.params.args).toMatchObject({ account_id: DEPOSIT })
+    expect((tx.actions[0] as NearFunctionCall | undefined)?.params.args).toMatchObject({
+      account_id: ME,
+    })
+    expect((tx.actions[1] as NearFunctionCall | undefined)?.params.deposit).toBe(
+      '1000000000000000000000000'
+    )
+    expect((tx.actions[2] as NearFunctionCall | undefined)?.params.args).toMatchObject({
+      account_id: DEPOSIT,
+    })
     expect(() => oneClickVenue.assertSafe(prepared.signing, ME)).not.toThrow()
   })
 
   it('does not register a sender who is already registered on wrap.near', async () => {
     sim.registered.add(`${WRAP_NEAR}|${ME}`)
     const prepared = await oneClickVenue.prepare(swap({ tokenIn: 'NEAR', tokenOut: 'USDC' }), ME)
-    expect(txOf(prepared).actions.map((a) => a.params.methodName)).toEqual([
+    expect(txOf(prepared).actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
       'near_deposit',
       'storage_deposit',
       'ft_transfer',
@@ -473,7 +485,7 @@ describe('what 1Click can refuse', () => {
   it('refuses when the deposit address cannot be checked on NEAR', async () => {
     const real = vi.mocked(fetch).getMockImplementation()
     vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input).includes('fastnear')) throw new Error('down')
+      if (/fastnear|drpc/.test(String(input))) throw new Error('down')
       return (real as typeof fetch)(input, init)
     })
     expect(await refusal()).toMatch(/could not be read/)
