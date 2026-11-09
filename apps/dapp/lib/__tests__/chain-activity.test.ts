@@ -10,7 +10,16 @@ import {
   withPayouts,
   type ActivityEntry,
 } from '../chains/activity'
-import { positionRows, type PositionsReport } from '../chains/positions-reply'
+import { parseChainAction } from '../chains/parse-action'
+import {
+  asksToManagePosition,
+  positionRequest,
+  positionRows,
+  rowsAt,
+  type PositionRow,
+  type PositionsReport,
+} from '../chains/positions-reply'
+import { typedAmount } from '../../components/intents/position-card'
 import { evmExplorerUrl } from '../chains/evm/tokens'
 import { explorerUrl as nearExplorerUrl } from '../chains/near/tokens'
 import type { SwapRecord } from '../swap/history'
@@ -279,35 +288,167 @@ describe('position rows', () => {
     unread: [],
   }
 
-  it('name the venue the money is at, and the way back out', () => {
+  it('name the venue the money is at', () => {
     const rows = positionRows(report)
-    expect(rows[0]).toMatchObject({
-      title: 'Supplied to NAVI',
-      note: 'earning',
+    expect(rows.map((r) => r.title)).toEqual([
+      'Supplied to NAVI',
+      'Borrowed from NAVI',
+      'Staked on Staker',
+      'Cooling down on Staker',
+      'Ready to claim on Staker',
+      'Supplied to Readonly',
+    ])
+    expect(rows[3]?.note).toBe('ready in about 30 hours')
+  })
+
+  it('offer withdrawing some, all, or topping up, where the venue can', () => {
+    const [supplied] = positionRows(report)
+    expect(supplied).toMatchObject({
       symbol: 'USDC',
       amount: '5.1',
-      exit: { label: 'Withdraw', words: 'withdraw all USDC from NAVI' },
+      venueId: 'navi',
+      out: { kind: 'withdraw', label: 'Withdraw' },
+      into: { kind: 'supply', label: 'Top up' },
     })
-    expect(rows[1]).toMatchObject({
-      title: 'Borrowed from NAVI',
-      note: 'owed',
-      exit: { label: 'Repay', words: 'repay all SUI on NAVI' },
+    expect(supplied?.whole?.label).toBe('Withdraw all')
+  })
+
+  it('build all of it the way the chat reads "withdraw all USDC from NAVI"', () => {
+    const [supplied] = positionRows(report)
+    expect(supplied?.whole?.request).toEqual(parseChainAction('withdraw all USDC from NAVI'))
+    expect(supplied?.whole?.request).toMatchObject({ kind: 'withdraw', amount: 'all' })
+  })
+
+  it('build some of it as the same request a typed amount makes', () => {
+    const [supplied] = positionRows(report)
+    expect(
+      positionRequest(supplied as PositionRow, { kind: 'withdraw', label: 'Withdraw' }, '2')
+    ).toEqual({
+      kind: 'withdraw',
+      amount: '2',
+      tokenIn: 'USDC',
+      venue: 'navi',
     })
-    expect(rows[2]).toMatchObject({
-      title: 'Staked on Staker',
-      exit: { label: 'Unstake', words: 'unstake all SUI from Staker' },
-    })
-    expect(rows[3]).toMatchObject({
-      title: 'Cooling down on Staker',
-      note: 'ready in about 30 hours',
-    })
-    expect(rows[4]).toMatchObject({
-      title: 'Ready to claim on Staker',
-      exit: { label: 'Claim', words: 'claim SUI from Staker' },
+    expect(
+      positionRequest(supplied as PositionRow, { kind: 'supply', label: 'Top up' }, '3')
+    ).toEqual({
+      kind: 'supply',
+      amount: '3',
+      tokenIn: 'USDC',
+      venue: 'navi',
     })
   })
 
-  it('offers no way out that no sentence would do', () => {
-    expect(positionRows(report)[5]?.exit).toBeUndefined()
+  it('repay a loan, or borrow more', () => {
+    const debt = positionRows(report)[1]
+    expect(debt).toMatchObject({
+      out: { kind: 'repay', label: 'Repay' },
+      into: { kind: 'borrow', label: 'Borrow more' },
+    })
+    expect(debt?.whole?.label).toBe('Repay all')
+  })
+
+  it('unstake or stake more', () => {
+    const stake = positionRows(report)[2]
+    expect(stake).toMatchObject({
+      out: { kind: 'unstake', label: 'Unstake' },
+      into: { kind: 'stake', label: 'Top up' },
+    })
+    expect(stake?.whole?.request).toEqual(parseChainAction('unstake all SUI from Staker'))
+  })
+
+  it('offer nothing on an exit still cooling, and only the claim once ready', () => {
+    const rows = positionRows(report)
+    expect(rows[3]?.out).toBeUndefined()
+    expect(rows[3]?.into).toBeUndefined()
+    expect(rows[3]?.whole).toBeUndefined()
+    expect(rows[4]?.out).toBeUndefined()
+    expect(rows[4]?.into).toBeUndefined()
+    expect(rows[4]?.whole?.label).toBe('Claim')
+  })
+
+  it('offer no way out a venue does not have, and keep what it does', () => {
+    const readonly = positionRows(report)[5]
+    expect(readonly?.out).toBeUndefined()
+    expect(readonly?.whole).toBeUndefined()
+    expect(readonly?.into).toMatchObject({ kind: 'supply' })
+  })
+
+  it('only cancel a stream, which has no amount to choose', () => {
+    const [stream] = positionRows({
+      venues: [
+        {
+          id: 'sablier',
+          name: 'Sablier',
+          kinds: ['stream', 'cancel'],
+          positions: [{ slot: 'claimable', symbol: 'USDC', amount: '1', id: '77' }],
+        },
+      ],
+      unread: [],
+    })
+    expect(stream?.out).toBeUndefined()
+    expect(stream?.into).toBeUndefined()
+    expect(stream?.whole?.label).toBe('Cancel stream')
+    expect(stream?.whole?.request).toMatchObject({ kind: 'cancel', streamId: '77' })
+  })
+
+  it('narrow to a venue named in chat, or show everything if it matches none', () => {
+    const rows = positionRows(report)
+    expect(rowsAt(rows, 'navi').map((r) => r.venueId)).toEqual(['navi', 'navi'])
+    expect(rowsAt(rows, 'nowhere')).toHaveLength(rows.length)
+    expect(rowsAt(rows, undefined)).toHaveLength(rows.length)
+  })
+})
+
+describe('an amount typed on a position', () => {
+  it('is a plain positive number', () => {
+    expect(typedAmount('5')).toBe('5')
+    expect(typedAmount(' 5.5 ')).toBe('5.5')
+    expect(typedAmount('.5')).toBe('.5')
+    for (const bad of ['', '0', '-1', 'abc', '1,000', '1e3', 'Infinity']) {
+      expect(typedAmount(bad)).toBeUndefined()
+    }
+  })
+
+  it('is no more than is held, where that is a limit', () => {
+    expect(typedAmount('5.1', { atMost: '5.1' })).toBe('5.1')
+    expect(typedAmount('5.2', { atMost: '5.1' })).toBeUndefined()
+  })
+
+  it('has no more places than the chain can hold', () => {
+    expect(typedAmount('1.1234567', { maxPlaces: 7 })).toBe('1.1234567')
+    expect(typedAmount('1.12345678', { maxPlaces: 7 })).toBeUndefined()
+  })
+})
+
+describe('asking to manage a position in chat', () => {
+  it.each([
+    ['withdraw from my position', {}],
+    ['manage my positions', {}],
+    ['i want to withdraw from my position', {}],
+    ['close my position', {}],
+    ['top up my position', {}],
+    ['please top up my deposit', {}],
+    ['withdraw from my navi position', { venue: 'navi' }],
+    ['top up my navi position', { venue: 'navi' }],
+    ['can you manage my jito stake', { venue: 'jito' }],
+    ['repay my aave loan', { venue: 'aave' }],
+    ['withdraw from navi', { venue: 'navi' }],
+    ['take my money out of kamino lend', null],
+    ['take out my funds from kamino lend', { venue: 'kamino lend' }],
+    ['pull out of suilend', { venue: 'suilend' }],
+  ])('"%s"', (text, expected) => {
+    expect(asksToManagePosition(text)).toEqual(expected)
+  })
+
+  it.each([
+    'withdraw 5 usdc from navi',
+    'withdraw all usdc from navi',
+    'withdraw usdc',
+    'deposit 5 usdc',
+    'what can you do',
+    'swap 5 usdc to sol',
+  ])('"%s" is a request of its own', (text) => {
+    expect(asksToManagePosition(text)).toBeNull()
   })
 })

@@ -1,5 +1,6 @@
 import type { BlendBalance, BlendPositions } from '../lend/position'
-import type { ChainActionKind, VenuePosition } from './types'
+import { parseChainAction } from './parse-action'
+import type { ChainActionKind, ChainActionRequest, VenuePosition } from './types'
 
 /** Client-safe: the chat reads a question and words the answer from here, and the route only reads. */
 
@@ -206,8 +207,18 @@ export interface PositionRow {
   note: string
   symbol: string
   amount: string
-  /** The way back out, as the sentence that does it. Absent when no sentence would. */
-  exit?: { label: string; words: string }
+  venueId: string
+  /** Taking some out. Absent where this venue can't, or where only all of it can go. */
+  out?: PositionMove
+  /** Adding to it. Absent where this venue can't. */
+  into?: PositionMove
+  /** All of it at once, built from the same words the chat reads. */
+  whole?: { label: string; request: ChainActionRequest }
+}
+
+export interface PositionMove {
+  kind: ChainActionKind
+  label: string
 }
 
 const ROW_OF: Record<VenuePosition['slot'], { title: (venue: string) => string; note: string }> = {
@@ -218,12 +229,40 @@ const ROW_OF: Record<VenuePosition['slot'], { title: (venue: string) => string; 
   claimable: { title: (v) => `Ready to claim on ${v}`, note: 'ready' },
 }
 
-const EXIT_LABEL: Record<VenuePosition['slot'], string> = {
-  supplied: 'Withdraw',
-  staked: 'Unstake',
-  borrowed: 'Repay',
-  cooling: 'Claim',
-  claimable: 'Claim',
+const OUT_OF: Partial<Record<VenuePosition['slot'], PositionMove>> = {
+  supplied: { kind: 'withdraw', label: 'Withdraw' },
+  staked: { kind: 'unstake', label: 'Unstake' },
+  borrowed: { kind: 'repay', label: 'Repay' },
+}
+
+const INTO: Partial<Record<VenuePosition['slot'], PositionMove>> = {
+  supplied: { kind: 'supply', label: 'Top up' },
+  staked: { kind: 'stake', label: 'Top up' },
+  borrowed: { kind: 'borrow', label: 'Borrow more' },
+}
+
+function wholeOf(
+  position: VenuePosition,
+  venue: VenueHoldings
+): { label: string; request: ChainActionRequest } | undefined {
+  // A cooling exit has nothing to collect yet, so offering the claim would only be refused.
+  if (position.slot === 'cooling') return undefined
+  const words = nextWords(position, venue)
+  const request = words === undefined ? undefined : parseChainAction(words)
+  if (request === undefined || request === null) return undefined
+  if (position.id !== undefined) return { label: 'Cancel stream', request }
+  if (position.slot === 'claimable') return { label: 'Claim', request }
+  const out = OUT_OF[position.slot]
+  return out === undefined ? undefined : { label: `${out.label} all`, request }
+}
+
+function usable(
+  move: PositionMove | undefined,
+  position: VenuePosition,
+  venue: VenueHoldings
+): PositionMove | undefined {
+  if (move === undefined || position.id !== undefined) return undefined
+  return venue.kinds.includes(move.kind) ? move : undefined
 }
 
 /** Every position in a report as a row, named after the venue the money is at. */
@@ -232,19 +271,76 @@ export function positionRows(report: PositionsReport): PositionRow[] {
     venue.positions.map((position, i) => {
       const { title, note } = ROW_OF[position.slot]
       const when = position.slot === 'cooling' ? readyIn(position.readyInHours) : undefined
-      // A cooling exit has nothing to collect yet, so offering the claim would only be refused.
-      const words = position.slot === 'cooling' ? undefined : nextWords(position, venue)
-      const label = position.id !== undefined ? 'Cancel' : EXIT_LABEL[position.slot]
+      const out = usable(OUT_OF[position.slot], position, venue)
+      const into = usable(INTO[position.slot], position, venue)
+      const whole = wholeOf(position, venue)
       return {
         key: `${venue.id}-${position.slot}-${position.symbol}-${position.id ?? i}`,
         title: title(venue.name),
         note: when === undefined ? note : `ready ${when}`,
         symbol: position.symbol,
         amount: position.amount,
-        ...(words === undefined ? {} : { exit: { label, words } }),
+        venueId: venue.id,
+        ...(out !== undefined ? { out } : {}),
+        ...(into !== undefined ? { into } : {}),
+        ...(whole !== undefined ? { whole } : {}),
       }
     })
   )
+}
+
+/** Some of a position, as the same request a typed "withdraw 5 USDC from NAVI" makes. */
+export function positionRequest(
+  row: Pick<PositionRow, 'symbol' | 'venueId'>,
+  move: PositionMove,
+  amount: string
+): ChainActionRequest {
+  return { kind: move.kind, amount, tokenIn: row.symbol, venue: row.venueId }
+}
+
+/** The rows at a venue named in chat, or every row if it names none of them. */
+export function rowsAt(rows: readonly PositionRow[], venue: string | undefined): PositionRow[] {
+  if (venue === undefined) return [...rows]
+  const wanted = venue.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const plain = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const at = rows.filter(
+    (row) => plain(row.venueId).includes(wanted) || plain(row.title).includes(wanted)
+  )
+  return at.length > 0 ? at : [...rows]
+}
+
+const MANAGE_VERBS = String.raw`(?:withdraw|take out|pull out|remove|exit|close|manage|top up|add to|unstake|repay)`
+const VENUE_WORD = String.raw`[a-z][a-z0-9 .-]{1,30}`
+const MANAGE_POSITION = new RegExp(
+  String.raw`^${MANAGE_VERBS}(?: from| of)?(?: my)?(?: (${VENUE_WORD}?))? (?:positions?|deposits?|stakes?|loans?)$`
+)
+const MANAGE_VENUE = new RegExp(
+  String.raw`^(?:withdraw|take out|pull out|exit|top up)(?: my (?:money|funds))?(?: from| out of| of| on| in) (?:my )?(${VENUE_WORD})$`
+)
+const MANAGE_LEAD_IN =
+  /^(?:please |i want to |i'd like to |id like to |i wanna |let me |help me |can you |could you |can i |could i )+/
+
+/**
+ * Whether a message asks to act on a position without saying how much: "withdraw from my position",
+ * "top up my NAVI position", "withdraw from navi". The card lets them choose. Anything with a figure,
+ * or naming a token to take, is a request of its own and is left for the action parser.
+ */
+export function asksToManagePosition(text: string): { venue?: string } | null {
+  const clean = text
+    .trim()
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .replace(/[?.!\s]+$/, '')
+    .replace(MANAGE_LEAD_IN, '')
+  if (/\d/.test(clean)) return null
+  const position = MANAGE_POSITION.exec(clean)
+  const venue = position !== null ? position[1] : MANAGE_VENUE.exec(clean)?.[1]
+  if (position !== null || venue !== undefined) {
+    const named = venue?.replace(/^(?:the|open|lending|staking)\s+/, '').trim()
+    return named === undefined || named === '' || named === 'open' ? {} : { venue: named }
+  }
+  return null
 }
 
 const BLEND = 'Blend'

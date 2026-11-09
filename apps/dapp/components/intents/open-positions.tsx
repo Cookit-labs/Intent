@@ -7,6 +7,7 @@ import { ExternalLink } from 'lucide-react'
 
 import { useWallet } from '../../hooks/use-wallet'
 import { useBlendPosition } from '../../hooks/use-blend-position'
+import { useSupply } from '../../hooks/use-supply'
 import { useWithdraw } from '../../hooks/use-withdraw'
 import { useBorrow } from '../../hooks/use-borrow'
 import { useCollateral } from '../../hooks/use-collateral'
@@ -24,6 +25,8 @@ import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
 import { OpenOrders } from './open-orders'
 import { PoolPositions, loadPoolShares } from './pool-positions'
+import { ManagePanel, PositionCard } from './position-card'
+import { SupplyConfirm } from './supply-confirm'
 import { WithdrawConfirm } from './withdraw-confirm'
 
 /**
@@ -160,10 +163,17 @@ function healthTone(hf: number | undefined): string {
   return 'text-muted-foreground'
 }
 
-export function OpenPositions(): JSX.Element | null {
+export function OpenPositions({
+  inChat = false,
+}: {
+  /** Says so when nothing is open, where a page can simply leave the section out. */
+  inChat?: boolean
+} = {}): JSX.Element | null {
   const { address, isConnected } = useWallet()
-  const { positions, error: blendUnread } = useBlendPosition()
+  const { positions, error: blendUnread, loading: blendLoading } = useBlendPosition()
   const withdraw = useWithdraw()
+  const supply = useSupply()
+  const [openKey, setOpenKey] = useState<string | null>(null)
   const borrow = useBorrow()
   const queryClient = useQueryClient()
   // What this network's pool lends: a list for the wrong network offers a loan
@@ -238,6 +248,10 @@ export function OpenPositions(): JSX.Element | null {
     if (borrow.phase !== 'settled') return
     void queryClient.invalidateQueries({ queryKey: ['blend-position', address] })
   }, [borrow.phase, queryClient, address])
+  useEffect(() => {
+    if (supply.phase !== 'settled') return
+    void queryClient.invalidateQueries({ queryKey: ['blend-position', address] })
+  }, [supply.phase, queryClient, address])
 
   const supplied = positions?.supplied ?? []
   const collateral = positions?.collateral ?? []
@@ -270,7 +284,15 @@ export function OpenPositions(): JSX.Element | null {
   // Nothing open is a perfectly good state and says so once, rather than
   // rendering an empty titled section that reads as something failing to load.
   // A read that failed is not "nothing open", which is the one thing this must not imply.
-  if (!isConnected || (count === 0 && !blendUnread && !offersUnread && !poolsUnread)) return null
+  if (!isConnected) return null
+  if (count === 0 && !blendUnread && !offersUnread && !poolsUnread) {
+    if (!inChat || blendLoading) return null
+    return (
+      <Card className="text-muted-foreground p-4 text-sm">
+        You have nothing open on Stellar. Tokens in your wallet aren’t listed here.
+      </Card>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -289,59 +311,81 @@ export function OpenPositions(): JSX.Element | null {
       {/* Lending first: it earns continuously and has no expiry, so it is the
           position most easily forgotten. Every asset, not only XLM: a supply of
           anything else used to be invisible here, and so had no way out. */}
-      {supplied.map((held) => (
-        <Card key={`supply-${held.assetId}`} className="flex flex-wrap items-center gap-4 p-4">
-          <TokenIcon symbol={held.symbol} size={28} />
-
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold">Supplied to Blend</span>
-              <span className="text-muted-foreground text-xs">earning</span>
-            </div>
-            <div className="mt-1.5 text-sm font-medium tabular-nums">
-              {amount(held.display)} {held.symbol}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {/* The reason this section exists. Blend's own dashboard does not
-                offer a withdrawal for a plain (non-collateral) supply, which is
-                how a real position became visible here and retrievable
-                nowhere. */}
-            <AmountAction
-              label="Withdraw"
+      {supplied.map((held) => {
+        const key = `supply-${held.assetId}`
+        const inBase = (amount: string): string | undefined => {
+          try {
+            return toBaseUnits(amount)
+          } catch {
+            return undefined
+          }
+        }
+        return (
+          <PositionCard
+            key={key}
+            symbol={held.symbol}
+            title="Supplied to Blend"
+            note="earning"
+            amount={held.display}
+            open={openKey === key}
+            onToggle={() => setOpenKey((now) => (now === key ? null : key))}
+          >
+            <ManagePanel
               symbol={held.symbol}
-              held={held.amount}
-              busy={busy}
-              onSome={(baseUnits) =>
-                withdraw.prepare({
-                  assetId: held.assetId,
-                  symbol: held.symbol,
-                  amount: baseUnits,
-                  from: 'supply',
-                })
-              }
-              onAll={() =>
-                withdraw.prepare({ assetId: held.assetId, symbol: held.symbol, from: 'supply' })
-              }
+              held={held.display}
+              busy={busy || supply.phase !== 'idle'}
+              maxPlaces={7}
+              out={{
+                label: 'Withdraw',
+                onAmount: (amount) => {
+                  const base = inBase(amount)
+                  if (base === undefined) return
+                  withdraw.prepare({
+                    assetId: held.assetId,
+                    symbol: held.symbol,
+                    amount: base,
+                    from: 'supply',
+                  })
+                },
+              }}
+              into={{
+                label: 'Top up',
+                onAmount: (amount) => {
+                  const base = inBase(amount)
+                  if (base === undefined) return
+                  supply.prepare({ assetId: held.assetId, symbol: held.symbol, amount: base })
+                },
+              }}
+              all={{
+                label: 'Withdraw all',
+                onPress: () =>
+                  withdraw.prepare({ assetId: held.assetId, symbol: held.symbol, from: 'supply' }),
+              }}
               secondary={{
                 label: 'As collateral',
                 disabled: collateral$.phase !== 'idle',
-                onSome: (baseUnits) => postCollateral(baseUnits, held.assetId, held.symbol),
+                onAmount: (amount) => {
+                  const base = inBase(amount)
+                  if (base !== undefined) postCollateral(base, held.assetId, held.symbol)
+                },
               }}
+              extra={
+                <a
+                  href={blendPositionUrl()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-xs transition-colors"
+                >
+                  Open on Blend
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              }
             />
-            <a
-              href={blendPositionUrl()}
-              target="_blank"
-              rel="noreferrer"
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
-            >
-              Manage
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        </Card>
-      ))}
+          </PositionCard>
+        )
+      })}
+
+      <SupplyConfirm supply={supply} />
 
       {/* Sits directly under the position it acts on, so the amount being
           withdrawn and the amount held are readable together. */}

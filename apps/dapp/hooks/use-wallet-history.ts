@@ -37,14 +37,16 @@ export interface WalletHistory {
   unread: boolean
   /** Every read answered. Only then does an empty list mean this wallet has done nothing here. */
   settled: boolean
+  /** Any past transaction here, including ones the list doesn't show. */
+  hasActivity: boolean
 }
 
 /**
  * Everything this wallet has done on the page's chain, on every chain the same way.
  *
- * Stellar's ledger stays the first source there, since it holds trades made outside this app and
- * reads richer rows. The app's own record fills in what it doesn't list as a swap, a Blend supply for
- * one, and is the whole list on every other chain.
+ * Stellar lists what it always has, its ledger's swaps and its cash-outs. The app's own record is
+ * the whole list on every other chain. On Stellar it only says whether a wallet has done anything,
+ * so a wallet whose one transaction was a Blend supply isn't invited to make its first.
  */
 export function useWalletHistory(): WalletHistory {
   const { address, isConnected } = useWallet()
@@ -107,7 +109,7 @@ export function useWalletHistory(): WalletHistory {
       )
     : []
   const recorded = withPayouts(activityRecords(activity.data ?? [], slug), orders.data ?? [], slug)
-  const rows = mergeHistory(primary, recorded)
+  const rows = stellar ? primary : recorded
 
   const reads = stellar ? [ledger, activity] : [activity]
   return {
@@ -117,5 +119,6 @@ export function useWalletHistory(): WalletHistory {
     loading: rows.length === 0 && reads.some((read) => read.isLoading),
     unread: reads.some((read) => read.isError),
     settled: ready && reads.every((read) => read.isSuccess),
+    hasActivity: rows.length > 0 || recorded.length > 0,
   }
 }

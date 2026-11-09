@@ -46,7 +46,7 @@ export default function HistoryPage(): JSX.Element {
           <SwapHistory />
           <IntentActivity
             firstIntent={composeInviteShown({
-              rows: history.rows.length,
+              rows: history.hasActivity ? 1 : 0,
               settled: history.settled,
             })}
           />

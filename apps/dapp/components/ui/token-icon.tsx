@@ -1,4 +1,7 @@
+'use client'
+
 import Image from 'next/image'
+import { useState } from 'react'
 
 /**
  * The logo for an asset symbol.
@@ -21,15 +24,43 @@ export function TokenIcon({
   symbol,
   size = 20,
   className = '',
+  src: given,
+  unknown = false,
 }: {
   symbol: string | undefined
   size?: number
   className?: string
+  /** A logo a token source reported, for a token with no file here. */
+  src?: string | undefined
+  /**
+   * Not the token this app knows by that symbol. Anyone can name a token USDC, and drawing the real
+   * logo beside it would vouch for it, so it gets the logo it reports or a lettered disc.
+   */
+  unknown?: boolean | undefined
 }): JSX.Element | null {
+  const [failed, setFailed] = useState(false)
   if (symbol === undefined) return null
 
   const code = symbol.toUpperCase()
-  const src = LOGOS[code]
+  const src = unknown ? undefined : LOGOS[code]
+
+  if (src === undefined && given !== undefined && !failed) {
+    return (
+      // A logo from anywhere a token source points, so there is no list of hosts to optimise from.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={given}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={`bg-muted shrink-0 rounded-full object-cover ${className}`}
+        style={{ width: size, height: size }}
+      />
+    )
+  }
 
   if (src === undefined) {
     return (

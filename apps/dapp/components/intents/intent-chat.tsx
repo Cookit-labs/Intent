@@ -85,7 +85,15 @@ import { sizeInUnits } from '../../lib/chains/dollar-amount'
 import { chainHelp, helpForUnread } from '../../lib/chains/explain'
 import { racesFirst } from '../../lib/chains/parse-action'
 import { txExplorerLink } from '../../lib/chains/activity'
-import { asksForPositions, readPositionsReply } from '../../lib/chains/positions-reply'
+import {
+  asksForPositions,
+  asksToManagePosition,
+  readPositionsReply,
+} from '../../lib/chains/positions-reply'
+import { asksAboutTokens, type TokenAsk } from '../../lib/tokens/ask'
+import { TokenChatCard } from '../tokens/token-chat-card'
+import { ChainPositions } from './chain-positions'
+import { OpenPositions } from './open-positions'
 import {
   cashoutStarts,
   chainRouteFromReading,
@@ -273,13 +281,10 @@ function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
 export function IntentChat({
   showing,
   linkedRule,
-  linkedDraft,
 }: {
   /** False while the person is on another page and this is kept mounted behind it. */
   showing: boolean
   linkedRule?: string
-  /** Words a link wants typed for the person, left for them to read and send. Never sent by itself. */
-  linkedDraft?: string
 }): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
@@ -400,6 +405,9 @@ export function IntentChat({
   const [pending, setPending] = useState<UnderstoodIntent | null>(null)
   /** The message that asked for the resting limit orders, while their list is on screen. */
   const [ordersShown, setOrdersShown] = useState<string | null>(null)
+  /** Open positions asked for in the thread, and the venue if one was named. */
+  const [positionsShown, setPositionsShown] = useState<{ venue?: string } | null>(null)
+  const [tokensShown, setTokensShown] = useState<TokenAsk | null>(null)
   const [parsing, setParsing] = useState(false)
   // The conversation around the open intent. `thread` holds the turns that came
   // before it, kept in view so the chat reads as one; `notes` are things the
@@ -2235,6 +2243,8 @@ export function IntentChat({
     }
 
     setOrdersShown(null)
+    setPositionsShown(null)
+    setTokensShown(null)
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
     const capabilities = chainCapabilities(slug)
     const chainRead =
@@ -2255,6 +2265,29 @@ export function IntentChat({
       } else {
         leaveSequence()
       }
+    }
+
+    // Reading positions or tokens moves nothing, so these open their card and leave anything
+    // under way alone. Asked with no wallet, positions keep the sentence saying to connect one.
+    const tokenAsk = slug === 'arc' ? null : asksAboutTokens(text)
+    const positionAsk =
+      !isConnected || slug === 'arc'
+        ? null
+        : asksForPositions(text) || (slug === 'stellar' && parseStellarExit(text)?.kind === 'where')
+          ? {}
+          : asksToManagePosition(text)
+    if (!refused && (tokenAsk !== null || positionAsk !== null)) {
+      setClarifying(null)
+      setMessage(text)
+      if (chainSequence.sequence === null) {
+        resetTurnState()
+        setParsed(null)
+        setTurnId(null)
+        chainAction.reset()
+      }
+      if (tokenAsk !== null) setTokensShown(tokenAsk)
+      else setPositionsShown(positionAsk)
+      return
     }
 
     // "cash out to KES" at the question of a swap waiting on it answers that question,
@@ -3615,6 +3648,14 @@ export function IntentChat({
               {ordersShown !== null ? (
                 <ChainOrdersCard action={chainAction} asked={ordersShown} />
               ) : null}
+              {positionsShown !== null ? (
+                slug === 'stellar' ? (
+                  <OpenPositions inChat />
+                ) : (
+                  <ChainPositions inChat venue={positionsShown.venue} />
+                )
+              ) : null}
+              {tokensShown !== null ? <TokenChatCard ask={tokensShown} /> : null}
 
               {cashout.session !== null ? (
                 <CashoutCard key={cashout.session.key} cashout={cashout} />
@@ -3774,7 +3815,6 @@ export function IntentChat({
       >
         <ComposerInput
           onSubmit={handleSubmit}
-          {...(linkedDraft !== undefined ? { draft: linkedDraft } : {})}
           showExamples={message === null && thread.length === 0 && transcript.length === 0}
           {...(clarifying !== null
             ? { placeholder: 'Type your answer…' }

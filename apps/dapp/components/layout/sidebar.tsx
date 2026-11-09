@@ -1,7 +1,7 @@
 'use client'
 
 import { ChainMark, cn } from '@intent/ui'
-import { BarChart3, Boxes, History, Loader2, Sparkles, Vault, Wallet } from 'lucide-react'
+import { BarChart3, Boxes, Coins, History, Loader2, Sparkles, Vault, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -16,6 +16,7 @@ const nav = [
   { href: '/intents', label: 'Intents', icon: Sparkles },
   { href: '/agents', label: 'Agents', icon: Wallet },
   { href: '/apps', label: 'Apps', icon: Boxes },
+  { href: '/tokens', label: 'Tokens', icon: Coins },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, soon: true },
   { href: '/history', label: 'History', icon: History },
   { href: '/vault', label: 'Vault', icon: Vault, soon: true },

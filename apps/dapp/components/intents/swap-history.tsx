@@ -129,7 +129,7 @@ export function SwapHistory(): JSX.Element | null {
   if (!isConnected) {
     return (
       <Card className="text-muted-foreground p-6 text-sm">
-        Connect a wallet to see its transactions.
+        Connect a wallet to see its swap history.
       </Card>
     )
   }
@@ -149,7 +149,9 @@ export function SwapHistory(): JSX.Element | null {
     return (
       couldNotRead ?? (
         <Card className="text-muted-foreground p-6 text-sm">
-          No transactions yet for this account on {descriptor.name}.
+          {slug === 'stellar'
+            ? 'No swaps or cash-outs yet for this account.'
+            : `No transactions yet for this account on ${descriptor.name}.`}
         </Card>
       )
     )
@@ -197,7 +199,9 @@ export function SwapHistory(): JSX.Element | null {
       <div className="text-muted-foreground flex items-baseline justify-between text-xs">
         {/* Named by chain: history is per-network, and saying so removes any
             doubt about which ledger these came from. */}
-        <span>Transactions · {descriptor.name}</span>
+        <span>
+          {slug === 'stellar' ? 'Swaps and cash-outs' : 'Transactions'} · {descriptor.name}
+        </span>
         <span>{swaps.length}</span>
       </div>
 

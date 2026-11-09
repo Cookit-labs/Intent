@@ -132,3 +132,13 @@ export function accountExplorerUrl(slug: ChainSlug, address: string): string {
     ? `${base}/account/${address}`
     : `${base}/address/${address}`
 }
+
+/**
+ * Explorer URL for a token. Stellar's assets are `CODE-ISSUER` there, or just `XLM`. A chain's
+ * native coin has no address of its own on some chains, so callers pass the one its data is under.
+ */
+export function tokenExplorerUrl(slug: ChainSlug, id: string): string {
+  const base = CHAIN_DESCRIPTORS[slug].blockExplorerUrl
+  if (slug === 'stellar') return `${base}/asset/${id.replace(':', '-')}`
+  return slug === 'sui' ? `${base}/coin/${id}` : `${base}/token/${id}`
+}
