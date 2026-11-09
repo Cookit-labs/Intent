@@ -25,6 +25,7 @@ export const BRAINS: Record<BrainProvider, AgentBrain> = {
   anthropic: brainFor('anthropic'),
   deepseek: brainFor('deepseek'),
   groq: brainFor('groq'),
+  nearai: brainFor('nearai'),
   ollama: brainFor('ollama'),
   openrouter: brainFor('openrouter'),
 }

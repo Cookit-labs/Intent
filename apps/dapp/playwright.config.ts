@@ -86,6 +86,7 @@ export default defineConfig({
       AGENT_BRAINS: '',
       DEEPSEEK_API_KEY: '',
       GROQ_API_KEY: '',
+      NEARAI_API_KEY: '',
       OPENROUTER_API_KEY: '',
       SOROSWAP_API_KEY: '',
       DEFINDEX_API_KEY: '',

@@ -5,6 +5,7 @@ import { confirmStake, metapoolVenue, rnearVenue } from '../chains/near/stake'
 import { METAPOOL_CONTRACT, RNEAR_CONTRACT } from '../chains/near/tokens'
 import { prepareChainAction } from '../chains/prepare'
 import { ChainActionRefused, type ChainActionRequest, type NearTransaction } from '../chains/types'
+import type { NearFunctionCall } from '../chains/types'
 
 const ME = 'alice.near'
 const HASH = 'G6RQqbkHNF1JVMwmq9BiLnZ3vvUeYoNm7z4dYVEKgScA'
@@ -99,11 +100,11 @@ describe('staking with rNEAR', () => {
     const prepared = await rnearVenue.prepare(stake(), ME)
     const tx = txOf(prepared)
     expect(tx.receiverId).toBe('lst.rhealab.near')
-    expect(tx.actions.map((a) => a.params.methodName)).toEqual([
+    expect(tx.actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
       'storage_deposit',
       'deposit_and_stake',
     ])
-    expect(tx.actions[1]?.params).toMatchObject({
+    expect((tx.actions[1] as NearFunctionCall | undefined)?.params).toMatchObject({
       args: {},
       deposit: '2000000000000000000000000',
       gas: '200000000000000',
@@ -115,7 +116,9 @@ describe('staking with rNEAR', () => {
   it('skips registration when already registered', async () => {
     rpc.views[`${RNEAR_CONTRACT}.storage_balance_of`] = { total: '1', available: '0' }
     const prepared = await rnearVenue.prepare(stake(), ME)
-    expect(txOf(prepared).actions.map((a) => a.params.methodName)).toEqual(['deposit_and_stake'])
+    expect(txOf(prepared).actions.map((a) => (a as NearFunctionCall).params.methodName)).toEqual([
+      'deposit_and_stake',
+    ])
     expect(prepared.notes.join(' ')).not.toMatch(/register/)
   })
 
@@ -312,5 +315,28 @@ describe('confirming a stake', () => {
     expect(await run({ venueId: 'constructor' })).toMatchObject({ ok: false })
     expect(await run({ hashes: ['not a hash'] })).toMatchObject({ ok: false })
     expect(await run({ hashes: [] })).toMatchObject({ ok: false })
+  })
+})
+
+describe('staking straight after a swap', () => {
+  it.each([
+    ['Meta Pool', metapoolVenue],
+    ['rNEAR', rnearVenue],
+  ])('lets %s follow a swap that ends in NEAR', async (_name, venue) => {
+    await expect(venue.assertCanFollow?.({ kind: 'stake', tokenIn: 'NEAR' }, ME)).resolves.toBe(
+      undefined
+    )
+    await expect(venue.assertCanFollow?.({ kind: 'stake', tokenIn: 'near' }, ME)).resolves.toBe(
+      undefined
+    )
+  })
+
+  it.each([
+    ['Meta Pool', metapoolVenue],
+    ['rNEAR', rnearVenue],
+  ])('refuses %s after a swap that ends in anything else', async (_name, venue) => {
+    await expect(venue.assertCanFollow?.({ kind: 'stake', tokenIn: 'USDC' }, ME)).rejects.toThrow(
+      ChainActionRefused
+    )
   })
 })

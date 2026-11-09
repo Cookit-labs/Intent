@@ -6,6 +6,7 @@ import { USDC_NEAR, USDT_NEAR, WRAP_NEAR } from '../chains/near/tokens'
 import { ChainActionRefused, type NearTransaction, type SigningPayload } from '../chains/types'
 import { nearDeposit } from '../weave/deposit/near'
 import type { DepositExpectation } from '../weave/types'
+import type { NearFunctionCall } from '../chains/types'
 
 vi.mock('../chains/near/rpc', async (original) => ({
   ...(await original<typeof import('../chains/near/rpc')>()),
@@ -26,7 +27,7 @@ const EXPECTATION: DepositExpectation = {
   amount: '25.5',
 }
 
-type Action = NearTransaction['actions'][number]
+type Action = NearFunctionCall
 
 function ftTransfer(args: Record<string, unknown> = {}): Action {
   return {

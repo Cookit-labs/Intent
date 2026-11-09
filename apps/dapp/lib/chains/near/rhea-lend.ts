@@ -48,6 +48,8 @@ const REGULAR = 'REGULAR'
  * withdrawal this app builds keeps collateral at 120% of what the contract counts as owed.
  */
 const SAFE_HEALTH_BPS = BigInt(12_000)
+/** An exit reads positions inside 6 seconds, and the warning must not be what makes it miss them. */
+const LOAN_WARNING_READ_MS = 2_500
 const BPS = BigInt(10_000)
 const USD_SCALE = BigInt(10) ** BigInt(18)
 /** Interest runs while a repayment waits for a signature, so paying off sends a little over. */
@@ -387,6 +389,36 @@ function liquidationNote(health: bigint): string {
   const drop = (Number(dropTenths) / 10).toFixed(1)
   const percent = (Number(health) / 100).toFixed(0)
   return `You can lose your collateral. After this your position stands at ${percent}% of the level Rhea Lend requires. If what backs the loan falls about ${drop}% against what you owe, or interest builds up by that much, anyone can liquidate you: they repay your debt and take your collateral at a discount. Nobody warns you first, and this app doesn't watch it for you.`
+}
+
+/** Where an open loan stands, read for someone asking where their money is. Never throws. */
+async function loanWarning(holdings: Holdings): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const priced = await Promise.race([
+      readPriced(new Set([...holdings.collateral.keys(), ...holdings.borrowed.keys()])),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('prices ran late')), LOAN_WARNING_READ_MS)
+      }),
+    ])
+    const health = healthBps(
+      collateralSum(holdings.collateral, priced),
+      borrowedSum(holdings.borrowed, priced)
+    )
+    if (health <= BPS) {
+      return 'This loan is at the point where anyone can liquidate it. Repay some now, or you can lose your collateral.'
+    }
+    const dropTenths = ((health - BPS) * BigInt(1000)) / health
+    const drop = (Number(dropTenths) / 10).toFixed(1)
+    const standing = `stands at ${(Number(health) / 100).toFixed(0)}% of the level Rhea Lend requires. If what backs it falls about ${drop}% against what you owe, anyone can liquidate it, and this app doesn't watch it for you.`
+    return health < SAFE_HEALTH_BPS
+      ? `This loan is close to being liquidated. It ${standing}`
+      : `This loan ${standing}`
+  } catch {
+    return "I couldn't read how close this loan is to liquidation just now, so ask again in a minute."
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function prepareSupply(
@@ -868,7 +900,7 @@ async function quote(request: ChainActionRequest, account: string): Promise<Venu
 async function positions(account: string): Promise<VenuePosition[]> {
   assertAccount(account)
   const holdings = await readHoldings(account)
-  return LEND_TOKENS.flatMap((token) => {
+  const read: VenuePosition[] = LEND_TOKENS.flatMap((token) => {
     const supplied = held(holdings.plain, token.id) + held(holdings.collateral, token.id)
     const borrowed = held(holdings.borrowed, token.id)
     return [
@@ -880,6 +912,9 @@ async function positions(account: string): Promise<VenuePosition[]> {
         : []),
     ]
   })
+  const firstLoan = read.find((position) => position.slot === 'borrowed')
+  if (firstLoan !== undefined) firstLoan.warning = await loanWarning(holdings)
+  return read
 }
 
 /** After a swap, only what arrives in a known form: a swap to NEAR can arrive as NEAR or wNEAR. */

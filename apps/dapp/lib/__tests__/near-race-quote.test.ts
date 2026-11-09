@@ -5,7 +5,7 @@ import { clearTokenCache } from '../chains/near/oneclick'
 import { metapoolVenue, rnearVenue } from '../chains/near/stake'
 import { oneClickVenue } from '../chains/near/swap'
 import { METAPOOL_CONTRACT, RNEAR_CONTRACT, USDC_NEAR } from '../chains/near/tokens'
-import type { ChainActionRequest } from '../chains/types'
+import { ChainActionRefused, type ChainActionRequest } from '../chains/types'
 
 vi.mock('../chains/near/quote-signature', () => ({
   verifyQuoteSignature: vi.fn(() => true),
@@ -116,7 +116,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const swap: ChainActionRequest = { kind: 'swap', amount: '1', tokenIn: 'USDC', tokenOut: 'NEAR' }
+const swap: ChainActionRequest = {
+  kind: 'swap',
+  amount: '1',
+  tokenIn: 'USDC',
+  tokenOut: 'NEAR',
+  venue: '1click',
+}
 const supply: ChainActionRequest = { kind: 'supply', amount: '1', tokenIn: 'USDC' }
 const stake: ChainActionRequest = { kind: 'stake', amount: '2', tokenIn: 'NEAR' }
 
@@ -188,5 +194,25 @@ describe('quoting 1Click Earn for the race', () => {
     expect(quoted?.receive?.symbol).toBe('gtUSDCp')
     expect(quoted).not.toHaveProperty('depositAddress')
     expect(quoted).not.toHaveProperty('apyPercent')
+  })
+})
+
+describe('1Click in a race for NEAR', () => {
+  const toNear: ChainActionRequest = {
+    kind: 'swap',
+    amount: '1',
+    tokenIn: 'USDC',
+    tokenOut: 'NEAR',
+  }
+
+  it('stays out unless named, because it pays wNEAR and a person asked for NEAR', async () => {
+    await expect(oneClickVenue.quote?.(toNear, ME)).rejects.toThrow(ChainActionRefused)
+    expect(sim.quotes).toHaveLength(0)
+  })
+
+  it('answers when a person names it', async () => {
+    await expect(oneClickVenue.quote?.({ ...toNear, venue: '1click' }, ME)).resolves.toMatchObject({
+      receive: { symbol: 'NEAR' },
+    })
   })
 })

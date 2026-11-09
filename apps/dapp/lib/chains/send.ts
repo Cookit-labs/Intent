@@ -14,10 +14,10 @@ import { EVM_CHAINS, evmExplorerUrl, type EvmChain } from './evm/tokens'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './near/account'
 import { resolveRecipient } from './names/resolve'
 import { recipientName } from './names/tlds'
-import { isRegistered } from './near/rpc'
-import { assertTokenTransferSafe } from './near/safety'
+import { accountBalance, isRegistered, NearRpcError, waitForTransaction } from './near/rpc'
+import { assertNativeTransferSafe, assertTokenTransferSafe, DEPOSIT_ADDRESS } from './near/safety'
 import { buildDepositTransaction } from './near/swap'
-import { explorerUrl as nearExplorerUrl, formatUnits, nearTokens } from './near/tokens'
+import { explorerUrl as nearExplorerUrl, formatUnits, nearTokens, WRAP_NEAR } from './near/tokens'
 import { sameProof, secret } from './oneclick-origin'
 import { isValidRecipient, SEND_VENUE_NAME, sendRefusal } from './recipient'
 import { explorerUrl as solanaExplorerUrl, feePayerSignature } from './solana/submit'
@@ -83,15 +83,20 @@ interface Mover {
 const OTHER_WORDS = /\b(?:trades?|prices?|swaps?|orders?|deposits?)\b/i
 
 /** The builders speak of orders and swaps. What is on this path is said for a transfer instead. */
-function sendWords(text: string): string {
+export function sendWords(text: string): string {
   return text
+    .replace(/\bThe swap did not go through\b/g, 'This transfer did not go through')
+    .replace(/\bThe swap\b/g, 'This transfer')
+    .replace(/\bThis swap\b/g, 'This transfer')
+    .replace(/\bit won't swap\b/g, "it won't go through")
+    .replace(/\binstead of swapped\b/g, 'instead of sent')
     .replace(/This order[’']s deposit address/g, 'That address')
     .replace(/This order[’']s amount/g, 'This amount')
     .replace(/this order[’']s amount/g, 'this amount')
     .replace(/\b(?:the|this) swap\b/g, 'this transfer')
 }
 
-async function inSendWords<T>(work: () => Promise<T>): Promise<T> {
+export async function inSendWords<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work()
   } catch (e) {
@@ -101,16 +106,74 @@ async function inSendWords<T>(work: () => Promise<T>): Promise<T> {
 }
 
 const NEAR_USDC = tokenBySymbol(nearTokens, 'USDC') as ChainToken
+const NATIVE_NEAR_DECIMALS = 24
+/** Long enough for an ordinary transfer to finish, and short enough to wait on in a request. */
+const NATIVE_CONFIRM_WAIT_MS = 15_000
+
+/** NEAR's table lists the coin by the wrapped contract it trades through. A send moves the coin. */
+function isNativeNear(token: Pick<ChainToken, 'id'> | undefined): boolean {
+  return token?.id === WRAP_NEAR
+}
+
+/** A named account has to exist to be paid. An implicit one comes into being when it is funded. */
+async function assertNearAccountExists(recipient: string): Promise<void> {
+  if (DEPOSIT_ADDRESS.test(recipient)) return
+  try {
+    await accountBalance(recipient)
+  } catch (e) {
+    throw new ChainActionRefused(
+      e instanceof NearRpcError && e.message === 'UNKNOWN_ACCOUNT'
+        ? `${recipient} doesn't exist on NEAR, so this transfer would fail. Check the name. ${NOTHING_MOVED}`
+        : `NEAR's network could not be read just now. ${NOTHING_MOVED}`
+    )
+  }
+}
+
+async function submitNativeNear(
+  signed: SignedPayload,
+  expectation: DepositExpectation
+): Promise<SubmitResult> {
+  const hash = signed.family === 'near' ? signed.hashes[signed.hashes.length - 1] : undefined
+  if (hash === undefined || !NEAR_TX_HASH.test(hash)) {
+    return {
+      ok: false,
+      pending: true,
+      error:
+        "Your wallet did not return a transaction to follow, and it may still have sent this. Don't send it again until you've checked your wallet's activity.",
+    }
+  }
+  const outcome = await waitForTransaction(hash, expectation.account, NATIVE_CONFIRM_WAIT_MS)
+  if (outcome.state === 'unknown') return { ok: false, pending: true, error: NOT_SENT }
+  const yocto = toBaseUnits(expectation.amount, NATIVE_NEAR_DECIMALS)
+  const paid =
+    outcome.state === 'success' &&
+    outcome.signer === expectation.account &&
+    outcome.receiver === expectation.depositAddress &&
+    outcome.transfers?.includes(yocto) === true
+  return paid
+    ? { ok: true, hash, explorerUrl: nearExplorerUrl(hash) }
+    : { ok: false, error: NOT_THE_TRANSFER }
+}
 
 /**
  * The shared check with the receiver's shape opened to named accounts, then bound exactly, in one
  * action on USDC. A send never pays for anyone's storage, so `storage_deposit` can't pass here.
  */
 function assertNearSend(payload: SigningPayload, expectation: DepositExpectation): void {
+  if (isNativeNear(expectation.token)) {
+    assertNativeTransferSafe(
+      payload,
+      expectation.account,
+      expectation.depositAddress,
+      toBaseUnits(expectation.amount, NATIVE_NEAR_DECIMALS)
+    )
+    return
+  }
   assertTokenTransferSafe(payload, expectation.account, NEAR_ACCOUNT)
   if (payload.family !== 'near') throw new ChainActionRefused(NOT_THE_TRANSFER)
   const transaction = payload.transactions[0]
-  const args = transaction?.actions[0]?.params.args
+  const action = transaction?.actions[0]
+  const args = action?.type === 'FunctionCall' ? action.params.args : undefined
   if (
     transaction?.receiverId !== NEAR_USDC.id ||
     transaction.actions.length !== 1 ||
@@ -126,6 +189,24 @@ const NEAR_MOVER: Mover = {
   tokens: nearTokens,
   deposit: {
     build: async (expectation) => {
+      if (isNativeNear(expectation.token)) {
+        const payload: SigningPayload = {
+          family: 'near',
+          transactions: [
+            {
+              receiverId: expectation.depositAddress,
+              actions: [
+                {
+                  type: 'Transfer',
+                  params: { deposit: toBaseUnits(expectation.amount, NATIVE_NEAR_DECIMALS) },
+                },
+              ],
+            },
+          ],
+        }
+        assertNearSend(payload, expectation)
+        return payload
+      }
       const transaction = await buildDepositTransaction(
         NEAR_USDC,
         expectation.account,
@@ -137,9 +218,16 @@ const NEAR_MOVER: Mover = {
       return payload
     },
     assertSafe: assertNearSend,
-    submit: nearDeposit.submit,
+    submit: (signed, expectation) =>
+      isNativeNear(expectation.token)
+        ? submitNativeNear(signed, expectation)
+        : nearDeposit.submit(signed, expectation),
   },
-  assertReceiver: async (recipient) => {
+  assertReceiver: async (recipient, token) => {
+    if (isNativeNear(token)) {
+      await assertNearAccountExists(recipient)
+      return
+    }
     let registered: boolean
     try {
       registered = await isRegistered(NEAR_USDC.id, recipient)

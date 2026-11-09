@@ -19,6 +19,7 @@ import { rheaDexVenue } from '../chains/near/rhea-swap'
 import { viewCall } from '../chains/near/rpc'
 import { STORAGE_DEPOSIT_YOCTO } from '../chains/near/safety'
 import { USDC_NEAR, USDT_NEAR, WRAP_NEAR } from '../chains/near/tokens'
+import type { NearFunctionCall } from '../chains/types'
 
 /**
  * The real contracts, read-only. NEAR's RPC has no way to run a call that writes, so nothing here
@@ -147,7 +148,9 @@ describe.skipIf(SKIP)('Rhea DEX on mainnet', LOOK_AGAIN, () => {
     if (prepared.signing.family !== 'near') throw new Error('wrong family')
     const swap = prepared.signing.transactions.at(-1)
     expect(swap?.receiverId).toBe(WRAP_NEAR)
-    expect(swap?.actions.at(-1)?.params.args['receiver_id']).toBe(RHEA_DEX)
+    expect((swap?.actions.at(-1) as NearFunctionCall | undefined)?.params.args['receiver_id']).toBe(
+      RHEA_DEX
+    )
   }, 60_000)
 
   it('reads an account with nothing held there as nothing', async () => {
@@ -237,7 +240,9 @@ describe.skipIf(SKIP)('Rhea Lend on mainnet', LOOK_AGAIN, () => {
     expect(() => rheaLendVenue.assertSafe(borrow.signing, BORROWER)).not.toThrow()
     expect(borrow.notes.join(' ')).toMatch(/You can lose your collateral/)
     if (borrow.signing.family !== 'near') throw new Error('wrong family')
-    const call = borrow.signing.transactions.at(-1)?.actions.at(-1)?.params
+    const call = (
+      borrow.signing.transactions.at(-1)?.actions.at(-1) as NearFunctionCall | undefined
+    )?.params
     expect(call?.methodName).toBe('execute_with_pyth')
     expect(call?.args['actions']).toEqual([
       { Borrow: { token_id: USDC_NEAR, amount: '100000000000000000' } },
@@ -252,9 +257,10 @@ describe.skipIf(SKIP)('Rhea Lend on mainnet', LOOK_AGAIN, () => {
     )
     expect(() => rheaLendVenue.assertSafe(out.signing, BORROWER)).not.toThrow()
     if (out.signing.family !== 'near') throw new Error('wrong family')
-    expect(out.signing.transactions.at(-1)?.actions.at(-1)?.params.methodName).toBe(
-      'execute_with_pyth'
-    )
+    expect(
+      (out.signing.transactions.at(-1)?.actions.at(-1) as NearFunctionCall | undefined)?.params
+        .methodName
+    ).toBe('execute_with_pyth')
   }, 60_000)
 
   it('builds paying off a real loan, or says the wallet holds too little', async () => {

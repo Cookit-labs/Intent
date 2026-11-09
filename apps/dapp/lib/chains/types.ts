@@ -50,6 +50,8 @@ export interface VenuePosition {
   readyInHours?: number | undefined
   /** A stream's id, where this position is one. */
   id?: string | undefined
+  /** What a person should know about this position when they ask where their money is. */
+  warning?: string | undefined
 }
 
 /** What the user asked for. Amounts are decimal text in display units. */
@@ -89,12 +91,20 @@ export interface ChainActionRequest {
   invoiceId?: string | undefined
 }
 
+export interface NearFunctionCall {
+  type: 'FunctionCall'
+  params: { methodName: string; args: Record<string, unknown>; gas: string; deposit: string }
+}
+
+/** Native NEAR moving to an account. Only a send of NEAR builds one, and every other check refuses it. */
+export interface NearTransfer {
+  type: 'Transfer'
+  params: { deposit: string }
+}
+
 export interface NearTransaction {
   receiverId: string
-  actions: {
-    type: 'FunctionCall'
-    params: { methodName: string; args: Record<string, unknown>; gas: string; deposit: string }
-  }[]
+  actions: (NearFunctionCall | NearTransfer)[]
 }
 
 /** What the wallet is asked to sign. Base64 for Solana and Sui. An EVM `value` is decimal base units. */
@@ -322,6 +332,8 @@ export interface ChainModule {
   /** A sentence for a symbol this chain doesn't list but a person may well type, by upper-case symbol. */
   tokenHints?: Record<string, string> | undefined
   limitBook?: LimitBook
+  /** A send to an address on another chain, which this chain's own send would refuse. */
+  crossChainSend?: { venue: ChainVenue; reaches: (recipient: string) => boolean } | undefined
 }
 
 /** "an Avalanche", "a Monad". */

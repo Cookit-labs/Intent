@@ -147,6 +147,8 @@ export interface QuoteInput {
   destinationAsset: string
   amount: string
   account: string
+  /** Who is paid, when it isn't the account paying. A refund always goes to the account. */
+  recipient?: string | undefined
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
   deadline: string
   slippageBps: number
@@ -207,7 +209,7 @@ export async function requestQuote(input: QuoteInput): Promise<QuoteEnvelope> {
     amount: input.amount,
     refundTo: input.account,
     refundType: funding,
-    recipient: input.account,
+    recipient: input.recipient ?? input.account,
     recipientType: input.recipientType,
     deadline: input.deadline,
     ...(fees !== undefined ? { appFees: fees } : {}),

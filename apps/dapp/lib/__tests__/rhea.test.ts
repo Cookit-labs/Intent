@@ -24,6 +24,7 @@ import {
   type PreparedAction,
   type SigningPayload,
 } from '../chains/types'
+import type { NearFunctionCall } from '../chains/types'
 
 const ME = 'alice.near'
 const THEM = 'mallory.near'
@@ -208,10 +209,10 @@ const txs = (prepared: { signing: SigningPayload }): NearTransaction[] =>
   (prepared.signing as { transactions: NearTransaction[] }).transactions
 
 const methods = (tx: NearTransaction | undefined): string[] =>
-  (tx?.actions ?? []).map((a) => a.params.methodName)
+  (tx?.actions ?? []).map((a) => (a as NearFunctionCall).params.methodName)
 
-const lastCall = (tx: NearTransaction | undefined): NearTransaction['actions'][number]['params'] =>
-  (tx?.actions.at(-1) as NearTransaction['actions'][number]).params
+const lastCall = (tx: NearTransaction | undefined): NearFunctionCall['params'] =>
+  (tx?.actions.at(-1) as NearFunctionCall).params
 
 const swap = (over: Partial<ChainActionRequest> = {}): ChainActionRequest => ({
   kind: 'swap',
@@ -238,7 +239,7 @@ describe('swapping on Rhea DEX', () => {
     expect(txs(prepared)).toHaveLength(1)
     expect(tx?.receiverId).toBe(WRAP_NEAR)
     expect(methods(tx)).toEqual(['near_deposit', 'ft_transfer_call'])
-    expect(tx?.actions[0]?.params.deposit).toBe(yocto(1))
+    expect((tx?.actions[0] as NearFunctionCall | undefined)?.params.deposit).toBe(yocto(1))
     expect(lastCall(tx).deposit).toBe('1')
     expect(lastCall(tx).args['receiver_id']).toBe(RHEA_DEX)
     expect(lastCall(tx).args['amount']).toBe(yocto(1))
@@ -304,8 +305,11 @@ describe('swapping on Rhea DEX', () => {
     const [first, second] = txs(prepared)
     expect(first?.receiverId).toBe(USDC_NEAR)
     expect(methods(first)).toEqual(['storage_deposit'])
-    expect(first?.actions[0]?.params.args).toEqual({ account_id: ME, registration_only: true })
-    expect(first?.actions[0]?.params.deposit).toBe(STORAGE)
+    expect((first?.actions[0] as NearFunctionCall | undefined)?.params.args).toEqual({
+      account_id: ME,
+      registration_only: true,
+    })
+    expect((first?.actions[0] as NearFunctionCall | undefined)?.params.deposit).toBe(STORAGE)
     expect(methods(second)).toEqual(['near_deposit', 'ft_transfer_call'])
     expect(prepared.notes.join(' ')).toMatch(/two transactions/)
   })
@@ -462,11 +466,18 @@ describe('the swap policy', () => {
       }
     }
     const a = await fresh()
-    ;(a.transactions[1]?.actions[0]?.params as { deposit: string }).deposit = yocto(2)
+    ;(
+      (a.transactions[1]?.actions[0] as NearFunctionCall | undefined)?.params as { deposit: string }
+    ).deposit = yocto(2)
     expect(() => assertRheaDexSafe(a, ME)).toThrow(/amount wrapped/)
 
     const b = await fresh()
-    ;(b.transactions[0]?.actions[0]?.params.args as Record<string, unknown>)['account_id'] = THEM
+    ;(
+      (b.transactions[0]?.actions[0] as NearFunctionCall | undefined)?.params.args as Record<
+        string,
+        unknown
+      >
+    )['account_id'] = THEM
     expect(() => assertRheaDexSafe(b, ME)).toThrow(/another account/)
 
     const c = await fresh()
@@ -817,7 +828,9 @@ describe('supplying to Rhea Lend', () => {
     expect(() => rheaLendVenue.assertSafe(prepared.signing, ME)).not.toThrow()
     const [first] = txs(prepared)
     expect(first?.receiverId).toBe(RHEA_LEND)
-    expect(first?.actions[0]?.params.deposit).toBe(RHEA_LEND_STORAGE_YOCTO)
+    expect((first?.actions[0] as NearFunctionCall | undefined)?.params.deposit).toBe(
+      RHEA_LEND_STORAGE_YOCTO
+    )
     expect(prepared.notes.join(' ')).toMatch(/0.1 NEAR/)
   })
 
@@ -825,7 +838,9 @@ describe('supplying to Rhea Lend', () => {
     const prepared = await rheaLendVenue.prepare(lend('supply', '2', 'NEAR'), ME)
     expect(() => rheaLendVenue.assertSafe(prepared.signing, ME)).not.toThrow()
     expect(methods(txs(prepared)[0])).toEqual(['near_deposit', 'ft_transfer_call'])
-    expect(txs(prepared)[0]?.actions[0]?.params.deposit).toBe(yocto(2))
+    expect((txs(prepared)[0]?.actions[0] as NearFunctionCall | undefined)?.params.deposit).toBe(
+      yocto(2)
+    )
   })
 
   it('refuses more than the wallet holds, and a market that is closed or full', async () => {
@@ -1234,8 +1249,89 @@ describe('reading a Rhea Lend position', () => {
     await expect(rheaLendVenue.positions?.(ME)).resolves.toEqual([
       { slot: 'supplied', symbol: 'NEAR', amount: '2' },
       { slot: 'supplied', symbol: 'USDC', amount: '50' },
-      { slot: 'borrowed', symbol: 'USDT', amount: '12.345678' },
+      {
+        slot: 'borrowed',
+        symbol: 'USDT',
+        amount: '12.345678',
+        warning: expect.stringContaining('of the level Rhea Lend requires') as string,
+      },
     ])
+  })
+
+  it('says how far a loan is from liquidation, in the figures the contract uses', async () => {
+    // 100 USDC counts for 95, and 40 owed counts for 42.1, so it stands at about 226%.
+    account = lendAccount({
+      plain: [],
+      collateral: [[USDC_NEAR, inner18(100)]],
+      borrowed: [[USDC_NEAR, inner18(40)]],
+    })
+    const read = await rheaLendVenue.positions?.(ME)
+    const loan = read?.find((p) => p.slot === 'borrowed')
+    expect(loan?.warning).toMatch(/226% of the level Rhea Lend requires/)
+    expect(loan?.warning).toMatch(/falls about 55\.\d%/)
+    expect(loan?.warning).toMatch(/doesn't watch/)
+    expect(read?.find((p) => p.slot === 'supplied')?.warning).toBeUndefined()
+  })
+
+  it('says plainly when a loan is near liquidation', async () => {
+    // 100 USDC counts for 95, and 85 owed counts for 89.5, so it stands at about 106%.
+    account = lendAccount({
+      plain: [],
+      collateral: [[USDC_NEAR, inner18(100)]],
+      borrowed: [[USDC_NEAR, inner18(85)]],
+    })
+    const read = await rheaLendVenue.positions?.(ME)
+    expect(read?.find((p) => p.slot === 'borrowed')?.warning).toMatch(
+      /^This loan is close to being liquidated\./
+    )
+  })
+
+  it('still shows the position when the health can not be priced, and says so', async () => {
+    account = lendAccount({
+      plain: [],
+      collateral: [[USDC_NEAR, inner18(100)]],
+      borrowed: [[USDC_NEAR, inner18(40)]],
+    })
+    rpc.views['aggregate-oracle.near.get_price_no_older_than'] = () => null
+    const read = await rheaLendVenue.positions?.(ME)
+    expect(read?.find((p) => p.slot === 'borrowed')).toMatchObject({
+      amount: '40',
+      warning: expect.stringContaining("couldn't read how close") as string,
+    })
+  })
+
+  it('gives up on the warning, not the position, when prices are slow', async () => {
+    account = lendAccount({
+      plain: [],
+      collateral: [[USDC_NEAR, inner18(100)]],
+      borrowed: [[USDC_NEAR, inner18(40)]],
+    })
+    const quick = vi.mocked(fetch).getMockImplementation() as typeof fetch
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(init?.body).includes('get_all_token_pyth_infos')
+        ? new Promise(() => undefined)
+        : quick(input, init)
+    )
+    const startedAt = Date.now()
+    const read = await rheaLendVenue.positions?.(ME)
+    expect(Date.now() - startedAt).toBeLessThan(4_000)
+    expect(read?.find((p) => p.slot === 'borrowed')).toMatchObject({
+      amount: '40',
+      warning: expect.stringContaining("couldn't read how close") as string,
+    })
+  })
+
+  it('gives one warning for a person with several loans', async () => {
+    account = lendAccount({
+      plain: [],
+      collateral: [[USDC_NEAR, inner18(100)]],
+      borrowed: [
+        [USDC_NEAR, inner18(10)],
+        [USDT_NEAR, inner18(10)],
+      ],
+    })
+    const read = await rheaLendVenue.positions?.(ME)
+    expect(read?.filter((p) => p.warning !== undefined)).toHaveLength(1)
   })
 
   it('is empty for an account with nothing there', async () => {

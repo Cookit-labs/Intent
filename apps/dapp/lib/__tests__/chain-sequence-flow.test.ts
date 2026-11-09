@@ -1,3 +1,4 @@
+import { nearTokens } from '../chains/near/tokens'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -1271,5 +1272,40 @@ describe('questionChainRefusal', () => {
     const refusal = questionChainRefusal('avalanche', 'monad')
     expect(refusal).toContain('another chain')
     expect(refusal).toContain('Nothing was signed or sent.')
+  })
+})
+
+describe('measuring a swap that ends in NEAR', () => {
+  const balances = (near: string, wrapped: string) => ({
+    complete: true,
+    tokens: [
+      { symbol: 'NEAR', id: 'near', amount: near, decimals: 24, native: true, listed: true },
+      {
+        symbol: 'wNEAR',
+        id: 'wrap.near',
+        amount: wrapped,
+        decimals: 24,
+        native: false,
+        listed: true,
+      },
+    ],
+  })
+
+  it('measures the coin, because that is what Rhea pays out and what a stake spends', () => {
+    const token = outputToken('near', 'NEAR', 'NEAR')
+    expect(token).toMatchObject({ id: 'near', symbol: 'NEAR', decimals: 24 })
+    expect(holdingOf(balances('3.5', '9'), token as NonNullable<typeof token>)).toBe('3.5')
+  })
+
+  it('keeps measuring other NEAR tokens by their contracts', () => {
+    expect(outputToken('near', 'USDC', 'USDC')?.id).toBe(
+      nearTokens.find((t) => t.symbol === 'USDC')?.id
+    )
+    expect(outputToken('near', 'stNEAR', 'stNEAR')?.id).toBe('meta-pool.near')
+  })
+
+  it('finds nothing to measure when the card names something else', () => {
+    expect(outputToken('near', 'USDC', 'NEAR')).toBeUndefined()
+    expect(outputToken('near', 'NEAR', 'USDC')).toBeUndefined()
   })
 })

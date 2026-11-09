@@ -46,8 +46,11 @@ describe('the NEAR venue list', () => {
     const claimed = nearVenues
       .filter((v) => v.integration === 'executes' && !v.id.startsWith('weave-'))
       .map((v) => v.id)
-    // A wallet transfer is not an app, so the Apps list has no entry for it.
-    const wired = nearModule.venues.map((v) => v.id).filter((id) => id !== 'send')
+    // A wallet transfer is not an app, so the Apps list has no entry for it. A send to another
+    // chain is 1Click, whose row is already there.
+    const wired = nearModule.venues
+      .map((v) => v.id)
+      .filter((id) => id !== 'send' && id !== 'near-intents-send')
     expect(claimed.sort()).toEqual(wired.sort())
     for (const venue of nearVenues) {
       if (venue.integration === 'executes') expect(venue.capability).toBeTruthy()

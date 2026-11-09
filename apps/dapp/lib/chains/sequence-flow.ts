@@ -10,7 +10,7 @@ import {
 import type { CashoutCurrencyCode, CashoutRoute } from '../weave/parse-cashout'
 import { MAX_COST_PERCENT } from '../weave/types'
 import { AVALANCHE_TOKENS, MONAD_TOKENS } from './evm/tokens'
-import { nearTokens } from './near/tokens'
+import { NATIVE_NEAR, nearTokens } from './near/tokens'
 import { chainNamesOf, chainTokenWord } from './parse-action'
 import {
   cashoutAmountFrom,
@@ -249,6 +249,9 @@ export function outputToken(
 ): ChainToken | undefined {
   if (receiveSymbol === undefined || asked === undefined) return undefined
   if (receiveSymbol.toUpperCase() !== asked.toUpperCase()) return undefined
+  // Rhea pays out the coin, and a stake or send spends it. A swap someone named 1Click for arrives
+  // as wNEAR instead, this never rises, and the sequence stops at the swap, with the wNEAR held.
+  if (chain === 'near' && receiveSymbol.toUpperCase() === NATIVE_NEAR.symbol) return NATIVE_NEAR
   const table = TOKEN_TABLES[chain as ChainWithActions]
   return table === undefined ? undefined : tokenBySymbol(table, receiveSymbol)
 }

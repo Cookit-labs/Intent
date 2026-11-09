@@ -1,10 +1,9 @@
 import { RHEA_LEND, RHEA_PRICE_ORACLE } from './rhea-safety'
-import { viewCall, waitForTransaction, type ExecutedCall } from './rpc'
+import { rpcCall, viewCall, waitForTransaction, type ExecutedCall } from './rpc'
 
 /** Rhea Lend's own `pyth_price_valid_duration_sec`: an older price would fail there too. */
 export const RHEA_PRICE_AGE_SEC = 60
 
-const DEFAULT_RPC_URL = 'https://free.rpc.fastnear.com'
 const RECEIPT_TIMEOUT_MS = 8_000
 
 export interface TokenPrice {
@@ -95,29 +94,12 @@ interface RawReceipts {
 }
 
 async function readReceipts(hash: string, account: string): Promise<RawReceipts | undefined> {
-  const configured = process.env['NEAR_RPC_URL']?.trim()
   try {
-    const response = await fetch(
-      configured === undefined || configured === '' ? DEFAULT_RPC_URL : configured,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'intent',
-          method: 'tx',
-          params: {
-            tx_hash: hash,
-            sender_account_id: account,
-            wait_until: 'EXECUTED_OPTIMISTIC',
-          },
-        }),
-        signal: AbortSignal.timeout(RECEIPT_TIMEOUT_MS),
-      }
-    )
-    if (!response.ok) return undefined
-    const body = (await response.json()) as { result?: RawReceipts }
-    return body.result
+    return (await rpcCall(
+      'tx',
+      { tx_hash: hash, sender_account_id: account, wait_until: 'EXECUTED_OPTIMISTIC' },
+      RECEIPT_TIMEOUT_MS
+    )) as RawReceipts | undefined
   } catch {
     return undefined
   }
