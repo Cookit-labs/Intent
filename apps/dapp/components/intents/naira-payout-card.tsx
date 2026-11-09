@@ -23,6 +23,7 @@ import type { NairaStatus } from '../../lib/naira/status'
 import { TokenIcon } from '../ui/token-icon'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
 import { toolCard, toolPanel } from './bubble'
+import { payoutProvider } from '../../lib/weave/cashout-view'
 
 /**
  * The form an agent drops into the thread when an instruction is read as a
@@ -57,6 +58,27 @@ const FIELD =
   'border-bubble-agent-border bg-background/70 focus-within:border-brand/60 focus-within:ring-brand/15 rounded-2xl border transition-all focus-within:ring-4 dark:border-white/[0.07] dark:bg-[#121212]'
 
 /** "DANIEL EMMANUEL OKPOHO" as a person would write it. Banks return names in capitals. */
+/** Naira from Stellar is always paid through Linq, said the way the cash-out card says it. */
+function LinqRow({ className }: { className: string }): JSX.Element {
+  const linq = payoutProvider({ provider: 'linq' })
+  return (
+    <div className={cn('flex items-center justify-between gap-4', className)}>
+      <dt className="text-muted-foreground">Routed through</dt>
+      <dd className="flex items-center gap-1.5 text-right font-medium">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={linq.logo}
+          alt=""
+          width={18}
+          height={18}
+          className="h-[18px] w-[18px] rounded-full object-cover"
+        />
+        {linq.name}
+      </dd>
+    </div>
+  )
+}
+
 function titleCase(name: string): string {
   return name.toLowerCase().replace(/(^|[\s'-])\p{L}/gu, (m) => m.toUpperCase())
 }
@@ -223,6 +245,7 @@ function PayoutProgress({
             {order.bankName} {order.accountMask}
           </dd>
         </div>
+        <LinqRow className="py-2" />
       </dl>
 
       {order.paymentHash !== undefined && order.paymentHash !== '' ? (
@@ -490,6 +513,7 @@ export function NairaPayoutCard({
               <dd className="text-right font-medium">{v}</dd>
             </div>
           ))}
+          <LinqRow className="py-2.5" />
           <div className="flex items-center justify-between gap-4 py-2.5">
             <dt className="text-muted-foreground">Pays to</dt>
             <dd className="text-right">

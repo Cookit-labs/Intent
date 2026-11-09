@@ -98,6 +98,8 @@ export interface WeaveOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** Which provider pays this order out. */
+  provider: CashoutProvider
   /** Linq locks the naira when the order is made, so its figure is what is paid. */
   exactDest?: boolean | undefined
   /** What it actually paid out, once Weave says so. */
@@ -121,6 +123,7 @@ export function toPublic(row: WeaveOrderRow): WeaveOrderView {
     currency: row.currency,
     amount: row.amount,
     estimatedDest: row.estimatedDest,
+    provider: row.provider ?? 'weave',
     ...(row.provider === 'linq' ? { exactDest: true } : {}),
     ...(row.paidDest !== undefined ? { paidDest: row.paidDest } : {}),
     institutionName: row.institutionName,

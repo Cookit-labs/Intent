@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { payoutProvider } from '../weave/cashout-view'
+
 import {
   accountHint,
   accountMismatch,
@@ -157,6 +159,37 @@ describe('status', () => {
 
   it('gives a refund as what Weave says, and asks the person to check it', () => {
     expect(statusText('refunded')).toMatch(/Weave says .* check that it arrived/)
+  })
+
+  it.each(['failed', 'expired', 'refunded'] as const)(
+    'names Linq, not Weave, on a %s Linq order',
+    (status) => {
+      expect(statusText(status, 'linq')).toMatch(/Linq/)
+      expect(statusText(status, 'linq')).not.toMatch(/Weave/)
+    }
+  )
+})
+
+describe('which provider an order is routed through', () => {
+  it('names Linq with its logo', () => {
+    expect(payoutProvider({ provider: 'linq' })).toEqual({
+      id: 'linq',
+      name: 'Linq',
+      logo: '/images/venues/linq.webp',
+    })
+  })
+
+  it('names Weave with its logo', () => {
+    expect(payoutProvider({ provider: 'weave' })).toEqual({
+      id: 'weave',
+      name: 'Weave',
+      logo: '/images/venues/weave.webp',
+    })
+  })
+
+  it('reads an order saved before the provider was sent as Linq when its amount was locked', () => {
+    expect(payoutProvider({ exactDest: true }).name).toBe('Linq')
+    expect(payoutProvider({}).name).toBe('Weave')
   })
 
   it.each(['waiting', 'processing'] as const)('keeps polling while %s', (status) => {

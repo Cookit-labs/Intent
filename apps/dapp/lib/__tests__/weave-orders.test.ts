@@ -46,6 +46,12 @@ function row(over: Partial<WeaveOrderRow> = {}): WeaveOrderRow {
 }
 
 describe('toPublic', () => {
+  it('says which provider the order is routed through', () => {
+    expect(toPublic(row({ provider: 'linq' })).provider).toBe('linq')
+    expect(toPublic(row({ provider: 'weave' })).provider).toBe('weave')
+    expect(toPublic(row({ provider: undefined })).provider).toBe('weave')
+  })
+
   it('masks the account identifier and never returns it whole', () => {
     const view = toPublic(row())
     expect(view.accountMask).toBe('••••1234')
