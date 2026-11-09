@@ -227,10 +227,6 @@ export async function POST(request: Request): Promise<Response> {
     chain,
     currency,
     amount,
-    weaveNaira:
-      quote.ok && weaveCost !== undefined && weaveCost <= MAX_COST_PERCENT
-        ? quote.value.destAmount
-        : undefined,
     institutionName: institution.name,
     accountIdentifier: input.accountIdentifier,
     accountName,
@@ -264,7 +260,8 @@ export async function POST(request: Request): Promise<Response> {
       providerStatus: order.status,
     })
   }
-  if (viaLinq.skipped === 'order_unknown' || viaLinq.skipped === 'order_unexpected') {
+  // Linq should take every naira cash-out it can, so each hand-back to Weave is reported.
+  if (viaLinq.skipped !== 'not_offered') {
     reportError('cashout/orders', new Error(`linq_${viaLinq.skipped}`), { chain, currency })
   }
 
