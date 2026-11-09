@@ -110,6 +110,20 @@ export const RAYDIUM_SWAP_POLICY: SolanaVenuePolicy = {
   mayWrapSol: true,
 }
 
+/**
+ * Titan's swap program, from the example instruction in its Portal reference,
+ * https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/reference/quote-swap. Not yet
+ * seen in a live transaction, because Titan needs a key: until then a route that calls anything else
+ * at the top level is refused, which is the safe way to be wrong.
+ */
+export const TITAN_SWAP_PROGRAM = 'T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT'
+
+export const TITAN_SWAP_POLICY: SolanaVenuePolicy = {
+  venueName: 'Titan',
+  programs: { [TITAN_SWAP_PROGRAM]: {} },
+  mayWrapSol: true,
+}
+
 export const JUPITER_LEND_POLICY: SolanaVenuePolicy = {
   venueName: 'Jupiter Lend',
   programs: { [JUPITER_LEND_PROGRAM]: { discriminators: [DEPOSIT_DISCRIMINATOR] } },

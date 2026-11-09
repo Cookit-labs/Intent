@@ -748,8 +748,8 @@ describe('module', () => {
 
 describe('venues page', () => {
   it('lists every row of the report', () => {
-    expect(solanaVenues).toHaveLength(23)
-    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(23)
+    expect(solanaVenues).toHaveLength(24)
+    expect(new Set(solanaVenues.map((v) => v.id)).size).toBe(24)
     for (const v of solanaVenues) {
       expect(v.family).toBe('solana')
       expect(v.chains).toEqual(['Solana'])

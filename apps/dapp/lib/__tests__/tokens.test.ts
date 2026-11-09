@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GET } from '../../app/api/chain/[chain]/tokens/route'
 import { asksAboutTokens } from '../tokens/ask'
 import { resetTokenCache, searchTokens, tokenDetail, tokenDirectory } from '../tokens/directory'
-import type { ReadJson } from '../tokens/sources'
+import { dexscreenerTokens, type ReadJson } from '../tokens/sources'
 import { changeFigure, countFigure, priceFigure, usdFigure } from '../tokens/types'
 
 vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
@@ -171,117 +171,108 @@ describe('tokens on Solana', () => {
   })
 })
 
-describe('tokens through GeckoTerminal', () => {
-  const pools = {
-    included: [
-      { type: 'token', attributes: { address: '0x2::sui::SUI' } },
-      { type: 'token', attributes: { address: '0xother::t::T' } },
-      { type: 'dex', attributes: {} },
-    ],
-  }
+const SUI_LONG = `0x${'0'.repeat(63)}2::sui::SUI`
 
-  it('lists the tokens in the busiest pools with what this app trades first', async () => {
-    const { read } = router({
-      '/pools?page': pools,
-      '/tokens/multi/': {
-        data: [
-          gecko('0xother::t::T', 'T', { total_reserve_in_usd: '9000' }),
-          gecko('0x2::sui::SUI', 'SUI', { coingecko_coin_id: 'sui' }),
+function cetusPool(a: [string, string], b: [string, string], tvl: number, vol: number) {
+  return {
+    pure_tvl_in_usd: String(tvl),
+    vol_in_usd_24h: String(vol),
+    coin_a: { address: a[0], symbol: a[1], name: a[1], logo_url: 'https://example.com/a.png' },
+    coin_b: { address: b[0], symbol: b[1], name: b[1], logo_url: null },
+  }
+}
+
+function dsPair(base: [string, string], quote: [string, string], liq: number, over = {}) {
+  return {
+    pairAddress: `${base[0]}-${quote[0]}-${liq}`,
+    baseToken: { address: base[0], symbol: base[1] },
+    quoteToken: { address: quote[0], symbol: quote[1] },
+    priceUsd: '2',
+    marketCap: 1000,
+    liquidity: { usd: liq },
+    volume: { h24: liq / 10 },
+    priceChange: { h24: 1.5 },
+    ...over,
+  }
+}
+
+describe('tokens on Sui, from its own apps', () => {
+  const T = '0xother::t::T'
+  const routes = (over: Record<string, unknown> = {}) => ({
+    'api-sui.cetus.zone': {
+      data: {
+        lp_list: [
+          cetusPool([SUI_LONG, 'SUI'], [SUI_USDC, 'USDC'], 1000, 100),
+          cetusPool([T, 'T'], [SUI_LONG, 'SUI'], 500, 50),
         ],
       },
-      '/info': { data: { attributes: { holders: { count: 777 } } } },
-      'api.dexscreener.com': [],
-    })
-    const { tokens, sources } = await tokenDirectory('sui', read)
-    expect(sources).toContain('GeckoTerminal')
-    expect(tokens[0]?.listed).toBe(true)
-    const sui = tokens.find((t) => t.symbol === 'SUI')
-    expect(sui?.verified).toEqual(['Checked by Intent, and tradable here', 'Listed on CoinGecko'])
-    expect(sui?.holders).toBe(777)
-    expect(sui?.explorerUrl).toBe('https://suiscan.xyz/mainnet/coin/0x2::sui::SUI')
-    expect(tokens.find((t) => t.symbol === 'T')?.liquidityUsd).toBe(9000)
+    },
+    'bluefin.io': [
+      { address: '0x2::sui::SUI', isVerified: true },
+      { address: T, isVerified: false },
+    ],
+    '/tokens/v1/sui/': [
+      dsPair(['0x2::sui::SUI', 'SUI'], [SUI_USDC, 'USDC'], 9_999_999),
+      dsPair([T, 'T'], ['0x2::sui::SUI', 'SUI'], 1),
+    ],
+    '/info': { data: { attributes: { holders: { count: 777 } } } },
+    ...over,
   })
 
-  it('asks for holders of only a few tokens, and stops at the first refusal', async () => {
-    let calls = 0
-    const { read } = router({
-      '/pools?page': pools,
-      '/tokens/multi/': { data: [] },
-      '/info': () => {
-        calls += 1
-        return new Error('429')
-      },
-      'api.dexscreener.com': [],
+  it('takes depth from Cetus, price from DexScreener, and the tick from Bluefin', async () => {
+    const { tokens, sources } = await tokenDirectory('sui', router(routes()).read)
+    expect(sources).toEqual(['Cetus', 'Bluefin', 'DexScreener'])
+    const sui = tokens.find((t) => t.symbol === 'SUI')
+    expect(sui).toMatchObject({
+      id: '0x2::sui::SUI',
+      listed: true,
+      liquidityUsd: 1500,
+      volume24hUsd: 150,
+      priceUsd: 2,
+      change24h: 1.5,
+      explorerUrl: 'https://suiscan.xyz/mainnet/coin/0x2::sui::SUI',
     })
+    expect(sui?.verified).toEqual(['Checked by Intent, and tradable here', 'Verified by Bluefin'])
+    expect(tokens.find((t) => t.symbol === 'T')?.verified).toEqual([])
+  })
+
+  it('counts holders through GeckoTerminal, a few at a time, stopping at a refusal', async () => {
+    let calls = 0
+    const { read } = router(
+      routes({
+        '/info': () => {
+          calls += 1
+          return new Error('429')
+        },
+      })
+    )
     await tokenDirectory('sui', read)
     expect(calls).toBe(1)
   })
 
-  it('falls back to DexScreener when GeckoTerminal is busy', async () => {
-    const { read } = router({
-      '/pools?page': new Error('429'),
-      '/tokens/multi/': new Error('429'),
-      '/info': new Error('429'),
-      '/tokens/v1/sui/': [
-        {
-          baseToken: { address: SUI_USDC, symbol: 'USDC', name: 'USD Coin' },
-          priceUsd: '1',
-          marketCap: 100,
-          liquidity: { usd: 50 },
-          volume: { h24: 25 },
-          priceChange: { h24: 0.5 },
-        },
-      ],
-    })
-    const { tokens, sources, partial } = await tokenDirectory('sui', read)
-    expect(sources).toEqual(['DexScreener'])
-    expect(partial).toBe(true)
-    expect(tokens.find((t) => t.symbol === 'USDC')).toMatchObject({
-      liquidityUsd: 50,
-      volume24hUsd: 25,
-      change24h: 0.5,
-    })
+  it('leaves out tokens nothing priced, but never one this app trades', async () => {
+    const { tokens } = await tokenDirectory(
+      'sui',
+      router(routes({ '/tokens/v1/sui/': [], '/info': new Error('429') })).read
+    )
+    expect(tokens.some((t) => t.symbol === 'T')).toBe(false)
+    expect(tokens.some((t) => t.symbol === 'SUI' && t.listed)).toBe(true)
   })
 
-  it('reads a native coin through its wrapped form, under its own name', async () => {
-    const { read, asked } = router({
-      '/pools?page': { included: [] },
-      '/tokens/multi/': { data: [gecko(WMON, 'WMON', { total_reserve_in_usd: '42' })] },
-      '/info': new Error('429'),
-      'api.dexscreener.com': [],
-    })
-    const { tokens } = await tokenDirectory('monad', read)
-    expect(asked.some((u) => u.includes('/tokens/multi/'))).toBe(true)
-    const mon = tokens.find((t) => t.symbol === 'MON')
-    expect(mon?.listed).toBe(true)
-    expect(mon?.liquidityUsd).toBe(42)
+  it('keeps the last good answer when every source stops answering', async () => {
+    const first = await tokenDirectory('sui', router(routes()).read, 1_000)
+    expect(first.tokens.find((t) => t.symbol === 'SUI')?.priceUsd).toBe(2)
+    const later = await tokenDirectory('sui', router({}).read, 1_000 + 10 * 60_000)
+    expect(later.partial).toBe(true)
+    expect(later.tokens.find((t) => t.symbol === 'SUI')?.priceUsd).toBe(2)
   })
 
-  it('gives a native coin its whole market cap, never what happens to be wrapped', async () => {
-    const { read } = router({
-      '/pools?page': { included: [] },
-      '/tokens/multi/': {
-        data: [gecko(WMON, 'WMON', { market_cap_usd: '6000000', fdv_usd: '6000000' })],
-      },
-      '/info': new Error('429'),
-      'api.dexscreener.com': [],
-      'api.coingecko.com': { monad: { usd: 0.02, usd_market_cap: 900000000 } },
-    })
-    const mon = (await tokenDirectory('monad', read)).tokens.find((t) => t.symbol === 'MON')
-    expect(mon?.marketCapUsd).toBe(900000000)
-    expect(mon?.fdvUsd).toBeUndefined()
-  })
-
-  it('says no market cap for a native coin rather than the wrapped figure', async () => {
-    const { read } = router({
-      '/pools?page': { included: [] },
-      '/tokens/multi/': { data: [gecko(WMON, 'WMON', { market_cap_usd: '6000000' })] },
-      '/info': new Error('429'),
-      'api.dexscreener.com': [],
-      'api.coingecko.com': new Error('429'),
-    })
-    const mon = (await tokenDirectory('monad', read)).tokens.find((t) => t.symbol === 'MON')
-    expect(mon?.marketCapUsd).toBeUndefined()
+  it('answers from memory within five minutes', async () => {
+    const { read, asked } = router(routes())
+    await tokenDirectory('sui', read, 1_000)
+    const after = asked.length
+    await tokenDirectory('sui', read, 1_000 + 60_000)
+    expect(asked.length).toBe(after)
   })
 
   it('asks again soon after a partial answer, not five minutes later', async () => {
@@ -293,32 +284,140 @@ describe('tokens through GeckoTerminal', () => {
     await tokenDirectory('sui', busy.read, 1_000 + 61_000)
     expect(busy.asked.length).toBeGreaterThan(after)
   })
+})
 
-  it('keeps the last good answer when every source stops answering', async () => {
-    const good = router({
-      '/pools?page': pools,
-      '/tokens/multi/': { data: [gecko('0x2::sui::SUI', 'SUI')] },
-      '/info': new Error('429'),
-      'api.dexscreener.com': [],
+describe('tokens on NEAR, from its own apps', () => {
+  it('ranks by NEARBlocks, ticks what NEAR Intents routes, and counts holders there', async () => {
+    const { read } = router({
+      'api.nearblocks.io/v1/fts?': {
+        tokens: [
+          {
+            contract: 'usdt.tether-token.near',
+            symbol: 'USDt',
+            name: 'Tether USD',
+            price: '1',
+            onchain_market_cap: '500',
+            market_cap: '99999999999',
+            volume_24h: '99999999999',
+            change_24: '-0.1',
+            icon: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E',
+          },
+          { contract: 'meme.near', symbol: 'MEME', price: '0.1', onchain_market_cap: '5' },
+        ],
+      },
+      '1click.chaindefuser.com': [
+        { blockchain: 'near', contractAddress: 'usdt.tether-token.near' },
+        { blockchain: 'sol', contractAddress: 'meme.near' },
+      ],
+      '/tokens/v1/near/': [dsPair(['usdt.tether-token.near', 'USDt'], ['wrap.near', 'wNEAR'], 600)],
+      '/holders/count': { holders: [{ count: '2496781' }] },
+      'api.coingecko.com': { near: { usd_market_cap: 4_000_000_000 } },
     })
-    const first = await tokenDirectory('sui', good.read, 1_000)
-    expect(first.tokens.find((t) => t.symbol === 'SUI')?.priceUsd).toBe(2)
-    const later = await tokenDirectory('sui', router({}).read, 1_000 + 10 * 60_000)
-    expect(later.partial).toBe(true)
-    expect(later.tokens.find((t) => t.symbol === 'SUI')?.priceUsd).toBe(2)
+    const { tokens, sources } = await tokenDirectory('near', read)
+    expect(sources).toEqual(['NEARBlocks', 'NEAR Intents', 'DexScreener'])
+    const usdt = tokens.find((t) => t.id === 'usdt.tether-token.near')
+    expect(usdt).toMatchObject({
+      marketCapUsd: 500,
+      liquidityUsd: 600,
+      volume24hUsd: 60,
+      holders: 2496781,
+      icon: 'data:image/svg+xml,%3Csvg%3E%3C/svg%3E',
+    })
+    expect(usdt?.verified).toContain('Listed on NEAR Intents')
+    expect(tokens.find((t) => t.id === 'meme.near')?.verified).toEqual([])
+  })
+})
+
+describe('tokens on Avalanche, from its own apps', () => {
+  it('lists what LFJ lists, priced by DexScreener, with holders from Routescan', async () => {
+    const LFJ_TOKEN = '0x00000000000000000000000000000000000000aa'
+    const { read, asked } = router({
+      'joe-tokenlists': {
+        tokens: [
+          {
+            chainId: 43114,
+            address: LFJ_TOKEN.toUpperCase().replace('0X', '0x'),
+            symbol: 'JOE',
+            logoURI: 'https://example.com/joe.png',
+          },
+          { chainId: 43113, address: '0xtestnet', symbol: 'TEST' },
+        ],
+      },
+      '/tokens/v1/avalanche/': [dsPair([LFJ_TOKEN, 'JOE'], ['0xusdc', 'USDC'], 300)],
+      'api.routescan.io': { count: 4242 },
+      'api.coingecko.com': new Error('429'),
+    })
+    const { tokens } = await tokenDirectory('avalanche', read)
+    const joe = tokens.find((t) => t.symbol === 'JOE')
+    expect(joe).toMatchObject({
+      liquidityUsd: 300,
+      holders: 4242,
+      icon: 'https://example.com/joe.png',
+    })
+    expect(joe?.verified).toEqual(['Listed by LFJ'])
+    expect(tokens.some((t) => t.symbol === 'TEST')).toBe(false)
+    expect(asked.some((u) => u.includes('/43114/erc20/'))).toBe(true)
+  })
+})
+
+describe('tokens on Monad, from its own apps', () => {
+  it('lists Monorail’s chosen tokens under this app’s names, the native coin as itself', async () => {
+    const { read } = router({
+      'monorail.xyz/v2/tokens/category/official': [
+        { address: '0x0000000000000000000000000000000000000000', symbol: 'MON', holders: 0 },
+        {
+          address: WMON,
+          symbol: 'WMON',
+          usd_per_token: '0.02',
+          holders: 0,
+          image_uri: 'https://example.com/wmon.svg',
+        },
+      ],
+      'monorail.xyz/v2/tokens/category/': [],
+      'monorail.xyz/v2/token/': { address: WMON, symbol: 'WMON', holders: 92816 },
+      '/tokens/v1/monad/': [dsPair([WMON, 'WMON'], ['0xusdc', 'USDC'], 42)],
+      'api.coingecko.com': { monad: { usd_market_cap: 900000000 } },
+    })
+    const { tokens } = await tokenDirectory('monad', read)
+    const mon = tokens.find((t) => t.symbol === 'MON')
+    expect(mon).toMatchObject({
+      listed: true,
+      liquidityUsd: 42,
+      marketCapUsd: 900000000,
+      holders: 92816,
+    })
+    expect(mon?.fdvUsd).toBeUndefined()
+    expect(mon?.verified).toContain('Chosen by Monorail')
   })
 
-  it('answers from memory within five minutes', async () => {
-    const { read, asked } = router({
-      '/pools?page': { included: [] },
-      '/tokens/multi/': { data: [] },
-      '/info': new Error('429'),
-      'api.dexscreener.com': [],
+  it('says no market cap for a native coin rather than the wrapped figure', async () => {
+    const { read } = router({
+      'monorail.xyz': [],
+      '/tokens/v1/monad/': [
+        dsPair([WMON, 'WMON'], ['0xusdc', 'USDC'], 42, { marketCap: 6_000_000 }),
+      ],
+      'api.coingecko.com': new Error('429'),
     })
-    await tokenDirectory('sui', read, 1_000)
-    const after = asked.length
-    await tokenDirectory('sui', read, 1_000 + 60_000)
-    expect(asked.length).toBe(after)
+    const mon = (await tokenDirectory('monad', read)).tokens.find((t) => t.symbol === 'MON')
+    expect(mon?.marketCapUsd).toBeUndefined()
+  })
+})
+
+describe('depth from DexScreener', () => {
+  it('sums every pool a token sits in, quote side included, counting each pool once', async () => {
+    const A = '0x00000000000000000000000000000000000000a1'
+    const B = '0x00000000000000000000000000000000000000b2'
+    const pools = [
+      dsPair([A, 'A'], [B, 'B'], 100),
+      dsPair([B, 'B'], ['0xother', 'O'], 50, { priceUsd: '9' }),
+      dsPair([A, 'A'], [B, 'B'], 100),
+    ]
+    const rows = await dexscreenerTokens(async () => pools, 'avalanche', [A, B])
+    const a = rows.find((r) => r.symbol === 'A')
+    const b = rows.find((r) => r.symbol === 'B')
+    expect(a?.liquidityUsd).toBe(100)
+    expect(b?.liquidityUsd).toBe(150)
+    expect(b?.priceUsd).toBe(9)
   })
 })
 

@@ -10,15 +10,25 @@ import { knownSymbols, resolveAsset } from '../swap/assets'
 import {
   DEXSCREENER_CHAIN,
   GECKO_NETWORK,
+  bluefinVerified,
+  cetusTokens,
   dexscreenerPools,
   dexscreenerSearch,
   dexscreenerTokens,
+  fullSuiType,
   geckoHolders,
-  geckoPoolTokens,
   geckoTokens,
   jupiterSearch,
   jupiterTop,
+  lfjTokens,
+  monorailHolders,
+  monorailTokens,
   nativeMarketCaps,
+  nearIntentsTokens,
+  nearblocksHolders,
+  nearblocksTokens,
+  routescanHolders,
+  soroswapCurated,
   stellarAssets,
   stellarSearch,
   type ReadJson,
@@ -44,8 +54,19 @@ const HOLDERS_MS = 6 * 60 * 60_000
 const DETAIL_MS = 5 * 60_000
 /** A list a source gave up on is asked for again soon, not left short for the whole five minutes. */
 const PARTIAL_LIST_MS = 60_000
-/** Holder counts are one call each, against a limit of about 30 a minute, so only a few at a time. */
-const HOLDERS_PER_LIST = 3
+/** Holder counts are one call each, so only a few at a time: fewer against GeckoTerminal's limit. */
+const HOLDERS_PER_LIST = 6
+const GECKO_HOLDERS_PER_LIST = 3
+/** The most tokens priced in one list, two DexScreener calls' worth. */
+const PRICED_PER_LIST = 60
+/** Who vouches for a token on each chain, beside what this app lists. */
+const VOUCH: Readonly<Partial<Record<TokenChain, string>>> = {
+  sui: 'Verified by Bluefin',
+  near: 'Listed on NEAR Intents',
+  avalanche: 'Listed by LFJ',
+  monad: 'Chosen by Monorail',
+  stellar: 'Listed by Soroswap',
+}
 /** CoinGecko's name for each chain's native coin, where its pools trade a wrapped form. */
 const NATIVE_COIN: Readonly<Partial<Record<TokenChain, { symbol: string; coinId: string }>>> = {
   near: { symbol: 'NEAR', coinId: 'near' },
@@ -100,12 +121,18 @@ function listedTokens(chain: TokenChain): Listed[] {
   }
 }
 
-/** Hex addresses are the same whatever their case. Everything else is exact. */
+/** Hex addresses are the same whatever their case, and a Sui type however its address is padded. */
 function keyOf(chain: TokenChain, id: string): string {
+  if (chain === 'sui') return fullSuiType(id)
   return chain === 'avalanche' || chain === 'monad' ? id.toLowerCase() : id
 }
 
-function toRow(chain: TokenChain, figures: TokenFigures, listed: Listed[]): TokenRow {
+function toRow(
+  chain: TokenChain,
+  figures: TokenFigures,
+  listed: Listed[],
+  vouched: ReadonlySet<string> = new Set()
+): TokenRow {
   const key = keyOf(chain, figures.id)
   const mine = listed.find((t) => keyOf(chain, t.dataId) === key || keyOf(chain, t.id) === key)
   const symbol = mine?.symbol ?? figures.symbol ?? ''
@@ -128,6 +155,7 @@ function toRow(chain: TokenChain, figures: TokenFigures, listed: Listed[]): Toke
     verified: [
       ...(mine !== undefined ? [CHECKED_BY_APP] : []),
       ...(vouchedBy !== undefined ? [vouchedBy] : []),
+      ...(vouched.has(key) && VOUCH[chain] !== undefined ? [VOUCH[chain] as string] : []),
     ],
     ...(namesake !== undefined ? { sameNameAs: namesake.symbol } : {}),
     explorerUrl: tokenExplorerUrl(chain, mine?.dataId ?? id),
@@ -149,6 +177,14 @@ interface Read {
   figures: TokenFigures[]
   partial: boolean
   sources: string[]
+  /** Tokens the chain's own list vouches for, by key. */
+  vouched?: ReadonlySet<string>
+  /** Show only tokens some source priced, or this app lists: a long list is mostly dead tokens. */
+  pricedOnly?: boolean
+}
+
+function keys(chain: TokenChain, ids: Iterable<string>): Set<string> {
+  return new Set([...ids].map((id) => keyOf(chain, id)))
 }
 
 function fromListed(listed: Listed[]): TokenFigures[] {
@@ -179,43 +215,85 @@ async function readSolana(read: ReadJson, listed: Listed[]): Promise<Read> {
   }
 }
 
-/** Whatever GeckoTerminal says about these, with DexScreener for what it leaves out or won't say. */
+/** Prices and depth from DexScreener, which reads each chain's own exchanges. */
 async function readMarket(
   read: ReadJson,
   chain: TokenChain,
   ids: readonly string[]
-): Promise<{ figures: TokenFigures[]; partial: boolean; sources: string[] }> {
-  const network = GECKO_NETWORK[chain] as string
-  const gecko = await attempt(() => geckoTokens(read, network, ids))
+): Promise<{ figures: TokenFigures[]; partial: boolean }> {
   const screener = DEXSCREENER_CHAIN[chain]
-  const needsScreener =
-    screener !== undefined &&
-    (gecko === undefined || gecko.some((row) => row.change24h === undefined))
-  const backup = needsScreener ? await attempt(() => dexscreenerTokens(read, screener, ids)) : []
+  if (screener === undefined) return { figures: [], partial: false }
+  const found = await attempt(() =>
+    dexscreenerTokens(read, screener, ids.slice(0, PRICED_PER_LIST))
+  )
+  return { figures: found ?? [], partial: found === undefined }
+}
+
+function idsOf(listed: Listed[], rows: readonly TokenFigures[] | undefined): string[] {
+  return [...new Set([...listed.map((t) => t.dataId), ...(rows ?? []).map((row) => row.id)])]
+}
+
+/** Cetus's deepest pools say which tokens matter and how deep they run; Bluefin says which are real. */
+async function readSui(read: ReadJson, listed: Listed[]): Promise<Read> {
+  const [cetus, verified] = await Promise.all([
+    attempt(() => cetusTokens(read)),
+    attempt(() => bluefinVerified(read)),
+  ])
+  const ranked = [...(cetus ?? [])].sort((a, b) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0))
+  const market = await readMarket(read, 'sui', idsOf(listed, ranked))
   return {
-    figures: [...(gecko ?? []), ...(backup ?? [])],
-    partial: gecko === undefined && (backup === undefined || backup.length === 0),
-    sources: [
-      ...(gecko !== undefined ? ['GeckoTerminal'] : []),
-      ...((backup?.length ?? 0) > 0 ? ['DexScreener'] : []),
-    ],
+    figures: [...ranked, ...market.figures, ...fromListed(listed)],
+    partial: cetus === undefined || verified === undefined || market.partial,
+    sources: ['Cetus', 'Bluefin', 'DexScreener'],
+    vouched: verified ?? new Set(),
+    pricedOnly: true,
   }
 }
 
-async function readThroughPools(
-  read: ReadJson,
-  chain: TokenChain,
-  listed: Listed[]
-): Promise<Read> {
-  const network = GECKO_NETWORK[chain] as string
-  const pools = await attempt(() => geckoPoolTokens(read, network))
-  const mine = listed.map((t) => t.dataId)
-  const ids = [...new Set([...mine, ...(pools ?? [])])]
-  const market = await readMarket(read, chain, ids)
+/** NEARBlocks ranks NEAR's tokens and prices them; NEAR Intents' list says which it will route. */
+async function readNear(read: ReadJson, listed: Listed[]): Promise<Read> {
+  const [nearblocks, intents] = await Promise.all([
+    attempt(() => nearblocksTokens(read)),
+    attempt(() => nearIntentsTokens(read, 'near')),
+  ])
+  const market = await readMarket(read, 'near', idsOf(listed, nearblocks))
   return {
-    figures: [...market.figures, ...fromListed(listed)],
-    partial: pools === undefined || market.partial,
-    sources: market.sources,
+    figures: [...(nearblocks ?? []), ...market.figures, ...fromListed(listed)],
+    partial: nearblocks === undefined || intents === undefined || market.partial,
+    sources: ['NEARBlocks', 'NEAR Intents', 'DexScreener'],
+    vouched: keys('near', intents ?? []),
+    pricedOnly: true,
+  }
+}
+
+/** LFJ's token list says what is on Avalanche; DexScreener prices what is trading. */
+async function readAvalanche(read: ReadJson, listed: Listed[]): Promise<Read> {
+  const lfj = await attempt(() => lfjTokens(read))
+  const market = await readMarket(read, 'avalanche', idsOf(listed, lfj))
+  return {
+    figures: [...market.figures, ...(lfj ?? []), ...fromListed(listed)],
+    partial: lfj === undefined || market.partial,
+    sources: ['LFJ', 'DexScreener'],
+    vouched: keys(
+      'avalanche',
+      (lfj ?? []).map((t) => t.id)
+    ),
+    pricedOnly: true,
+  }
+}
+
+/** Monorail's chosen groups say what is on Monad; DexScreener adds depth and the day's move. */
+async function readMonad(read: ReadJson, listed: Listed[]): Promise<Read> {
+  const monorail = await attempt(() => monorailTokens(read))
+  const market = await readMarket(read, 'monad', idsOf(listed, monorail))
+  return {
+    figures: [...market.figures, ...(monorail ?? []), ...fromListed(listed)],
+    partial: monorail === undefined || market.partial,
+    sources: ['Monorail', 'DexScreener'],
+    vouched: keys(
+      'monad',
+      (monorail ?? []).map((t) => t.id)
+    ),
   }
 }
 
@@ -224,7 +302,10 @@ function stellarNetwork(): 'public' | 'testnet' {
 }
 
 async function readStellar(read: ReadJson, listed: Listed[]): Promise<Read> {
-  const assets = await attempt(() => stellarAssets(read, stellarNetwork()))
+  const [assets, curated] = await Promise.all([
+    attempt(() => stellarAssets(read, stellarNetwork())),
+    stellarNetwork() === 'public' ? attempt(() => soroswapCurated(read)) : undefined,
+  ])
   const contracts = (assets ?? [])
     .map((a) => a.contract)
     .filter((id): id is string => id !== undefined)
@@ -247,7 +328,12 @@ async function readStellar(read: ReadJson, listed: Listed[]): Promise<Read> {
   return {
     figures: [...figures, ...fromListed(listed)],
     partial: assets === undefined || gecko === undefined,
-    sources: ['StellarExpert', ...(gecko !== undefined ? ['GeckoTerminal'] : [])],
+    sources: [
+      'StellarExpert',
+      ...(curated !== undefined ? ['Soroswap'] : []),
+      ...(gecko !== undefined ? ['GeckoTerminal'] : []),
+    ],
+    vouched: curated ?? new Set(),
   }
 }
 
@@ -276,20 +362,40 @@ function fresh<T>(entry: Cached<T> | undefined, ttl: number, now: number): T | u
  * A few counts per read, the tokens this app trades first and then the rest, and stopping at the
  * first refusal. So the column fills in over a few reads rather than spending the limit on one.
  */
+/** Where each chain's holder counts come from. Sui has no free native source, so it asks GeckoTerminal. */
+function holdersReader(
+  chain: TokenChain
+): ((read: ReadJson, id: string) => Promise<number | undefined>) | undefined {
+  switch (chain) {
+    case 'near':
+      return nearblocksHolders
+    case 'avalanche':
+      return (read, id) => routescanHolders(read, 43114, id)
+    case 'monad':
+      return monorailHolders
+    case 'sui':
+      return (read, id) => geckoHolders(read, GECKO_NETWORK['sui'] as string, id)
+    default:
+      return undefined
+  }
+}
+
 async function fillHolders(
   read: ReadJson,
   chain: TokenChain,
   ids: readonly string[],
   now: number
 ): Promise<void> {
-  const network = GECKO_NETWORK[chain] as string
+  const reader = holdersReader(chain)
+  if (reader === undefined) return
+  const limit = chain === 'sui' ? GECKO_HOLDERS_PER_LIST : HOLDERS_PER_LIST
   let asked = 0
   for (const id of ids) {
     const key = `${chain}|${keyOf(chain, id)}`
     if (fresh(holderCounts.get(key), HOLDERS_MS, now) !== undefined) continue
-    if (asked >= HOLDERS_PER_LIST) return
+    if (asked >= limit) return
     asked += 1
-    const count = await attempt(() => geckoHolders(read, network, id))
+    const count = await attempt(() => reader(read, id))
     if (count === undefined) return
     holderCounts.set(key, { value: count, at: now })
   }
@@ -326,14 +432,23 @@ async function buildDirectory(
   now: number
 ): Promise<TokenDirectory> {
   const listed = listedTokens(chain)
-  const source =
-    chain === 'solana'
-      ? await readSolana(read, listed)
-      : chain === 'stellar'
-        ? await readStellar(read, listed)
-        : await readThroughPools(read, chain, listed)
+  const readers: Record<TokenChain, (read: ReadJson, listed: Listed[]) => Promise<Read>> = {
+    solana: readSolana,
+    stellar: readStellar,
+    sui: readSui,
+    near: readNear,
+    avalanche: readAvalanche,
+    monad: readMonad,
+  }
+  const source = await readers[chain](read, listed)
 
-  const unique = byKey(chain, source.figures)
+  const listedKeys = keys(
+    chain,
+    listed.flatMap((t) => [t.id, t.dataId])
+  )
+  const unique = byKey(chain, source.figures).filter(
+    (row) => source.pricedOnly !== true || row.priceUsd !== undefined || listedKeys.has(row.id)
+  )
   if (chain !== 'solana' && chain !== 'stellar') {
     const ids = [...listed.map((t) => t.dataId), ...unique.map((row) => row.id)]
     await fillHolders(read, chain, [...new Set(ids)], now)
@@ -350,7 +465,8 @@ async function buildDirectory(
       figures.holders === undefined && counted !== undefined
         ? { ...figures, holders: counted }
         : figures,
-      listed
+      listed,
+      source.vouched
     )
     if (native === undefined || row.symbol !== native.symbol || !row.listed) return row
     const { marketCapUsd: _wrapped, fdvUsd: _wrappedFdv, ...whole } = row
@@ -465,11 +581,12 @@ export async function tokenDetail(
   if (row === undefined) return undefined
 
   let holders = row.holders
-  if (holders === undefined && chain !== 'stellar') {
+  const reader = holdersReader(chain)
+  if (holders === undefined && reader !== undefined) {
     const key = `${chain}|${keyOf(chain, dataId)}`
     holders = fresh(holderCounts.get(key), HOLDERS_MS, now)
     if (holders === undefined) {
-      holders = await attempt(() => geckoHolders(read, GECKO_NETWORK[chain] as string, dataId))
+      holders = await attempt(() => reader(read, dataId))
       if (holders !== undefined) holderCounts.set(key, { value: holders, at: now })
     }
   }
