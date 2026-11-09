@@ -5,6 +5,7 @@ import { activeNetwork, type StellarNetworkName } from '@intent/config'
 import { databaseConfigured, getPool, withTimeout, type QueryFn } from './db'
 import { describeExecution, type ExecutionFlow } from './execution-flow'
 import { reportError } from './report'
+import type { ActivityEntry } from '../chains/activity'
 
 /**
  * What Intent records so its usage can be counted, and checked, later.
@@ -123,6 +124,9 @@ export const ANALYTICS_DDL: readonly string[] = [
   // Set once a transaction logged without a value has been read back from its chain: 'chain'
   // when it was, 'unreadable' when its chain had no record of what it sold. See backfill-values.ts.
   `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS looked_up TEXT`,
+  // Where a transaction ran and exactly what it did. Older rows stay null: nothing recorded them.
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS venue TEXT`,
+  `ALTER TABLE usage_executions ADD COLUMN IF NOT EXISTS action TEXT`,
   // Reads from before this was recorded stay null: which chain they were typed on is not known.
   `ALTER TABLE intent_reads ADD COLUMN IF NOT EXISTS chain TEXT`,
 ]
@@ -163,6 +167,10 @@ export interface ExecutionRecord {
   failure?: string
   /** What the transaction sold, when it could be read. */
   flow?: ExecutionFlow
+  /** The venue it went through, by id, on chains that have them. */
+  venue?: string
+  /** The action it carried out, finer than `kind`: a supply and a repay are both `lend`. */
+  action?: string
   /**
    * The agent race whose plan the user signed. Kept only when it names a race
    * on the same network that had a winner and began shortly before.
@@ -353,7 +361,17 @@ export interface AnalyticsRepo {
   recordExecution: (record: ExecutionRecord) => Promise<void>
   recordRace: (record: RaceRecord) => Promise<void>
   historyForAccount: (query: HistoryQuery) => Promise<HistoryPage>
+  activityForAccount: (query: ActivityQuery) => Promise<ActivityEntry[]>
 }
+
+export interface ActivityQuery {
+  network: StellarNetworkName
+  chain: ExecutionChain
+  account: string
+}
+
+/** The most a wallet's history lists. */
+const ACTIVITY_LIMIT = 100
 
 export interface HistoryQuery {
   network: StellarNetworkName
@@ -396,8 +414,8 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
       await query(
         `INSERT INTO usage_executions
            (id, network, hash, account, kind, fee_sponsored, ok, failure, submitted_at,
-            asset_in, asset_out, amount_in, volume_usd, chain, race_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $15,
+            asset_in, asset_out, amount_in, volume_usd, chain, venue, action, race_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $15, $16, $17,
            (SELECT id FROM agent_races
              WHERE id = $14::uuid AND network = $2 AND winner IS NOT NULL
                AND chain = $15
@@ -420,8 +438,45 @@ export function createAnalyticsRepo(query: QueryFn): AnalyticsRepo {
           r.flow?.volumeUsd ?? null,
           r.raceId ?? null,
           r.chain ?? 'stellar',
+          r.venue ?? null,
+          r.action ?? null,
         ]
       )
+    },
+
+    /**
+     * What a wallet did on one chain through this app, newest first. Failures that never left are
+     * not history, and a wrap or approval is only a step of what came after it. A transaction sent
+     * with no outcome yet stays, because it may well have gone through.
+     *
+     * Open to any address for the reason `historyForAccount` is: these are hashes, tokens and
+     * amounts already public on the chain. Nothing a person typed or banked with is returned.
+     */
+    async activityForAccount({ network, chain, account }) {
+      const { rows } = await query(
+        `SELECT hash, kind, action, venue, asset_in, asset_out, amount_in, ok, submitted_at
+           FROM usage_executions
+          WHERE network = $1 AND chain = $2
+            AND (account = $3
+                 OR ($3 ~ '^0x[0-9a-fA-F]{40}$' AND lower(account) = lower($3)))
+            AND hash IS NOT NULL
+            AND (ok OR failure = 'pending')
+            AND kind <> 'setup'
+          ORDER BY submitted_at DESC
+          LIMIT $4`,
+        [network, chain, account, ACTIVITY_LIMIT]
+      )
+      return rows.map((row) => ({
+        hash: String(row['hash']),
+        kind: String(row['kind']),
+        action: (row['action'] as string | null) ?? null,
+        venue: (row['venue'] as string | null) ?? null,
+        assetIn: (row['asset_in'] as string | null) ?? null,
+        assetOut: (row['asset_out'] as string | null) ?? null,
+        amountIn: row['amount_in'] === null ? null : String(row['amount_in']),
+        confirmed: row['ok'] === true,
+        at: new Date(row['submitted_at'] as string).toISOString(),
+      }))
     },
 
     async recordIntentRead(r) {
@@ -582,6 +637,10 @@ export interface LogExecutionInput {
   signedXdr?: string
   /** What it moved, where the caller already knows and there is no Stellar envelope to read. */
   flow?: ExecutionFlow
+  /** The venue it went through, by id. */
+  venue?: string
+  /** The action it carried out, finer than `kind`. */
+  action?: string
   /** Set for actions on other chains, which only run on mainnet. Defaults to the page's Stellar network. */
   network?: StellarNetworkName
 }
@@ -632,6 +691,8 @@ export async function logExecution(input: LogExecutionInput): Promise<void> {
       feeSponsored: input.feeSponsored,
       ...executionFromResult(input.result),
       ...(flow === undefined ? {} : { flow }),
+      ...(input.venue === undefined ? {} : { venue: input.venue }),
+      ...(input.action === undefined ? {} : { action: input.action }),
       ...(raceId === undefined ? {} : { raceId }),
     })
   } catch (e) {

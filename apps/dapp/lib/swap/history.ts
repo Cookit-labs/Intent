@@ -40,7 +40,7 @@ import { INTENT_MEMO } from './build-tx'
  * memo, and the supply that follows it is a separate transaction the chain does
  * not associate with it. The caller joins that in from the app's own record.
  */
-export type SwapKind = 'swap' | 'limit' | 'bundle' | 'pool' | 'cashout'
+export type SwapKind = 'swap' | 'limit' | 'bundle' | 'pool' | 'cashout' | 'other'
 
 export interface SwapRecord {
   txHash: string
@@ -66,6 +66,12 @@ export interface SwapRecord {
    * it.
    */
   kind: SwapKind
+  /** What to call it, where the app's record knows better than its kind can say. */
+  title?: string
+  /** Sent, with no answer from the chain on how it ended. */
+  unconfirmed?: boolean
+  /** Read from the app's record and not a ledger, so it has no route to show. */
+  recorded?: boolean
   /** True when the transaction carries this app's memo. */
   fromThisApp: boolean
   /**

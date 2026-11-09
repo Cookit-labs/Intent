@@ -17,6 +17,7 @@ const WORDS: Record<SwapKind, (r: SwapRecord) => string> = {
   bundle: (r) => `Swap ${r.sentAmount} ${r.sentAsset} to ${r.receivedAsset}, then supply it`,
   pool: (r) => `Pool operation with ${r.sentAsset} and ${r.receivedAsset}`,
   cashout: (r) => `Cash out ${r.sentAmount} ${r.sentAsset}`,
+  other: (r) => r.title ?? 'Transaction',
 }
 
 export function ledgerTurns(

@@ -2,7 +2,7 @@
 
 import { cn } from '@intent/ui'
 import { ArrowUp, Bot, FileText, Paperclip, Plus, Sparkles, type LucideIcon } from 'lucide-react'
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 
 const EXAMPLES = [
   'Accumulate 2 ETH below $3,200',
@@ -33,12 +33,15 @@ function MenuItem({
 
 export function ComposerInput({
   onSubmit,
+  draft,
   disabled = false,
   showExamples = false,
   onReset,
   placeholder = 'Describe the outcome you want…',
 }: {
   onSubmit: (text: string) => void
+  /** Typed in for the person when it arrives or changes. Sending it stays theirs to do. */
+  draft?: string
   disabled?: boolean
   showExamples?: boolean
   onReset?: () => void
@@ -46,6 +49,10 @@ export function ComposerInput({
 }): JSX.Element {
   const [text, setText] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (draft !== undefined) setText(draft)
+  }, [draft])
 
   function submit(): void {
     const trimmed = text.trim()

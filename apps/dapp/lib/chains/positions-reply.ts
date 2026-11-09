@@ -129,7 +129,7 @@ function nextWords(position: VenuePosition, venue: VenueHoldings): string | unde
   }
 }
 
-function readyIn(hours: number | undefined): string | undefined {
+export function readyIn(hours: number | undefined): string | undefined {
   if (hours === undefined || !Number.isFinite(hours)) return undefined
   if (hours < 1) return 'in under an hour'
   const rounded = Math.round(hours)
@@ -197,6 +197,54 @@ export function positionsReply(report: PositionsReport | undefined, chainName: s
     nothing: `You have nothing deposited, staked, borrowed or waiting to be claimed on ${chainName}.`,
     notes: [],
   })
+}
+
+/** One thing held at a venue, as a row of the History page. */
+export interface PositionRow {
+  key: string
+  title: string
+  note: string
+  symbol: string
+  amount: string
+  /** The way back out, as the sentence that does it. Absent when no sentence would. */
+  exit?: { label: string; words: string }
+}
+
+const ROW_OF: Record<VenuePosition['slot'], { title: (venue: string) => string; note: string }> = {
+  supplied: { title: (v) => `Supplied to ${v}`, note: 'earning' },
+  staked: { title: (v) => `Staked on ${v}`, note: 'earning' },
+  borrowed: { title: (v) => `Borrowed from ${v}`, note: 'owed' },
+  cooling: { title: (v) => `Cooling down on ${v}`, note: 'on its way' },
+  claimable: { title: (v) => `Ready to claim on ${v}`, note: 'ready' },
+}
+
+const EXIT_LABEL: Record<VenuePosition['slot'], string> = {
+  supplied: 'Withdraw',
+  staked: 'Unstake',
+  borrowed: 'Repay',
+  cooling: 'Claim',
+  claimable: 'Claim',
+}
+
+/** Every position in a report as a row, named after the venue the money is at. */
+export function positionRows(report: PositionsReport): PositionRow[] {
+  return report.venues.flatMap((venue) =>
+    venue.positions.map((position, i) => {
+      const { title, note } = ROW_OF[position.slot]
+      const when = position.slot === 'cooling' ? readyIn(position.readyInHours) : undefined
+      // A cooling exit has nothing to collect yet, so offering the claim would only be refused.
+      const words = position.slot === 'cooling' ? undefined : nextWords(position, venue)
+      const label = position.id !== undefined ? 'Cancel' : EXIT_LABEL[position.slot]
+      return {
+        key: `${venue.id}-${position.slot}-${position.symbol}-${position.id ?? i}`,
+        title: title(venue.name),
+        note: when === undefined ? note : `ready ${when}`,
+        symbol: position.symbol,
+        amount: position.amount,
+        ...(words === undefined ? {} : { exit: { label, words } }),
+      }
+    })
+  )
 }
 
 const BLEND = 'Blend'

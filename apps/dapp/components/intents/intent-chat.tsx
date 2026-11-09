@@ -84,6 +84,7 @@ import { chainCapabilities } from '../../lib/chains/capabilities'
 import { sizeInUnits } from '../../lib/chains/dollar-amount'
 import { chainHelp, helpForUnread } from '../../lib/chains/explain'
 import { racesFirst } from '../../lib/chains/parse-action'
+import { txExplorerLink } from '../../lib/chains/activity'
 import { asksForPositions, readPositionsReply } from '../../lib/chains/positions-reply'
 import {
   cashoutStarts,
@@ -272,10 +273,13 @@ function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
 export function IntentChat({
   showing,
   linkedRule,
+  linkedDraft,
 }: {
   /** False while the person is on another page and this is kept mounted behind it. */
   showing: boolean
   linkedRule?: string
+  /** Words a link wants typed for the person, left for them to read and send. Never sent by itself. */
+  linkedDraft?: string
 }): JSX.Element {
   const createIntent = useCreateIntent()
   const cancelIntent = useCancelIntent()
@@ -3333,7 +3337,7 @@ export function IntentChat({
                     {restored.outcome}
                     {restored.txHash !== undefined ? (
                       <a
-                        href={`${stellarNetwork.blockExplorerUrl}/tx/${restored.txHash}`}
+                        href={txExplorerLink(slug, restored.txHash)}
                         target="_blank"
                         rel="noreferrer"
                         className="mt-1 block text-xs underline underline-offset-2 opacity-70"
@@ -3770,6 +3774,7 @@ export function IntentChat({
       >
         <ComposerInput
           onSubmit={handleSubmit}
+          {...(linkedDraft !== undefined ? { draft: linkedDraft } : {})}
           showExamples={message === null && thread.length === 0 && transcript.length === 0}
           {...(clarifying !== null
             ? { placeholder: 'Type your answer…' }

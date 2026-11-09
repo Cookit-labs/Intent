@@ -102,6 +102,7 @@ export async function POST(
     await logExecution({
       ...loggedAction(chainApi.chain, account, venueId, receipt),
       chain: chainApi.chain,
+      venue: venueId,
       account,
       feeSponsored: false,
       network: 'mainnet',

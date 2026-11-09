@@ -110,6 +110,15 @@ export function getChainDescriptor(slug: ChainSlug): ChainDescriptor {
   return CHAIN_DESCRIPTORS[slug]
 }
 
+/**
+ * Explorer URL for a transaction, for the same reason. NEAR's explorer is the one that disagrees.
+ * Stellar's descriptor is built for whichever network the page is on, so its base is right too.
+ */
+export function txExplorerUrl(slug: ChainSlug, hash: string): string {
+  const base = CHAIN_DESCRIPTORS[slug].blockExplorerUrl
+  return slug === 'near' ? `${base}/txns/${hash}` : `${base}/tx/${hash}`
+}
+
 /** Explorers that say `account` where the rest say `address`. */
 const ACCOUNT_PATH_CHAINS: readonly ChainSlug[] = ['stellar', 'solana', 'sui']
 

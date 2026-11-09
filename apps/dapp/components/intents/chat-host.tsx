@@ -11,9 +11,15 @@ import { IntentChat } from './intent-chat'
 
 /** A link that opens a rule still works when the chat is already mounted. */
 function ChatFromLink({ showing }: { showing: boolean }): JSX.Element {
-  const rule = useSearchParams().get('rule')
+  const params = useSearchParams()
+  const rule = params.get('rule')
+  const say = params.get('say')
   return (
-    <IntentChat showing={showing} {...(showing && rule !== null ? { linkedRule: rule } : {})} />
+    <IntentChat
+      showing={showing}
+      {...(showing && rule !== null ? { linkedRule: rule } : {})}
+      {...(showing && say !== null ? { linkedDraft: say } : {})}
+    />
   )
 }
 

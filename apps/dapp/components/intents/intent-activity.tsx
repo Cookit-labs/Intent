@@ -28,7 +28,17 @@ function Section({ title, intents }: { title: string; intents: Intent[] }): JSX.
   )
 }
 
-export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.Element {
+export function IntentActivity({
+  onCompose,
+  firstIntent = true,
+}: {
+  onCompose?: () => void
+  /**
+   * False once the wallet is known to have done something, or isn't known not to. Most of what a
+   * wallet does never becomes an intent, so an empty list here says nothing about that.
+   */
+  firstIntent?: boolean
+}): JSX.Element | null {
   const { slug, segment } = useChain()
   const { data: intents, isLoading, isError, error } = useIntents(slug)
 
@@ -54,6 +64,7 @@ export function IntentActivity({ onCompose }: { onCompose?: () => void }): JSX.E
   }
 
   if (!intents || intents.length === 0) {
+    if (!firstIntent) return null
     return (
       <Card className="flex flex-col items-center gap-3 p-12 text-center">
         <p className="text-muted-foreground text-sm">No intents yet.</p>
