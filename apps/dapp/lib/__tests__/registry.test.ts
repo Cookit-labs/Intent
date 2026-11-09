@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const KEYS = [
   'DEEPSEEK_API_KEY',
   'GROQ_API_KEY',
+  'NEARAI_API_KEY',
+  'NEARAI_MODEL',
   'OPENROUTER_API_KEY',
   'OPENROUTER_MODEL',
   'AGENT_BRAINS',
@@ -72,6 +74,18 @@ describe('getRoster', () => {
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
     expect(getRoster()).toHaveLength(5)
+  })
+
+  it('fields NEAR AI under its own name when its key is set', async () => {
+    process.env['NEARAI_API_KEY'] = 'test-key'
+    const { getRoster, publicRoster } = await registry()
+    const roster = getRoster() ?? []
+    expect(roster.map((a) => a.key)).toEqual(['nearai:z-ai/glm-5.3-flash'])
+    expect(publicRoster(roster)[0]).toMatchObject({
+      name: 'GLM 5.3 Flash',
+      providerName: 'NEAR AI',
+      free: false,
+    })
   })
 
   it('never fields a local daemon unless named', async () => {

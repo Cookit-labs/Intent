@@ -184,6 +184,33 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
   },
 
   /**
+   * NEAR AI Cloud, paid from credits on the account.
+   *
+   * Its gateway also forwards to outside labs, and those models are marked
+   * `verifiable: false` in the catalogue. GLM 5.3 Flash runs on NEAR's own
+   * attested hardware, supports tools, and is a lab nothing else here races.
+   * `near-ai.live.test.ts` checks the catalogue still says so. A model named in
+   * `NEARAI_MODEL` or `AGENT_BRAINS` is not checked.
+   *
+   * Its docs say `enable_thinking: false` only moves the reasoning into the
+   * reply, so a talk turn uses `reasoning_effort: 'low'` instead.
+   */
+  nearai: {
+    id: 'nearai',
+    displayName: 'NEAR AI',
+    baseUrl: 'https://cloud-api.near.ai/v1',
+    defaultModel: 'z-ai/glm-5.3-flash',
+    apiKeyEnv: 'NEARAI_API_KEY',
+    strictTools: false,
+    autoSelect: true,
+    toolChoice: 'auto',
+    pricing: { 'z-ai/glm-5.3-flash': { input: 0.08, output: 0.5 } },
+    defaultPricing: { input: 0.08, output: 0.5 },
+    displayNames: { 'z-ai/glm-5.3-flash': 'GLM 5.3 Flash' },
+    talk: { body: { reasoning_effort: 'low' }, maxTokens: 400 },
+  },
+
+  /**
    * A model running on this machine. Free, unmetered, and unreachable from a
    * deployed build — `localhost:11434` does not exist on Netlify, so an agent
    * configured here in production reports `no_api_key` and shows as an agent
