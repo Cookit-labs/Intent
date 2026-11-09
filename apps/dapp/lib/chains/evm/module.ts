@@ -127,16 +127,21 @@ function evmModule(
   }
 }
 
-export const avalancheModule = evmModule('avalanche', {
-  supply: 'aave-avalanche',
-  withdraw: 'aave-avalanche',
-  borrow: 'aave-avalanche',
-  repay: 'aave-avalanche',
-  stream: 'sablier-avalanche',
-  cancel: 'sablier-avalanche',
-  invoice: 'bulla',
-  pay_invoice: 'bulla',
-})
+export const avalancheModule: ChainModule = {
+  ...evmModule('avalanche', {
+    supply: 'aave-avalanche',
+    withdraw: 'aave-avalanche',
+    borrow: 'aave-avalanche',
+    repay: 'aave-avalanche',
+    stream: 'sablier-avalanche',
+    cancel: 'sablier-avalanche',
+    invoice: 'bulla',
+    pay_invoice: 'bulla',
+  }),
+  // 1Click, the default, doesn't list WAVAX.
+  venueForToken: { swap: { WAVAX: 'uniswap-avalanche' } },
+  wrappedToken: { AVAX: 'WAVAX' },
+}
 
 /**
  * USDT is not matched to USDT0. A person is told instead, so nothing gets signed under a name they

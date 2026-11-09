@@ -309,10 +309,12 @@ export interface ChainModule {
   venues: readonly ChainVenue[]
   defaultVenue: Partial<Record<ChainActionKind, string>>
   /**
-   * Where a token only one venue here can take goes when no venue is named, by upper-case symbol.
-   * Comes before the default, which would only refuse it.
+   * Where a token only one venue here can take goes when no venue is named, by upper-case symbol:
+   * for a swap, the token it delivers. Comes before the default, which would only refuse it.
    */
   venueForToken?: Partial<Record<ChainActionKind, Record<string, string>>> | undefined
+  /** The wrapped form of a native token, by upper-case symbol, for a venue that only takes that. */
+  wrappedToken?: Readonly<Record<string, string>> | undefined
   /** Dollars per display unit, or nothing if no live price, in which case the trade is refused. */
   priceUsd: (token: ChainToken) => Promise<number | undefined>
   /** Sends signed bytes, or records what a wallet already sent. */

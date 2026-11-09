@@ -11,6 +11,8 @@ export type FollowOn =
 export interface ChainSequenceRequest {
   swap: ChainActionRequest
   followOn: FollowOn
+  /** Said beside the steps before step 1 is signed, when the server changed how step 2 runs. */
+  note?: string
 }
 
 /** Where a swap can go on to a cash-out. Stellar has its own path, so it is not here. */

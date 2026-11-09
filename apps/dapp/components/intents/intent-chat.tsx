@@ -102,7 +102,7 @@ import {
   questionChainRefusal,
   sequenceOutcome,
   stepOnItsOwn,
-  readFollowOnRefusal,
+  readFollowOnPlan,
   cashoutSaid,
 } from '../../lib/chains/sequence-flow'
 import type { ChainActionRequest, ChainWithActions, WalletBalances } from '../../lib/chains/types'
@@ -687,6 +687,8 @@ export function IntentChat({
   // Read when a model's answer comes back, which may be after the run has moved on.
   const chainSequenceNow = useRef(chainSequence)
   chainSequenceNow.current = chainSequence
+  // The run whose step 2 now waits for a press, because the person left or typed during it.
+  const autoStoppedFor = useRef<ChainSequenceRequest | null>(null)
   // What a new message left behind by ending a swap that had settled.
   const [sequenceNote, setSequenceNote] = useState<string | null>(null)
   useEffect(() => {
@@ -1873,6 +1875,22 @@ export function IntentChat({
     chainSequence.runNext()
   }
 
+  // Step 2 follows the swap by itself, until the person does something else. Leaving this chat or
+  // typing anything hands it to them for the rest of the run: a wallet must not open over another
+  // page, over a card that went stale meanwhile, or against "wait, don't deposit". The button stays.
+  useEffect(() => {
+    if (!showing) {
+      autoStoppedFor.current = chainSequence.sequence
+      return
+    }
+    if (clarifyBusy || autoStoppedFor.current === chainSequence.sequence) return
+    const move = chainSequence.takeAutoMove()
+    if (move === 'prepare') pressNextStep()
+    else if (move === 'sign') chainAction.confirm()
+    // Both change identity with their state; these are what can make a move due.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showing, clarifyBusy, chainSequence.stage, chainAction.phase, chainAction.prepared])
+
   /** Step 1: the same race as a plain swap, with the sequence watching its card. */
   function runSequenceSwap(request: ChainSequenceRequest, text: string): void {
     // Sized here and not on the way in, so a currency question left open is priced when answered.
@@ -1984,13 +2002,20 @@ export function IntentChat({
       chainAction.reset()
       setClarifyBusy(true)
       const { turn, account, chain } = latest.current
-      void readFollowOnRefusal(slug, request, address).then((refused) => {
+      void readFollowOnPlan(slug, request, address).then((plan) => {
         if (clarifyRuns.current === 0) setClarifyBusy(false)
         // The person has moved on, and a swap must not start under what they did next.
         const now = latest.current
         if (turn !== now.turn || account !== now.account || chain !== now.chain) return
-        if (refused !== undefined) chainAction.refuse(refused, text)
-        else runSequenceSwap(request, text)
+        if ('refusal' in plan) {
+          chainAction.refuse(plan.refusal, text)
+          return
+        }
+        if (plan.note !== undefined) recordLive('agent', plan.note)
+        runSequenceSwap(
+          plan.note === undefined ? plan.request : { ...plan.request, note: plan.note },
+          text
+        )
       })
       return
     }
@@ -2194,6 +2219,7 @@ export function IntentChat({
    */
   function handleSubmit(typed: string): void {
     latest.current.turn += 1
+    autoStoppedFor.current = chainSequenceNow.current.sequence
     // A misspelled verb is corrected before anything reads the sentence. "Tell me my positions"
     // has none, and would become "sell me".
     const text = asksForPositions(typed) ? typed : fixVerbTypo(typed)

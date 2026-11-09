@@ -19,6 +19,7 @@ import {
   toBaseUnits,
   type ChainActionRequest,
   type ChainToken,
+  type FollowOnStep,
   type ChainVenue,
   type PreparedAction,
   type VenuePosition,
@@ -825,14 +826,31 @@ export function createAaveVenue(
     })
   }
 
+  const takesListed = takesOnly(
+    market.name,
+    market.tokens.map((token) => token.symbol)
+  )
+
+  /**
+   * Asked before a swap is signed, so a reserve that is full, frozen or paused says so then, and not
+   * once the swap has left the person holding a token they did not want. The size isn't known yet, so
+   * this asks for room for one whole token, and the build checks the real amount.
+   */
+  async function assertCanFollow(step: FollowOnStep, account: string): Promise<void> {
+    await takesListed(step, account)
+    const token = tokenBySymbol(market.tokens, step.tokenIn)
+    if (step.kind !== 'supply' || token === undefined) return
+    await failingClosed(async () => {
+      const reserve = await readReserve(market, token, readerNow())
+      assertSupplyOpen(market, token, reserve, BigInt(10) ** BigInt(token.decimals))
+    })
+  }
+
   return {
     id: market.id,
     name: market.name,
     kinds: ['supply', 'withdraw', 'borrow', 'repay'],
-    assertCanFollow: takesOnly(
-      market.name,
-      market.tokens.map((token) => token.symbol)
-    ),
+    assertCanFollow,
     quote,
     prepare,
     positions,

@@ -8,6 +8,7 @@ import {
   MEASURE_ATTEMPTS,
   MEASURE_INTERVAL_MS,
   SWAP_NEXT_STEP,
+  SWAP_THEN_WALLET,
   TOO_SMALL_FOR_WEAVE,
   UNCONFIRMED_SWAP,
   beforeReadCounts,
@@ -28,7 +29,7 @@ import {
   quoteStep,
   readBeforeSwap,
   readCashoutNote,
-  readFollowOnRefusal,
+  readFollowOnPlan,
   readHolding,
   readyAction,
   secondStepLabel,
@@ -407,7 +408,7 @@ describe('words for what follows a swap', () => {
 
   it('leaves out Weave’s size note, which is about cash-outs only', () => {
     for (const request of OTHERS) {
-      expect(swapLine('review', 'known', TOO_SMALL_FOR_WEAVE, request)).toBe(SWAP_NEXT_STEP)
+      expect(swapLine('review', 'known', TOO_SMALL_FOR_WEAVE, request)).toBe(SWAP_THEN_WALLET)
     }
   })
 
@@ -506,7 +507,14 @@ describe('secondStepPress', () => {
   })
 })
 
-describe('readFollowOnRefusal', () => {
+async function readFollowOnRefusal(
+  ...args: Parameters<typeof readFollowOnPlan>
+): Promise<string | undefined> {
+  const plan = await readFollowOnPlan(...args)
+  return 'refusal' in plan ? plan.refusal : undefined
+}
+
+describe('readFollowOnPlan', () => {
   const SEND: ChainSequenceRequest = {
     swap: { kind: 'swap', amount: '1', tokenIn: 'SOL', tokenOut: 'usdc' },
     followOn: { kind: 'send', recipient: BOB },

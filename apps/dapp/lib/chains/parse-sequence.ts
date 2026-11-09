@@ -33,9 +33,30 @@ const SEQUENCE = new RegExp(
   'i'
 )
 const CASHOUT = /^(?:cash[ -]?out|off[ -]?ramp|withdraw to bank)(?:\s+(.+))?$/i
-const EARN =
-  /^(deposit|supply|lend|save|earn)(?:\s+it)?(?:\s+(?:on|via|with|using|in|into|at|to)\s+(\S.*?))?$/i
-const STAKE = /^stake(?:\s+it)?(?:\s+(?:on|via|with|using|in|into|at|to)\s+(\S.*?))?$/i
+/** What the swap delivered, however it is referred to. Naming a token is left to the model. */
+const WHAT_ARRIVED = String.raw`(?:\s+(?:it|that|this|them|the\s+(?:proceeds|funds|money|tokens?|output)|everything|all(?:\s+of\s+(?:it|that))?))?`
+const PLACE = String.raw`(?:\s+(?:on|via|with|using|in|into|at|to)\s+(\S.*?))?`
+const EARN = new RegExp(
+  String.raw`^(?:deposit|supply|lend|save|earn|put)${WHAT_ARRIVED}${PLACE}$`,
+  'i'
+)
+const STAKE = new RegExp(String.raw`^stake${WHAT_ARRIVED}${PLACE}$`, 'i')
+const EARN_YIELD = /^earn\s+(?:yield|interest)(?:\s+on\s+(?:it|that|this|them))?$/i
+/** "put it" with nowhere to put it asks for nothing. */
+const PUT_ALONE = /^put\b/i
+/**
+ * Words for a kind of place and not for a place: "a yield vault", "the lending pool". They leave
+ * the choice of venue open, where taking them for a venue's name would refuse the whole request.
+ */
+const ANY_PLACE =
+  /^(?:(?:an?|the|some|my)\s+)?(?:(?:yield|earn(?:ing)?|lending|savings?|interest|defi)(?:[- ]bearing)?\s*)*(?:vaults?|pools?|venues?|protocols?|apps?|markets?|accounts?|yields?|earn|savings?|lending)?$/i
+
+/** "Earn" alone is how a venue is named on NEAR, where 1Click Earn answers to it. */
+function namedPlace(words: string | undefined): string | undefined {
+  const place = words?.trim()
+  if (place === undefined) return undefined
+  return ANY_PLACE.test(place) && place.toLowerCase() !== 'earn' ? undefined : place
+}
 /** An address and nothing else: NEAR accounts add `.`, `_`, `-` and `:` inside. */
 const ADDRESS_CHARS = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/
 const SEND = /^(?:send|transfer)(?:\s+it)?\s+to\s+(\S+)$/i
@@ -56,12 +77,17 @@ function followOnOf(text: string): FollowOn | { refusal: string } | null {
       ? { kind: 'cashout' }
       : { kind: 'cashout', currency: read.currency }
   }
+  if (EARN_YIELD.test(text)) return { kind: 'supply' }
   const earn = EARN.exec(text)
-  if (earn !== null)
-    return earn[2] === undefined ? { kind: 'supply' } : { kind: 'supply', venue: earn[2].trim() }
+  if (earn !== null && !(earn[1] === undefined && PUT_ALONE.test(text))) {
+    const venue = namedPlace(earn[1])
+    return venue === undefined ? { kind: 'supply' } : { kind: 'supply', venue }
+  }
   const stake = STAKE.exec(text)
-  if (stake !== null)
-    return stake[1] === undefined ? { kind: 'stake' } : { kind: 'stake', venue: stake[1].trim() }
+  if (stake !== null) {
+    const venue = namedPlace(stake[1])
+    return venue === undefined ? { kind: 'stake' } : { kind: 'stake', venue }
+  }
   const send = SEND.exec(text)
   if (send !== null && ADDRESS_CHARS.test(send[1] as string)) {
     return { kind: 'send', recipient: send[1] as string }
@@ -274,6 +300,19 @@ function swapOf(read: ReadSwap): ChainActionRequest | { refusal: string } {
   }
 }
 
+const STABLE = /^(?:USDC|USDT0?)$/i
+
+/**
+ * A model often reads "50 USDC" as fifty dollars. Where the words say a count of the stablecoin it
+ * is one, and stays exact rather than being sized at a live price.
+ */
+function countedInStable(swap: ChainActionRequest, said: readonly string[]): ChainActionRequest {
+  if (swap.amountIsUsd !== true || !STABLE.test(swap.tokenIn)) return swap
+  if (dollarsSaid(swap.amount, swap.tokenIn, undefined, said)) return swap
+  const { amountIsUsd: _dollars, ...counted } = swap
+  return counted
+}
+
 /** A venue's id, such as jupiter-lend, against "Jupiter Lend" or "jupiterlend" as typed. */
 function venueSaid(venue: string, said: readonly string[]): boolean {
   const plain = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -308,8 +347,10 @@ export function requestSaid(
       out !== undefined &&
       chainTokenWord(out).toUpperCase() === 'USDC' &&
       dollarsSaid(request.amount, request.tokenIn, undefined, said)
-    if (!asNamed && !toUsdc) return false
-    return request.recipient === undefined || typedExactly(request.recipient, said)
+    if (asNamed || toUsdc) {
+      return request.recipient === undefined || typedExactly(request.recipient, said)
+    }
+    if (!STABLE.test(chainTokenWord(request.tokenIn))) return false
   }
   if (!sequenceWordsMatch({ amount: request.amount, token: request.tokenIn }, said)) return false
   // Named in order: the amount by the token given up, and the token received after it. A cash-out
@@ -338,11 +379,12 @@ export function sequenceFromReading(
 ): ChainSequenceRequest | { refusal: string } | null {
   const model = read.followOn ?? refusedFollowOn(read, said)
   if (model === null) return null
-  const swap = swapOf(read)
-  if ('refusal' in swap) return swap
-  if (!requestSaid(swap, said, model.kind === 'offramp')) {
+  const read$ = swapOf(read)
+  if ('refusal' in read$) return read$
+  if (!requestSaid(read$, said, model.kind === 'offramp')) {
     return refuseUnsaid(read, 'that amount, token and token to receive')
   }
+  const swap = countedInStable(read$, said)
 
   let followOn: FollowOn
   if (model.kind === 'offramp') {
@@ -424,7 +466,7 @@ export function swapFromReading(
   const swap = swapOf(read)
   if ('refusal' in swap) return swap
   return requestSaid(swap, said)
-    ? swap
+    ? countedInStable(swap, said)
     : refuseUnsaid({ ...read, followOn: null }, 'that amount, token and token to receive')
 }
 
@@ -498,7 +540,13 @@ export function chainRouteFromReading(
     const { followOn } = sequence
     const recipientSaid = followOn.kind !== 'send' || typedExactly(followOn.recipient, said)
     return requestSaid(sequence.swap, said, followOn.kind === 'cashout') && recipientSaid
-      ? { sequence: { ...sequence, followOn: ownFollowOn(followOn, said) } }
+      ? {
+          sequence: {
+            ...sequence,
+            swap: countedInStable(sequence.swap, said),
+            followOn: ownFollowOn(followOn, said),
+          },
+        }
       : refuseUnsaid(
           { ...read, followOn: { kind: READING_KIND[followOn.kind], venue: '' } },
           'that request'
@@ -520,7 +568,7 @@ export function chainRouteFromReading(
         ? { ...action, venue: undefined }
         : action
     return requestSaid(own, said)
-      ? { action: own }
+      ? { action: countedInStable(own, said) }
       : refuseUnsaid(
           {
             ...read,
