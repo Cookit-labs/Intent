@@ -28,6 +28,92 @@ _Express outcomes. Let agents compete. Settle on-chain._
 
 ---
 
+## NEAR Hackathon
+
+Built at NEAR HACKATHON. **Only the NEAR integration below was built in the hackathon window and is
+submitted for judging.**
+
+**Disclosure.** Intent existed before the hackathon as a chat app for trading on Stellar. That
+product, including its chat, agent race and interface, is baseline. The sections after this one
+describe the wider project, and some predate the current app.
+
+- Baseline: tag `pre-hackathon`
+- Submitted: tag `hackathon-submission`
+- Diff: [`pre-hackathon...hackathon-submission`](https://github.com/Cookit-labs/Intent/compare/pre-hackathon...hackathon-submission)
+
+That diff also carries work on other chains. The NEAR work is in
+[`apps/dapp/lib/chains/near/`](apps/dapp/lib/chains/near),
+[`apps/dapp/lib/wallet/near-connector.ts`](apps/dapp/lib/wallet/near-connector.ts) and the
+`near-*` and `rhea*` files in [`apps/dapp/lib/__tests__/`](apps/dapp/lib/__tests__).
+
+### The problem and the product
+
+Using DeFi on NEAR means knowing which app to open, comparing prices yourself and working through
+wrapping, storage deposits and receipts that can fail after a transaction reports success. In
+Intent you type what you want in a chat. AI agents compare real quotes, question each other's
+choices in the chat and propose a route. You read a card and sign in your own wallet. Agents can't
+sign or send anything.
+
+### What runs on NEAR
+
+| You type                                 | What happens                                                              | Built on                      |
+| ---------------------------------------- | ------------------------------------------------------------------------- | ----------------------------- |
+| `swap 5 USDC to NEAR`                    | Agents race live quotes, you sign the winner                              | Rhea DEX, NEAR Intents 1Click |
+| `swap 5 USDC to NEAR then stake`         | Swap, then stake what arrived, as two steps                               | Rhea DEX, Meta Pool           |
+| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR              |
+| `supply 25 USDC on 1Click Earn`          | Deposit and withdraw                                                      | NEAR Intents                  |
+| `supply 25 USDC on Rhea Lend`            | Supply, withdraw, borrow, repay                                           | Rhea Lend                     |
+| `send 1 NEAR to bob.near`                | A plain NEAR transfer                                                     | Protocol `Transfer` action    |
+| `send 5 USDC to <Solana or Sui address>` | Pays out on that chain, refund comes back to NEAR                         | NEAR Intents 1Click           |
+| a limit order on NEAR and USDC           | Rests in the pool until filled or cancelled                               | Rhea DCL                      |
+| `where is my money`                      | Every position, what to type next, and how far a loan is from liquidation | Contract reads                |
+
+**NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect
+(`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent runs
+GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested. Intent doesn't check
+the attestation itself.
+
+**Libraries and tools:** see `apps/dapp/package.json`. Much of the code was written with AI coding
+tools. The Stellar app and its shared chat code are this team's own pre-hackathon work.
+
+### Try it with no wallet and no funds
+
+These read real NEAR mainnet and 1Click. They sign nothing and need no keys.
+
+```bash
+pnpm install
+cd apps/dapp
+pnpm exec vitest run lib/__tests__/near-1click.live.test.ts lib/__tests__/rhea.live.test.ts lib/__tests__/near-contracts.live.test.ts lib/__tests__/near-exits.live.test.ts lib/__tests__/near-rhea-dcl.live.test.ts
+```
+
+You should see every test pass. They cover real dry quotes, Rhea pool and lending reads, and
+transactions built and checked but never sent.
+
+### Try it in the app
+
+Everything here runs on mainnet, so use small amounts. The app is at
+[app.runintent.xyz](https://app.runintent.xyz) and needs a NEAR wallet.
+
+1. Open the app and connect a NEAR wallet. You should land in the chat on NEAR.
+2. Type `swap 1 USDC to NEAR`. You should see agents post proposals and question each other, then a
+   swap card with the amount you'd receive. Your wallet asks you to sign only when you confirm.
+3. Type `where is my money`. You should see what you hold in each app and what to type next.
+
+To run it locally, follow [Quick Start](#quick-start), then set one model key in
+`apps/dapp/.env.local`. `GROQ_API_KEY` is free and enough for one agent.
+
+### Not done or not proven
+
+- **Real wallet runs:** the NEAR flows are covered by tests and live read-only checks. No transaction
+  through this app has yet been confirmed on NEAR by a real wallet.
+- **Cash-out to a bank:** closed from NEAR, because the payout provider can't open an order for a
+  NEAR deposit yet. Sending USDC to Solana and cashing out there is the way around it.
+- **Sends to EVM chains:** refused, because a 0x address doesn't say which chain it means.
+- **Swaps into NEAR through 1Click:** these arrive as wNEAR, so 1Click only runs for them when it's
+  named. A stake or send after one stops and says the swap went through.
+
+---
+
 ## What is Intent?
 
 Intent is a stablecoin-native execution marketplace. Instead of placing orders manually, users express the **outcome** they want — buy ETH, accumulate a position, hedge exposure, rebalance capital. Autonomous AI agents then compete in a timed auction to fulfill that intent.
@@ -250,39 +336,33 @@ rate-limited to 1/minute and 5/hour per address.
 
 ## AI Agents
 
-The four competing agents (TWAP, Momentum, Arbitrage, Shadow) reason with
-DeepSeek. Off by default — with no configuration the app runs a simulated race
-and behaves exactly as before.
+An agent is a model. Each one competes on the same live quotes, so different models really do
+disagree. Set any of these keys and that model joins the race, on every chain:
 
-```bash
-# apps/dapp/.env.local
-AGENT_BRAIN=deepseek
-DEEPSEEK_API_KEY=sk-...
-NEXT_PUBLIC_USE_AI=true
-```
+| Variable             | Model                           |
+| -------------------- | ------------------------------- |
+| `ANTHROPIC_API_KEY`  | Claude Sonnet                   |
+| `DEEPSEEK_API_KEY`   | DeepSeek V4 Flash               |
+| `GROQ_API_KEY`       | Qwen on Groq's free plan        |
+| `NEARAI_API_KEY`     | GLM 5.3 Flash on NEAR AI Cloud  |
+| `OPENROUTER_API_KEY` | Three free models on OpenRouter |
 
-**The key is server-side only.** Agents run in a route handler
-(`app/api/agents/compete`) that streams each proposal over SSE as it lands.
-Nothing under `lib/agents/brains/` may be imported from a component.
+`AGENT_BRAINS` overrides the line-up, for example `AGENT_BRAINS=nearai,groq`.
 
-**Failure degrades, it does not break.** A missing key, a rate limit, a timeout
-or a malformed response makes that one agent fall back to a simulated proposal;
-the race still renders four cards and picks a winner. The panel says
-"Simulated proposals" whenever any card came from the fallback, so mock
-reasoning is never passed off as live agent output.
+**The keys are server-side only.** Agents run in a route handler (`app/api/agents/compete`) that
+streams each proposal as it lands. Nothing under `lib/agents/brains/` may be imported from a
+component.
 
-**Scoring is deterministic TypeScript**, not a model call — a model grading its
-own competition would not be reproducible between identical runs.
+**There is no fallback.** With no key, or when nobody answers, the chat says the agents aren't
+available. It never shows a made-up proposal.
 
-**Swapping provider** means adding one file under `lib/agents/brains/` and a
-line in `registry.ts`. Nothing else knows which model answered.
+**Scoring is deterministic TypeScript**, not a model call, so identical runs score identically.
 
-| Variable             | Default             | Purpose                                  |
-| -------------------- | ------------------- | ---------------------------------------- |
-| `AGENT_BRAIN`        | `mock`              | `deepseek` to use the model              |
-| `DEEPSEEK_API_KEY`   | —                   | Unset falls back to simulated agents     |
-| `DEEPSEEK_MODEL`     | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning   |
-| `NEXT_PUBLIC_USE_AI` | `false`             | Routes the UI through the agent endpoint |
+-------------------- | ------------------- | ---------------------------------------- |
+| `AGENT_BRAIN` | `mock` | `deepseek` to use the model |
+| `DEEPSEEK_API_KEY` | — | Unset falls back to simulated agents |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning |
+| `NEXT_PUBLIC_USE_AI` | `false` | Routes the UI through the agent endpoint |
 
 ---
 
