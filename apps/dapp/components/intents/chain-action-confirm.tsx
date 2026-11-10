@@ -39,20 +39,24 @@ export function ChainActionConfirm({
   action,
   sequenceSettled = false,
   typedStep,
+  bare = false,
 }: {
   action: ChainAction
   /** This card is step 2, after a swap that was signed and settled. */
   sequenceSettled?: boolean
   /** That step as a request of its own, for when it can't go on from here. */
   typedStep?: string | undefined
+  /** Inside a panel that is already its own surface, so it draws no box of its own. */
+  bare?: boolean
 }): JSX.Element {
   const { phase, prepared, hash, explorerUrl, earlier } = action
   const { slug } = useChain()
   const error = stepErrorMessage(action.error, sequenceSettled, typedStep)
   const busy = phase === 'signing' || phase === 'submitting'
+  const Surface = bare ? 'div' : Card
 
   return (
-    <Card className="flex flex-col gap-3 p-5">
+    <Surface className={bare ? 'flex flex-col gap-3' : 'flex flex-col gap-3 p-5'}>
       {phase === 'building' ? (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
@@ -190,8 +194,13 @@ export function ChainActionConfirm({
               ) : null}
             </p>
           ) : (
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={action.confirm} disabled={busy}>
+            <div className={bare ? 'flex flex-col gap-1' : 'flex items-center gap-2'}>
+              <Button
+                size={bare ? 'lg' : 'sm'}
+                className={bare ? 'h-12 w-full rounded-full text-[15px]' : undefined}
+                onClick={action.confirm}
+                disabled={busy}
+              >
                 {busy ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
@@ -201,7 +210,7 @@ export function ChainActionConfirm({
                   'Sign and send'
                 )}
               </Button>
-              {!busy ? (
+              {!busy && !bare ? (
                 <Button variant="ghost" size="sm" onClick={action.reset}>
                   Cancel
                 </Button>
@@ -210,6 +219,6 @@ export function ChainActionConfirm({
           )}
         </>
       ) : null}
-    </Card>
+    </Surface>
   )
 }

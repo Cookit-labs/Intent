@@ -204,6 +204,9 @@ export function positionsReply(report: PositionsReport | undefined, chainName: s
 export interface PositionRow {
   key: string
   title: string
+  /** What the money is doing, in one word or two: Supplied, Staked, Borrowed. */
+  label: string
+  venueName: string
   note: string
   symbol: string
   amount: string
@@ -221,12 +224,15 @@ export interface PositionMove {
   label: string
 }
 
-const ROW_OF: Record<VenuePosition['slot'], { title: (venue: string) => string; note: string }> = {
-  supplied: { title: (v) => `Supplied to ${v}`, note: 'earning' },
-  staked: { title: (v) => `Staked on ${v}`, note: 'earning' },
-  borrowed: { title: (v) => `Borrowed from ${v}`, note: 'owed' },
-  cooling: { title: (v) => `Cooling down on ${v}`, note: 'on its way' },
-  claimable: { title: (v) => `Ready to claim on ${v}`, note: 'ready' },
+const ROW_OF: Record<
+  VenuePosition['slot'],
+  { title: (venue: string) => string; label: string; note: string }
+> = {
+  supplied: { title: (v) => `Supplied to ${v}`, label: 'Supplied', note: 'earning' },
+  staked: { title: (v) => `Staked on ${v}`, label: 'Staked', note: 'earning' },
+  borrowed: { title: (v) => `Borrowed from ${v}`, label: 'Borrowed', note: 'owed' },
+  cooling: { title: (v) => `Cooling down on ${v}`, label: 'Cooling down', note: 'on its way' },
+  claimable: { title: (v) => `Ready to claim on ${v}`, label: 'Ready to claim', note: 'ready' },
 }
 
 const OUT_OF: Partial<Record<VenuePosition['slot'], PositionMove>> = {
@@ -269,7 +275,7 @@ function usable(
 export function positionRows(report: PositionsReport): PositionRow[] {
   return report.venues.flatMap((venue) =>
     venue.positions.map((position, i) => {
-      const { title, note } = ROW_OF[position.slot]
+      const { title, label, note } = ROW_OF[position.slot]
       const when = position.slot === 'cooling' ? readyIn(position.readyInHours) : undefined
       const out = usable(OUT_OF[position.slot], position, venue)
       const into = usable(INTO[position.slot], position, venue)
@@ -277,6 +283,8 @@ export function positionRows(report: PositionsReport): PositionRow[] {
       return {
         key: `${venue.id}-${position.slot}-${position.symbol}-${position.id ?? i}`,
         title: title(venue.name),
+        label,
+        venueName: venue.name,
         note: when === undefined ? note : `ready ${when}`,
         symbol: position.symbol,
         amount: position.amount,

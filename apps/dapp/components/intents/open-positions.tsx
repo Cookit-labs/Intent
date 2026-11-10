@@ -25,7 +25,7 @@ import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
 import { OpenOrders } from './open-orders'
 import { PoolPositions, loadPoolShares } from './pool-positions'
-import { ManagePanel, PositionCard } from './position-card'
+import { ManageSheet, PositionList, PositionRow } from './position-card'
 import { SupplyConfirm } from './supply-confirm'
 import { WithdrawConfirm } from './withdraw-confirm'
 
@@ -174,6 +174,13 @@ export function OpenPositions({
   const withdraw = useWithdraw()
   const supply = useSupply()
   const [openKey, setOpenKey] = useState<string | null>(null)
+  const inBase = (amount: string): string | undefined => {
+    try {
+      return toBaseUnits(amount)
+    } catch {
+      return undefined
+    }
+  }
   const borrow = useBorrow()
   const queryClient = useQueryClient()
   // What this network's pool lends: a list for the wrong network offers a loan
@@ -265,6 +272,14 @@ export function OpenPositions({
     pending.length
 
   const busy = withdraw.phase !== 'idle'
+  const sheetHeld = supplied.find((held) => `supply-${held.assetId}` === openKey)
+  function closeSheet(): void {
+    setOpenKey(null)
+    if (withdraw.phase === 'settled' || withdraw.phase === 'failed' || withdraw.phase === 'review')
+      withdraw.reset()
+    if (supply.phase === 'settled' || supply.phase === 'failed' || supply.phase === 'review')
+      supply.reset()
+  }
 
   // A borrow is not bounded by a balance the way a withdrawal is, so this
   // only checks the figure is well formed. The pool decides whether the
@@ -311,85 +326,105 @@ export function OpenPositions({
       {/* Lending first: it earns continuously and has no expiry, so it is the
           position most easily forgotten. Every asset, not only XLM: a supply of
           anything else used to be invisible here, and so had no way out. */}
-      {supplied.map((held) => {
-        const key = `supply-${held.assetId}`
-        const inBase = (amount: string): string | undefined => {
-          try {
-            return toBaseUnits(amount)
-          } catch {
-            return undefined
-          }
-        }
-        return (
-          <PositionCard
-            key={key}
-            symbol={held.symbol}
-            title="Supplied to Blend"
-            note="earning"
-            amount={held.display}
-            open={openKey === key}
-            onToggle={() => setOpenKey((now) => (now === key ? null : key))}
-          >
-            <ManagePanel
+      {supplied.length > 0 ? (
+        <PositionList count={supplied.length} heading={false}>
+          {supplied.map((held) => (
+            <PositionRow
+              key={`supply-${held.assetId}`}
+              venueId="blend"
+              venueName="Blend"
               symbol={held.symbol}
-              held={held.display}
-              busy={busy || supply.phase !== 'idle'}
-              maxPlaces={7}
-              out={{
-                label: 'Withdraw',
-                onAmount: (amount) => {
-                  const base = inBase(amount)
-                  if (base === undefined) return
-                  withdraw.prepare({
-                    assetId: held.assetId,
-                    symbol: held.symbol,
-                    amount: base,
-                    from: 'supply',
-                  })
-                },
-              }}
-              into={{
-                label: 'Top up',
-                onAmount: (amount) => {
-                  const base = inBase(amount)
-                  if (base === undefined) return
-                  supply.prepare({ assetId: held.assetId, symbol: held.symbol, amount: base })
-                },
-              }}
-              all={{
-                label: 'Withdraw all',
-                onPress: () =>
-                  withdraw.prepare({ assetId: held.assetId, symbol: held.symbol, from: 'supply' }),
-              }}
-              secondary={{
-                label: 'As collateral',
-                disabled: collateral$.phase !== 'idle',
-                onAmount: (amount) => {
-                  const base = inBase(amount)
-                  if (base !== undefined) postCollateral(base, held.assetId, held.symbol)
-                },
-              }}
-              extra={
-                <a
-                  href={blendPositionUrl()}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-xs transition-colors"
-                >
-                  Open on Blend
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              }
+              amount={held.display}
+              label="Supplied"
+              note="earning"
+              onOpen={() => setOpenKey(`supply-${held.assetId}`)}
             />
-          </PositionCard>
-        )
-      })}
+          ))}
+        </PositionList>
+      ) : null}
 
-      <SupplyConfirm supply={supply} />
+      {sheetHeld !== undefined ? (
+        <ManageSheet
+          open
+          onClose={closeSheet}
+          venueId="blend"
+          venueName="Blend"
+          symbol={sheetHeld.symbol}
+          held={sheetHeld.display}
+          label="Supplied"
+          busy={busy || supply.phase !== 'idle'}
+          maxPlaces={7}
+          out={{
+            label: 'Withdraw',
+            onAmount: (amount) => {
+              const base = inBase(amount)
+              if (base === undefined) return
+              withdraw.prepare({
+                assetId: sheetHeld.assetId,
+                symbol: sheetHeld.symbol,
+                amount: base,
+                from: 'supply',
+              })
+            },
+          }}
+          into={{
+            label: 'Top up',
+            onAmount: (amount) => {
+              const base = inBase(amount)
+              if (base === undefined) return
+              supply.prepare({ assetId: sheetHeld.assetId, symbol: sheetHeld.symbol, amount: base })
+            },
+          }}
+          all={{
+            label: 'Withdraw all',
+            onPress: () =>
+              withdraw.prepare({
+                assetId: sheetHeld.assetId,
+                symbol: sheetHeld.symbol,
+                from: 'supply',
+              }),
+          }}
+          secondary={{
+            label: 'Post this much as collateral instead',
+            disabled: collateral$.phase !== 'idle',
+            onAmount: (amount) => {
+              const base = inBase(amount)
+              if (base === undefined) return
+              setOpenKey(null)
+              postCollateral(base, sheetHeld.assetId, sheetHeld.symbol)
+            },
+          }}
+          review={
+            withdraw.phase !== 'idle' ? (
+              <WithdrawConfirm withdraw={withdraw} />
+            ) : supply.phase !== 'idle' ? (
+              <SupplyConfirm supply={supply} />
+            ) : undefined
+          }
+          onBack={
+            withdraw.phase === 'review' || withdraw.phase === 'failed'
+              ? withdraw.reset
+              : supply.phase === 'review' || supply.phase === 'failed'
+                ? supply.reset
+                : undefined
+          }
+          extra={
+            <a
+              href={blendPositionUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-foreground mx-auto flex w-fit items-center gap-1 text-xs transition-colors"
+            >
+              Open on Blend
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          }
+        />
+      ) : null}
 
       {/* Sits directly under the position it acts on, so the amount being
           withdrawn and the amount held are readable together. */}
-      <WithdrawConfirm withdraw={withdraw} />
+      {openKey === null ? <WithdrawConfirm withdraw={withdraw} /> : null}
 
       {/* Posting collateral, awaiting its signature. Deliberately spells out
           what changes rather than showing an amount and a button: this is the

@@ -11,19 +11,20 @@ import {
   positionRequest,
   positionRows,
   rowsAt,
+  type PositionRow as Row,
   type PositionsReport,
 } from '../../lib/chains/positions-reply'
 import { useChain } from '../../providers/chain-provider'
 import { ChainActionConfirm } from './chain-action-confirm'
 import { ChainOrdersCard } from './chain-orders-card'
-import { ManagePanel, PositionCard } from './position-card'
+import { ManageSheet, PositionList, PositionRow } from './position-card'
 
 /**
  * What this wallet still has out on a chain other than Stellar, above what already finished.
  *
  * Read from each venue when the page opens, and never kept: a position grows and can be changed from
  * another app. So money put in somewhere else shows here too, and can be managed here. Managing runs
- * on its own action, and each press builds the same review card the chat signs through.
+ * on its own action, and each choice builds the same review the chat signs through.
  */
 
 async function loadPositions(chain: string, account: string): Promise<PositionsReport> {
@@ -40,8 +41,8 @@ async function loadOrders(chain: string, account: string): Promise<RestingOrder[
   return body.orders ?? []
 }
 
-function Unread({ children }: { children: string }): JSX.Element {
-  return <Card className="text-muted-foreground p-4 text-sm">{children}</Card>
+function Notice({ children }: { children: string }): JSX.Element {
+  return <p className="text-muted-foreground px-1 text-xs leading-relaxed">{children}</p>
 }
 
 export function ChainPositions({
@@ -73,14 +74,11 @@ export function ChainPositions({
     refetchInterval: 15_000,
   })
 
-  const all = positions.data === undefined ? [] : positionRows(positions.data)
-  const rows = rowsAt(all, venue)
+  const rows = rowsAt(positions.data === undefined ? [] : positionRows(positions.data), venue)
   const resting = orders.data ?? []
   const unreadVenues = positions.data?.unread.map((v) => v.name) ?? []
-
   const [openKey, setOpenKey] = useState<string | null>(null)
-  // The row a card belongs to. None means the orders card pressed it.
-  const [actingKey, setActingKey] = useState<string | null>(null)
+  const open = rows.find((row) => row.key === openKey)
 
   // Asked for by name, so it opens ready to use.
   const onlyKey = venue !== undefined && rows.length === 1 ? rows[0]?.key : undefined
@@ -89,25 +87,51 @@ export function ChainPositions({
   }, [onlyKey])
 
   const { phase } = action
-  const settled = phase === 'settled'
   useEffect(() => {
-    if (!settled) return
+    if (phase !== 'settled') return
     void queryClient.invalidateQueries({ queryKey: ['chain-positions', slug, address] })
     void queryClient.invalidateQueries({ queryKey: ['chain-activity', slug, address] })
-  }, [settled, queryClient, slug, address])
-  useEffect(() => {
-    if (phase === 'idle') setActingKey(null)
-  }, [phase])
+  }, [phase, queryClient, slug, address])
 
   // Anything but an idle or finished card holds the buttons, and an unknown outcome most of all:
   // the wallet may have sent, so nothing new starts until that card is dismissed.
   const busy = phase !== 'idle' && phase !== 'settled' && phase !== 'failed'
 
-  function run(key: string, request: Parameters<typeof action.prepare>[0], asked: string): void {
-    setActingKey(key)
+  function run(request: Parameters<typeof action.prepare>[0], asked: string): void {
     // Each press is the person starting something new, which is what lifts the signed latch.
     action.release()
     action.prepare(request, asked)
+  }
+
+  function close(): void {
+    setOpenKey(null)
+    if (phase === 'settled' || phase === 'failed' || phase === 'review') action.reset()
+  }
+
+  function movesOf(row: Row) {
+    const { out, into } = row
+    return {
+      out:
+        out === undefined
+          ? undefined
+          : {
+              label: out.label,
+              onAmount: (amount: string) =>
+                run(positionRequest(row, out, amount), `${out.label} ${amount} ${row.symbol}`),
+            },
+      into:
+        into === undefined
+          ? undefined
+          : {
+              label: into.label,
+              onAmount: (amount: string) =>
+                run(positionRequest(row, into, amount), `${into.label} ${amount} ${row.symbol}`),
+            },
+      all:
+        row.whole === undefined
+          ? undefined
+          : { label: row.whole.label, onPress: () => run(row.whole!.request, row.whole!.label) },
+    }
   }
 
   const count = rows.length + resting.length
@@ -122,89 +146,61 @@ export function ChainPositions({
     )
   }
 
+  const moves = open === undefined ? undefined : movesOf(open)
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-muted-foreground flex items-baseline justify-between text-xs">
-        <span>Open positions</span>
-        <span>{count}</span>
-      </div>
+      {rows.length > 0 ? (
+        <PositionList count={count}>
+          {rows.map((row) => {
+            const manageable =
+              row.out !== undefined || row.into !== undefined || row.whole !== undefined
+            return (
+              <PositionRow
+                key={row.key}
+                venueId={row.venueId}
+                venueName={row.venueName}
+                symbol={row.symbol}
+                amount={row.amount}
+                label={row.label}
+                note={row.note}
+                onOpen={manageable ? () => setOpenKey(row.key) : undefined}
+              />
+            )
+          })}
+        </PositionList>
+      ) : null}
 
       {positions.isError ? (
-        <Unread>
-          Could not read your positions from the network, so this list may be missing money you hold
-          there. It will try again shortly.
-        </Unread>
+        <Notice>
+          Your positions couldn’t be read just now, so this may be missing money you hold. It will
+          try again shortly.
+        </Notice>
       ) : null}
       {unreadVenues.length > 0 ? (
-        <Unread>
-          {`Could not read ${unreadVenues.join(', ')} from the network, so this list may be missing money you hold there. It will try again shortly.`}
-        </Unread>
+        <Notice>{`${unreadVenues.join(', ')} couldn’t be read just now, so this may be missing money you hold there.`}</Notice>
       ) : null}
-      {orders.isError ? <Unread>Could not read your open orders from the network.</Unread> : null}
-
-      {rows.map((row) => {
-        const { out, into, whole } = row
-        const manageable = out !== undefined || into !== undefined || whole !== undefined
-        return (
-          <PositionCard
-            key={row.key}
-            symbol={row.symbol}
-            title={row.title}
-            note={row.note}
-            amount={row.amount}
-            open={openKey === row.key}
-            onToggle={
-              manageable ? () => setOpenKey((key) => (key === row.key ? null : row.key)) : undefined
-            }
-          >
-            <ManagePanel
-              symbol={row.symbol}
-              held={row.amount}
-              busy={busy}
-              out={
-                out === undefined
-                  ? undefined
-                  : {
-                      label: out.label,
-                      onAmount: (amount) =>
-                        run(
-                          row.key,
-                          positionRequest(row, out, amount),
-                          `${out.label} ${amount} ${row.symbol}`
-                        ),
-                    }
-              }
-              into={
-                into === undefined
-                  ? undefined
-                  : {
-                      label: into.label,
-                      onAmount: (amount) =>
-                        run(
-                          row.key,
-                          positionRequest(row, into, amount),
-                          `${into.label} ${amount} ${row.symbol}`
-                        ),
-                    }
-              }
-              all={
-                whole === undefined
-                  ? undefined
-                  : {
-                      label: whole.label,
-                      onPress: () => run(row.key, whole.request, whole.label),
-                    }
-              }
-            />
-            {actingKey === row.key && phase !== 'idle' ? (
-              <ChainActionConfirm action={action} />
-            ) : null}
-          </PositionCard>
-        )
-      })}
+      {orders.isError ? <Notice>Your open orders couldn’t be read just now.</Notice> : null}
 
       {resting.length > 0 ? <ChainOrdersCard action={action} asked="Your limit orders" /> : null}
-      {actingKey === null && phase !== 'idle' ? <ChainActionConfirm action={action} /> : null}
+
+      {open !== undefined && moves !== undefined ? (
+        <ManageSheet
+          open
+          onClose={close}
+          venueId={open.venueId}
+          venueName={open.venueName}
+          symbol={open.symbol}
+          held={open.amount}
+          label={open.label}
+          out={moves.out}
+          into={moves.into}
+          all={moves.all}
+          busy={busy}
+          review={phase !== 'idle' ? <ChainActionConfirm action={action} bare /> : undefined}
+          onBack={phase === 'review' || phase === 'failed' ? action.reset : undefined}
+        />
+      ) : null}
     </div>
   )
 }

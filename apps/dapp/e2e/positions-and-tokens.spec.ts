@@ -15,7 +15,11 @@ const SIGNED = btoa('signed-transaction')
 const SHOTS = process.env['E2E_SHOTS']
 
 async function shot(page: Page, name: string): Promise<void> {
-  if (SHOTS !== undefined) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true })
+  if (SHOTS === undefined) return
+  // Every logo loaded and faded in, so a frame never catches one half-drawn.
+  await page.waitForFunction(() => [...document.images].every((img) => img.complete))
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: `${SHOTS}/${name}.png` })
 }
 
 async function connect(page: Page): Promise<void> {
@@ -209,21 +213,23 @@ async function stubTokens(page: Page): Promise<void> {
   })
 }
 
+const ROW = 'Manage supplied USDC on Kamino Lend'
+
 test.describe('an open position on History', () => {
   test('shows the venue it is at, never another chain’s', async ({ page }) => {
     await stubPosition(page)
     await connect(page)
     await openHistory(page)
 
-    await expect(page.getByText('Supplied to Kamino Lend')).toBeVisible()
-    await expect(page.getByText('12.5 USDC').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await expect(page.getByText('12.5', { exact: true }).first()).toBeVisible()
     await expect(page.getByText(/Blend/)).toHaveCount(0)
     await expect(page.getByText('Deposit on Kamino Lend')).toBeVisible()
     await expect(page.getByText(/Compose your first intent/)).toHaveCount(0)
     await shot(page, 'history-closed')
   })
 
-  test('withdraws all of it, from the card, through to the wallet', async ({ page }) => {
+  test('withdraws all of it, from the panel, through to the wallet', async ({ page }) => {
     const { prepared } = await stubPosition(page)
     let submitted: unknown
     await page.route('**/api/chain/solana/submit', async (route) => {
@@ -235,19 +241,22 @@ test.describe('an open position on History', () => {
     await connect(page)
     await openHistory(page)
 
-    await page.getByRole('button', { name: 'Manage' }).click()
+    await page.getByRole('button', { name: ROW }).click()
+    const panel = page.getByRole('dialog', { name: 'Kamino Lend position' })
+    await expect(panel).toBeVisible()
     await shot(page, 'history-manage')
-    await page.getByRole('button', { name: 'Withdraw all' }).click()
+    await panel.getByRole('button', { name: 'Max' }).click()
+    await panel.getByRole('button', { name: 'Withdraw all' }).click()
 
-    await expect(page.getByText('Built withdraw of all USDC on Kamino Lend.')).toBeVisible()
+    await expect(panel.getByText('Built withdraw of all USDC on Kamino Lend.')).toBeVisible()
     expect(prepared()[0]).toEqual({
       account: ADDRESS,
       request: { kind: 'withdraw', amount: 'all', tokenIn: 'USDC', venue: 'Kamino Lend' },
     })
     await shot(page, 'history-review')
 
-    await page.getByRole('button', { name: 'Sign and send' }).click()
-    await expect(page.getByRole('link', { name: /abc123/ })).toBeVisible()
+    await panel.getByRole('button', { name: 'Sign and send' }).click()
+    await expect(panel.getByRole('link', { name: /abc123/ })).toBeVisible()
     expect(submitted).toMatchObject({
       account: ADDRESS,
       venueId: 'kamino-lend',
@@ -255,38 +264,46 @@ test.describe('an open position on History', () => {
     })
   })
 
-  test('withdraws an amount typed, and refuses more than is there', async ({ page }) => {
+  test('withdraws an amount typed or a share, and refuses more than is there', async ({ page }) => {
     const { prepared } = await stubPosition(page)
     await connect(page)
     await openHistory(page)
-    await page.getByRole('button', { name: 'Manage' }).click()
+    await page.getByRole('button', { name: ROW }).click()
+    const panel = page.getByRole('dialog', { name: 'Kamino Lend position' })
 
-    const amount = page.getByRole('textbox', { name: 'Amount of USDC to withdraw' })
+    const amount = panel.getByRole('textbox', { name: 'Amount of USDC to withdraw' })
     await amount.fill('99')
-    await expect(page.getByText('That is more than the 12.5 USDC here.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Withdraw', exact: true }).last()).toBeDisabled()
+    await expect(panel.getByRole('button', { name: 'More than you have' })).toBeDisabled()
+
+    await panel.getByRole('button', { name: '50%' }).click()
+    await expect(amount).toHaveValue('6.25')
 
     await amount.fill('2.5')
-    await page.getByRole('button', { name: 'Withdraw 2.5 USDC' }).click()
-    await expect(page.getByText('Built withdraw of 2.5 USDC on Kamino Lend.')).toBeVisible()
+    await panel.getByRole('button', { name: 'Withdraw 2.5 USDC' }).click()
+    await expect(panel.getByText('Built withdraw of 2.5 USDC on Kamino Lend.')).toBeVisible()
     expect(prepared()[0]).toEqual({
       account: ADDRESS,
       request: { kind: 'withdraw', amount: '2.5', tokenIn: 'USDC', venue: 'kamino-lend' },
     })
+
+    await panel.getByRole('button', { name: 'Change amount' }).click()
+    await expect(amount).toBeVisible()
   })
 
   test('tops up with an amount typed, with no limit from the position', async ({ page }) => {
     const { prepared } = await stubPosition(page)
     await connect(page)
     await openHistory(page)
-    await page.getByRole('button', { name: 'Manage' }).click()
+    await page.getByRole('button', { name: ROW }).click()
+    const panel = page.getByRole('dialog', { name: 'Kamino Lend position' })
 
-    await page.getByRole('button', { name: 'Top up' }).click()
-    await expect(page.getByRole('button', { name: 'Withdraw all' })).toHaveCount(0)
-    await page.getByRole('textbox', { name: 'Amount of USDC to top up' }).fill('50')
-    await page.getByRole('button', { name: 'Top up 50 USDC' }).click()
+    await panel.getByRole('tab', { name: 'Top up' }).click()
+    await expect(panel.getByRole('button', { name: 'Max' })).toHaveCount(0)
+    await panel.getByRole('textbox', { name: 'Amount of USDC to top up' }).fill('50')
+    await shot(page, 'history-topup')
+    await panel.getByRole('button', { name: 'Top up 50 USDC' }).click()
 
-    await expect(page.getByText('Built supply of 50 USDC on Kamino Lend.')).toBeVisible()
+    await expect(panel.getByText('Built supply of 50 USDC on Kamino Lend.')).toBeVisible()
     expect(prepared()[0]).toEqual({
       account: ADDRESS,
       request: { kind: 'supply', amount: '50', tokenIn: 'USDC', venue: 'kamino-lend' },
@@ -300,12 +317,14 @@ test.describe('open positions in the chat', () => {
     await connect(page)
 
     await say(page, 'show my positions')
-    await expect(page.getByText('Supplied to Kamino Lend')).toBeVisible()
-    await page.getByRole('button', { name: 'Manage' }).click()
-    await page.getByRole('button', { name: 'Withdraw all' }).click()
-    await expect(page.getByText('Built withdraw of all USDC on Kamino Lend.')).toBeVisible()
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await shot(page, 'chat-positions')
+    await page.getByRole('button', { name: ROW }).click()
+    const panel = page.getByRole('dialog', { name: 'Kamino Lend position' })
+    await panel.getByRole('button', { name: 'Max' }).click()
+    await panel.getByRole('button', { name: 'Withdraw all' }).click()
+    await expect(panel.getByText('Built withdraw of all USDC on Kamino Lend.')).toBeVisible()
     expect(prepared()).toHaveLength(1)
-    await shot(page, 'chat-position-review')
   })
 
   test('open ready to use when asked to withdraw from one', async ({ page }) => {
@@ -313,14 +332,9 @@ test.describe('open positions in the chat', () => {
     await connect(page)
 
     await say(page, 'withdraw from kamino lend')
-    await expect(page.getByText('Supplied to Kamino Lend')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Withdraw all' })).toBeVisible()
-    // The logo really draws in the thread, not only an empty frame while it loads.
-    const logo = page.locator('img[src*="usdc"]').first()
-    await expect(logo).toBeVisible()
-    await expect
-      .poll(() => logo.evaluate((img) => (img as HTMLImageElement).naturalWidth))
-      .toBeGreaterThan(0)
+    const panel = page.getByRole('dialog', { name: 'Kamino Lend position' })
+    await expect(panel).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Max' })).toBeVisible()
     await shot(page, 'chat-position-open')
   })
 
@@ -345,44 +359,51 @@ test.describe('tokens', () => {
     await page.getByRole('link', { name: 'Tokens' }).first().click()
 
     await expect(page.getByRole('heading', { name: 'Tokens' })).toBeVisible({ timeout: 120_000 })
-    await expect(page.getByRole('cell', { name: /dogwifhat/ })).toBeVisible()
-    await expect(page.getByRole('cell', { name: '$378M' })).toBeVisible()
+    await expect(page.getByText('dogwifhat')).toBeVisible()
+    await expect(page.getByText('$378M')).toBeVisible()
     await expect(page.getByText('5.25M')).toBeVisible()
+    // A token using a known name gets no borrowed logo: the real one draws once, for the real one.
+    await expect(page.locator('ul img[src*="usdc"]')).toHaveCount(1)
     await shot(page, 'tokens-stubbed')
 
-    // A token using a known name gets no borrowed logo: the real one draws once, for the real one.
-    await expect(page.locator('tbody img[src*="usdc"]')).toHaveCount(1)
+    await page.getByRole('button', { name: /^Verified/ }).click()
+    await expect(page.getByText('Totally USDC')).toHaveCount(0)
+    await page.getByRole('button', { name: /^All/ }).click()
 
-    await page.getByRole('button', { name: 'Verified only' }).click()
-    await expect(page.getByRole('cell', { name: /Totally USDC/ })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Verified only' }).click()
-
-    await page.getByRole('button', { name: 'Show details for WIF' }).click()
-    await expect(page.getByText('Verified by Jupiter').first()).toBeVisible()
-    await expect(page.getByText('WIF/SOL on orca')).toBeVisible()
-    await expect(page.getByRole('link', { name: 'View on explorer' })).toHaveAttribute(
+    await page.getByRole('button', { name: 'WIF details' }).click()
+    const panel = page.getByRole('dialog', { name: 'WIF' })
+    await expect(panel.getByText('Jupiter', { exact: true })).toBeVisible()
+    await expect(panel.getByText('WIF/SOL')).toBeVisible()
+    await expect(panel.getByRole('link', { name: 'View on explorer' })).toHaveAttribute(
       'href',
       'https://solscan.io/token/WIF'
     )
-    await page.getByRole('button', { name: 'Hide details for WIF' }).click()
+    await shot(page, 'tokens-detail')
+    await page.keyboard.press('Escape')
 
-    await page.getByRole('button', { name: 'Show details for USDC' }).last().click()
-    await expect(page.getByText(/Not verified by any source here/)).toBeVisible()
-    await expect(page.getByText(/The USDC this app trades is a different token/)).toBeVisible()
-    await page.getByRole('button', { name: 'Hide details for USDC' }).click()
+    await page.getByRole('button', { name: 'USDC details' }).last().click()
+    const fake = page.getByRole('dialog', { name: 'USDC' })
+    await expect(fake.getByText('Not verified by anyone here')).toBeVisible()
+    await expect(fake.getByText(/Not the USDC this app trades/)).toBeVisible()
+    await page.keyboard.press('Escape')
 
     await page.getByRole('textbox', { name: 'Search tokens on Solana' }).fill('wif')
-    await expect(page.getByRole('cell', { name: /USD Coin/ })).toHaveCount(0)
-    await expect(page.getByRole('cell', { name: /dogwifhat/ })).toBeVisible()
+    await expect(page.getByText('USD Coin')).toHaveCount(0)
+    await expect(page.getByText('dogwifhat')).toBeVisible()
   })
 
-  test('list in the chat when asked', async ({ page }) => {
+  test('list in the chat when asked, with their logos', async ({ page }) => {
     await stubTokens(page)
     await connect(page)
 
     await say(page, 'give me a list of tokens on this chain')
     await expect(page.getByText('Tokens on Solana', { exact: true })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'See all tokens on Solana' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'All tokens on Solana' })).toBeVisible()
+    const logo = page.locator('img[src*="usdc"]').first()
+    await expect
+      .poll(() => logo.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0)
+    await expect(logo).toHaveCSS('opacity', '1')
     await shot(page, 'chat-token-list')
   })
 
@@ -391,9 +412,9 @@ test.describe('tokens', () => {
     await connect(page)
 
     await say(page, 'is USDC verified')
-    await expect(page.getByText('Verified by Jupiter')).toBeVisible()
-    await expect(page.getByText('Checked by Intent, and tradable here')).toBeVisible()
-    await expect(page.getByText('One other token uses this name', { exact: false })).toBeVisible()
+    await expect(page.getByText('Jupiter', { exact: true })).toBeVisible()
+    await expect(page.getByText('Tradable on Intent', { exact: true })).toBeVisible()
+    await expect(page.getByText(/Another token uses this name/)).toBeVisible()
     await shot(page, 'chat-token-one')
   })
 })

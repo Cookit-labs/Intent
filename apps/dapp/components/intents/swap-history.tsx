@@ -206,11 +206,13 @@ export function SwapHistory(): JSX.Element | null {
       </div>
 
       {groupByDay(swaps).map((group) => (
-        <section key={group.label} className="flex flex-col gap-3">
-          <h3 className="text-muted-foreground pt-2 text-xs font-medium">{group.label}</h3>
-          {group.rows.map((s) => (
-            <SwapRow key={s.txHash} swap={s} />
-          ))}
+        <section key={group.label} className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground px-1 pt-2 text-xs font-medium">{group.label}</h3>
+          <div className="bg-bubble-agent border-bubble-agent-border divide-border/60 flex flex-col divide-y overflow-hidden rounded-3xl border shadow-[0_1px_3px_rgb(0_0_0/0.04)]">
+            {group.rows.map((s) => (
+              <SwapRow key={s.txHash} swap={s} />
+            ))}
+          </div>
         </section>
       ))}
     </div>
@@ -238,12 +240,12 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
         : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`
 
   return (
-    <Card className="overflow-hidden">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="hover:bg-muted/40 flex w-full items-center gap-4 p-4 text-left transition-colors"
+        className="hover:bg-muted/40 flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors sm:px-5"
       >
         {/* Leading mark, so an on-chain swap row is scannable the same way an
             intent row is — the type is readable before the numbers are. */}
@@ -291,7 +293,7 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
       </button>
 
       {expanded ? (
-        <div className="border-border flex flex-col gap-4 border-t px-4 pb-4 pt-4">
+        <div className="bg-muted/30 flex flex-col gap-4 px-4 pb-5 pt-4 sm:px-5">
           <div className="grid grid-cols-2 gap-4 text-sm tabular-nums sm:grid-cols-4">
             {hasSent ? (
               <div>
@@ -415,6 +417,6 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
           ) : null}
         </div>
       ) : null}
-    </Card>
+    </div>
   )
 }
