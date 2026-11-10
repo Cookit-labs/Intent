@@ -17,6 +17,7 @@ import { restContextLines } from '../rest-option'
 import type { ChainRouteQuote } from '../chain-routes'
 import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
+import { enclaveFor, proveReply, type ProofDeps, type ReplyProof } from './nearai-proof'
 import type { ProviderConfig } from './providers'
 import { PROVIDERS, modelFor } from './providers'
 
@@ -82,6 +83,12 @@ export interface BrainOptions {
   baseUrl?: string
   strictTools?: boolean
   fetchImpl?: typeof fetch
+  /** How an attested provider's replies are checked. The real services when unset. */
+  proofDeps?: ProofDeps
+}
+
+interface ChatCompletionReply {
+  id?: string
 }
 
 interface ChatCompletionResponse {
@@ -327,6 +334,8 @@ function routeLines(req: ProposalRequest): string[] {
     return [
       '',
       'No executable routes were found for this pair. Reason about the intent, and return an empty routeId.',
+      // A model reasoning briefly left the price at zero here, and a zero price fails the proposal.
+      'projectedAvgPriceUsd must still be your estimate, above zero, from the market prices above.',
     ]
   }
 
@@ -477,6 +486,10 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
     signal: AbortSignal | undefined
   ): Promise<TalkOutcome> {
     const startedAt = Date.now()
+    const requestBody = JSON.stringify(body)
+    // Started before the request, so the enclave evidence predates the reply it vouches for.
+    const enclave =
+      config.attested === true ? enclaveFor(model, baseUrl, options.proofDeps) : undefined
 
     let res: Response
     try {
@@ -486,7 +499,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: requestBody,
         ...(signal !== undefined ? { signal } : {}),
       })
     } catch (e) {
@@ -516,9 +529,12 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    let reply: ChatCompletionResponse
+    let reply: ChatCompletionResponse & ChatCompletionReply
+    // Read as text first: a signature covers the exact bytes, not a re-serialised object.
+    let responseBody: string
     try {
-      reply = (await res.json()) as ChatCompletionResponse
+      responseBody = await res.text()
+      reply = JSON.parse(responseBody) as ChatCompletionResponse & ChatCompletionReply
     } catch {
       return {
         ok: false,
@@ -557,7 +573,23 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    return { ok: true, args, meta: meta(config, model, Date.now() - startedAt, reply.usage) }
+    const chatId = reply.id
+    let proven: Promise<ReplyProof> | undefined
+    const proof =
+      enclave !== undefined && typeof chatId === 'string' && apiKey !== undefined
+        ? () =>
+            (proven ??= proveReply(
+              enclave,
+              { baseUrl, apiKey, chatId, requestBody, responseBody },
+              options.proofDeps
+            ))
+        : undefined
+    return {
+      ok: true,
+      args,
+      meta: meta(config, model, Date.now() - startedAt, reply.usage),
+      ...(proof !== undefined ? { proof } : {}),
+    }
   }
 
   return {
@@ -578,26 +610,38 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
             function: { ...SUBMIT_PROPOSAL_TOOL.function, strict: false },
           }
 
-      const out = await chat(
-        {
-          model,
-          messages: buildMessages(req),
-          tools: [tool],
-          // 'auto' for every provider today. DeepSeek's models reason in
-          // thinking mode, which rejects a forced tool_choice outright:
-          // "Thinking mode does not support this tool_choice"; Ollama ignores
-          // the field entirely. The brief already instructs the
-          // model to answer by calling the tool, and a reply that arrives as
-          // prose anyway is caught below — so forcing buys nothing.
-          tool_choice: config.toolChoice,
-          temperature: TEMPERATURE,
-          max_tokens: MAX_OUTPUT_TOKENS,
-        },
-        req.agent,
-        req.signal
-      )
-      if (!out.ok) return out
-      return toOutcome(req, out.args, out.meta)
+      const body = {
+        model,
+        messages: buildMessages(req),
+        tools: [tool],
+        // 'auto' for every provider today. DeepSeek's models reason in
+        // thinking mode, which rejects a forced tool_choice outright:
+        // "Thinking mode does not support this tool_choice"; Ollama ignores
+        // the field entirely. The brief already instructs the
+        // model to answer by calling the tool, and a reply that arrives as
+        // prose anyway is caught below — so forcing buys nothing.
+        tool_choice: config.toolChoice,
+        temperature: TEMPERATURE,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        ...config.propose?.body,
+      }
+      const startedAt = Date.now()
+      const retry = config.propose?.retryIncomplete
+      for (let tries = 1; ; tries++) {
+        const out = await chat(body, req.agent, req.signal)
+        const outcome = out.ok ? toOutcome(req, out.args, out.meta) : out
+        if (outcome.ok) {
+          return out.ok && out.proof !== undefined ? { ...outcome, proof: out.proof } : outcome
+        }
+        // A fast model that left a field out is asked again, while the race still has time for it.
+        const again =
+          retry !== undefined &&
+          outcome.error === 'invalid_schema' &&
+          tries < retry.tries &&
+          Date.now() - startedAt < retry.withinMs &&
+          req.signal?.aborted !== true
+        if (!again) return outcome
+      }
     },
 
     async talk(call: TalkCall): Promise<TalkOutcome> {

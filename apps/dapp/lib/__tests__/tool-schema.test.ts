@@ -289,3 +289,68 @@ describe('clipReasoning', () => {
     expect(out.length).toBeLessThanOrEqual(30)
   })
 })
+
+/**
+ * A model without strict tools may leave out what a fill plan doesn't use. GLM 5.3 Flash on NEAR
+ * AI dropped `restPriceUsd` on two of three NEAR swaps at low reasoning, and every one was lost.
+ */
+describe('a fill plan that leaves out its unused fields', () => {
+  const ctx = { referencePriceUsd: 2.6, allowedVenueIds: ['rhea'] }
+  const plan = (over: Record<string, unknown>): Record<string, unknown> => {
+    const base: Record<string, unknown> = {
+      routeId: '',
+      reasoning: 'Rhea has the depth.',
+      projectedAvgPriceUsd: 2.6,
+      projectedSlippagePct: 0.2,
+      venues: ['rhea'],
+      sliceCount: 1,
+      confidence: 0.8,
+      horizonMinutes: 1,
+      executionMode: 'fill',
+      restPriceUsd: 0,
+      splitPct: 0,
+      thenAction: 'none',
+      thenVenue: '',
+      ...over,
+    }
+    for (const [k, v] of Object.entries(base)) if (v === undefined) delete base[k]
+    return base
+  }
+
+  it('reads a missing rest price and split as zero, which is what a fill means', () => {
+    const out = validateProposal(plan({ restPriceUsd: undefined, splitPct: undefined }), ctx)
+    expect(out).toMatchObject({ ok: true, value: { restPriceUsd: 0, splitPct: 0 } })
+  })
+
+  it('reads a missing follow-on as none, with no venue', () => {
+    expect(
+      validateProposal(plan({ thenAction: undefined, thenVenue: undefined }), ctx)
+    ).toMatchObject({ ok: true, value: { thenAction: 'none', thenVenue: '' } })
+    expect(validateProposal(plan({ thenVenue: undefined }), ctx)).toMatchObject({
+      ok: true,
+      value: { thenVenue: '' },
+    })
+  })
+
+  it('still needs the route and the figures', () => {
+    expect(validateProposal(plan({ routeId: undefined }), ctx)).toEqual({
+      ok: false,
+      reason: 'routeId: Required',
+    })
+    expect(validateProposal(plan({ projectedAvgPriceUsd: undefined }), ctx)).toMatchObject({
+      ok: false,
+    })
+  })
+
+  it('still rejects a rest or split plan that leaves out its price', () => {
+    expect(validateProposal(plan({ executionMode: 'rest', restPriceUsd: undefined }), ctx)).toEqual(
+      {
+        ok: false,
+        reason: 'restPriceUsd: Required',
+      }
+    )
+    expect(
+      validateProposal(plan({ executionMode: 'split', splitPct: 40, restPriceUsd: undefined }), ctx)
+    ).toEqual({ ok: false, reason: 'restPriceUsd: Required' })
+  })
+})

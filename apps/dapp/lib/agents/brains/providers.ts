@@ -19,6 +19,8 @@ import type { BrainProvider } from '../brain'
 
 export interface ProviderConfig {
   id: BrainProvider
+  /** Signs each reply inside an attested enclave, so a reply can be checked against it. */
+  attested?: boolean
   displayName: string
   /** Chat-completions base, without the trailing `/chat/completions`. */
   baseUrl: string
@@ -74,6 +76,18 @@ export interface ProviderConfig {
    * thinking and returns no tool call at all.
    */
   talk?: { body?: Record<string, unknown>; maxTokens: number }
+  /**
+   * Extra fields on a first take. A first take still running when talk closes, 20 s after the
+   * line-up, is cut off, so a model that reasons past that needs its reasoning turned down.
+   */
+  propose?: {
+    body: Record<string, unknown>
+    /**
+     * Ask again when a first take comes back incomplete: at most `tries` in all, and only while
+     * `withinMs` has not passed since the first, so a retry still lands before talk closes.
+     */
+    retryIncomplete?: { tries: number; withinMs: number }
+  }
 }
 
 /**
@@ -199,6 +213,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     id: 'nearai',
     displayName: 'NEAR AI',
     baseUrl: 'https://cloud-api.near.ai/v1',
+    attested: true,
     defaultModel: 'z-ai/glm-5.3-flash',
     apiKeyEnv: 'NEARAI_API_KEY',
     strictTools: false,
@@ -208,6 +223,14 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     defaultPricing: { input: 0.08, output: 0.5 },
     displayNames: { 'z-ai/glm-5.3-flash': 'GLM 5.3 Flash' },
     talk: { body: { reasoning_effort: 'low' }, maxTokens: 400 },
+    // Measured 2026-11-10 on a NEAR swap: 12 to 18 s at the default effort, 14 s at medium,
+    // 3.3 s at low, each with a tool call. Races were cutting the default off at 20 s.
+    // At low reasoning about one take in three leaves a required field out (measured live, 6 runs
+    // each way, 10 November 2026), and each take is 2 to 8 s, so it is asked up to twice more.
+    propose: {
+      body: { reasoning_effort: 'low' },
+      retryIncomplete: { tries: 3, withinMs: 10_000 },
+    },
   },
 
   /**
