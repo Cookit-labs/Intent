@@ -44,7 +44,8 @@ describe the wider project, and some predate the current app.
 That diff also carries work on other chains. The NEAR work is in
 [`apps/dapp/lib/chains/near/`](apps/dapp/lib/chains/near),
 [`apps/dapp/lib/wallet/near-connector.ts`](apps/dapp/lib/wallet/near-connector.ts) and the
-`near-*` and `rhea*` files in [`apps/dapp/lib/__tests__/`](apps/dapp/lib/__tests__).
+`near-*` and `rhea*` files in [`apps/dapp/lib/__tests__/`](apps/dapp/lib/__tests__). A full
+file map and the scope for reviewers is in [`AGENTS.md`](AGENTS.md).
 
 ### The problem and the product
 
@@ -357,12 +358,6 @@ component.
 available. It never shows a made-up proposal.
 
 **Scoring is deterministic TypeScript**, not a model call, so identical runs score identically.
-
--------------------- | ------------------- | ---------------------------------------- |
-| `AGENT_BRAIN` | `mock` | `deepseek` to use the model |
-| `DEEPSEEK_API_KEY` | — | Unset falls back to simulated agents |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | `deepseek-v4-pro` for harder reasoning |
-| `NEXT_PUBLIC_USE_AI` | `false` | Routes the UI through the agent endpoint |
 
 ---
 
