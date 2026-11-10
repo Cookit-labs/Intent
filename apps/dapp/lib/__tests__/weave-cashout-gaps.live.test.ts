@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 /**
- * Why cash-outs stay closed on NEAR, Monad and Avalanche, as far as can be read without Weave's key. Every
+ * Why cash-outs stay closed on NEAR and Monad, and what keeps Avalanche open, as far as can be read without Weave's key. Every
  * quote here is `dry: true`, which makes no deposit address and moves nothing. A failure means a
  * reason in `closedCashoutReply` may have gone, so look again at the question before changing this.
  *
@@ -19,8 +19,6 @@ const NEAR_USDC = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad20
 const BASE_USDC = 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near'
 const MONAD_USDC = 'nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx'
 const AVALANCHE_USDC = 'nep245:v2_1.omni.hot.tg:43114_3atVJH3r5c4GqiSYmg9fECvjc47o'
-const SOLANA_USDC = 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near'
-const SOLANA_ACCOUNT = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
 
 async function dryQuote(
   over: Record<string, unknown>
@@ -60,21 +58,14 @@ describe.skipIf(SKIP)('what keeps NEAR closed', () => {
   }, 30_000)
 })
 
-describe.skipIf(SKIP)('what keeps Avalanche closed', () => {
-  it('has NEAR Intents refusing Avalanche USDC, the first leg of every Weave route from it', async () => {
+describe.skipIf(SKIP)('what keeps Avalanche open', () => {
+  // NEAR Intents refused Avalanche USDC for part of 2026-11-10, and every Weave route from
+  // Avalanche starts there. If this fails, close Avalanche in `closedCashoutReply` again.
+  it('has NEAR Intents quoting Avalanche USDC, the first leg of every Weave route from it', async () => {
     const quote = await dryQuote({
       originAsset: AVALANCHE_USDC,
       destinationAsset: BASE_USDC,
       refundTo: EVM_ACCOUNT,
-    })
-    expect(quote.status).toBe(400)
-  }, 30_000)
-
-  it('quotes Solana USDC asked the same way, so the refusal is about Avalanche', async () => {
-    const quote = await dryQuote({
-      originAsset: SOLANA_USDC,
-      destinationAsset: BASE_USDC,
-      refundTo: SOLANA_ACCOUNT,
     })
     expect(quote.status).toBe(201)
   }, 30_000)

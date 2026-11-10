@@ -442,6 +442,32 @@ function isFairDeposit(deposit: string, asked: string, decimals: number): boolea
   return scaled(paid) >= scaled(wanted) && scaled(paid) <= most
 }
 
+function toUnits(amount: string, decimals: number): bigint | undefined {
+  if (!/^\d+(?:\.\d+)?$/.test(amount)) return undefined
+  const [whole = '0', fraction = ''] = amount.split('.')
+  if (fraction.length > decimals) return undefined
+  return BigInt(whole + fraction.padEnd(decimals, '0'))
+}
+
+function fromUnits(units: bigint, decimals: number): string {
+  const text = units.toString().padStart(decimals + 1, '0')
+  const fraction = text.slice(-decimals).replace(/0+$/, '')
+  return fraction === '' ? text.slice(0, -decimals) : `${text.slice(0, -decimals)}.${fraction}`
+}
+
+/**
+ * What to ask Weave for so the deposit it answers with still fits the wallet. Weave adds its fee
+ * on top of the amount asked, about 1%, so asking for the whole balance made an order that could
+ * never be paid, and the person then made a second, smaller one. An amount near the balance is
+ * asked as the balance less the most an order may add; anything else is left as it was.
+ */
+export function fitToHeld(amount: string, held: bigint, decimals: number): string {
+  const asked = toUnits(amount, decimals)
+  if (asked === undefined || asked > held) return amount
+  const most = (held * BigInt(100)) / BigInt(100 + MAX_DEPOSIT_OVER_PERCENT)
+  return asked <= most ? amount : fromUnits(most, decimals)
+}
+
 function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }

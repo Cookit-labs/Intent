@@ -14,6 +14,7 @@ import { chainRefusal, guardCashout } from '../../../../lib/weave/guard'
 import { placeWithLinq } from '../../../../lib/weave/linq-cashout'
 import {
   cleanMemo,
+  fitToHeld,
   getWeaveOrderRepo,
   isPastExpiry,
   MAX_COST_PERCENT,
@@ -274,10 +275,16 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
+  // Weave adds its fee on top of what is asked. Asked for the whole balance, its deposit was more
+  // than the wallet held, so that order could never be paid and a second, smaller one followed.
+  // A read that fails leaves the amount as asked: the deposit check still says what is short.
+  const held = await deposit.usdcBalance(input.account).catch(() => undefined)
+  const asked = held === undefined ? amount : fitToHeld(amount, held, deposit.usdcDecimals)
+
   const made = await weave.createOrder({
     chain,
     currency,
-    amount,
+    amount: asked,
     account: input.account,
     institutionCode: input.institution,
     accountIdentifier: input.accountIdentifier,
@@ -312,7 +319,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const order = made.value
-  const mismatch = orderMismatch(order, { chain, currency, amount }, deposit)
+  const mismatch = orderMismatch(order, { chain, currency, amount: asked }, deposit)
   if (mismatch !== undefined) {
     reportError('cashout/orders', new Error('order_mismatch'), {
       chain,

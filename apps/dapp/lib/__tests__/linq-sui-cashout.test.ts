@@ -132,6 +132,8 @@ beforeEach(() => {
     supportsMemo: false,
     isAccount: (a: string) => /^0x[0-9a-f]{64}$/.test(a),
     isDepositAddress: (a: string) => /^0x[0-9a-f]{64}$/.test(a),
+    // Far more than any test asks for, so a Weave order is never fitted here.
+    usdcBalance: vi.fn(async () => BigInt('1000000000000')),
   }
   vi.stubEnv('WEAVE_CASHOUT_CURRENCIES', 'NGN,KES')
 })

@@ -181,18 +181,36 @@ test('a refusal from the server is shown as written', async ({ page }) => {
   await expect(page.getByRole('alert').filter({ hasText: 'Nothing here can swap' })).toBeVisible()
 })
 
-test('an instruction it cannot read gets told what works, and nothing is built', async ({
-  page,
-}) => {
+test('an instruction it cannot read is asked about, and nothing is built', async ({ page }) => {
   await connectFakeSolanaWallet(page)
   let asked = false
   await page.route('**/api/chain/solana/prepare', async (route) => {
     asked = true
     await route.abort()
   })
-  await say(page, 'swap all my USDC')
-  await expect(page.getByRole('alert').filter({ hasText: 'swap 10 USDC to SOL' })).toBeVisible()
+  await say(page, 'swap some sol')
+  await expect(
+    page.getByText("I didn't quite follow that. What would you like to do on Solana?").first()
+  ).toBeVisible()
+  await expect(page.getByText('"swap 5 SOL to USDC"').first()).toBeVisible()
   expect(asked).toBe(false)
+})
+
+test('a share of the balance is worked out from the wallet and said back', async ({ page }) => {
+  await connectFakeSolanaWallet(page)
+  await page.route('**/api/chain/solana/balances**', (route) =>
+    route.fulfill({
+      json: {
+        complete: true,
+        tokens: [
+          { id: 'native', symbol: 'SOL', amount: '1', decimals: 9, native: true, listed: true },
+          { id: 'EPjF', symbol: 'USDC', amount: '12.5', decimals: 6, native: false, listed: true },
+        ],
+      },
+    })
+  )
+  await say(page, 'swap half my USDC to SOL')
+  await expect(page.getByText('50% of your USDC is 6.25 USDC.').first()).toBeVisible()
 })
 
 test('the apps page shows which apps run and which are only listed', async ({ page }) => {

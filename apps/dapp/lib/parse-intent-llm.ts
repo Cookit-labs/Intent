@@ -2,6 +2,7 @@ import { OUTSIDE_TEXT_RULE, promptText } from './agents/prompt-safe'
 import { DEFAULT_LENDING_VENUE } from './lend/venues'
 import { intentModels, type IntentModel } from './llm/intent-models'
 import type { FollowOnAction } from './parse-compound'
+import { isFiatWord } from './weave/parse-cashout'
 
 /**
  * Reading an instruction by meaning rather than by matching its wording.
@@ -333,6 +334,32 @@ export function readingFromArguments(
   args: ToolArguments,
   options: ReadIntentOptions
 ): LlmReadIntent | null {
+  // "Swap my USDC to naira" names a currency where a token goes. That is a cash-out, and
+  // throwing the reading away left the person with a list of examples instead.
+  const target = typeof args.tokenOut === 'string' ? args.tokenOut.trim().toLowerCase() : ''
+  if (target !== '' && isFiatWord(target)) {
+    const stable = typeof args.tokenIn === 'string' && args.tokenIn.trim().toUpperCase() === 'USDC'
+    return readingFromArguments(
+      stable
+        ? { ...args, action: 'offramp', tokenOut: 'USDC', followOn: 'none' }
+        : { ...args, tokenOut: 'USDC', followOn: 'offramp' },
+      options
+    )
+  }
+
+  // "Swap USDC to USDC, then cash out" is how a model writes cashing out USDC already held. As a
+  // swap of a coin to itself it was thrown away, though the meaning was plain.
+  if (
+    args.action === 'swap' &&
+    args.followOn === 'offramp' &&
+    typeof args.tokenIn === 'string' &&
+    typeof args.tokenOut === 'string' &&
+    args.tokenIn.trim().toUpperCase() === 'USDC' &&
+    args.tokenOut.trim().toUpperCase() === 'USDC'
+  ) {
+    return readingFromArguments({ ...args, action: 'offramp', followOn: 'none' }, options)
+  }
+
   // Anything unrecognised falls back to a swap rather than to a lending
   // action. A malformed reply must not silently open a liability.
   const ACTIONS = ['swap', 'supply', 'borrow', 'repay', 'offramp'] as const

@@ -80,10 +80,11 @@ import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
 import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
+import { findShare, shareOfCoin, sizeShare } from '../../lib/chat/share-amount'
 import { yieldReply, type VenueYield } from '../../lib/chat/yield-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { sizeInUnits } from '../../lib/chains/dollar-amount'
-import { chainHelp, helpForUnread } from '../../lib/chains/explain'
+import { askAgain, helpForUnread } from '../../lib/chains/explain'
 import { racesFirst } from '../../lib/chains/parse-action'
 import { txExplorerLink } from '../../lib/chains/activity'
 import {
@@ -132,6 +133,7 @@ import {
   unsupportedTokenReply,
 } from '../../lib/weave/cashout-view'
 import {
+  cashoutFromReading,
   parseCashout,
   parseCurrencyAnswer,
   routeCashout,
@@ -703,6 +705,8 @@ export function IntentChat({
   chainSequenceNow.current = chainSequence
   // The run whose step 2 now waits for a press, because the person left or typed during it.
   const autoStoppedFor = useRef<ChainSequenceRequest | null>(null)
+  /** The coin a pending "how much?" is about, so a bare "all" or "half" can be read. */
+  const shareCoin = useRef<string | null>(null)
   // What a new message left behind by ending a swap that had settled.
   const [sequenceNote, setSequenceNote] = useState<string | null>(null)
   useEffect(() => {
@@ -2231,7 +2235,78 @@ export function IntentChat({
    * its own. The clarifier failing or running out of questions means the user's
    * own words run, so asking never makes the chat less capable than before.
    */
-  function handleSubmit(typed: string): void {
+  /** What the connected wallet holds here, by symbol, read now. Nothing when it can't be read. */
+  async function readHoldings(): Promise<Record<string, string> | undefined> {
+    if (!isConnected || address === undefined) return undefined
+    if (slug === 'stellar') {
+      if (balances === undefined || !balances.exists) return undefined
+      const held: Record<string, string> = { XLM: balances.xlm }
+      for (const [code, line] of Object.entries(balances.trustlines)) held[code] = line.balance
+      return held
+    }
+    try {
+      const response = await fetch(
+        `/api/chain/${slug}/balances?account=${encodeURIComponent(address)}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(20_000) }
+      )
+      if (!response.ok) return undefined
+      const body = (await response.json()) as Partial<WalletBalances>
+      if (!Array.isArray(body.tokens)) return undefined
+      const held: Record<string, string> = {}
+      for (const token of body.tokens) {
+        if (token.native || token.listed) held[token.symbol] = token.amount
+      }
+      return held
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * "All my USDC", "half my SOL", "100% of my AVAX": worked out from the balance read now and
+   * written into the sentence as a number before anything reads it, and said, so every path after
+   * this sees an amount the person can check.
+   */
+  function handleSubmit(said: string): void {
+    const coin = clarifying !== null ? shareCoin.current : null
+    shareCoin.current = null
+    const typed = coin === null ? said : shareOfCoin(said, coin)
+    if (findShare(typed) === undefined) {
+      submitText(typed)
+      return
+    }
+    const turn = latest.current.turn
+    setMessage(typed)
+    setClarifying(null)
+    setAffordError(null)
+    setClarifyBusy(true)
+    void readHoldings().then((held) => {
+      if (clarifyRuns.current === 0) setClarifyBusy(false)
+      if (latest.current.turn !== turn) return
+      const out =
+        held === undefined
+          ? {
+              refusal:
+                "I couldn't read your wallet just now, so I can't work out that share of it. Say an amount instead, or try again in a moment. Nothing was signed or sent.",
+            }
+          : sizeShare(typed, held)
+      if (out === undefined) {
+        submitText(typed)
+        return
+      }
+      if ('refusal' in out) {
+        latest.current.turn += 1
+        recordLive('user', typed)
+        setAffordError(out.refusal)
+        return
+      }
+      submitText(out.text)
+      setSequenceNote((shown) => (shown === null ? out.line : `${shown} ${out.line}`))
+      recordLive('agent', out.line)
+    })
+  }
+
+  function submitText(typed: string): void {
     latest.current.turn += 1
     autoStoppedFor.current = chainSequenceNow.current.sequence
     // A misspelled verb is corrected before anything reads the sentence. "Tell me my positions"
@@ -2426,6 +2501,16 @@ export function IntentChat({
     return chainBalanceReply(held, descriptor.name)
   }
 
+  /**
+   * One question back, held open so the answer is read with what came before it. `coin` is what
+   * "all" or "half" in the answer is a share of.
+   */
+  function askBack(turns: ClarifyTurn[], question: string, coin?: string): void {
+    shareCoin.current = coin ?? null
+    setClarifying({ turns: [...turns, { role: 'assistant', content: question }] })
+    recordLive('agent', question)
+  }
+
   /** Where an asset earns most on this chain, from rates read now. */
   async function walletYieldsReply(asset: string): Promise<string> {
     const account = isConnected ? address : undefined
@@ -2526,7 +2611,12 @@ export function IntentChat({
         setParsed(null)
         setFollowOn(null)
         clearChainRace()
-        chainAction.refuse(help, turns[0]?.content ?? text)
+        if (answer.reason === 'rate_limited' || answer.reason === 'rate_limited_today') {
+          chainAction.refuse(help, turns[0]?.content ?? text)
+        } else {
+          // Asked, so the answer is read together with this message rather than on its own.
+          askBack(turns, help)
+        }
         return
       }
     }
@@ -2598,6 +2688,15 @@ export function IntentChat({
       return
     }
 
+    // A cash-out of USDC the model read, in words of its own that the line above doesn't know.
+    const readOut =
+      chainCaps === undefined ? undefined : cashoutFromReading(answer.read, said, slug)
+    if (readOut !== undefined) {
+      if (cashoutStarts(readOut)) leaveSequence()
+      startCashout(readOut, turns[0]?.content ?? text)
+      return
+    }
+
     // Off Stellar a reading never reaches Stellar's swap and lend flows below. It goes where a typed
     // sentence goes, and only what the person typed themselves can be signed.
     if (chainCaps !== undefined) {
@@ -2614,13 +2713,17 @@ export function IntentChat({
       } else if (route !== null && 'action' in route) {
         leaveSequence()
         startChainAction(route.action, shown)
+      } else if (route === null || 'question' in route) {
+        clearChainRace()
+        askBack(
+          turns,
+          route === null ? askAgain(descriptor.name, chainCaps) : route.question,
+          route === null ? undefined : answer.read.tokenIn
+        )
       } else {
         setMessage(shown)
         clearChainRace()
-        chainAction.refuse(
-          route !== null ? route.refusal : chainHelp(descriptor.name, chainCaps),
-          shown
-        )
+        chainAction.refuse(route.refusal, shown)
       }
       return
     }
