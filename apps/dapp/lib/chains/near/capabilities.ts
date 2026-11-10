@@ -7,6 +7,8 @@ export const nearCapabilities: ChainCapability[] = [
   { kind: 'stake', venue: 'rNEAR', symbol: 'NEAR' },
   { kind: 'unstake', venue: 'Meta Pool', symbol: 'stNEAR' },
   { kind: 'unstake', venue: 'rNEAR', symbol: 'rNEAR' },
+  { kind: 'stake', venue: 'LiNEAR', symbol: 'NEAR' },
+  { kind: 'unstake', venue: 'LiNEAR', symbol: 'LiNEAR' },
   { kind: 'claim', venue: 'Meta Pool', symbol: 'NEAR' },
   { kind: 'supply', venue: '1Click Earn', symbol: 'USDC' },
   { kind: 'withdraw', venue: '1Click Earn', symbol: 'USDC' },

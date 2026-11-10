@@ -292,3 +292,63 @@ describe('route selection', () => {
     expect(r.ok).toBe(true)
   })
 })
+
+/**
+ * GLM 5.3 Flash on NEAR AI, at the low reasoning that lands it inside the talk window, left a
+ * required field out of about one first take in three, measured live on 10 November 2026. Each
+ * try takes a few seconds, so a fast incomplete one is asked again while there is time.
+ */
+describe('an incomplete first take from a fast model', () => {
+  const noProof = {
+    fetch: (async () => new Response('', { status: 503 })) as unknown as typeof fetch,
+    verifyQuote: async () => {
+      throw new Error('unused')
+    },
+    nonce: () => 'ab'.repeat(32),
+    now: () => 0,
+  }
+
+  function replies(...bodies: string[]): { fetchImpl: typeof fetch; calls: () => number } {
+    let n = 0
+    const fetchImpl = (async () => {
+      const args = bodies[Math.min(n, bodies.length - 1)] ?? ''
+      n += 1
+      return new Response(JSON.stringify(toolResponse(args)))
+    }) as unknown as typeof fetch
+    return { fetchImpl, calls: () => n }
+  }
+
+  const missingReasoning = JSON.stringify({ ...JSON.parse(goodArguments()), reasoning: undefined })
+
+  it('asks NEAR AI again, and takes the complete answer', async () => {
+    const { fetchImpl, calls } = replies(missingReasoning, goodArguments())
+    const brain = createBrain({ provider: 'nearai', apiKey: SECRET, fetchImpl, proofDeps: noProof })
+    const outcome = await brain.propose(request)
+    expect(outcome.ok).toBe(true)
+    expect(calls()).toBe(2)
+  })
+
+  it('asks at most three times in all', async () => {
+    const { fetchImpl, calls } = replies(missingReasoning)
+    const brain = createBrain({ provider: 'nearai', apiKey: SECRET, fetchImpl, proofDeps: noProof })
+    expect(await brain.propose(request)).toMatchObject({ ok: false, error: 'invalid_schema' })
+    expect(calls()).toBe(3)
+  })
+
+  it('does not ask again once the person has left', async () => {
+    const { fetchImpl, calls } = replies(missingReasoning, goodArguments())
+    const left = new AbortController()
+    left.abort()
+    const brain = createBrain({ provider: 'nearai', apiKey: SECRET, fetchImpl, proofDeps: noProof })
+    await brain.propose({ ...request, signal: left.signal })
+    expect(calls()).toBe(1)
+  })
+
+  it('leaves every other provider at one try', async () => {
+    const { fetchImpl, calls } = replies(missingReasoning, goodArguments())
+    expect(await createBrain({ apiKey: SECRET, fetchImpl }).propose(request)).toMatchObject({
+      ok: false,
+    })
+    expect(calls()).toBe(1)
+  })
+})

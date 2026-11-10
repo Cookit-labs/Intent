@@ -1,3 +1,4 @@
+import { OUTSIDE_TEXT_RULE, promptSafe, promptText } from '../agents/prompt-safe'
 import { chainModule } from '../chains/registry'
 import { cashOutPrompt } from '../weave/corridors'
 import { tidyProse } from '../chat/prose'
@@ -346,6 +347,14 @@ type Attempt =
   /** No reply arrived: a timeout, a refusal, an unreachable host. */
   | { kind: 'failed' }
 
+/**
+ * A turn with nothing hidden in it. An earlier reply can repeat a token's own name from a balance
+ * read, and anyone can name a token, so history is outside text too.
+ */
+function cleanTurn(turn: OrchestrateTurn): OrchestrateTurn {
+  return { ...turn, content: promptText(turn.content) }
+}
+
 async function orchestrateWithModel(
   turns: OrchestrateTurn[],
   options: OrchestrateOptions,
@@ -355,9 +364,14 @@ async function orchestrateWithModel(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
 
-  const context = (options.context ?? []).filter((l) => l.trim() !== '').slice(0, 6)
+  // What earlier turns established goes into the system message, so each line crosses as one
+  // bounded line. The history and the turns keep their lines, with nothing hidden in them.
+  const context = (options.context ?? [])
+    .map((l) => promptSafe(l, 300))
+    .filter((l) => l !== '')
+    .slice(0, 6)
   const chain = options.chain ?? 'stellar'
-  const facts = `${systemPrompt(chain)}\nWhat Intent does:\n${capabilitySheet(chain)}`
+  const facts = `${systemPrompt(chain)}\n${OUTSIDE_TEXT_RULE}\nWhat Intent does:\n${capabilitySheet(chain)}`
   const system =
     context.length === 0
       ? facts
@@ -370,7 +384,11 @@ async function orchestrateWithModel(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify({
         model: config.model,
-        messages: [{ role: 'system', content: system }, ...(options.history ?? []), ...turns],
+        messages: [
+          { role: 'system', content: system },
+          ...(options.history ?? []).map(cleanTurn),
+          ...turns.map(cleanTurn),
+        ],
         tools: [ORCHESTRATE_TOOL],
         tool_choice: 'auto',
         temperature: 0,

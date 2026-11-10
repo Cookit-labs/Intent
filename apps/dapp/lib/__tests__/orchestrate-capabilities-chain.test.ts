@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { OUTSIDE_TEXT_RULE } from '../agents/prompt-safe'
 import { capabilitySheet } from '../orchestrate/capabilities'
 import { orchestrateWithLlm } from '../orchestrate/orchestrate'
 
@@ -100,9 +101,9 @@ describe('capabilitySheet multi-step forms', () => {
     return (await import('../orchestrate/capabilities')).capabilitySheet
   }
 
-  it('says swap then cash out runs on Solana, Sui and Avalanche', async () => {
+  it('says swap then cash out runs on Solana and Sui', async () => {
     const sheet = await sheetWith('k')
-    for (const chain of ['solana', 'sui', 'avalanche']) {
+    for (const chain of ['solana', 'sui']) {
       expect(sheet(chain)).toMatch(/Swap then cash out:/)
     }
     expect(sheet('solana')).toMatch(/Swap then deposit:/)
@@ -131,6 +132,15 @@ describe('capabilitySheet multi-step forms', () => {
     expect(monad).toMatch(/Swap then deposit:/)
     expect(monad).not.toMatch(/Swap then cash out:/)
     expect(monad).toMatch(/Cash out does not run from Monad/)
+    expect(monad).toContain('Move USDC to Solana or Sui')
+  }, 60_000)
+
+  it('says Avalanche does not cash out, and why', async () => {
+    const sheet = await sheetWith('k')
+    const avalanche = sheet('avalanche')
+    expect(avalanche).not.toMatch(/Swap then cash out:/)
+    expect(avalanche).toMatch(/Cash out does not run from Avalanche/)
+    expect(avalanche).toContain('Move USDC to Solana or Sui')
   }, 60_000)
 
   it('says which native coins cannot be sent yet', async () => {
@@ -180,7 +190,10 @@ describe('the orchestrator prompt', () => {
 
   it('is byte for byte what it was on Stellar', async () => {
     vi.stubEnv('WEAVE_SECRET_KEY', '')
-    const system = await systemFor('stellar')
+    // The one line added since is the rule that outside text is data, said on every chain.
+    const withRule = await systemFor('stellar')
+    expect(withRule).toContain(`\n${OUTSIDE_TEXT_RULE}\n`)
+    const system = withRule.replace(`\n${OUTSIDE_TEXT_RULE}`, '')
     expect(system.length).toBe(6768)
     expect(createHash('sha256').update(system).digest('hex')).toBe(
       '03e493d4aafe64d8eed78599cd00c44c9f5a90226e92828db44fdf0e9681da99'

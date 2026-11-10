@@ -337,6 +337,12 @@ export function useCompetition(
               continue
             }
 
+            // Not talk, so it leaves the race's pacing as it was.
+            if (frame.type === 'competition:proof') {
+              showInThread({ type: 'line', line: { kind: 'verified', agent: frame.agent } })
+              continue
+            }
+
             if (frame.type === 'competition:proposal') {
               const key = frame.proposal.agent
               const agent = agentsRef.current.find((a) => a.key === key)

@@ -15,8 +15,9 @@ import { anchorOn, anchorsOn } from '../../offramp/anchors'
 import { systemPromptFor } from '../brief'
 import { restContextLines } from '../rest-option'
 import type { ChainRouteQuote } from '../chain-routes'
-import { promptSafe } from '../prompt-safe'
+import { promptSafe, promptSymbol } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
+import { enclaveFor, proveReply, type ProofDeps, type ReplyProof } from './nearai-proof'
 import type { ProviderConfig } from './providers'
 import { PROVIDERS, modelFor } from './providers'
 
@@ -82,6 +83,12 @@ export interface BrainOptions {
   baseUrl?: string
   strictTools?: boolean
   fetchImpl?: typeof fetch
+  /** How an attested provider's replies are checked. The real services when unset. */
+  proofDeps?: ProofDeps
+}
+
+interface ChatCompletionReply {
+  id?: string
 }
 
 interface ChatCompletionResponse {
@@ -141,10 +148,16 @@ export function meta(
  * and still returns the right answer; it just quietly costs ~50x more.
  */
 export function buildMessages(req: ProposalRequest): { role: string; content: string }[] {
-  const venueList = req.market.venues.map((v) => `${v.id} (${v.name}, ${v.category})`).join(', ')
-  const priceList = Object.entries(req.market.prices)
-    .map(([sym, px]) => `${sym}=$${px}`)
+  // Every value below that came from outside crosses as one bounded line, and every token symbol
+  // as a symbol, because a token's name is chosen by whoever deployed it.
+  const venueList = req.market.venues
+    .map((v) => `${v.id} (${promptSafe(v.name, 40)}, ${v.category})`)
     .join(', ')
+  const priceList = Object.entries(req.market.prices)
+    .map(([sym, px]) => `${promptSymbol(sym)}=$${px}`)
+    .join(', ')
+  const tokenIn = promptSymbol(req.intent.input.tokenIn)
+  const tokenOut = promptSymbol(req.intent.input.tokenOut)
 
   return [
     { role: 'system', content: systemPromptFor(req.chain, req.market.rest !== undefined) },
@@ -160,7 +173,10 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
         ...(req.market.assets !== undefined && req.market.assets.length > 0
           ? [
               'Assets you may trade:',
-              ...req.market.assets.map((a) => `  ${a.code} — ${a.what} (${a.trust})`),
+              ...req.market.assets.map(
+                (a) =>
+                  `  ${promptSymbol(a.code)} — ${promptSafe(a.what)} (${promptSafe(a.trust, 40)})`
+              ),
             ]
           : []),
         `Venues available on ${req.chain}: ${venueList}`,
@@ -170,7 +186,7 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
               'Anchors that withdraw to fiat, with live limits:',
               ...req.market.offramps.map(
                 (o) =>
-                  `  ${o.venue}: ${o.asset}` +
+                  `  ${promptSafe(o.venue, 40)}: ${promptSymbol(o.asset)}` +
                   (o.minAmount !== undefined ? `, min ${o.minAmount}` : '') +
                   (o.maxAmount !== undefined ? `, max ${o.maxAmount}` : '') +
                   (o.feeEnabled ? ', charges a fee' : ', no fee')
@@ -207,19 +223,19 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
         // The user's sentence, on one line. A newline in it would read as the
         // next line of the brief rather than more of the intent.
         `Intent: ${promptSafe(req.intent.outcome, 500)}`,
-        `Parsed as: ${req.intent.input.type}, ${req.intent.input.tokenIn} -> ${req.intent.input.tokenOut}`,
+        `Parsed as: ${req.intent.input.type}, ${tokenIn} -> ${tokenOut}`,
         `Size: about $${Math.round(req.intent.escrowUsd)}`,
         // The routes above are live; this table is indicative and can be badly
         // stale. Saying so stops an agent splitting the difference between the
         // two and quoting a price neither source supports.
         ...(req.chain === 'stellar'
           ? [
-              `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
+              `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${tokenOut}`,
               'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
             ]
           : req.intent.referencePriceUsd > 0
             ? [
-                `Market reference: $${req.intent.referencePriceUsd} per ${req.intent.input.tokenIn}, the token being paid in.`,
+                `Market reference: $${req.intent.referencePriceUsd} per ${tokenIn}, the token being paid in.`,
               ]
             : []),
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
@@ -264,10 +280,10 @@ function perpLines(req: ProposalRequest): string[] {
   if (perps === undefined || perps.markets.length === 0) return []
   const usd = (n: number): string => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
   return [
-    `Perpetual futures on Noether (${perps.venue}), read live. The protocol is unaudited and testnet-only; its gateway reports version ${perps.version}.`,
+    `Perpetual futures on Noether (${promptSafe(perps.venue, 40)}), read live. The protocol is unaudited and testnet-only; its gateway reports version ${promptSafe(perps.version, 20)}.`,
     ...perps.markets.map(
       (m) =>
-        `  ${m.asset}: mark $${m.markPriceUsd}` +
+        `  ${promptSymbol(m.asset)}: mark $${m.markPriceUsd}` +
         (m.openInterestLongUsd !== undefined && m.openInterestShortUsd !== undefined
           ? `, open interest long $${usd(m.openInterestLongUsd)} / short $${usd(m.openInterestShortUsd)}`
           : '') +
@@ -289,10 +305,13 @@ function perpLines(req: ProposalRequest): string[] {
 function chainRouteLines(routes: QuotedRoute[]): string[] {
   const line = (r: QuotedRoute): string => {
     const q = r.quote as Partial<ChainRouteQuote> | undefined
-    const pay = q?.pay !== undefined ? `${q.pay.amount} ${q.pay.symbol}` : r.sendAmount
+    const pay =
+      q?.pay !== undefined
+        ? `${promptSafe(q.pay.amount, 40)} ${promptSymbol(q.pay.symbol)}`
+        : promptSafe(r.sendAmount, 40)
     const gets =
       q?.receive !== undefined
-        ? ` -> receive ${q.receive.amount} ${q.receive.symbol}` +
+        ? ` -> receive ${promptSafe(q.receive.amount, 40)} ${promptSymbol(q.receive.symbol)}` +
           (q.valueOutUsd !== undefined ? ` (about $${q.valueOutUsd.toFixed(2)})` : '')
         : ''
     const rate = q?.apyPercent !== undefined ? `, ${q.apyPercent}% APY (current rate)` : ''
@@ -327,6 +346,8 @@ function routeLines(req: ProposalRequest): string[] {
     return [
       '',
       'No executable routes were found for this pair. Reason about the intent, and return an empty routeId.',
+      // A model reasoning briefly left the price at zero here, and a zero price fails the proposal.
+      'projectedAvgPriceUsd must still be your estimate, above zero, from the market prices above.',
     ]
   }
 
@@ -339,7 +360,7 @@ function routeLines(req: ProposalRequest): string[] {
       (r) =>
         // The path is asset codes anyone can issue; the note echoes a token code
         // the venue's API chose. Both cross as one bounded line.
-        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} on ${r.source}, ${r.via !== undefined ? promptSafe(r.via) : `${r.hops} hop(s)`}` +
+        `  ${r.id}: send ${promptSafe(r.sendAmount, 40)} -> receive ${promptSafe(r.receiveAmount, 40)} on ${promptSafe(r.source)}, ${r.via !== undefined ? promptSafe(r.via) : `${r.hops} hop(s)`}` +
         (r.executable ? '' : ' [COMPARISON ONLY, cannot be executed]') +
         (r.note !== undefined ? ` [${promptSafe(r.note, 160)}]` : '')
     ),
@@ -477,6 +498,10 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
     signal: AbortSignal | undefined
   ): Promise<TalkOutcome> {
     const startedAt = Date.now()
+    const requestBody = JSON.stringify(body)
+    // Started before the request, so the enclave evidence predates the reply it vouches for.
+    const enclave =
+      config.attested === true ? enclaveFor(model, baseUrl, options.proofDeps) : undefined
 
     let res: Response
     try {
@@ -486,7 +511,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: requestBody,
         ...(signal !== undefined ? { signal } : {}),
       })
     } catch (e) {
@@ -516,9 +541,12 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    let reply: ChatCompletionResponse
+    let reply: ChatCompletionResponse & ChatCompletionReply
+    // Read as text first: a signature covers the exact bytes, not a re-serialised object.
+    let responseBody: string
     try {
-      reply = (await res.json()) as ChatCompletionResponse
+      responseBody = await res.text()
+      reply = JSON.parse(responseBody) as ChatCompletionResponse & ChatCompletionReply
     } catch {
       return {
         ok: false,
@@ -557,7 +585,23 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    return { ok: true, args, meta: meta(config, model, Date.now() - startedAt, reply.usage) }
+    const chatId = reply.id
+    let proven: Promise<ReplyProof> | undefined
+    const proof =
+      enclave !== undefined && typeof chatId === 'string' && apiKey !== undefined
+        ? () =>
+            (proven ??= proveReply(
+              enclave,
+              { baseUrl, apiKey, chatId, requestBody, responseBody },
+              options.proofDeps
+            ))
+        : undefined
+    return {
+      ok: true,
+      args,
+      meta: meta(config, model, Date.now() - startedAt, reply.usage),
+      ...(proof !== undefined ? { proof } : {}),
+    }
   }
 
   return {
@@ -578,26 +622,38 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
             function: { ...SUBMIT_PROPOSAL_TOOL.function, strict: false },
           }
 
-      const out = await chat(
-        {
-          model,
-          messages: buildMessages(req),
-          tools: [tool],
-          // 'auto' for every provider today. DeepSeek's models reason in
-          // thinking mode, which rejects a forced tool_choice outright:
-          // "Thinking mode does not support this tool_choice"; Ollama ignores
-          // the field entirely. The brief already instructs the
-          // model to answer by calling the tool, and a reply that arrives as
-          // prose anyway is caught below — so forcing buys nothing.
-          tool_choice: config.toolChoice,
-          temperature: TEMPERATURE,
-          max_tokens: MAX_OUTPUT_TOKENS,
-        },
-        req.agent,
-        req.signal
-      )
-      if (!out.ok) return out
-      return toOutcome(req, out.args, out.meta)
+      const body = {
+        model,
+        messages: buildMessages(req),
+        tools: [tool],
+        // 'auto' for every provider today. DeepSeek's models reason in
+        // thinking mode, which rejects a forced tool_choice outright:
+        // "Thinking mode does not support this tool_choice"; Ollama ignores
+        // the field entirely. The brief already instructs the
+        // model to answer by calling the tool, and a reply that arrives as
+        // prose anyway is caught below — so forcing buys nothing.
+        tool_choice: config.toolChoice,
+        temperature: TEMPERATURE,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        ...config.propose?.body,
+      }
+      const startedAt = Date.now()
+      const retry = config.propose?.retryIncomplete
+      for (let tries = 1; ; tries++) {
+        const out = await chat(body, req.agent, req.signal)
+        const outcome = out.ok ? toOutcome(req, out.args, out.meta) : out
+        if (outcome.ok) {
+          return out.ok && out.proof !== undefined ? { ...outcome, proof: out.proof } : outcome
+        }
+        // A fast model that left a field out is asked again, while the race still has time for it.
+        const again =
+          retry !== undefined &&
+          outcome.error === 'invalid_schema' &&
+          tries < retry.tries &&
+          Date.now() - startedAt < retry.withinMs &&
+          req.signal?.aborted !== true
+        if (!again) return outcome
+      }
     },
 
     async talk(call: TalkCall): Promise<TalkOutcome> {

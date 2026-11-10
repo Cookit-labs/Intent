@@ -82,6 +82,9 @@ const AGENT_TIMEOUT_MS = 60_000
 
 const WINDOW_SECONDS = 30
 
+/** A cold enclave check takes Intel and NVIDIA about six seconds; past this the note is dropped. */
+const PROOF_WAIT_MS = 8_000
+
 /**
  * Chains a competition can execute on: Stellar, and any chain with a module.
  *
@@ -525,6 +528,8 @@ export async function POST(request: Request): Promise<Response> {
       const talking = clientTalks && roster.filter((a) => a.brain.talk !== undefined).length >= 2
       const talkStartedAt = Date.now()
       const rawFirstTakes = new Map<string, AgentProposalResult>()
+      // NEAR AI answers are checked against its enclave while the race goes on.
+      const proofs: Promise<void>[] = []
       const firstTakeAborts: AbortController[] = []
 
       // The checked plan for what this request is, whichever turn produced it.
@@ -601,6 +606,19 @@ export async function POST(request: Request): Promise<Response> {
               error: outcome.error,
             })
             return undefined
+          }
+
+          if (outcome.proof !== undefined) {
+            proofs.push(
+              outcome.proof().then((proof) => {
+                if (proof.verified) {
+                  send({ type: 'competition:proof', competitionId, agent: agent.key })
+                } else {
+                  // eslint-disable-next-line no-console
+                  console.warn(`[agents] ${agent.key}: answer not verified (${proof.reason})`)
+                }
+              })
+            )
           }
 
           // This agent's own route, so executing it signs what it proposed
@@ -810,6 +828,13 @@ export async function POST(request: Request): Promise<Response> {
           scored.filter((s) => !heldOff.has(s.agent)).map((s) => [s.agent, s.score])
         )
       )
+      // A proof still being checked gets a short while to land before the stream ends.
+      if (proofs.length > 0 && !closed) {
+        await Promise.race([
+          Promise.allSettled(proofs),
+          new Promise((resolve) => setTimeout(resolve, PROOF_WAIT_MS)),
+        ])
+      }
       if (!closed) {
         closed = true
         controller.close()

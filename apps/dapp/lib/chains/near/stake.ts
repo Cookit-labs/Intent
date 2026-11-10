@@ -15,8 +15,11 @@ import {
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import { accountBalance, isRegistered, viewCall, waitForTransaction } from './rpc'
 import {
+  assertLinearSafe,
   assertMetapoolSafe,
   assertRnearSafe,
+  LINEAR_EXIT_GAS,
+  LINEAR_STAKE_GAS,
   METAPOOL_EXIT_GAS,
   METAPOOL_STAKE_GAS,
   RNEAR_EXIT_GAS,
@@ -27,6 +30,7 @@ import {
 import {
   explorerUrl,
   formatUnits,
+  LINEAR_CONTRACT,
   METAPOOL_CONTRACT,
   nearTokens,
   RNEAR_CONTRACT,
@@ -36,6 +40,7 @@ import {
 
 export const RNEAR_VENUE_ID = 'rnear'
 export const METAPOOL_VENUE_ID = 'metapool'
+export const LINEAR_VENUE_ID = 'linear'
 
 const RHEA_APY_URL = 'https://api.rhea.finance/get-rnear-apy'
 const APY_TIMEOUT_MS = 5_000
@@ -44,8 +49,8 @@ const CONFIRM_WAIT_MS = 25_000
 const HOURS_PER_EPOCH = 7.2
 /** Share rounding leaves dust in `unstaked`. `rnear-sdk` treats less than this as nothing pending. */
 const MIN_PENDING_YOCTO = BigInt('10000000000000000000')
-/** rNEAR's contract keeps this much for itself and won't pay out of it. */
-const RNEAR_MIN_RESERVE_YOCTO = YOCTO_PER_NEAR
+/** rNEAR's and LiNEAR's contracts keep this much for themselves and won't pay out of it. */
+const LIQUID_MIN_RESERVE_YOCTO = YOCTO_PER_NEAR
 
 function cannotRead(venue: string): ChainActionRefused {
   return new ChainActionRefused(
@@ -93,23 +98,70 @@ function stakeCall(amount: string, gas: bigint): NearTransaction['actions'][numb
 }
 
 /**
- * What a stake would give back, without building the transaction. A rate Rhea does not
+ * A liquid staking contract of the LiNEAR design. rNEAR is a fork of it, so both stake, price,
+ * register, pause and pay out the same way, each on its own contract.
+ */
+interface LiquidStake {
+  id: string
+  name: string
+  receipt: string
+  contract: string
+  stakeGas: bigint
+  /** A rate the venue publishes, or nothing. A missing rate is never guessed. */
+  apy: () => Promise<number | undefined>
+  summary: (amount: string) => string
+  notes: string[]
+}
+
+const RNEAR_STAKE: LiquidStake = {
+  id: RNEAR_VENUE_ID,
+  name: 'rNEAR',
+  receipt: 'rNEAR',
+  contract: RNEAR_CONTRACT,
+  stakeGas: RNEAR_STAKE_GAS,
+  apy: rnearApyPercent,
+  summary: (amount) => `Stake ${amount} NEAR with Rhea and receive rNEAR.`,
+  notes: [
+    "rNEAR's price rises only as staking rewards come in, and the rate changes, so no return is guaranteed. Leaving takes about 30 hours at full price, or happens right away through a swap at the market price.",
+    'Most rNEAR sits in Rhea Lend, which lost about $18.4M to an exploit in April 2026. Trouble there could hurt the price of rNEAR and the instant way out.',
+  ],
+}
+
+/** LiNEAR's rate endpoint, api.linearprotocol.org, answered 526 on 10 November 2026, so none is shown. */
+const LINEAR_STAKE: LiquidStake = {
+  id: LINEAR_VENUE_ID,
+  name: 'LiNEAR',
+  receipt: 'LiNEAR',
+  contract: LINEAR_CONTRACT,
+  stakeGas: LINEAR_STAKE_GAS,
+  apy: async () => undefined,
+  summary: (amount) => `Stake ${amount} NEAR with LiNEAR and receive LiNEAR.`,
+  notes: [
+    "LiNEAR's price rises only as staking rewards come in, and the rate changes, so no return is guaranteed. Leaving takes 4 epochs, about 30 hours, at full price, or happens right away through a swap at the market price.",
+    'Your NEAR is held by the contract at linear-protocol.near, which delegates to many validators, so a contract bug or a validator failure could cost you.',
+  ],
+}
+
+/**
+ * What a stake would give back, without building the transaction. A rate the venue does not
  * give is left out rather than guessed. Meta Pool has no rate endpoint here, so its quote
  * carries none.
  */
-async function quoteRnear(request: ChainActionRequest, account: string): Promise<VenueQuote> {
-  assertStakeRequest(request, account, 'rNEAR')
-  const amount = toBaseUnits(request.amount, 24)
-  let receive: string
-  try {
-    receive = receiptAmount(amount, await viewCall<string>(RNEAR_CONTRACT, 'ft_price'))
-  } catch {
-    throw cannotRead('rNEAR')
-  }
-  const apyPercent = await rnearApyPercent()
-  return {
-    receive: { amount: receive, symbol: 'rNEAR' },
-    ...(apyPercent !== undefined ? { apyPercent } : {}),
+function quoteLiquid(lst: LiquidStake): ChainVenue['quote'] {
+  return async (request: ChainActionRequest, account: string): Promise<VenueQuote> => {
+    assertStakeRequest(request, account, lst.name)
+    const amount = toBaseUnits(request.amount, 24)
+    let receive: string
+    try {
+      receive = receiptAmount(amount, await viewCall<string>(lst.contract, 'ft_price'))
+    } catch {
+      throw cannotRead(lst.name)
+    }
+    const apyPercent = await lst.apy()
+    return {
+      receive: { amount: receive, symbol: lst.receipt },
+      ...(apyPercent !== undefined ? { apyPercent } : {}),
+    }
   }
 }
 
@@ -124,8 +176,16 @@ async function quoteMetapool(request: ChainActionRequest, account: string): Prom
   }
 }
 
-async function prepareRnear(request: ChainActionRequest, account: string): Promise<PreparedAction> {
-  const venue = 'rNEAR'
+function prepareLiquid(lst: LiquidStake): ChainVenue['prepare'] {
+  return (request, account) => prepareLiquidStake(lst, request, account)
+}
+
+async function prepareLiquidStake(
+  lst: LiquidStake,
+  request: ChainActionRequest,
+  account: string
+): Promise<PreparedAction> {
+  const venue = lst.name
   assertStakeRequest(request, account, venue)
   const amount = toBaseUnits(request.amount, 24)
 
@@ -134,18 +194,20 @@ async function prepareRnear(request: ChainActionRequest, account: string): Promi
   let paused: boolean
   try {
     ;[price, registered, paused] = await Promise.all([
-      viewCall<string>(RNEAR_CONTRACT, 'ft_price'),
-      isRegistered(RNEAR_CONTRACT, account),
-      viewCall<boolean>(RNEAR_CONTRACT, 'is_paused'),
+      viewCall<string>(lst.contract, 'ft_price'),
+      isRegistered(lst.contract, account),
+      viewCall<boolean>(lst.contract, 'is_paused'),
     ])
     receiptAmount(amount, price)
   } catch {
     throw cannotRead(venue)
   }
   if (paused) {
-    throw new ChainActionRefused('rNEAR staking is paused right now. Nothing was signed or sent.')
+    throw new ChainActionRefused(
+      `${venue} staking is paused right now. Nothing was signed or sent.`
+    )
   }
-  const apy = await rnearApyPercent()
+  const apy = await lst.apy()
 
   const actions: NearTransaction['actions'] = []
   if (!registered) {
@@ -159,24 +221,23 @@ async function prepareRnear(request: ChainActionRequest, account: string): Promi
       },
     })
   }
-  actions.push(stakeCall(amount, RNEAR_STAKE_GAS))
+  actions.push(stakeCall(amount, lst.stakeGas))
 
   return {
-    venueId: RNEAR_VENUE_ID,
+    venueId: lst.id,
     venueName: venue,
     kind: 'stake',
-    summary: `Stake ${request.amount} NEAR with Rhea and receive rNEAR.`,
+    summary: lst.summary(request.amount),
     pay: { amount: request.amount, symbol: 'NEAR' },
-    receive: { amount: receiptAmount(amount, price), symbol: 'rNEAR', approximate: true },
+    receive: { amount: receiptAmount(amount, price), symbol: lst.receipt, approximate: true },
     ...(apy !== undefined ? { apy: { basePercent: apy } } : {}),
     notes: [
-      "rNEAR's price rises only as staking rewards come in, and the rate changes, so no return is guaranteed. Leaving takes about 30 hours at full price, or happens right away through a swap at the market price.",
-      'Most rNEAR sits in Rhea Lend, which lost about $18.4M to an exploit in April 2026. Trouble there could hurt the price of rNEAR and the instant way out.',
+      ...lst.notes,
       ...(registered
         ? []
-        : ['This first stake also pays 0.00125 NEAR to register you on the rNEAR token.']),
+        : [`This first stake also pays 0.00125 NEAR to register you on the ${lst.receipt} token.`]),
     ],
-    signing: { family: 'near', transactions: [{ receiverId: RNEAR_CONTRACT, actions }] },
+    signing: { family: 'near', transactions: [{ receiverId: lst.contract, actions }] },
   }
 }
 
@@ -296,22 +357,27 @@ async function currentEpoch(): Promise<number | undefined> {
   }
 }
 
-async function readRnear(account: string): Promise<StakeHolding> {
+/** rNEAR and LiNEAR keep accounts the same way, each on its own contract. */
+function readLiquid(contract: string): (account: string) => Promise<StakeHolding> {
+  return (account) => readLiquidAccount(contract, account)
+}
+
+async function readLiquidAccount(contract: string, account: string): Promise<StakeHolding> {
   const [details, receipt] = await Promise.all([
     viewCall<{
       unstaked_balance: string
       unstaked_available_epoch_height: number
       can_withdraw: boolean
-    }>(RNEAR_CONTRACT, 'get_account_details', { account_id: account }),
-    viewCall<string>(RNEAR_CONTRACT, 'ft_balance_of', { account_id: account }),
+    }>(contract, 'get_account_details', { account_id: account }),
+    viewCall<string>(contract, 'ft_balance_of', { account_id: account }),
   ])
   const pending = BigInt(details.unstaked_balance)
   const waiting = pending >= MIN_PENDING_YOCTO
   let ready = waiting && details.can_withdraw
   if (ready) {
     // `assert_can_withdraw` also needs this much free on the contract, its reserve aside.
-    const held = BigInt(await accountBalance(RNEAR_CONTRACT))
-    ready = held - RNEAR_MIN_RESERVE_YOCTO >= pending
+    const held = BigInt(await accountBalance(contract))
+    ready = held - LIQUID_MIN_RESERVE_YOCTO >= pending
   }
   let epochsLeft: number | undefined
   if (waiting && !details.can_withdraw) {
@@ -349,28 +415,37 @@ const METAPOOL_EXIT: ExitVenue = {
   },
 }
 
-const RNEAR_EXIT: ExitVenue = {
-  id: RNEAR_VENUE_ID,
-  name: 'rNEAR',
-  receipt: 'rNEAR',
-  contract: RNEAR_CONTRACT,
-  gas: RNEAR_EXIT_GAS,
-  claimMethod: 'withdraw_all',
-  price: () => viewCall<string>(RNEAR_CONTRACT, 'ft_price'),
-  read: readRnear,
-  assertOpen: async () => {
-    if (await viewCall<boolean>(RNEAR_CONTRACT, 'is_paused')) {
-      throw new ChainActionRefused(
-        'rNEAR exits are paused right now, by the contract itself. Nothing was signed or sent.'
-      )
-    }
-  },
-  unstakeNotes: async () => [
-    'Your rNEAR is gone as soon as this is signed, and your NEAR comes in a second step. The wait is at least 4 epochs, about 30 hours, and runs longer when its validators are already busy. After that, say "claim my NEAR". It earns nothing while it waits.',
-    RESTART_NOTE,
-    "The source link rNEAR's contract publishes does not open. Its methods were checked against what the deployed contract reports about itself and an older public copy of the source.",
-  ],
+function liquidExit(lst: LiquidStake, gas: bigint, extraNotes: string[]): ExitVenue {
+  return {
+    id: lst.id,
+    name: lst.name,
+    receipt: lst.receipt,
+    contract: lst.contract,
+    gas,
+    claimMethod: 'withdraw_all',
+    price: () => viewCall<string>(lst.contract, 'ft_price'),
+    read: readLiquid(lst.contract),
+    assertOpen: async () => {
+      if (await viewCall<boolean>(lst.contract, 'is_paused')) {
+        throw new ChainActionRefused(
+          `${lst.name} exits are paused right now, by the contract itself. Nothing was signed or sent.`
+        )
+      }
+    },
+    unstakeNotes: async () => [
+      `Your ${lst.receipt} is gone as soon as this is signed, and your NEAR comes in a second step. The wait is at least 4 epochs, about 30 hours, and runs longer when its validators are already busy. After that, say "claim my NEAR". It earns nothing while it waits.`,
+      RESTART_NOTE,
+      ...extraNotes,
+    ],
+  }
 }
+
+const RNEAR_EXIT = liquidExit(RNEAR_STAKE, RNEAR_EXIT_GAS, [
+  "The source link rNEAR's contract publishes does not open. Its methods were checked against what the deployed contract reports about itself and an older public copy of the source.",
+])
+
+/** Checked against LiNEAR 1.6.2's source, which its contract links to on-chain. */
+const LINEAR_EXIT = liquidExit(LINEAR_STAKE, LINEAR_EXIT_GAS, [])
 
 function stakePositions(venue: ExitVenue): (account: string) => Promise<VenuePosition[]> {
   return async (account) => {
@@ -532,10 +607,21 @@ export const rnearVenue: ChainVenue = {
   name: 'rNEAR',
   kinds: ['stake', 'unstake', 'claim'],
   assertCanFollow: takesOnly('rNEAR', ['NEAR']),
-  quote: quoteRnear,
-  prepare: prepareFor(RNEAR_EXIT, prepareRnear),
+  quote: quoteLiquid(RNEAR_STAKE),
+  prepare: prepareFor(RNEAR_EXIT, prepareLiquid(RNEAR_STAKE)),
   positions: stakePositions(RNEAR_EXIT),
   assertSafe: assertRnearSafe,
+}
+
+export const linearVenue: ChainVenue = {
+  id: LINEAR_VENUE_ID,
+  name: 'LiNEAR',
+  kinds: ['stake', 'unstake', 'claim'],
+  assertCanFollow: takesOnly('LiNEAR', ['NEAR']),
+  quote: quoteLiquid(LINEAR_STAKE),
+  prepare: prepareFor(LINEAR_EXIT, prepareLiquid(LINEAR_STAKE)),
+  positions: stakePositions(LINEAR_EXIT),
+  assertSafe: assertLinearSafe,
 }
 
 export const metapoolVenue: ChainVenue = {
@@ -557,6 +643,10 @@ const STAKE_CONTRACTS: Record<string, { contract: string; methods: readonly stri
   [METAPOOL_VENUE_ID]: {
     contract: METAPOOL_CONTRACT,
     methods: ['deposit_and_stake', 'unstake', 'unstake_all', 'withdraw_unstaked'],
+  },
+  [LINEAR_VENUE_ID]: {
+    contract: LINEAR_CONTRACT,
+    methods: ['deposit_and_stake', 'unstake', 'unstake_all', 'withdraw_all'],
   },
 }
 

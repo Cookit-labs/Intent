@@ -61,7 +61,7 @@ sign or send anything.
 | ---------------------------------------- | ------------------------------------------------------------------------- | ----------------------------- |
 | `swap 5 USDC to NEAR`                    | Agents race live quotes, you sign the winner                              | Rhea DEX, NEAR Intents 1Click |
 | `swap 5 USDC to NEAR then stake`         | Swap, then stake what arrived, as two steps                               | Rhea DEX, Meta Pool           |
-| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR              |
+| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR, LiNEAR      |
 | `supply 25 USDC on 1Click Earn`          | Deposit and withdraw                                                      | NEAR Intents                  |
 | `supply 25 USDC on Rhea Lend`            | Supply, withdraw, borrow, repay                                           | Rhea Lend                     |
 | `send 1 NEAR to bob.near`                | A plain NEAR transfer                                                     | Protocol `Transfer` action    |
@@ -71,8 +71,25 @@ sign or send anything.
 
 **NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect
 (`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent runs
-GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested. Intent doesn't check
-the attestation itself.
+GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested.
+
+**Checked attestation:** the server checks every answer from that agent before the chat says it
+was signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation report and checks
+these:
+
+- The Intel TDX quote verifies against Intel's own collateral, is up to date, and isn't running in
+  debug mode.
+- The quote binds the model's signing address and the nonce.
+- NVIDIA's attestation service passes the GPUs for the same nonce.
+- NEAR AI's signature over the SHA-256 of the exact request and response bytes recovers to that
+  attested address. The signature is the model's own, not the gateway's.
+
+Only then does the race show a note: "GLM 5.3 Flash's answer was signed inside a verified NEAR
+AI enclave". Anything unproven shows nothing. A passed enclave check is reused for five minutes.
+
+The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which
+software image ran, and every instance of a model shares one key. See
+`apps/dapp/lib/agents/brains/nearai-proof.ts`.
 
 **Libraries and tools:** see `apps/dapp/package.json`. Much of the code was written with AI coding
 tools. The Stellar app and its shared chat code are this team's own pre-hackathon work.
@@ -358,6 +375,31 @@ component.
 available. It never shows a made-up proposal.
 
 **Scoring is deterministic TypeScript**, not a model call, so identical runs score identically.
+
+**Outside text can't steer a model.** Text from outside reaches the models on every chain. That
+includes:
+
+- A token's own name, and anyone can airdrop a token into a wallet.
+- Venue and route labels.
+- Earlier replies and other agents' words.
+- Text pasted from a web page.
+
+All of it passes `lib/agents/prompt-safe.ts` first. That file:
+
+- Removes characters nobody can see (zero-width characters, direction overrides, Unicode tag
+  characters, private-use characters).
+- Folds full-width lookalike letters to plain ones.
+- Strips chat template markers.
+- Keeps each value to one bounded line, and defuses lines that pose as a new turn.
+
+A token symbol keeps only symbol characters, and is flagged when it uses non-Latin letters, like a
+Cyrillic "USDС". Every system prompt says outside text is data, not instructions. None of this is
+the last line of defence: every proposal is checked by deterministic code, every transaction is
+checked by its chain's safety rules, and the person signs.
+
+`prompt-injection.test.ts` runs 11 attacks against each prompt on all six chains.
+`prompt-injection.live.test.ts` sends a scam-token order and a hidden pasted order to the real
+chat model.
 
 ---
 

@@ -17,10 +17,10 @@ const BASE_URL = 'https://api.paywithweave.com/api/v1'
 const DEFAULT_TIMEOUT_MS = 20_000
 
 export type WeaveFailure =
-  /** Weave refused the request. */
-  | { ok: false; code: 'rejected'; message: string }
+  /** Weave refused the request. `detail` is its reason, for the server log only. */
+  | { ok: false; code: 'rejected'; message: string; detail?: string }
   /** Weave answered, but not in a shape this client can trust. */
-  | { ok: false; code: 'unexpected'; message: string }
+  | { ok: false; code: 'unexpected'; message: string; detail?: string }
   /** The reference on an order was already used. */
   | { ok: false; code: 'duplicate'; message: string }
   /** An order was sent and no clear answer came back. It may exist. */
@@ -151,6 +151,31 @@ const OrderState = z.object({
   status: z.string().min(1),
   destAmount: z.number().finite().nonnegative().optional(),
 })
+
+const DETAIL_MAX = 300
+
+/** Weave's own reason for a refusal, as it may be logged: digit runs masked, length capped. */
+function refusalDetail(body: unknown): string | undefined {
+  if (!isRecord(body)) return undefined
+  const said = body['error'] ?? body['message']
+  if (said === undefined) return undefined
+  const text = typeof said === 'string' ? said : JSON.stringify(said)
+  return text.replace(/\d{6,}/g, '[digits]').slice(0, DETAIL_MAX)
+}
+
+/** Which order Weave made, when its answer to placing one could not be used. */
+function unusableDetail(body: unknown): string | undefined {
+  const inner = unwrap(body)
+  const order = isRecord(inner) ? inner['order'] : undefined
+  if (!isRecord(order)) return undefined
+  const deposit = isRecord(inner) && (inner['depositInstruction'] ?? inner['nextAction'])
+  return [
+    `order ${String(order['id'])} ${String(order['status'])}`,
+    deposit ? 'with an unreadable deposit instruction' : 'with no deposit instruction',
+  ]
+    .join(' ')
+    .slice(0, DETAIL_MAX)
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -360,19 +385,23 @@ export function createWeaveClient(options: WeaveClientOptions = {}): WeaveClient
         }
       }
       if (res.status >= 400 || (isRecord(res.body) && res.body['success'] === false)) {
+        const detail = refusalDetail(res.body)
         return {
           ok: false,
           code: 'rejected',
           message: 'The cash-out could not be started. Nothing was signed or sent.',
+          ...(detail === undefined ? {} : { detail }),
         }
       }
 
       const order = parsePlacedOrder(res.body)
       if (order === undefined) {
+        const detail = unusableDetail(res.body)
         return {
           ok: false,
           code: 'unexpected',
           message: 'The cash-out could not be started. Nothing was signed or sent.',
+          ...(detail === undefined ? {} : { detail }),
         }
       }
       return { ok: true, value: order }

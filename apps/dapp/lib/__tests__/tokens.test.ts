@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GET } from '../../app/api/chain/[chain]/tokens/route'
 import { asksAboutTokens } from '../tokens/ask'
@@ -639,5 +639,51 @@ describe('asking about tokens in chat', () => {
     'what is the market cap of 5',
   ])('"%s" is about something else', (text) => {
     expect(asksAboutTokens(text)).toBeNull()
+  })
+})
+
+describe('tokens on each Stellar network', () => {
+  const asset = (code: string) => ({
+    _embedded: { records: [{ asset: code, price: 1, supply: '1000' }] },
+  })
+
+  afterEach(async () => {
+    const { setNetworkResolver } = await import('@intent/config')
+    setNetworkResolver(undefined)
+    vi.unstubAllEnvs()
+  })
+
+  async function on(network: 'testnet' | 'mainnet'): Promise<void> {
+    const { setNetworkResolver } = await import('@intent/config')
+    vi.stubEnv('NEXT_PUBLIC_STELLAR_NETWORKS', 'testnet,mainnet')
+    setNetworkResolver(() => network)
+  }
+
+  it('keeps each network to its own list, whichever was read first', async () => {
+    const { read } = router({
+      'explorer/public': asset('MAIN-GISSUER-1'),
+      'explorer/testnet': asset('TEST-GISSUER-1'),
+    })
+    await on('testnet')
+    const test = await tokenDirectory('stellar', read)
+    expect(test.tokens.some((t) => t.symbol === 'TEST')).toBe(true)
+
+    await on('mainnet')
+    const main = await tokenDirectory('stellar', read)
+    expect(main.tokens.some((t) => t.symbol === 'MAIN')).toBe(true)
+    expect(main.tokens.some((t) => t.symbol === 'TEST')).toBe(false)
+  })
+
+  it('keeps each network to its own token details', async () => {
+    const { read } = router({
+      'explorer/public': asset('SAME-GISSUER-1'),
+      'explorer/testnet': asset('SAME-GISSUER-1'),
+    })
+    await on('testnet')
+    const test = await tokenDetail('stellar', 'SAME:GISSUER', read)
+    await on('mainnet')
+    const main = await tokenDetail('stellar', 'SAME:GISSUER', read)
+    expect(test?.explorerUrl).toContain('/testnet/')
+    expect(main?.explorerUrl).toContain('/public/')
   })
 })

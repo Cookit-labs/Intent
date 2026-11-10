@@ -4,6 +4,7 @@ import { viewCall, waitForTransaction } from '../chains/near/rpc'
 import { METAPOOL_STAKE_GAS, RNEAR_STAKE_GAS, STORAGE_DEPOSIT_YOCTO } from '../chains/near/safety'
 import { metapoolVenue, rnearVenue } from '../chains/near/stake'
 import {
+  LINEAR_CONTRACT,
   METAPOOL_CONTRACT,
   nearTokens,
   RNEAR_CONTRACT,
@@ -85,7 +86,7 @@ describe.skipIf(SKIP)('the allowlisted contracts', () => {
   }, 60_000)
 
   it('charge exactly the storage amount the safety check allows', async () => {
-    for (const contract of [WRAP_NEAR, USDC_NEAR, USDT_NEAR, RNEAR_CONTRACT]) {
+    for (const contract of [WRAP_NEAR, USDC_NEAR, USDT_NEAR, RNEAR_CONTRACT, LINEAR_CONTRACT]) {
       const bounds = await viewCall<{ min: string }>(contract, 'storage_balance_bounds')
       expect(bounds.min, contract).toBe(STORAGE_DEPOSIT_YOCTO)
     }
@@ -98,6 +99,16 @@ describe.skipIf(SKIP)('the allowlisted contracts', () => {
       [USDT_NEAR]: ['ft_transfer', 'storage_deposit', 'storage_balance_of'],
       [RNEAR_CONTRACT]: ['deposit_and_stake', 'storage_deposit', 'ft_price', 'is_paused'],
       [METAPOOL_CONTRACT]: ['deposit_and_stake', 'get_st_near_price', 'get_contract_params'],
+      [LINEAR_CONTRACT]: [
+        'deposit_and_stake',
+        'unstake',
+        'unstake_all',
+        'withdraw_all',
+        'storage_deposit',
+        'ft_price',
+        'is_paused',
+        'get_account_details',
+      ],
     }
     for (const [contract, methods] of Object.entries(expected)) {
       const exported = await exportedMethods(contract)
