@@ -5,6 +5,7 @@ export const USDC_NEAR = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad20
 export const USDT_NEAR = 'usdt.tether-token.near'
 export const RNEAR_CONTRACT = 'lst.rhealab.near'
 export const METAPOOL_CONTRACT = 'meta-pool.near'
+export const LINEAR_CONTRACT = 'linear-protocol.near'
 
 /**
  * Exact NEP-141 accounts. Each id and decimal count was read from the contract's
@@ -17,6 +18,7 @@ export const nearTokens: readonly ChainToken[] = [
   { symbol: 'USDT', id: USDT_NEAR, decimals: 6, name: 'Tether USD' },
   { symbol: 'stNEAR', id: METAPOOL_CONTRACT, decimals: 24, name: 'Meta Pool Staked NEAR' },
   { symbol: 'rNEAR', id: RNEAR_CONTRACT, decimals: 24, name: 'Rhea Staked NEAR' },
+  { symbol: 'LiNEAR', id: LINEAR_CONTRACT, decimals: 24, name: 'LiNEAR' },
 ]
 
 /**
