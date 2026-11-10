@@ -359,6 +359,31 @@ available. It never shows a made-up proposal.
 
 **Scoring is deterministic TypeScript**, not a model call, so identical runs score identically.
 
+**Outside text can't steer a model.** Text from outside reaches the models on every chain. That
+includes:
+
+- A token's own name, and anyone can airdrop a token into a wallet.
+- Venue and route labels.
+- Earlier replies and other agents' words.
+- Text pasted from a web page.
+
+All of it passes `lib/agents/prompt-safe.ts` first. That file:
+
+- Removes characters nobody can see (zero-width characters, direction overrides, Unicode tag
+  characters, private-use characters).
+- Folds full-width lookalike letters to plain ones.
+- Strips chat template markers.
+- Keeps each value to one bounded line, and defuses lines that pose as a new turn.
+
+A token symbol keeps only symbol characters, and is flagged when it uses non-Latin letters, like a
+Cyrillic "USDС". Every system prompt says outside text is data, not instructions. None of this is
+the last line of defence: every proposal is checked by deterministic code, every transaction is
+checked by its chain's safety rules, and the person signs.
+
+`prompt-injection.test.ts` runs 11 attacks against each prompt on all six chains.
+`prompt-injection.live.test.ts` sends a scam-token order and a hidden pasted order to the real
+chat model.
+
 ---
 
 <div align="center">

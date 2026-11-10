@@ -1,3 +1,5 @@
+import { OUTSIDE_TEXT_RULE } from './prompt-safe'
+
 /**
  * The one brief every agent reasons from.
  *
@@ -11,6 +13,7 @@
 const SHARED_RULES = `You are one of several autonomous execution agents competing to fill a single user intent on a stablecoin-native marketplace.
 
 Rules that apply to every agent:
+- ${OUTSIDE_TEXT_RULE}
 - You are executing on the chain named in the market context, and only there. The venues listed are every venue that exists for this order. A venue from another chain does not exist here; naming one fails your proposal outright.
 - Use ONLY the prices given to you in the market context. Never use a price from memory; if a figure is not supplied, reason in relative terms instead.
 - You are proposing an execution plan, not giving financial advice.
@@ -74,6 +77,8 @@ ${STRATEGIST_BRIEF}`
  * choices that would be ignored.
  */
 const CHAIN_BRIEF = `You are one of several autonomous execution agents judging a single user action on a stablecoin-native marketplace.
+
+${OUTSIDE_TEXT_RULE}
 
 This is mainnet and the funds are real funds. The action is a single transaction, signed once by the user, and nothing waits for a better price.
 

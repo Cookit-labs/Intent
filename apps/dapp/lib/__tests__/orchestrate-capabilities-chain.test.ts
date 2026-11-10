@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { OUTSIDE_TEXT_RULE } from '../agents/prompt-safe'
 import { capabilitySheet } from '../orchestrate/capabilities'
 import { orchestrateWithLlm } from '../orchestrate/orchestrate'
 
@@ -180,7 +181,10 @@ describe('the orchestrator prompt', () => {
 
   it('is byte for byte what it was on Stellar', async () => {
     vi.stubEnv('WEAVE_SECRET_KEY', '')
-    const system = await systemFor('stellar')
+    // The one line added since is the rule that outside text is data, said on every chain.
+    const withRule = await systemFor('stellar')
+    expect(withRule).toContain(`\n${OUTSIDE_TEXT_RULE}\n`)
+    const system = withRule.replace(`\n${OUTSIDE_TEXT_RULE}`, '')
     expect(system.length).toBe(6452)
     expect(createHash('sha256').update(system).digest('hex')).toBe(
       'a6ed692eb9f9ebc325842f13f0b6417c6b4ee970922535a1fa9c8c497c63edfc'

@@ -16,6 +16,7 @@
  * leave the app exactly as capable as it was before this existed.
  */
 
+import { OUTSIDE_TEXT_RULE, promptSafe, promptText } from '../agents/prompt-safe'
 import { cashOutPrompt } from '../weave/corridors'
 import { tidyProse } from '../chat/prose'
 import { intentModels, type IntentModel } from '../llm/intent-models'
@@ -153,11 +154,15 @@ async function clarifyWithModel(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? TIMEOUT_MS)
 
-  const context = (options.context ?? []).filter((l) => l.trim() !== '').slice(0, 6)
+  const context = (options.context ?? [])
+    .map((l) => promptSafe(l, 300))
+    .filter((l) => l !== '')
+    .slice(0, 6)
+  const rules = `${SYSTEM_PROMPT} ${OUTSIDE_TEXT_RULE}`
   const system =
     context.length === 0
-      ? SYSTEM_PROMPT
-      : `${SYSTEM_PROMPT} Context from earlier in this chat:\n${context.join('\n')}`
+      ? rules
+      : `${rules} Context from earlier in this chat:\n${context.join('\n')}`
 
   let payload: unknown
   try {
@@ -166,7 +171,10 @@ async function clarifyWithModel(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: config.model,
-        messages: [{ role: 'system', content: system }, ...turns],
+        messages: [
+          { role: 'system', content: system },
+          ...turns.map((t) => ({ ...t, content: promptText(t.content) })),
+        ],
         tools: [CLARIFY_TOOL],
         tool_choice: 'auto',
         temperature: 0,
