@@ -63,6 +63,13 @@ export interface CompetitionTalkFrame {
   line: TalkLine
 }
 
+/** An agent's answer checked out against its provider's attested enclave. Sent only on a pass. */
+export interface CompetitionProofFrame {
+  type: 'competition:proof'
+  competitionId: string
+  agent: AgentKey
+}
+
 export interface CompetitionFailedFrame {
   type: 'competition:failed'
   competitionId: string
@@ -125,6 +132,7 @@ export type CompetitionFrame =
   | CompetitionProposalFrame
   | CompetitionTakeFrame
   | CompetitionTalkFrame
+  | CompetitionProofFrame
   | CompetitionFailedFrame
   | CompetitionWinnerFrame
   | CompetitionErrorFrame

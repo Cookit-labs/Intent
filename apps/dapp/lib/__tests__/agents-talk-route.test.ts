@@ -322,6 +322,33 @@ describe('the race with talk', () => {
   })
 })
 
+describe('a proved answer', () => {
+  const proved = (verified: boolean): Record<string, unknown> => {
+    const seat = agent('a', undefined)
+    const brain = seat['brain'] as { propose: () => Promise<Record<string, unknown>> }
+    const propose = brain.propose
+    brain.propose = async () => ({
+      ...(await propose()),
+      proof: async () =>
+        verified ? { verified: true } : { verified: false, reason: 'gpu_unverified' },
+    })
+    return seat
+  }
+
+  it("says so once the agent's answer checks out", async () => {
+    state.roster = [proved(true), agent('b', undefined)]
+    const out = await race()
+    expect(out.filter((f) => f.type === 'competition:proof')).toEqual([
+      expect.objectContaining({ type: 'competition:proof', agent: 'a' }),
+    ])
+  })
+
+  it('says nothing when it does not', async () => {
+    state.roster = [proved(false), agent('b', undefined)]
+    expect(types(await race())).not.toContain('competition:proof')
+  })
+})
+
 describe('scoring a held plan', () => {
   const held: AgentProposalResult = { ...take('h'), held: true }
   const { routeId: _none, ...heldNoRoute } = held

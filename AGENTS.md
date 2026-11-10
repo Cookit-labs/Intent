@@ -29,6 +29,7 @@ git diff pre-hackathon hackathon-submission -- apps/dapp/lib/chains/near apps/da
 | `apps/dapp/lib/chains/near/rpc.ts`, `balances.ts`, `tokens.ts` | RPC with failover, spendable balances, NEP-141 tokens                          |
 | `apps/dapp/lib/wallet/near-connector.ts`                       | Wallet connection through NEAR Connect (`@hot-labs/near-connect`)              |
 | `apps/dapp/lib/agents/brains/providers.ts` (`nearai`)          | NEAR AI Cloud as one of the competing agents                                   |
+| `apps/dapp/lib/agents/brains/nearai-proof.ts`                  | Checks each NEAR AI answer against Intel TDX, NVIDIA and the reply signature   |
 | `apps/dapp/lib/chains/registry.ts`                             | Where the NEAR module is registered with the shared chat                       |
 | `apps/dapp/lib/__tests__/near-*.test.ts`, `rhea*.test.ts`      | Unit tests, and `*.live.test.ts` checks against NEAR mainnet that sign nothing |
 
@@ -47,7 +48,9 @@ pnpm exec vitest run lib/__tests__/near-1click.live.test.ts lib/__tests__/rhea.l
 
 These read NEAR mainnet and 1Click and take about 90 seconds. Every NEAR test file runs with
 `pnpm exec vitest run near- rhea weave-deposit-near`. `near-ai.live.test.ts` needs NEAR AI Cloud's
-public model list to answer.
+public model list to answer, and its calls that use credits, the signed reply check among them,
+run only with `NEARAI_API_KEY` set. `near-ai-proof.test.ts` covers every way the check fails closed,
+with no network.
 
 See the [NEAR Hackathon section of the README](README.md#near-hackathon) for the product, what
 each chat command does, and what is not done or not proven.

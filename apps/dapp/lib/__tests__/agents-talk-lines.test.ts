@@ -4,6 +4,7 @@ import { planTalkReveal } from '../agents/pacing'
 import {
   ALL_HELD_LINE,
   allHeld,
+  isProofLine,
   showTakes,
   talkPill,
   talkSpeaker,
@@ -13,6 +14,22 @@ import {
 
 const names: Record<string, string> = { s: 'Sonnet', j: 'Jeff', o: 'Opus', l: 'Ling' }
 const nameOf = (key: string): string => names[key] ?? key
+
+describe('a proof note', () => {
+  const proof: ThreadItem = { type: 'line', line: { kind: 'verified', agent: 'j' } }
+
+  it('says the answer was signed inside a verified NEAR AI enclave', () => {
+    expect(talkPill({ kind: 'verified', agent: 'j' }, nameOf)).toBe(
+      "Jeff's answer was signed inside a verified NEAR AI enclave."
+    )
+  })
+
+  it('keeps the takes of a decided race that never talked off the thread', () => {
+    expect(showTakes([{ type: 'take', agent: 'j' }, proof], 'decided')).toBe(false)
+    expect(isProofLine(proof)).toBe(true)
+    expect(isProofLine({ type: 'take', agent: 'j' })).toBe(false)
+  })
+})
 
 describe('talkPill', () => {
   it('names what the agent was given to read', () => {

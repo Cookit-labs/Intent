@@ -19,6 +19,7 @@ import {
   ALL_HELD_LINE,
   allHeld,
   showTakes,
+  isProofLine,
   talkPill,
   talkSpeaker,
   waitingAgents,
@@ -247,63 +248,61 @@ export function CompetitionPanel({
   return (
     <div className="flex flex-col gap-4">
       {routeNote !== undefined ? <div className={systemPill}>{routeNote}</div> : null}
-      {showTakes(thread, phase)
-        ? thread.map((item, i) => {
-            if (item.type === 'take') {
-              const take = state.takes?.[item.agent]
-              if (take === undefined) return null
-              const tag = describePlan(take)
-              return (
-                <ThreadMessage
-                  key={`take-${item.agent}`}
-                  seed={item.agent}
-                  name={take.name}
-                  speaker={take.name}
-                  model={take.model}
-                >
-                  {tag !== '' ? (
-                    <p className="mb-1 text-[11px] font-medium uppercase tracking-wide opacity-55">
-                      {tag}
-                    </p>
-                  ) : null}
-                  <p className="leading-relaxed">{take.reasoning}</p>
-                </ThreadMessage>
-              )
-            }
-            const { line } = item
-            const pill = talkPill(line, nameOf)
-            if (pill !== undefined) {
-              return (
-                <motion.div
-                  key={`line-${i}`}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={systemPill}
-                >
-                  {line.kind === 'reading' && racing ? (
-                    <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
-                  ) : null}
-                  {pill}
-                </motion.div>
-              )
-            }
-            const speaker = talkSpeaker(line, nameOf)
-            if (speaker === undefined || (line.kind !== 'asked' && line.kind !== 'answered')) {
-              return null
-            }
-            return (
-              <ThreadMessage
-                key={`line-${i}`}
-                seed={line.agent}
-                name={nameOf(line.agent)}
-                speaker={speaker}
-                model={modelOf(line.agent)}
-              >
-                <p className="leading-relaxed">{line.text}</p>
-              </ThreadMessage>
-            )
-          })
-        : null}
+      {(showTakes(thread, phase) ? thread : thread.filter(isProofLine)).map((item, i) => {
+        if (item.type === 'take') {
+          const take = state.takes?.[item.agent]
+          if (take === undefined) return null
+          const tag = describePlan(take)
+          return (
+            <ThreadMessage
+              key={`take-${item.agent}`}
+              seed={item.agent}
+              name={take.name}
+              speaker={take.name}
+              model={take.model}
+            >
+              {tag !== '' ? (
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide opacity-55">
+                  {tag}
+                </p>
+              ) : null}
+              <p className="leading-relaxed">{take.reasoning}</p>
+            </ThreadMessage>
+          )
+        }
+        const { line } = item
+        const pill = talkPill(line, nameOf)
+        if (pill !== undefined) {
+          return (
+            <motion.div
+              key={`line-${i}`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={systemPill}
+            >
+              {line.kind === 'reading' && racing ? (
+                <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />
+              ) : null}
+              {pill}
+            </motion.div>
+          )
+        }
+        const speaker = talkSpeaker(line, nameOf)
+        if (speaker === undefined || (line.kind !== 'asked' && line.kind !== 'answered')) {
+          return null
+        }
+        return (
+          <ThreadMessage
+            key={`line-${i}`}
+            seed={line.agent}
+            name={nameOf(line.agent)}
+            speaker={speaker}
+            model={modelOf(line.agent)}
+          >
+            <p className="leading-relaxed">{line.text}</p>
+          </ThreadMessage>
+        )
+      })}
       {revealedAgents.length === 0 && !decided && thread.length === 0 ? (
         <div className={systemPill}>
           <Radio className="h-3.5 w-3.5 animate-pulse motion-reduce:animate-none" />

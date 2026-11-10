@@ -71,8 +71,25 @@ sign or send anything.
 
 **NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect
 (`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent runs
-GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested. Intent doesn't check
-the attestation itself.
+GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested.
+
+**Checked attestation:** the server checks every answer from that agent before the chat says it
+was signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation report and checks
+these:
+
+- The Intel TDX quote verifies against Intel's own collateral, is up to date, and isn't running in
+  debug mode.
+- The quote binds the model's signing address and the nonce.
+- NVIDIA's attestation service passes the GPUs for the same nonce.
+- NEAR AI's signature over the SHA-256 of the exact request and response bytes recovers to that
+  attested address. The signature is the model's own, not the gateway's.
+
+Only then does the race show a note: "GLM 5.3 Flash's answer was signed inside a verified NEAR
+AI enclave". Anything unproven shows nothing. A passed enclave check is reused for five minutes.
+
+The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which
+software image ran, and every instance of a model shares one key. See
+`apps/dapp/lib/agents/brains/nearai-proof.ts`.
 
 **Libraries and tools:** see `apps/dapp/package.json`. Much of the code was written with AI coding
 tools. The Stellar app and its shared chat code are this team's own pre-hackathon work.

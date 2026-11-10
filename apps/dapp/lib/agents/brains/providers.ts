@@ -19,6 +19,8 @@ import type { BrainProvider } from '../brain'
 
 export interface ProviderConfig {
   id: BrainProvider
+  /** Signs each reply inside an attested enclave, so a reply can be checked against it. */
+  attested?: boolean
   displayName: string
   /** Chat-completions base, without the trailing `/chat/completions`. */
   baseUrl: string
@@ -199,6 +201,7 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     id: 'nearai',
     displayName: 'NEAR AI',
     baseUrl: 'https://cloud-api.near.ai/v1',
+    attested: true,
     defaultModel: 'z-ai/glm-5.3-flash',
     apiKeyEnv: 'NEARAI_API_KEY',
     strictTools: false,

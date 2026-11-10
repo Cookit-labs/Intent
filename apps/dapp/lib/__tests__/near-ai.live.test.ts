@@ -83,4 +83,21 @@ describe.skipIf(SKIP || KEY === undefined || KEY === '')('NEAR AI Cloud agent', 
     },
     CALL_TIMEOUT_MS
   )
+
+  it(
+    'signs a reply inside an enclave that passes Intel and NVIDIA checks',
+    async () => {
+      const outcome = await brain.talk?.({
+        agent: 'nearai:live',
+        system: 'You are racing other agents to route a swap. Question one of them.',
+        user: 'Jeff picked Soroswap for 20 USDC to XLM. Ask Jeff one short question.',
+        tool: ASK_TOOL,
+      })
+      const proof = outcome?.ok === true ? await outcome.proof?.() : undefined
+      // eslint-disable-next-line no-console
+      console.log('proof', proof)
+      expect(proof).toMatchObject({ verified: true })
+    },
+    CALL_TIMEOUT_MS
+  )
 })
