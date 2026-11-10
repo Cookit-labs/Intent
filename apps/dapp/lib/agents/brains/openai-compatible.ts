@@ -622,6 +622,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           tool_choice: config.toolChoice,
           temperature: TEMPERATURE,
           max_tokens: MAX_OUTPUT_TOKENS,
+          ...config.propose?.body,
         },
         req.agent,
         req.signal
