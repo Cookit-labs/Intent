@@ -1,3 +1,4 @@
+import { OUTSIDE_TEXT_RULE, promptText } from './agents/prompt-safe'
 import { DEFAULT_LENDING_VENUE } from './lend/venues'
 import { intentModels, type IntentModel } from './llm/intent-models'
 import type { FollowOnAction } from './parse-compound'
@@ -285,8 +286,9 @@ async function readWithModel(
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: text },
+          { role: 'system', content: `${SYSTEM_PROMPT} ${OUTSIDE_TEXT_RULE}` },
+          // What the person typed or pasted, with nothing hidden in it.
+          { role: 'user', content: promptText(text) },
         ],
         tools: [READ_INTENT_TOOL],
         // 'auto' rather than forced, matching the agent brain: DeepSeek's

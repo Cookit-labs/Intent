@@ -15,7 +15,7 @@ import { anchorOn, anchorsOn } from '../../offramp/anchors'
 import { systemPromptFor } from '../brief'
 import { restContextLines } from '../rest-option'
 import type { ChainRouteQuote } from '../chain-routes'
-import { promptSafe } from '../prompt-safe'
+import { promptSafe, promptSymbol } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
 import { enclaveFor, proveReply, type ProofDeps, type ReplyProof } from './nearai-proof'
 import type { ProviderConfig } from './providers'
@@ -148,10 +148,16 @@ export function meta(
  * and still returns the right answer; it just quietly costs ~50x more.
  */
 export function buildMessages(req: ProposalRequest): { role: string; content: string }[] {
-  const venueList = req.market.venues.map((v) => `${v.id} (${v.name}, ${v.category})`).join(', ')
-  const priceList = Object.entries(req.market.prices)
-    .map(([sym, px]) => `${sym}=$${px}`)
+  // Every value below that came from outside crosses as one bounded line, and every token symbol
+  // as a symbol, because a token's name is chosen by whoever deployed it.
+  const venueList = req.market.venues
+    .map((v) => `${v.id} (${promptSafe(v.name, 40)}, ${v.category})`)
     .join(', ')
+  const priceList = Object.entries(req.market.prices)
+    .map(([sym, px]) => `${promptSymbol(sym)}=$${px}`)
+    .join(', ')
+  const tokenIn = promptSymbol(req.intent.input.tokenIn)
+  const tokenOut = promptSymbol(req.intent.input.tokenOut)
 
   return [
     { role: 'system', content: systemPromptFor(req.chain, req.market.rest !== undefined) },
@@ -167,7 +173,10 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
         ...(req.market.assets !== undefined && req.market.assets.length > 0
           ? [
               'Assets you may trade:',
-              ...req.market.assets.map((a) => `  ${a.code} — ${a.what} (${a.trust})`),
+              ...req.market.assets.map(
+                (a) =>
+                  `  ${promptSymbol(a.code)} — ${promptSafe(a.what)} (${promptSafe(a.trust, 40)})`
+              ),
             ]
           : []),
         `Venues available on ${req.chain}: ${venueList}`,
@@ -177,7 +186,7 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
               'Anchors that withdraw to fiat, with live limits:',
               ...req.market.offramps.map(
                 (o) =>
-                  `  ${o.venue}: ${o.asset}` +
+                  `  ${promptSafe(o.venue, 40)}: ${promptSymbol(o.asset)}` +
                   (o.minAmount !== undefined ? `, min ${o.minAmount}` : '') +
                   (o.maxAmount !== undefined ? `, max ${o.maxAmount}` : '') +
                   (o.feeEnabled ? ', charges a fee' : ', no fee')
@@ -214,19 +223,19 @@ export function buildMessages(req: ProposalRequest): { role: string; content: st
         // The user's sentence, on one line. A newline in it would read as the
         // next line of the brief rather than more of the intent.
         `Intent: ${promptSafe(req.intent.outcome, 500)}`,
-        `Parsed as: ${req.intent.input.type}, ${req.intent.input.tokenIn} -> ${req.intent.input.tokenOut}`,
+        `Parsed as: ${req.intent.input.type}, ${tokenIn} -> ${tokenOut}`,
         `Size: about $${Math.round(req.intent.escrowUsd)}`,
         // The routes above are live; this table is indicative and can be badly
         // stale. Saying so stops an agent splitting the difference between the
         // two and quoting a price neither source supports.
         ...(req.chain === 'stellar'
           ? [
-              `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${req.intent.input.tokenOut}`,
+              `Market reference (context only, NOT the number to quote): $${req.intent.referencePriceUsd} per ${tokenOut}`,
               'Your projectedAvgPriceUsd must come from the route you picked, not from that reference.',
             ]
           : req.intent.referencePriceUsd > 0
             ? [
-                `Market reference: $${req.intent.referencePriceUsd} per ${req.intent.input.tokenIn}, the token being paid in.`,
+                `Market reference: $${req.intent.referencePriceUsd} per ${tokenIn}, the token being paid in.`,
               ]
             : []),
         req.intent.targetPriceUsd > 0 ? `Target price: $${req.intent.targetPriceUsd}` : '',
@@ -271,10 +280,10 @@ function perpLines(req: ProposalRequest): string[] {
   if (perps === undefined || perps.markets.length === 0) return []
   const usd = (n: number): string => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
   return [
-    `Perpetual futures on Noether (${perps.venue}), read live. The protocol is unaudited and testnet-only; its gateway reports version ${perps.version}.`,
+    `Perpetual futures on Noether (${promptSafe(perps.venue, 40)}), read live. The protocol is unaudited and testnet-only; its gateway reports version ${promptSafe(perps.version, 20)}.`,
     ...perps.markets.map(
       (m) =>
-        `  ${m.asset}: mark $${m.markPriceUsd}` +
+        `  ${promptSymbol(m.asset)}: mark $${m.markPriceUsd}` +
         (m.openInterestLongUsd !== undefined && m.openInterestShortUsd !== undefined
           ? `, open interest long $${usd(m.openInterestLongUsd)} / short $${usd(m.openInterestShortUsd)}`
           : '') +
@@ -296,10 +305,13 @@ function perpLines(req: ProposalRequest): string[] {
 function chainRouteLines(routes: QuotedRoute[]): string[] {
   const line = (r: QuotedRoute): string => {
     const q = r.quote as Partial<ChainRouteQuote> | undefined
-    const pay = q?.pay !== undefined ? `${q.pay.amount} ${q.pay.symbol}` : r.sendAmount
+    const pay =
+      q?.pay !== undefined
+        ? `${promptSafe(q.pay.amount, 40)} ${promptSymbol(q.pay.symbol)}`
+        : promptSafe(r.sendAmount, 40)
     const gets =
       q?.receive !== undefined
-        ? ` -> receive ${q.receive.amount} ${q.receive.symbol}` +
+        ? ` -> receive ${promptSafe(q.receive.amount, 40)} ${promptSymbol(q.receive.symbol)}` +
           (q.valueOutUsd !== undefined ? ` (about $${q.valueOutUsd.toFixed(2)})` : '')
         : ''
     const rate = q?.apyPercent !== undefined ? `, ${q.apyPercent}% APY (current rate)` : ''
@@ -348,7 +360,7 @@ function routeLines(req: ProposalRequest): string[] {
       (r) =>
         // The path is asset codes anyone can issue; the note echoes a token code
         // the venue's API chose. Both cross as one bounded line.
-        `  ${r.id}: send ${r.sendAmount} -> receive ${r.receiveAmount} on ${r.source}, ${r.via !== undefined ? promptSafe(r.via) : `${r.hops} hop(s)`}` +
+        `  ${r.id}: send ${promptSafe(r.sendAmount, 40)} -> receive ${promptSafe(r.receiveAmount, 40)} on ${promptSafe(r.source)}, ${r.via !== undefined ? promptSafe(r.via) : `${r.hops} hop(s)`}` +
         (r.executable ? '' : ' [COMPARISON ONLY, cannot be executed]') +
         (r.note !== undefined ? ` [${promptSafe(r.note, 160)}]` : '')
     ),
