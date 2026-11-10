@@ -12,6 +12,7 @@ import { createLuloVenue } from './lulo'
 import { createMarinadeVenue } from './marinade'
 import { createPriceSource } from './price'
 import { createRaydiumSwapVenue } from './raydium-swap'
+import { createTitanSwapVenue } from './titan-swap'
 import { createSolayerVenue } from './solayer'
 import { createStreamflowVenue } from './streamflow'
 import { createSolanaSubmit } from './submit'
@@ -26,9 +27,11 @@ export function buildSolanaVenues(
   env: Record<string, string | undefined> = process.env
 ): ChainVenue[] {
   const luloKey = env['LULO_API_KEY']?.trim()
+  const titanKey = env['TITAN_API_KEY']?.trim()
   return [
     createJupiterSwapVenue({ priceUsd, env }),
     createRaydiumSwapVenue({ priceUsd }),
+    ...(titanKey ? [createTitanSwapVenue({ apiKey: titanKey, priceUsd })] : []),
     ...(canIssueOneClick(env) ? [oneClickOriginVenue('solana')] : []),
     createJupiterLendVenue({ env }),
     // After Earn, so "supply on Kamino" stays the vault it has always meant.

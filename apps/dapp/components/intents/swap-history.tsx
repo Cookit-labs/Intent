@@ -1,31 +1,30 @@
 'use client'
 
-import { stellarNetwork } from '@intent/config'
 import { Card, cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, ChevronDown, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 
 import { useWallet } from '../../hooks/use-wallet'
+import { useWalletHistory } from '../../hooks/use-wallet-history'
 import { useChain } from '../../providers/chain-provider'
 import {
   agentHistoryByHash,
   fetchAgentHistory,
   type AgentHistoryEntry,
 } from '../../lib/agents/history'
-import { fetchSwapHistory } from '../../lib/swap/history'
-import { cashoutRecords, fetchCashouts } from '../../lib/naira/history'
 import type { SwapKind, SwapRecord } from '../../lib/swap/history'
-import { bundlesByTxHash, syncTurns, type BundleStep } from '../../lib/chat-history'
+import { askedByHash } from '../../lib/chains/activity'
+import { bundlesByTxHash, loadTurns, type BundleStep } from '../../lib/chat-history'
 import { TokenIcon } from '../ui/token-icon'
 import { SwapCircleIcon } from './intent-type-icon'
 
 /**
- * Swaps this account has made, read from the ledger.
+ * What this account has done on the page's chain.
  *
- * Deliberately not backed by anything the app stores. A trade made on another
- * device, in another browser, or before this feature existed still belongs in
- * a user's history, and the network already has all of them.
+ * Stellar's ledger comes first where there is one, so a trade made on another
+ * device or before this feature existed still belongs here. Every chain also has
+ * the app's own record of what it submitted. See `useWalletHistory`.
  */
 
 /**
@@ -41,6 +40,8 @@ interface HistoryRow extends SwapRecord {
   bundleSteps?: BundleStep[]
   /** Which agent won the race this swap came from, and why, when known. */
   agentHistory?: AgentHistoryEntry
+  /** What was typed for it, for a row the record can't otherwise name. */
+  asked?: string
 }
 
 /** What each kind is called, in the user's terms. */
@@ -50,11 +51,21 @@ const KIND_LABELS: Record<SwapKind, string> = {
   bundle: 'Bundled swap',
   pool: 'Liquidity',
   cashout: 'Cash-out',
+  other: 'Transaction',
 }
 
 function amount(value: string): string {
   const n = Number(value)
   return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : value
+}
+
+/** What a cash-out paid, in its own currency. */
+function paidOut(value: string, currency: string): string {
+  const figure = Number(value).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+  return currency === 'NGN' ? `₦${figure}` : `${figure} ${currency}`
 }
 
 function time(iso: string): string {
@@ -94,43 +105,7 @@ function groupByDay(rows: HistoryRow[]): { label: string; rows: HistoryRow[] }[]
 export function SwapHistory(): JSX.Element | null {
   const { address, isConnected } = useWallet()
   const { slug, descriptor } = useChain()
-  // This reads Stellar's ledger specifically. Running it while Arc is active
-  // would show Stellar trades under an Arc wallet, which is exactly the
-  // cross-chain bleed the chain segment exists to prevent.
-  const supported = slug === 'stellar'
-
-  // The bundle labels come from the app's own record, which lives on the
-  // server. Pulled before the ledger rows are rendered so a cleared browser
-  // still names a bundled intent as one rather than as a bare swap.
-  useQuery({
-    queryKey: ['turn-sync', slug, address],
-    queryFn: () => syncTurns(slug),
-    enabled: supported && isConnected && address !== undefined,
-    staleTime: 30_000,
-  })
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['swap-history', slug, address],
-    queryFn: () => fetchSwapHistory(address as string),
-    enabled: supported && isConnected && address !== undefined,
-    // Settled trades do not change, so this only needs to catch new ones.
-    staleTime: 30_000,
-    // A trade made moments ago in the Compose tab must be here when the user
-    // switches to History. Without this the cached list is served untouched and
-    // the newest trade appears to be missing.
-    refetchOnMount: 'always',
-  })
-
-  // Cash-outs are the app's own record, not the ledger's: a payout is a plain
-  // payment to a one-time address that no longer exists, so the chain cannot
-  // say what it was. A failed or empty list leaves the ledger as it was.
-  const { data: cashouts } = useQuery({
-    queryKey: ['cashouts', slug, address],
-    queryFn: () => fetchCashouts(address as string),
-    enabled: supported && isConnected && address !== undefined,
-    staleTime: 30_000,
-    refetchOnMount: 'always',
-  })
+  const { supported, rows, loading, unread } = useWalletHistory()
 
   // The agent's own reasoning for the winning plan, when this swap came from
   // a race. A failed fetch leaves rows exactly as they were before this
@@ -146,7 +121,7 @@ export function SwapHistory(): JSX.Element | null {
   if (!supported) {
     return (
       <Card className="text-muted-foreground p-6 text-sm">
-        On-chain swap history is not available on {descriptor.name} yet.
+        Transaction history is not available on {descriptor.name} yet.
       </Card>
     )
   }
@@ -159,19 +134,26 @@ export function SwapHistory(): JSX.Element | null {
     )
   }
 
-  if (isLoading) {
+  if (loading) {
     return <Card className="bg-muted/40 h-20 animate-pulse" />
   }
 
-  const ledger = [
-    ...(data ?? []),
-    ...cashoutRecords(cashouts ?? [], stellarNetwork.blockExplorerUrl),
-  ].sort((a, b) => b.settledAt.localeCompare(a.settledAt))
-  if (ledger.length === 0) {
+  const couldNotRead = unread ? (
+    <Card className="text-muted-foreground p-4 text-sm">
+      Could not read all of this wallet’s transactions, so this list may be missing some. It will
+      try again shortly.
+    </Card>
+  ) : null
+
+  if (rows.length === 0) {
     return (
-      <Card className="text-muted-foreground p-6 text-sm">
-        No swaps or cash-outs yet for this account.
-      </Card>
+      couldNotRead ?? (
+        <Card className="text-muted-foreground p-6 text-sm">
+          {slug === 'stellar'
+            ? 'No swaps or cash-outs yet for this account.'
+            : `No transactions yet for this account on ${descriptor.name}.`}
+        </Card>
+      )
     )
   }
 
@@ -185,16 +167,24 @@ export function SwapHistory(): JSX.Element | null {
   // that a swap was followed moments later by a supply of what it delivered —
   // which is what a bundled intent looks like from the outside.
   const bundles = bundlesByTxHash(slug)
+  const asked = askedByHash(loadTurns(slug))
   const agentHistoryByTxHash = agentHistoryByHash(agentHistory ?? [])
-  const swaps: HistoryRow[] = ledger.map((row) => {
+  const swaps: HistoryRow[] = rows.map((row) => {
     const agent = agentHistoryByTxHash.get(row.txHash)
-    const withAgent = agent !== undefined ? { agentHistory: agent } : {}
+    const typed = asked.get(row.txHash)
+    const withAgent = {
+      ...(agent !== undefined ? { agentHistory: agent } : {}),
+      ...(typed !== undefined ? { asked: typed } : {}),
+    }
 
     const recorded = bundles.get(row.txHash)
     if (recorded !== undefined) {
       // A bundle is what the person asked for, so it names the row even though
-      // the ledger saw only a swap.
-      return { ...row, kind: 'bundle' as const, bundleSteps: recorded.steps, ...withAgent }
+      // the ledger saw only a swap. A step the record names keeps its own name:
+      // a deposit that followed a swap is still a deposit.
+      return row.title !== undefined
+        ? { ...row, bundleSteps: recorded.steps, ...withAgent }
+        : { ...row, kind: 'bundle' as const, bundleSteps: recorded.steps, ...withAgent }
     }
 
     if (row.bundledWith !== undefined && row.bundledWith.length > 1) {
@@ -209,16 +199,20 @@ export function SwapHistory(): JSX.Element | null {
       <div className="text-muted-foreground flex items-baseline justify-between text-xs">
         {/* Named by chain: history is per-network, and saying so removes any
             doubt about which ledger these came from. */}
-        <span>Swaps and cash-outs · {descriptor.name}</span>
+        <span>
+          {slug === 'stellar' ? 'Swaps and cash-outs' : 'Transactions'} · {descriptor.name}
+        </span>
         <span>{swaps.length}</span>
       </div>
 
       {groupByDay(swaps).map((group) => (
-        <section key={group.label} className="flex flex-col gap-3">
-          <h3 className="text-muted-foreground pt-2 text-xs font-medium">{group.label}</h3>
-          {group.rows.map((s) => (
-            <SwapRow key={s.txHash} swap={s} />
-          ))}
+        <section key={group.label} className="flex flex-col gap-2">
+          <h3 className="text-muted-foreground px-1 pt-2 text-xs font-medium">{group.label}</h3>
+          <div className="bg-bubble-agent border-bubble-agent-border divide-border/60 flex flex-col divide-y overflow-hidden rounded-3xl border shadow-[0_1px_3px_rgb(0_0_0/0.04)]">
+            {group.rows.map((s) => (
+              <SwapRow key={s.txHash} swap={s} />
+            ))}
+          </div>
         </section>
       ))}
     </div>
@@ -234,14 +228,24 @@ export function SwapHistory(): JSX.Element | null {
  */
 function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
+  const { slug } = useChain()
+  const named = swap.title ?? (swap.kind === 'other' ? swap.asked : undefined)
+  const hasSent = swap.sentAmount !== ''
+  const hasReceived = swap.receivedAsset !== ''
+  const received =
+    swap.kind === 'cashout'
+      ? paidOut(swap.receivedAmount, swap.receivedAsset)
+      : swap.receivedAmount === ''
+        ? swap.receivedAsset
+        : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`
 
   return (
-    <Card className="overflow-hidden">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="hover:bg-muted/40 flex w-full items-center gap-4 p-4 text-left transition-colors"
+        className="hover:bg-muted/40 flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors sm:px-5"
       >
         {/* Leading mark, so an on-chain swap row is scannable the same way an
             intent row is — the type is readable before the numbers are. */}
@@ -251,28 +255,32 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
           <div className="flex items-center justify-between gap-3">
             {/* Named, like the intent rows. Without a title these read as a
                 different kind of thing entirely from the list beneath. */}
-            <span className="text-sm font-semibold">{KIND_LABELS[swap.kind]}</span>
-            <span className="text-muted-foreground text-xs">{time(swap.settledAt)}</span>
+            <span className="text-sm font-semibold">{named ?? KIND_LABELS[swap.kind]}</span>
+            <span className="text-muted-foreground shrink-0 text-xs">
+              {swap.unconfirmed === true ? 'unconfirmed · ' : ''}
+              {time(swap.settledAt)}
+            </span>
           </div>
 
-          <div className="mt-1.5 flex items-center gap-2 text-sm tabular-nums">
-            <span className="flex items-center gap-1.5 font-medium">
-              <TokenIcon symbol={swap.sentAsset} size={18} />
-              {amount(swap.sentAmount)} {swap.sentAsset}
-            </span>
-            <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-            <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
-              {swap.kind === 'cashout' ? null : <TokenIcon symbol={swap.receivedAsset} size={18} />}
-              <span className="truncate">
-                {swap.kind === 'cashout'
-                  ? `₦${Number(swap.receivedAmount).toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
-                  : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`}
+          {hasSent ? (
+            <div className="mt-1.5 flex items-center gap-2 text-sm tabular-nums">
+              <span className="flex items-center gap-1.5 font-medium">
+                <TokenIcon symbol={swap.sentAsset} size={18} />
+                {amount(swap.sentAmount)} {swap.sentAsset}
               </span>
-            </span>
-          </div>
+              {hasReceived ? (
+                <>
+                  <ArrowRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+                  <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
+                    {swap.kind === 'cashout' ? null : (
+                      <TokenIcon symbol={swap.receivedAsset} size={18} />
+                    )}
+                    <span className="truncate">{received}</span>
+                  </span>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <ChevronDown
@@ -285,42 +293,42 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
       </button>
 
       {expanded ? (
-        <div className="border-border flex flex-col gap-4 border-t px-4 pb-4 pt-4">
+        <div className="bg-muted/30 flex flex-col gap-4 px-4 pb-5 pt-4 sm:px-5">
           <div className="grid grid-cols-2 gap-4 text-sm tabular-nums sm:grid-cols-4">
-            <div>
-              <p className="text-muted-foreground text-xs">Sent</p>
-              <p className="text-foreground">
-                {amount(swap.sentAmount)} {swap.sentAsset}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Received</p>
-              <p className="text-foreground">
-                {swap.kind === 'cashout'
-                  ? `₦${Number(swap.receivedAmount).toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`
-                  : `${amount(swap.receivedAmount)} ${swap.receivedAsset}`}
-              </p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">
-                {swap.payout !== undefined ? 'Payout' : 'Route'}
-              </p>
-              <p className="text-foreground">
-                {swap.payout !== undefined
-                  ? [
-                      swap.payout.statusLabel,
-                      `${swap.payout.bankName} ${swap.payout.accountMask}`.trim(),
-                    ]
-                      .filter((part) => part !== '')
-                      .join(', ')
-                  : swap.hops === 0
-                    ? 'direct'
-                    : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}
-              </p>
-            </div>
+            {hasSent ? (
+              <div>
+                <p className="text-muted-foreground text-xs">Sent</p>
+                <p className="text-foreground">
+                  {amount(swap.sentAmount)} {swap.sentAsset}
+                </p>
+              </div>
+            ) : null}
+            {hasReceived ? (
+              <div>
+                <p className="text-muted-foreground text-xs">Received</p>
+                <p className="text-foreground">{received}</p>
+              </div>
+            ) : null}
+            {/* A hop count is only read from Stellar's ledger, so nothing else has a route to show. */}
+            {swap.payout !== undefined || swap.recorded !== true ? (
+              <div>
+                <p className="text-muted-foreground text-xs">
+                  {swap.payout !== undefined ? 'Payout' : 'Route'}
+                </p>
+                <p className="text-foreground">
+                  {swap.payout !== undefined
+                    ? [
+                        swap.payout.statusLabel,
+                        `${swap.payout.bankName} ${swap.payout.accountMask}`.trim(),
+                      ]
+                        .filter((part) => part !== '')
+                        .join(', ')
+                    : swap.hops === 0
+                      ? 'direct'
+                      : `${swap.hops} hop${swap.hops === 1 ? '' : 's'}`}
+                </p>
+              </div>
+            ) : null}
             <div>
               <p className="text-muted-foreground text-xs">Settled</p>
               <p className="text-foreground">
@@ -358,7 +366,7 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
               rel="noreferrer"
               className="border-border hover:bg-muted/60 inline-flex w-fit items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium transition-colors"
             >
-              View on Stellar Expert
+              {slug === 'stellar' ? 'View on Stellar Expert' : 'View transaction'}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
 
@@ -409,6 +417,6 @@ function SwapRow({ swap }: { swap: HistoryRow }): JSX.Element {
           ) : null}
         </div>
       ) : null}
-    </Card>
+    </div>
   )
 }
