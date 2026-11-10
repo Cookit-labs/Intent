@@ -76,6 +76,11 @@ export interface ProviderConfig {
    * thinking and returns no tool call at all.
    */
   talk?: { body?: Record<string, unknown>; maxTokens: number }
+  /**
+   * Extra fields on a first take. A first take still running when talk closes, 20 s after the
+   * line-up, is cut off, so a model that reasons past that needs its reasoning turned down.
+   */
+  propose?: { body: Record<string, unknown> }
 }
 
 /**
@@ -211,6 +216,9 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     defaultPricing: { input: 0.08, output: 0.5 },
     displayNames: { 'z-ai/glm-5.3-flash': 'GLM 5.3 Flash' },
     talk: { body: { reasoning_effort: 'low' }, maxTokens: 400 },
+    // Measured 2026-11-10 on a NEAR swap: 12 to 18 s at the default effort, 14 s at medium,
+    // 3.3 s at low, each with a tool call. Races were cutting the default off at 20 s.
+    propose: { body: { reasoning_effort: 'low' } },
   },
 
   /**

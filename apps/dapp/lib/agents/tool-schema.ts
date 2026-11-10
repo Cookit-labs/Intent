@@ -200,6 +200,24 @@ export const proposalToolSchema = z.object({
 
 export type ProposalToolInput = z.infer<typeof proposalToolSchema>
 
+/**
+ * The fields a plan doesn't use, as the tool's own description says to fill them. A model without
+ * strict tools may leave them out, and an omission is then read as that value: no follow-on and no
+ * follow-on venue on a plain trade, and no rest price and no split on a fill. A rest or split
+ * plan's price, the route and every figure must still be sent.
+ */
+function withUnusedDefaults(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
+  const plan = { ...(raw as Record<string, unknown>) }
+  plan['thenAction'] ??= 'none'
+  if (plan['thenAction'] === 'none') plan['thenVenue'] ??= ''
+  if (plan['executionMode'] === 'fill') {
+    plan['restPriceUsd'] ??= 0
+    plan['splitPct'] ??= 0
+  }
+  return plan
+}
+
 export interface ValidationContext {
   referencePriceUsd: number
   /**
@@ -260,9 +278,11 @@ export function validateProposal(
   raw: unknown,
   ctx: ValidationContext
 ): { ok: true; value: ProposalToolInput } | { ok: false; reason: string } {
-  const parsed = proposalToolSchema.safeParse(raw)
+  const parsed = proposalToolSchema.safeParse(withUnusedDefaults(raw))
   if (!parsed.success) {
-    return { ok: false, reason: parsed.error.issues[0]?.message ?? 'schema mismatch' }
+    const issue = parsed.error.issues[0]
+    const at = issue !== undefined && issue.path.length > 0 ? `${issue.path.join('.')}: ` : ''
+    return { ok: false, reason: issue !== undefined ? `${at}${issue.message}` : 'schema mismatch' }
   }
 
   const value = parsed.data

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createClaudeBrain } from '../agents/brains/anthropic'
 import { createBrain } from '../agents/brains/openai-compatible'
 import { ASK_TOOL } from '../agents/talk-prompts'
+import { parseIntent } from '../parse-intent'
 
 const call = { agent: 'a', system: 'sys', user: 'usr', tool: ASK_TOOL }
 
@@ -141,5 +142,25 @@ describe('claude talk', () => {
       client: reply('end_turn', [{ type: 'text', text: 'Hi' }]) as unknown as Anthropic,
     })
     expect(await prose.talk?.(call)).toMatchObject({ ok: false, error: 'invalid_schema' })
+  })
+})
+
+describe('brain.propose', () => {
+  it('asks NEAR AI for low reasoning, so a first take lands inside the talk window', async () => {
+    const fetchImpl = replying(toolReply)
+    await createBrain({ provider: 'nearai', apiKey: 'k', model: 'x', fetchImpl }).propose({
+      intent: parseIntent('swap 5 NEAR to USDC'),
+      agent: 'a',
+      seat: 0,
+      chain: 'near',
+      market: {
+        asOf: new Date().toISOString(),
+        prices: { NEAR: 2.6, USDC: 1 },
+        venues: [{ id: 'rhea', name: 'Rhea', category: 'dex' }],
+        volatilityHint: 'normal',
+        gasHint: 'cheap',
+      },
+    })
+    expect(sentBody(fetchImpl)['reasoning_effort']).toBe('low')
   })
 })
