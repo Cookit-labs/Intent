@@ -177,6 +177,13 @@ function staticAccount(
   return index === undefined ? undefined : transaction.staticAccounts[index]
 }
 
+/** A heap the network accepts: a whole number of kilobytes from the default 32 KB up to 256 KB. */
+function isHeapFrame(bytes: bigint): boolean {
+  return (
+    bytes >= BigInt(32 * 1024) && bytes <= BigInt(256 * 1024) && bytes % BigInt(1024) === BigInt(0)
+  )
+}
+
 function checkComputeBudget(instructions: readonly DecodedInstruction[]): void {
   let price = BigInt(0)
   let limit = DEFAULT_COMPUTE_UNIT_LIMIT
@@ -184,7 +191,10 @@ function checkComputeBudget(instructions: readonly DecodedInstruction[]): void {
     const tag = data[0]
     if (tag === 2 && data.length === 5) limit = readLittleEndian(data, 1, 4)
     else if (tag === 3 && data.length === 9) price = readLittleEndian(data, 1, 8)
-    else if (!(tag === 4 && data.length === 5)) {
+    else if (tag === 1 && data.length === 5 && isHeapFrame(readLittleEndian(data, 1, 4))) {
+      // More memory for the program, which moves nothing and is paid for in compute, not SOL.
+      // Titan's router asks for the most.
+    } else if (!(tag === 4 && data.length === 5)) {
       refuse('This transaction sets a compute budget option I don’t recognise.')
     }
   }

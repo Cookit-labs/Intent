@@ -110,6 +110,15 @@ export function getChainDescriptor(slug: ChainSlug): ChainDescriptor {
   return CHAIN_DESCRIPTORS[slug]
 }
 
+/**
+ * Explorer URL for a transaction, for the same reason. NEAR's explorer is the one that disagrees.
+ * Stellar's descriptor is built for whichever network the page is on, so its base is right too.
+ */
+export function txExplorerUrl(slug: ChainSlug, hash: string): string {
+  const base = CHAIN_DESCRIPTORS[slug].blockExplorerUrl
+  return slug === 'near' ? `${base}/txns/${hash}` : `${base}/tx/${hash}`
+}
+
 /** Explorers that say `account` where the rest say `address`. */
 const ACCOUNT_PATH_CHAINS: readonly ChainSlug[] = ['stellar', 'solana', 'sui']
 
@@ -122,4 +131,14 @@ export function accountExplorerUrl(slug: ChainSlug, address: string): string {
   return ACCOUNT_PATH_CHAINS.includes(slug)
     ? `${base}/account/${address}`
     : `${base}/address/${address}`
+}
+
+/**
+ * Explorer URL for a token. Stellar's assets are `CODE-ISSUER` there, or just `XLM`. A chain's
+ * native coin has no address of its own on some chains, so callers pass the one its data is under.
+ */
+export function tokenExplorerUrl(slug: ChainSlug, id: string): string {
+  const base = CHAIN_DESCRIPTORS[slug].blockExplorerUrl
+  if (slug === 'stellar') return `${base}/asset/${id.replace(':', '-')}`
+  return slug === 'sui' ? `${base}/coin/${id}` : `${base}/token/${id}`
 }

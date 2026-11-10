@@ -110,6 +110,20 @@ export const RAYDIUM_SWAP_POLICY: SolanaVenuePolicy = {
   mayWrapSol: true,
 }
 
+/**
+ * Titan's swap program, from the example instruction in its Portal reference,
+ * https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/reference/quote-swap, and
+ * the only program besides Compute Budget that live routes called on 10 November 2026, for USDC to
+ * SOL, SOL to USDC and USDC to JitoSOL. Each built transaction simulated cleanly on mainnet.
+ */
+export const TITAN_SWAP_PROGRAM = 'T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT'
+
+export const TITAN_SWAP_POLICY: SolanaVenuePolicy = {
+  venueName: 'Titan',
+  programs: { [TITAN_SWAP_PROGRAM]: {} },
+  mayWrapSol: true,
+}
+
 export const JUPITER_LEND_POLICY: SolanaVenuePolicy = {
   venueName: 'Jupiter Lend',
   programs: { [JUPITER_LEND_PROGRAM]: { discriminators: [DEPOSIT_DISCRIMINATOR] } },

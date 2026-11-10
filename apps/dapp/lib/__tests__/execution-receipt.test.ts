@@ -31,6 +31,7 @@ describe('the receipt a prepared action carries to submit', () => {
     const prepared = await withReceipt(solana, ACCOUNT, swap, env)
     expect(loggedAction('solana', ACCOUNT, 'jupiter', prepared.receipt, env)).toEqual({
       kind: 'swap',
+      action: 'swap',
       flow: { assetIn: 'SOL', amountIn: '0.5', assetOut: 'USDC', volumeUsd: 75 },
     })
   })
