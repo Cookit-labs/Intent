@@ -7,11 +7,27 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id
 }
 
+const SHOWN_PLACES = 6
+
+/**
+ * An amount to 6 places, rounded down so it never shows more than is held. NEAR counts to 24
+ * places, and a figure that long can't be read or typed back.
+ */
+function shown(amount: string): string {
+  const [whole = '0', fraction = ''] = amount.split('.')
+  const kept = fraction.slice(0, SHOWN_PLACES).replace(/0+$/, '')
+  if (kept === '' && /^0*$/.test(whole) && /[1-9]/.test(fraction)) {
+    return `<0.${'0'.repeat(SHOWN_PLACES - 1)}1`
+  }
+  return kept === '' ? whole : `${whole}.${kept}`
+}
+
 function line(token: TokenBalance): string {
-  if (token.listed || token.native) return `• ${token.amount} ${token.symbol}`
+  const amount = shown(token.amount)
+  if (token.listed || token.native) return `• ${amount} ${token.symbol}`
   return token.symbol === token.id
-    ? `• ${token.amount} ${shortId(token.id)}`
-    : `• ${token.amount} ${token.symbol} (${shortId(token.id)})`
+    ? `• ${amount} ${shortId(token.id)}`
+    : `• ${amount} ${token.symbol} (${shortId(token.id)})`
 }
 
 function isZero(amount: string): boolean {

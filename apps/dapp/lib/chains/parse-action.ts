@@ -186,8 +186,20 @@ export function dollarsOn(text: string, token: string): { amountIsUsd?: true } {
  * and is read wrongly costs money, so anything looser falls through to being
  * told what works. Tokens and venues are checked on the server.
  */
+/**
+ * Words people put after a token that say nothing about the action: "0.5 NEAR token to USDC",
+ * "5 SOL in my wallet to USDC", "inmy wallet" typed fast. Taken out before any pattern reads it.
+ */
+const FILLER =
+  /(?<=\S)\s+(?:(?:tokens?|coins?)(?:\s+(?:in|from)\s*my\s+wallet)?|(?:in|from)\s*my\s+wallet)(?=\s+(?:to|for|into|on|with|via)\b|\s*$)/gi
+
+function withoutFiller(text: string): string {
+  return text.trim().replace(FILLER, '')
+}
+
 export function parseChainAction(text: string): ChainActionRequest | null {
-  const swap = SWAP.exec(text.trim())
+  const said = withoutFiller(text)
+  const swap = SWAP.exec(said)
   if (swap !== null) {
     const tokenIn = chainTokenWord(swap[2] as string)
     return {
@@ -199,7 +211,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       venue: swap[4]?.trim(),
     }
   }
-  const supply = SUPPLY.exec(text.trim())
+  const supply = SUPPLY.exec(said)
   if (supply !== null) {
     const tokenIn = chainTokenWord(supply[2] as string)
     return {
@@ -210,7 +222,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       venue: supply[3]?.trim(),
     }
   }
-  const stake = STAKE.exec(text.trim())
+  const stake = STAKE.exec(said)
   if (stake !== null) {
     const tokenIn = chainTokenWord(stake[2] as string)
     return {
@@ -221,7 +233,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       venue: stake[3]?.trim(),
     }
   }
-  const send = SEND.exec(text.trim())
+  const send = SEND.exec(said)
   if (send !== null) {
     const tokenIn = chainTokenWord(send[2] as string)
     return {
@@ -232,7 +244,7 @@ export function parseChainAction(text: string): ChainActionRequest | null {
       recipient: send[3] as string,
     }
   }
-  return parsePositionAction(text.trim()) ?? parsePaymentAction(text.trim())
+  return parsePositionAction(said) ?? parsePaymentAction(said)
 }
 
 /** Taking out of a position, or borrowing against one: an amount, a token and maybe a venue. */

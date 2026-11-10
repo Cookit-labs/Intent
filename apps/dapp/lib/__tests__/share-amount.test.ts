@@ -50,8 +50,8 @@ describe('sizeShare', () => {
       line: '100% of your USDC is 5.115078 USDC.',
     })
     expect(sizeShare('swap half my avax to usdc', held)).toEqual({
-      text: 'swap 0.043437090611522326 AVAX to usdc',
-      line: '50% of your AVAX is 0.043437090611522326 AVAX.',
+      text: 'swap 0.04343709 AVAX to usdc',
+      line: '50% of your AVAX is 0.04343709 AVAX.',
     })
   })
 

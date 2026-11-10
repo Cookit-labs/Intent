@@ -284,6 +284,23 @@ function refuseUnsaid(
   }
 }
 
+/**
+ * A model reads an amount as a JSON number, which keeps about 16 digits. When the person typed
+ * more, what comes back is their figure rounded, which no longer matches what they said. It is put
+ * back exactly as they typed it, so their own digits are what is checked and what is signed.
+ */
+function ownDigits(text: string, said: readonly string[]): string {
+  const typed = (said.join(' ').match(/\d[\d,]*\.\d{16,}/g) ?? []).map((t) => t.replace(/,/g, ''))
+  if (typed.length === 0) return text
+  return text.replace(/\d+\.\d+/g, (n) => typed.find((t) => Number(t) === Number(n)) ?? n)
+}
+
+function withOwnDigits<T>(swap: T, said: readonly string[]): T {
+  if (typeof swap !== 'object' || swap === null || !('amount' in swap)) return swap
+  const amount = (swap as { amount: unknown }).amount
+  return typeof amount === 'string' ? { ...swap, amount: ownDigits(amount, said) } : swap
+}
+
 /** The amount and token a model read, or why it cannot be used. Nothing is checked against words. */
 function swapOf(
   read: ReadSwap
@@ -385,7 +402,7 @@ export function sequenceFromReading(
 ): ChainSequenceRequest | { refusal: string } | null {
   const model = read.followOn ?? refusedFollowOn(read, said)
   if (model === null) return null
-  const read$ = swapOf(read)
+  const read$ = withOwnDigits(swapOf(read), said)
   if ('refusal' in read$) return read$
   if (!requestSaid(read$, said, model.kind === 'offramp')) {
     return refuseUnsaid(read, 'that amount, token and token to receive')
@@ -469,7 +486,7 @@ export function swapFromReading(
   read: ReadSwap,
   said: readonly string[]
 ): ChainActionRequest | { refusal: string } {
-  const swap = swapOf(read)
+  const swap = withOwnDigits(swapOf(read), said)
   if ('refusal' in swap) return swap
   return requestSaid(swap, said)
     ? countedInStable(swap, said)
@@ -532,10 +549,11 @@ function limitRouteFromReading(
  */
 export function chainRouteFromReading(
   read: ReadSwap & { action: string },
-  instruction: string,
+  modelInstruction: string,
   said: readonly string[],
   chain?: ChainWithActions
 ): ChainRoute | null {
+  const instruction = ownDigits(modelInstruction, said)
   const limit = limitRouteFromReading(read, instruction, said, chain)
   if (limit !== undefined) return limit
   if (read.followOn !== null || read.followOnRefused !== undefined) {
