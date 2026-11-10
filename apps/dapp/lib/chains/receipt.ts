@@ -25,6 +25,8 @@ import {
 
 interface Receipt {
   kind: ExecutionKind
+  /** The action itself, since a kind folds several together. Absent on receipts issued before it. */
+  action?: ChainActionKind
   assetIn: string
   amountIn: string
   assetOut: string | null
@@ -95,6 +97,7 @@ export async function withReceipt(
   if (key === undefined) return prepared
   const receipt: Receipt = {
     kind: prepared.thenPrepareAgain === true ? 'setup' : LOGGED_KIND[prepared.kind],
+    action: prepared.kind,
     assetIn: prepared.pay.symbol,
     amountIn: prepared.pay.amount,
     assetOut: prepared.receive?.symbol ?? null,
@@ -111,6 +114,9 @@ function isReceipt(value: unknown): value is Receipt {
   return (
     typeof r['kind'] === 'string' &&
     RECEIPT_KINDS.has(r['kind']) &&
+    (r['action'] === undefined ||
+      (typeof r['action'] === 'string' &&
+        Object.prototype.hasOwnProperty.call(LOGGED_KIND, r['action']))) &&
     typeof r['assetIn'] === 'string' &&
     typeof r['amountIn'] === 'string' &&
     /^\d+(\.\d+)?$/.test(r['amountIn']) &&
@@ -127,7 +133,7 @@ export function loggedAction(
   venueId: string,
   receipt: string | undefined,
   env: Record<string, string | undefined> = process.env
-): { kind: ExecutionKind; flow?: ExecutionFlow } {
+): { kind: ExecutionKind; action?: ChainActionKind; flow?: ExecutionFlow } {
   const key = secret(env)
   const [body, proof, extra] = (receipt ?? '').split('.')
   if (key === undefined || body === undefined || proof === undefined || extra !== undefined) {
@@ -143,6 +149,7 @@ export function loggedAction(
   if (!isReceipt(parsed)) return { kind: 'unknown' }
   return {
     kind: parsed.kind,
+    ...(parsed.action === undefined ? {} : { action: parsed.action }),
     flow: {
       assetIn: parsed.assetIn,
       amountIn: parsed.amountIn,

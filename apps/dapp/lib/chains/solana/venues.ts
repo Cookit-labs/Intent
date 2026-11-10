@@ -49,6 +49,16 @@ export const solanaVenues: Venue[] = [
       'Swaps USDC, USDT, SOL, JitoSOL, mSOL, sSOL and ONyc through Raydium’s router, which races Jupiter for the better price. Checks that every transaction spends exactly the amount quoted and accepts no less than the quote’s floor before you sign.',
   },
   {
+    // Listed, as Lulo is: whether this runs depends on a key this client-safe file can't read.
+    id: 'titan',
+    family: 'solana',
+    name: 'Titan',
+    category: 'aggregator',
+    chains: ['Solana'],
+    bestFor: 'A third routed price, from an aggregator that races several routers at once',
+    url: 'https://titan.exchange',
+  },
+  {
     // Listed, as Lulo is: whether this runs depends on a secret this client-safe file can't read.
     id: '1click-solana',
     family: 'solana',

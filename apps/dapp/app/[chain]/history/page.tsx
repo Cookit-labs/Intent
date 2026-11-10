@@ -2,10 +2,14 @@
 
 import { Card } from '@intent/ui'
 
+import { ChainPositions } from '../../../components/intents/chain-positions'
 import { IntentActivity } from '../../../components/intents/intent-activity'
 import { OpenPositions } from '../../../components/intents/open-positions'
 import { SwapHistory } from '../../../components/intents/swap-history'
 import { useWallet } from '../../../hooks/use-wallet'
+import { useWalletHistory } from '../../../hooks/use-wallet-history'
+import { chainPositionsSource, composeInviteShown } from '../../../lib/chains/activity'
+import { useChain } from '../../../providers/chain-provider'
 
 /**
  * Everything a wallet has done here, on its own page.
@@ -16,6 +20,9 @@ import { useWallet } from '../../../hooks/use-wallet'
  */
 export default function HistoryPage(): JSX.Element {
   const { isConnected } = useWallet()
+  const { slug } = useChain()
+  const history = useWalletHistory()
+  const positions = chainPositionsSource(slug)
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
@@ -30,12 +37,19 @@ export default function HistoryPage(): JSX.Element {
         <div className="flex flex-col gap-8">
           {/* Anything still live comes first. A settled swap is a record and
               needs no decision; a resting order or a lending position is money
-              still committed. */}
-          <OpenPositions />
+              still committed. Each chain asks its own reader: Blend, the book and the
+              pools only exist on Stellar, and would refuse any other chain's address. */}
+          {positions === 'blend' ? <OpenPositions /> : null}
+          {positions === 'venues' ? <ChainPositions /> : null}
           {/* On-chain swaps before tracked intents: they are the trades that
               actually happened. */}
           <SwapHistory />
-          <IntentActivity />
+          <IntentActivity
+            firstIntent={composeInviteShown({
+              rows: history.hasActivity ? 1 : 0,
+              settled: history.settled,
+            })}
+          />
         </div>
       ) : (
         <Card className="p-12 text-center">
