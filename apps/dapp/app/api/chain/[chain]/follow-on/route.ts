@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { assertFollowOnCanRun } from '../../../../../lib/chains/prepare'
+import { resolveFollowOn } from '../../../../../lib/chains/prepare'
 import { chainModule } from '../../../../../lib/chains/registry'
 import { ChainActionRefused } from '../../../../../lib/chains/types'
 import { enforceRateLimit } from '../../../../../lib/server/rate-limit'
@@ -23,7 +23,7 @@ const Body = z.object({
   }),
 })
 
-/** Whether a step could run after a swap, asked before the swap is signed. Builds nothing. */
+/** Whether a step could run after a swap and where, asked before the swap is signed. Builds nothing. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ chain: string }> }
@@ -42,7 +42,7 @@ export async function POST(
 
   try {
     const { kind, tokenIn, venue, recipient } = parsed.data.step
-    await assertFollowOnCanRun(
+    const plan = await resolveFollowOn(
       chainApi,
       {
         kind,
@@ -52,7 +52,7 @@ export async function POST(
       },
       parsed.data.account
     )
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, ...plan })
   } catch (e) {
     if (e instanceof ChainActionRefused) {
       const said = e.message.endsWith(NOTHING_MOVED) ? e.message : `${e.message} ${NOTHING_MOVED}`

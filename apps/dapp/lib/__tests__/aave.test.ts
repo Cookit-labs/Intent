@@ -393,6 +393,38 @@ function venueWith(fixture: Fixture = {}, market: AaveMarket = AAVE_AVALANCHE_MA
   return { venue: createAaveVenue(market, fake.reader), ...fake }
 }
 
+describe('a deposit asked for before the swap that pays for it', () => {
+  const STEP = { kind: 'supply', tokenIn: 'USDC' } as const
+
+  it('goes ahead on a reserve with room', async () => {
+    await expect(venueWith().venue.assertCanFollow?.(STEP, ACCOUNT)).resolves.toBeUndefined()
+  })
+
+  it.each([
+    [
+      'full',
+      { supplyCap: BigInt(1_000_000), totalAToken: BigInt(1_000_000_000_000) },
+      /supply cap/,
+    ],
+    ['paused', { paused: true }, /paused/],
+    ['frozen', { frozen: true }, /frozen/],
+    ['unreadable', { failRead: 'getReserveConfigurationData' }, /read/],
+  ])(
+    'refuses a reserve that is %s, so no swap leaves anyone stuck',
+    async (_name, fixture, words) => {
+      await expect(venueWith(fixture).venue.assertCanFollow?.(STEP, ACCOUNT)).rejects.toThrow(words)
+    }
+  )
+
+  it('reads nothing for a token it does not take', async () => {
+    const { venue, reads } = venueWith()
+    await expect(
+      venue.assertCanFollow?.({ kind: 'supply', tokenIn: 'AVAX' }, ACCOUNT)
+    ).rejects.toThrow(/not AVAX/)
+    expect(reads).toHaveLength(0)
+  })
+})
+
 function ask(kind: ChainActionKind, amount = '10', tokenIn = 'USDC') {
   return { kind, amount, tokenIn }
 }

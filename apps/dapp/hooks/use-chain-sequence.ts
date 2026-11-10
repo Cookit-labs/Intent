@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ChainSequenceRequest } from '../lib/chains/sequence'
 import {
+  autoMove,
   beforeReadCounts,
   keepsBefore,
   measureDelivered,
@@ -22,6 +23,7 @@ import {
   stepLabels,
   swapLine,
   unmeasuredReply,
+  type AutoMove,
   type Before,
   type BeforeStatus,
   type SequenceProgress,
@@ -60,8 +62,10 @@ export interface ChainSequence {
   /** What to say about step 2 while step 1 is unsigned. */
   swapLine: string
   start: (request: ChainSequenceRequest, text: string) => void
-  /** Step 2. Called from a press and nowhere else. */
+  /** Step 2, from a press or from `takeAutoMove`. */
   runNext: () => void
+  /** What step 2 should do by itself right now, marked as done so it never happens twice. */
+  takeAutoMove: () => AutoMove | undefined
   clear: () => void
 }
 
@@ -72,8 +76,10 @@ export interface ChainSequence {
  * kept, and the transcript and the card's attempt notice cover the person.
  *
  * A deposit, stake or send is that same card again. The one other thing that lifts its latch is
- * step 2's press, once, from `ready`, and `ready` is reached only from a settled step 1 or from a
- * step 2 that proved nothing moved. See `moveOnSecond`.
+ * step 2 starting, once, from `ready`, and `ready` is reached only from a settled step 1 or from a
+ * step 2 that proved nothing moved. See `moveOnSecond`. It starts by itself the first time, and the
+ * wallet opens by itself on its card, as on Stellar: the steps were all shown before the first
+ * signature, and the wallet stays the last word on each. See `autoMove`.
  */
 export function useChainSequence(
   chainAction: ChainAction,
@@ -294,6 +300,29 @@ export function useChainSequence(
     })
   }, [run, cashout, chainAction, slug])
 
+  // Which run has had its one automatic build, and which card its one automatic wallet prompt.
+  const autoBuiltFor = useRef<ChainSequenceRequest | null>(null)
+  const autoSignedCard = useRef<typeof prepared>(undefined)
+  const takeAutoMove = useCallback((): AutoMove | undefined => {
+    const extraArrived =
+      run?.delivered !== undefined &&
+      stepAmount(run.request, run.delivered, run.quotedOut).note !== undefined
+    const move = autoMove({
+      stage: run?.stage,
+      followOnKind: run?.request.followOn.kind,
+      phase,
+      opened: run?.opened === true,
+      cardKind: prepared?.kind,
+      extraArrived,
+      warned: chainAction.earlier !== undefined,
+      prepareTried: run !== null && autoBuiltFor.current === run.request,
+      signTried: prepared !== undefined && autoSignedCard.current === prepared,
+    })
+    if (move === 'prepare' && run !== null) autoBuiltFor.current = run.request
+    if (move === 'sign') autoSignedCard.current = prepared
+    return move
+  }, [run, phase, prepared, chainAction.earlier])
+
   return {
     sequence: run?.request ?? null,
     stage,
@@ -306,6 +335,7 @@ export function useChainSequence(
     swapLine: swapLine(phase, readStatus, quoted, request),
     start,
     runNext,
+    takeAutoMove,
     clear,
   }
 }

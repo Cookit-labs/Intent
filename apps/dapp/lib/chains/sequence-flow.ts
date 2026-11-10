@@ -77,6 +77,10 @@ export const UNCONFIRMED_SWAP =
 export const SWAP_NEXT_STEP =
   'Step 2 waits for your press. It uses what the swap actually delivers.'
 
+/** For a step with no form to fill. Approving the swap isn't approving this: the wallet still asks. */
+export const SWAP_THEN_WALLET =
+  'Your wallet opens again for step 2 after this, for what the swap actually delivers. If it does not, a button here does the same. Decline it and you keep what arrived.'
+
 export const BALANCE_UNREAD =
   'I could not read your USDC balance, so if you sign this swap the cash-out will not follow. You would hold the USDC and can cash it out yourself.'
 
@@ -392,7 +396,7 @@ export function swapLine(
   if (request === undefined || request.followOn.kind === 'cashout') {
     return unread ? BALANCE_UNREAD : (quoted ?? SWAP_NEXT_STEP)
   }
-  if (!unread) return SWAP_NEXT_STEP
+  if (!unread) return SWAP_THEN_WALLET
   const symbol = outputSymbol(request)
   return `I could not read your ${symbol} balance, so if you sign this swap the ${nounOf(request.followOn)} will not follow. You would hold the ${symbol}.`
 }
@@ -662,6 +666,37 @@ export function secondStepPress(
   return wrongWallet !== undefined
     ? { kind: 'refused', message: wrongWallet }
     : { kind: 'prepare', request }
+}
+
+export type AutoMove = 'prepare' | 'sign'
+
+/**
+ * What step 2 does by itself, or nothing where it waits for a press. Each move happens once: one
+ * build a run and one wallet prompt a card. So a decline, a wrong wallet or a failed build leaves the
+ * button and the card's own Sign button, and can never bring the wallet back unasked.
+ *
+ * The wallet is opened only on step 2's own card, of the kind that was asked for and built after
+ * step 1 settled. A cash-out has a form, which only a person can fill in. More arriving than this
+ * swap should bring stops for a press too, and so does a card warning this may already have been
+ * sent, because those have to be read before anything is signed.
+ */
+export function autoMove(state: {
+  stage: SequenceStage | undefined
+  followOnKind: FollowOn['kind'] | undefined
+  phase: ChainActionPhase
+  opened: boolean
+  cardKind: ChainActionKind | undefined
+  extraArrived: boolean
+  /** The card warns of an earlier attempt at the same thing. */
+  warned: boolean
+  prepareTried: boolean
+  signTried: boolean
+}): AutoMove | undefined {
+  const { stage, followOnKind, phase, opened, cardKind } = state
+  if (followOnKind === undefined || followOnKind === 'cashout') return undefined
+  if (stage === 'ready') return state.prepareTried || state.extraArrived ? undefined : 'prepare'
+  if (stage !== 'following' || !opened || state.signTried || state.warned) return undefined
+  return phase === 'review' && cardKind === followOnKind ? 'sign' : undefined
 }
 
 export type StepMark = 'now' | 'waiting' | 'done' | 'stopped'
@@ -1011,18 +1046,38 @@ export function questionChainRefusal(asked: string, now: string): string | undef
 export const FOLLOW_ON_UNCHECKED =
   'I could not check that the next step can finish, so the swap did not start. Nothing was signed or sent.'
 
+export type FollowOnAnswer = { request: ChainSequenceRequest; note?: string } | { refusal: string }
+
+/** The sequence as the server says it will run: its venue, and anything it had to change. */
+function asPlanned(
+  request: ChainSequenceRequest,
+  body: { kind?: unknown; venue?: unknown; tokenOut?: unknown; note?: unknown }
+): FollowOnAnswer {
+  const { followOn, swap } = request
+  if (followOn.kind === 'cashout' || followOn.kind === 'send') return { request }
+  const kind = body.kind === 'stake' || body.kind === 'supply' ? body.kind : followOn.kind
+  const venue = typeof body.venue === 'string' ? body.venue : followOn.venue
+  const planned: ChainSequenceRequest = {
+    swap: typeof body.tokenOut === 'string' ? { ...swap, tokenOut: body.tokenOut } : swap,
+    followOn: venue === undefined ? { kind } : { kind, venue },
+  }
+  return typeof body.note === 'string'
+    ? { request: planned, note: body.note }
+    : { request: planned }
+}
+
 /**
  * Asks the server whether a deposit, stake or send could run after this swap, while the swap is
  * unsigned: its venues, what they take, and what only the chain can say about a receiver. Any answer
  * but a clear yes refuses, so a swap never starts on a follow-on nobody checked.
  */
-export async function readFollowOnRefusal(
+export async function readFollowOnPlan(
   chain: string,
   request: ChainSequenceRequest,
   account: string
-): Promise<string | undefined> {
+): Promise<FollowOnAnswer> {
   const { followOn, swap } = request
-  if (followOn.kind === 'cashout') return undefined
+  if (followOn.kind === 'cashout') return { request }
   const step = {
     kind: followOn.kind,
     tokenIn: swap.tokenOut,
@@ -1036,12 +1091,22 @@ export async function readFollowOnRefusal(
       body: JSON.stringify({ account, step }),
       signal: AbortSignal.timeout(READ_TIMEOUT_MS),
     })
-    const body = (await response.json()) as { ok?: unknown; error?: unknown }
-    if (response.status === 200 && body.ok === true) return undefined
-    return response.status === 422 && typeof body.error === 'string'
-      ? body.error
-      : FOLLOW_ON_UNCHECKED
+    const body = (await response.json()) as {
+      ok?: unknown
+      error?: unknown
+      kind?: unknown
+      venue?: unknown
+      tokenOut?: unknown
+      note?: unknown
+    }
+    if (response.status === 200 && body.ok === true) return asPlanned(request, body)
+    return {
+      refusal:
+        response.status === 422 && typeof body.error === 'string'
+          ? body.error
+          : FOLLOW_ON_UNCHECKED,
+    }
   } catch {
-    return FOLLOW_ON_UNCHECKED
+    return { refusal: FOLLOW_ON_UNCHECKED }
   }
 }

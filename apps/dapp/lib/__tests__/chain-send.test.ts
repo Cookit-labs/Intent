@@ -1537,7 +1537,7 @@ describe('the follow-on route', () => {
       params
     )
     expect(reply.status).toBe(200)
-    await expect(reply.json()).resolves.toEqual({ ok: true })
+    await expect(reply.json()).resolves.toEqual({ ok: true, kind: 'send' })
   })
 
   it('gives the sentence for one that can’t, ending the way every refusal does', async () => {

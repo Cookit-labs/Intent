@@ -47,6 +47,16 @@ export function venueAnswersTo(venue: Pick<ChainVenue, 'id' | 'name'>, wanted: s
   return venue.id.toLowerCase() === wanted || venue.name.toLowerCase().includes(wanted)
 }
 
+/** The venue this chain goes to when none is named. */
+function defaultVenueId(
+  chainApi: ChainModule,
+  kind: ChainActionKind,
+  /** What the venue has to take or, for a swap, to deliver. */
+  token: string
+): string | undefined {
+  return chainApi.venueForToken?.[kind]?.[token.trim().toUpperCase()] ?? chainApi.defaultVenue[kind]
+}
+
 function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVenue {
   const usable = chainApi.venues.filter((v) => v.kinds.includes(request.kind))
   const wanted = namedVenue(chainApi, request)
@@ -62,9 +72,11 @@ function pickVenue(chainApi: ChainModule, request: ChainActionRequest): ChainVen
     }
     return named
   }
-  const defaultId =
-    chainApi.venueForToken?.[request.kind]?.[request.tokenIn.trim().toUpperCase()] ??
-    chainApi.defaultVenue[request.kind]
+  const defaultId = defaultVenueId(
+    chainApi,
+    request.kind,
+    request.kind === 'swap' ? (request.tokenOut ?? request.tokenIn) : request.tokenIn
+  )
   const venue = usable.find((v) => v.id === defaultId) ?? usable[0]
   if (venue === undefined) {
     throw new ChainActionRefused(`Nothing here can ${request.kind} on this chain yet.`)
@@ -182,7 +194,14 @@ export async function assertFollowOnCanRun(
 ): Promise<void> {
   const request: ChainActionRequest = { ...step, amount: '0' }
   assertKnownTokens(chainApi, request)
-  const venue = pickVenue(chainApi, request)
+  await assertVenueCanFollow(pickVenue(chainApi, request), step, account)
+}
+
+async function assertVenueCanFollow(
+  venue: ChainVenue,
+  step: FollowOnStep,
+  account: string
+): Promise<void> {
   if (venue.assertCanFollow === undefined) {
     throw new ChainActionRefused(`${venue.name} can't follow a swap yet.`)
   }
@@ -212,6 +231,99 @@ async function assertFeesForBothSteps(
   throw new ChainActionRefused(
     `Keep at least ${fromBase(needed, native.decimals)} ${native.symbol} in your wallet before this, to pay the fees on both steps. You have ${native.amount}. Nothing was signed or sent.`
   )
+}
+
+/** How a follow-on will run, once a venue that takes the token has been found. */
+export interface FollowOnPlan {
+  kind: FollowOnStep['kind']
+  /** The venue's name, so step 2 goes where step 1's card said it would. */
+  venue?: string
+  /** A token to swap into in place of the one asked for, because only that can be deposited. */
+  tokenOut?: string
+  /** What changed from what was asked, to say before anything is signed. */
+  note?: string
+}
+
+/** Venues for this step, the one this chain would pick by default first. */
+function venuesInOrder(
+  chainApi: ChainModule,
+  kind: ChainActionKind,
+  tokenIn: string
+): ChainVenue[] {
+  const usable = chainApi.venues.filter((v) => v.kinds.includes(kind))
+  const first = defaultVenueId(chainApi, kind, tokenIn)
+  return [...usable.filter((v) => v.id === first), ...usable.filter((v) => v.id !== first)]
+}
+
+/** The first venue that says it could take this step, or the first refusal. Only a refusal is caught. */
+async function firstTaking(
+  chainApi: ChainModule,
+  step: FollowOnStep,
+  account: string
+): Promise<{ venue: ChainVenue } | { refused: ChainActionRefused }> {
+  let refused: ChainActionRefused | undefined
+  for (const venue of venuesInOrder(chainApi, step.kind, step.tokenIn)) {
+    try {
+      await assertVenueCanFollow(venue, step, account)
+      return { venue }
+    } catch (e) {
+      if (!(e instanceof ChainActionRefused)) throw e
+      refused ??= e
+    }
+  }
+  return {
+    refused: refused ?? new ChainActionRefused(`Nothing here can ${step.kind} on this chain yet.`),
+  }
+}
+
+/**
+ * Where a step after a swap will go, asked before the swap is signed. A venue the person named is
+ * theirs, and it says yes or no. Otherwise any venue on the chain may take it, not only the default.
+ *
+ * "Deposit" asks for the money to earn. So a token no lending venue can take after a swap is staked where it can be,
+ * which keeps the token asked for, or else swapped into its wrapped form where that can be lent.
+ * Each of those says so beside the steps before the first signature.
+ */
+export async function resolveFollowOn(
+  chainApi: ChainModule,
+  step: FollowOnStep,
+  account: string
+): Promise<FollowOnPlan> {
+  if (step.kind === 'send' || namedVenue(chainApi, step) !== undefined) {
+    await assertFollowOnCanRun(chainApi, step, account)
+    return { kind: step.kind }
+  }
+  assertKnownTokens(chainApi, { ...step, amount: '0' })
+  const asked = await firstTaking(chainApi, step, account)
+  if ('venue' in asked) return { kind: step.kind, venue: asked.venue.name }
+  if (step.kind !== 'supply') throw asked.refused
+
+  const token = step.tokenIn.trim().toUpperCase()
+  const stake = await firstTaking(chainApi, { ...step, kind: 'stake' }, account)
+  if ('venue' in stake) {
+    const { name } = stake.venue
+    return {
+      kind: 'stake',
+      venue: name,
+      note: `No lending app here can take ${token} straight after a swap, so step 2 stakes it on ${name}, which earns too.`,
+    }
+  }
+  const wrapped = chainApi.wrappedToken?.[token]
+  if (wrapped !== undefined) {
+    const lent = await firstTaking(chainApi, { ...step, tokenIn: wrapped }, account)
+    if ('venue' in lent) {
+      const { name } = lent.venue
+      return {
+        kind: 'supply',
+        venue: name,
+        tokenOut: wrapped,
+        note: `${name} takes ${wrapped} and not ${token}, so this swaps to ${wrapped}, the same coin in wrapped form, and deposits that.`,
+      }
+    }
+    // The wrapped form was the only way, so why it can't go in is the answer.
+    throw lent.refused
+  }
+  throw asked.refused
 }
 
 export { LIMIT_NOT_HERE }

@@ -90,6 +90,12 @@ export function ChainSequenceSteps({ steps }: { steps: ChainSequence }): JSX.Ele
           </li>
         </ol>
 
+        {sequence.note !== undefined ? (
+          <p role="status" className="text-sm leading-relaxed">
+            {sequence.note}
+          </p>
+        ) : null}
+
         {stage === 'swap' ? (
           <p className="text-muted-foreground text-xs leading-relaxed">{steps.swapLine}</p>
         ) : null}
