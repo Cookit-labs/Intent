@@ -176,6 +176,7 @@ function order(over: Partial<WeaveOrderView> = {}): WeaveOrderView {
     currency: 'NGN',
     amount: '5',
     estimatedDest: '7000',
+    provider: 'weave',
     institutionName: 'Opay',
     accountName: 'A B',
     accountMask: '••••1234',
