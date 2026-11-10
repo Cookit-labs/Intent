@@ -164,3 +164,27 @@ describe('brain.propose', () => {
     expect(sentBody(fetchImpl)['reasoning_effort']).toBe('low')
   })
 })
+
+describe('a race with no routes', () => {
+  it('still asks for a real price estimate, which a fast model otherwise leaves at zero', async () => {
+    const fetchImpl = replying(toolReply)
+    await createBrain({ provider: 'nearai', apiKey: 'k', model: 'x', fetchImpl }).propose({
+      intent: parseIntent('Swap 20 USDC to XLM'),
+      agent: 'a',
+      seat: 0,
+      chain: 'stellar',
+      market: {
+        asOf: new Date().toISOString(),
+        prices: { XLM: 0.18, USDC: 1 },
+        venues: [{ id: 'soroswap', name: 'Soroswap', category: 'dex' }],
+        volatilityHint: 'normal',
+        gasHint: 'cheap',
+      },
+    })
+    const context = (sentBody(fetchImpl)['messages'] as { content: string }[])
+      .map((m) => m.content)
+      .join('\n')
+    expect(context).toMatch(/No executable routes/)
+    expect(context).toMatch(/projectedAvgPriceUsd must still be your estimate, above zero/)
+  })
+})
