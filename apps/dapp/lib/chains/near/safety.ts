@@ -10,7 +10,15 @@ import {
   dclOrderMsg,
   isDclOrderId,
 } from './rhea-dcl-rules'
-import { METAPOOL_CONTRACT, RNEAR_CONTRACT, TGAS, USDC_NEAR, USDT_NEAR, WRAP_NEAR } from './tokens'
+import {
+  LINEAR_CONTRACT,
+  METAPOOL_CONTRACT,
+  RNEAR_CONTRACT,
+  TGAS,
+  USDC_NEAR,
+  USDT_NEAR,
+  WRAP_NEAR,
+} from './tokens'
 
 /**
  * What a NEAR wallet may be asked to sign.
@@ -51,6 +59,12 @@ export const METAPOOL_STAKE_GAS = BigInt(100) * TGAS
 export const RNEAR_EXIT_GAS = BigInt(200) * TGAS
 /** The same margin as a Meta Pool stake. Unused gas comes back. */
 export const METAPOOL_EXIT_GAS = BigInt(100) * TGAS
+/**
+ * LiNEAR runs the code rNEAR was forked from, and its own calls reserve 75 TGas for each validator
+ * step, so it gets rNEAR's 200 TGas for a stake and every exit. Unused gas comes back.
+ */
+export const LINEAR_STAKE_GAS = BigInt(200) * TGAS
+export const LINEAR_EXIT_GAS = BigInt(200) * TGAS
 /** A generous limit: `ft_withdraw` spends what it needs on the transfer and its resolve. */
 export const INTENTS_CALL_GAS = BigInt(100) * TGAS
 
@@ -337,6 +351,20 @@ export function assertRnearSafe(payload: SigningPayload, account: string): void 
     stakeGas: RNEAR_STAKE_GAS,
     allowStorage: true,
     exitGas: RNEAR_EXIT_GAS,
+    claimMethod: 'withdraw_all',
+  })
+}
+
+/**
+ * On `linear-protocol.near`: [storage_deposit(you)?, deposit_and_stake], [unstake(amount)],
+ * [unstake_all] or [withdraw_all].
+ */
+export function assertLinearSafe(payload: SigningPayload, account: string): void {
+  assertStakeVenue(payload, account, {
+    contract: LINEAR_CONTRACT,
+    stakeGas: LINEAR_STAKE_GAS,
+    allowStorage: true,
+    exitGas: LINEAR_EXIT_GAS,
     claimMethod: 'withdraw_all',
   })
 }

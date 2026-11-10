@@ -70,6 +70,18 @@ export const nearVenues: Venue[] = [
       'Stakes NEAR for rNEAR on lst.rhealab.near, showing the rate Rhea publishes, and unstakes it with a wait and then a claim. Mainnet only. Nothing has been signed through this app yet.',
   },
   {
+    id: 'linear',
+    family: 'near',
+    name: 'LiNEAR',
+    category: 'staking',
+    chains: NEAR,
+    bestFor: 'Liquid staking spread across hundreds of NEAR validators',
+    url: 'https://linearprotocol.org',
+    integration: 'executes',
+    capability:
+      'Stakes NEAR for LiNEAR on linear-protocol.near and unstakes it with a wait of 4 epochs and then a claim. Mainnet only. Nothing has been signed through this app yet.',
+  },
+  {
     id: '1click-earn',
     family: 'near',
     name: '1Click Earn',

@@ -8,7 +8,14 @@ import { assetIdOf, oneClickPrice } from './oneclick'
 import { RHEA_VENUE_ID, rheaBook, rheaVenue } from './rhea-dcl'
 import { RHEA_LEND_VENUE_ID, rheaLendVenue } from './rhea-lend'
 import { RHEA_DEX_VENUE_ID, rheaDexVenue } from './rhea-swap'
-import { confirmStake, metapoolVenue, METAPOOL_VENUE_ID, rnearVenue } from './stake'
+import {
+  confirmStake,
+  linearVenue,
+  LINEAR_VENUE_ID,
+  metapoolVenue,
+  METAPOOL_VENUE_ID,
+  rnearVenue,
+} from './stake'
 import { oneClickVenue } from './swap'
 import { nearTokens } from './tokens'
 
@@ -22,6 +29,7 @@ export function buildNearVenues(
     rheaDexVenue,
     metapoolVenue,
     rnearVenue,
+    linearVenue,
     earnVenue,
     rheaVenue,
     // Sends come together: a deployment that can't offer one offers neither, and says so.
@@ -52,7 +60,7 @@ export const nearModule: ChainModule = {
     limit: RHEA_VENUE_ID,
   },
   venueForToken: {
-    unstake: { STNEAR: METAPOOL_VENUE_ID, RNEAR: 'rnear' },
+    unstake: { STNEAR: METAPOOL_VENUE_ID, RNEAR: 'rnear', LINEAR: LINEAR_VENUE_ID },
     claim: { USDC: EARN_VENUE_ID },
   },
   priceUsd: (token) => oneClickPrice(assetIdOf(token), token.decimals),

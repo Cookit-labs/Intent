@@ -61,7 +61,7 @@ sign or send anything.
 | ---------------------------------------- | ------------------------------------------------------------------------- | ----------------------------- |
 | `swap 5 USDC to NEAR`                    | Agents race live quotes, you sign the winner                              | Rhea DEX, NEAR Intents 1Click |
 | `swap 5 USDC to NEAR then stake`         | Swap, then stake what arrived, as two steps                               | Rhea DEX, Meta Pool           |
-| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR              |
+| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR, LiNEAR      |
 | `supply 25 USDC on 1Click Earn`          | Deposit and withdraw                                                      | NEAR Intents                  |
 | `supply 25 USDC on Rhea Lend`            | Supply, withdraw, borrow, repay                                           | Rhea Lend                     |
 | `send 1 NEAR to bob.near`                | A plain NEAR transfer                                                     | Protocol `Transfer` action    |
