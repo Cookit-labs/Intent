@@ -16,7 +16,7 @@ export interface ChainSequenceRequest {
 }
 
 /** Where a swap can go on to a cash-out. Stellar has its own path, so it is not here. */
-export const SEQUENCE_CASHOUT_CHAINS: readonly ChainWithActions[] = ['solana', 'sui', 'avalanche']
+export const SEQUENCE_CASHOUT_CHAINS: readonly ChainWithActions[] = ['solana', 'sui']
 
 const NOTHING_MOVED = 'Nothing was signed or sent.'
 

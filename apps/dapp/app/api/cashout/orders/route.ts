@@ -293,8 +293,12 @@ export async function POST(request: Request): Promise<Response> {
       // never shown to anyone. The page starts a new attempt on this code.
       return refusal('order_closed', made.message, 409)
     }
-    if (made.code === 'unknown' || made.code === 'unexpected') {
-      reportError('cashout/orders', new Error(`order_${made.code}`), { chain, currency })
+    if (made.code === 'unknown' || made.code === 'unexpected' || made.code === 'rejected') {
+      reportError('cashout/orders', new Error(`order_${made.code}`), {
+        chain,
+        currency,
+        ...('detail' in made && made.detail !== undefined ? { detail: made.detail } : {}),
+      })
     }
     const status =
       made.code === 'rejected'

@@ -125,7 +125,7 @@ describe('2. ordinary words reach the model', () => {
 })
 
 describe('3. a currency as the token out', () => {
-  it.each(['solana', 'sui', 'avalanche'] as const)('is a cash-out sequence on %s', (chain) => {
+  it.each(['solana', 'sui'] as const)('is a cash-out sequence on %s', (chain) => {
     expect(readChainMessage('change 5 SOL into naira', chain, chain)).toEqual({
       kind: 'cashout',
       route: { kind: 'sequence', token: 'SOL', amount: '5', currency: 'NGN' },
@@ -167,6 +167,7 @@ describe('3. a currency as the token out', () => {
   it.each([
     ['near', 'NEAR'],
     ['monad', 'Monad'],
+    ['avalanche', 'Avalanche'],
   ] as const)('is refused before anything starts on %s', (chain, name) => {
     const refusal = followOnRefusal(chain, name, { kind: 'cashout' }, [])
     expect(refusal).toBeDefined()
@@ -301,6 +302,7 @@ describe('4. a follow-on the server cannot honour', () => {
     for (const [chain, name] of [
       ['near', 'NEAR'],
       ['monad', 'Monad'],
+      ['avalanche', 'Avalanche'],
     ] as [ChainWithActions, string][]) {
       expect(followOnRefusal(chain, name, route.sequence.followOn, [])).toMatch(
         /Nothing was signed or sent\./

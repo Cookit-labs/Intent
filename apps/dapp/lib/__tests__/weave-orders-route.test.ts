@@ -158,10 +158,17 @@ describe('checks before anything is asked of Weave', () => {
   it('refuses NEAR, which Weave cannot make an order for, in words that say what to do', async () => {
     const json = await refused(post({ chain: 'near' }), 422)
     expect(json['error']).toBe('chain_closed')
-    expect(json['message']).toMatch(/move your USDC to Solana, Avalanche or Sui/)
+    expect(json['message']).toMatch(/move your USDC to Solana or Sui/)
     expect(json['message']).toMatch(/Nothing was signed or sent\.$/)
     expect(called(state.weave['quote'])).not.toHaveBeenCalled()
     expect(called(state.weave['institutions'])).not.toHaveBeenCalled()
+  })
+
+  it('refuses Avalanche, whose USDC NEAR Intents no longer takes, before Weave is asked', async () => {
+    const json = await refused(post({ chain: 'avalanche' }), 422)
+    expect(json['error']).toBe('chain_closed')
+    expect(json['message']).toMatch(/move your USDC to Solana or Sui/)
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
   })
 
   it('refuses a Stellar cash-out off mainnet', async () => {
@@ -435,6 +442,35 @@ describe('what Weave could not answer', () => {
     const res = await POST(post())
     expect(res.status).toBe(504)
     expect(called(state.repo['insert'])).not.toHaveBeenCalled()
+  })
+
+  it("reports Weave's reason for a refusal, and keeps it from the browser", async () => {
+    state.weave = weave({
+      createOrder: vi.fn(async () => ({
+        ok: false,
+        code: 'rejected',
+        message: 'The cash-out could not be started. Nothing was signed or sent.',
+        detail: 'NEAR Intents 400: tokenIn is not valid',
+      })),
+    })
+    const res = await POST(post())
+    expect(res.status).toBe(422)
+    expect(JSON.stringify(await res.json())).not.toContain('tokenIn')
+    expect(state.report).toHaveLength(1)
+    expect(JSON.stringify(state.report[0])).toContain('tokenIn is not valid')
+  })
+
+  it('names the order Weave made when its answer could not be used', async () => {
+    state.weave = weave({
+      createOrder: vi.fn(async () => ({
+        ok: false,
+        code: 'unexpected',
+        message: 'Unreadable.',
+        detail: 'order ord_9 awaiting_deposit with no deposit instruction',
+      })),
+    })
+    expect((await POST(post())).status).toBe(502)
+    expect(JSON.stringify(state.report[0])).toContain('ord_9')
   })
 
   it('reports an answer it could not read, with no account details', async () => {

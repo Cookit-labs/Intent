@@ -2,7 +2,7 @@ import type { ChainCapability } from '../explain'
 
 /** What actually works here, for telling someone who asked for something else. Client-safe. */
 export const avalancheCapabilities: ChainCapability[] = [
-  { kind: 'swap', venue: 'Uniswap', symbol: 'AVAX', then: ['cashout', 'supply', 'send'] },
+  { kind: 'swap', venue: 'Uniswap', symbol: 'AVAX', then: ['supply', 'send'] },
   { kind: 'limit', venue: 'CoW Protocol', symbol: 'AVAX' },
   { kind: 'supply', venue: 'Aave', symbol: 'USDC' },
   { kind: 'withdraw', venue: 'Aave', symbol: 'USDC' },
