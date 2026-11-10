@@ -108,16 +108,18 @@ test('a typed swap reaches review, signs, submits and reports the result', async
 
   await say(page, 'Swap 1 USDC to SOL')
 
-  await expect(page.getByText('Swap 1 USDC for SOL on Jupiter.')).toBeVisible()
+  await expect(page.getByText('Review swap')).toBeVisible()
+  await expect(page.getByText('via Jupiter')).toBeVisible()
   await expect(page.getByText('The price can move before this lands.')).toBeVisible()
   expect(prepared()).toEqual({
     account: ADDRESS,
     request: { kind: 'swap', amount: '1', tokenIn: 'USDC', tokenOut: 'SOL' },
   })
 
-  await page.getByRole('button', { name: 'Sign and send' }).click()
+  await page.getByRole('button', { name: 'Sign & swap' }).click()
 
-  await expect(page.getByRole('link', { name: /abc123/ })).toHaveAttribute(
+  await expect(page.getByText('Swap complete')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View on Solscan' })).toHaveAttribute(
     'href',
     'https://solscan.io/tx/abc123def456'
   )
@@ -144,9 +146,9 @@ test('declining in the wallet goes back to review, with nothing sent', async ({ 
   })
 
   await say(page, 'Swap 1 USDC to SOL')
-  await page.getByRole('button', { name: 'Sign and send' }).click()
+  await page.getByRole('button', { name: 'Sign & swap' }).click()
 
-  await expect(page.getByRole('button', { name: 'Sign and send' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Sign & swap' })).toBeEnabled()
   await expect(page.getByText('User rejected')).toHaveCount(0)
   expect(sent).toBe(false)
 })
@@ -164,7 +166,7 @@ test('a transaction with no outcome yet says so, and is not shown as a failure',
   )
 
   await say(page, 'Swap 1 USDC to SOL')
-  await page.getByRole('button', { name: 'Sign and send' }).click()
+  await page.getByRole('button', { name: 'Sign & swap' }).click()
 
   await expect(page.getByRole('status').filter({ hasText: 'Still processing' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Done' })).toBeVisible()

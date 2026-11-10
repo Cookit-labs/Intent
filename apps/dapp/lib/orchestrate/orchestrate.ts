@@ -92,6 +92,8 @@ export type OrchestrateResult =
   | { status: 'out_of_scope'; reply?: string }
   /** The person asked what their wallet holds. The chat lists it from the balances it already has. */
   | { status: 'balance' }
+  /** The person asked where an asset earns most. The app reads the live rates; the model never quotes one. */
+  | { status: 'yields'; asset?: string }
   /** Four questions asked and the request is still not usable. */
   | { status: 'unclear'; reply?: string }
 
@@ -118,9 +120,14 @@ const ORCHESTRATE_TOOL = {
       properties: {
         outcome: {
           type: 'string',
-          enum: ['act', 'ask', 'help', 'out_of_scope', 'balance'],
+          enum: ['act', 'ask', 'help', 'out_of_scope', 'balance', 'yields'],
           description:
-            "'act' when the message is a complete instruction Intent can carry out. 'ask' when it is about Intent's work but something it cannot be carried out without is missing or unclear. 'help' when the user asks what they can do or how Intent works. 'out_of_scope' when it has nothing to do with Intent's work. 'balance' when the user asks to see what their wallet holds: their balance, their tokens, their assets, what they have.",
+            "'act' when the message is a complete instruction Intent can carry out. 'ask' when it is about Intent's work but something it cannot be carried out without is missing or unclear. 'help' when the user asks what they can do or how Intent works. 'out_of_scope' when it has nothing to do with Intent's work. 'balance' when the user asks to see what their wallet holds: their balance, their tokens, their assets, what they have. 'yields' when the user asks where an asset earns the most, which platform or venue pays the best yield, rate or APY, or the best way to earn on what they hold.",
+        },
+        yieldAsset: {
+          type: 'string',
+          description:
+            "When outcome is 'yields': the asset the person wants to earn on, as its symbol, such as USDC. Empty when they named none. Empty otherwise.",
         },
         question: {
           type: 'string',
@@ -163,6 +170,7 @@ const ORCHESTRATE_TOOL = {
       },
       required: [
         'outcome',
+        'yieldAsset',
         'question',
         'reply',
         'instruction',
@@ -188,6 +196,7 @@ function basePrompt(chain: string): string {
       : "Decide by what the person MEANS, not by which words they used: 'flip', 'turn into', 'get me some', 'move my coins to dollars' are all trades.",
     "Use outcome 'out_of_scope' for anything unrelated to that work — exercise, weather, recipes, general chat. Do not try to stretch an unrelated message into a trade.",
     "Use outcome 'balance' when the person asks to see what is in their wallet: their balance, their tokens or assets, how much they have. Leave reply empty; the app lists the wallet itself. A question about the price of an asset is not a balance request.",
+    "Use outcome 'yields' when the person asks where an asset earns the most, which platform pays the best yield or rate, or the best way to put an asset to work. Put the asset in yieldAsset. Leave reply empty: the app reads the live rates of every venue on this chain and answers with them. Never state a rate yourself.",
     "Use outcome 'help' when the person asks what they can do, what Intent is, how to get started, or asks you to explain something Intent does.",
     'For help, write reply yourself, in your own words, as a person would in a conversation. Answer exactly what they asked: if they ask about one thing, explain that one thing rather than listing everything.',
     'Write reply in flowing paragraphs, the way a person writes a chat message: two or three sentences each, separated by a blank line. Weave several things into sentences rather than listing them; group related abilities together ("you can swap, send, or lend what you hold"). Use a bulleted list only when the person explicitly asks for a list or for steps. Never use an em dash or an en dash; use a period, a comma or a colon instead.',
@@ -413,6 +422,7 @@ interface OrchestrateArguments extends ToolArguments {
   orderStyle?: unknown
   limitPriceUsd?: unknown
   amountOf?: unknown
+  yieldAsset?: unknown
 }
 
 function argumentsOf(payload: unknown): OrchestrateArguments | null {
@@ -460,6 +470,11 @@ function interpret(payload: unknown, options: OrchestrateOptions): OrchestrateRe
 
     case 'balance':
       return { status: 'balance' }
+
+    case 'yields': {
+      const asset = text(args.yieldAsset).trim().toUpperCase()
+      return /^[A-Z0-9.]{1,12}$/.test(asset) ? { status: 'yields', asset } : { status: 'yields' }
+    }
 
     case 'out_of_scope': {
       const reply = tidyProse(text(args.reply))

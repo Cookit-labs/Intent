@@ -330,6 +330,22 @@ describe('orchestrateWithLlm', () => {
     expect(result).toEqual({ status: 'balance' })
   })
 
+  it('reads a question about where an asset earns most as yields, with the asset', async () => {
+    const result = await orchestrateWithLlm(turn('USDC which platform will have the best yield?'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'yields', yieldAsset: 'usdc' }),
+    })
+    expect(result).toEqual({ status: 'yields', asset: 'USDC' })
+  })
+
+  it('reads yields with no asset named as no asset, for the app to choose', async () => {
+    const result = await orchestrateWithLlm(turn('best yields on this chain?'), {
+      ...options,
+      fetchImpl: reply({ ...empty, outcome: 'yields', yieldAsset: '' }),
+    })
+    expect(result).toEqual({ status: 'yields' })
+  })
+
   it('tells the model that asking for a balance is the balance outcome', async () => {
     let sent: { messages: { content: string }[] } | undefined
     await orchestrateWithLlm(turn('show my balance'), {

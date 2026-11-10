@@ -138,6 +138,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       await logIntentRead({ chain, understood: true, action: 'balance' })
       return NextResponse.json({ outcome: 'balance' })
 
+    case 'yields':
+      await logIntentRead({ chain, understood: true, action: 'yields' })
+      return NextResponse.json({
+        outcome: 'yields',
+        ...(result.asset !== undefined ? { asset: result.asset } : {}),
+      })
+
     case 'out_of_scope':
       await logIntentRead({ chain, understood: true, action: 'out_of_scope' })
       return NextResponse.json({

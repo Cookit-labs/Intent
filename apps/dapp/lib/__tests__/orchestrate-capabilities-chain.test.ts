@@ -185,9 +185,9 @@ describe('the orchestrator prompt', () => {
     const withRule = await systemFor('stellar')
     expect(withRule).toContain(`\n${OUTSIDE_TEXT_RULE}\n`)
     const system = withRule.replace(`\n${OUTSIDE_TEXT_RULE}`, '')
-    expect(system.length).toBe(6452)
+    expect(system.length).toBe(6768)
     expect(createHash('sha256').update(system).digest('hex')).toBe(
-      'a6ed692eb9f9ebc325842f13f0b6417c6b4ee970922535a1fa9c8c497c63edfc'
+      '03e493d4aafe64d8eed78599cd00c44c9f5a90226e92828db44fdf0e9681da99'
     )
   })
 

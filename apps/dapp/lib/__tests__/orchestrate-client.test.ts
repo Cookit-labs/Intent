@@ -154,6 +154,15 @@ describe('orchestrator copy', () => {
     expect(unavailableMessage('not_tradeable', [])).toMatch(/borrowed/i)
   })
 
+  it('passes a yields question through, with its asset when one was named', async () => {
+    expect(
+      await fetchOrchestrate(turns, [], 'solana', json({ outcome: 'yields', asset: 'USDC' }))
+    ).toEqual({ outcome: 'yields', asset: 'USDC' })
+    expect(await fetchOrchestrate(turns, [], 'solana', json({ outcome: 'yields' }))).toEqual({
+      outcome: 'yields',
+    })
+  })
+
   it('passes a balance request through', async () => {
     expect(await fetchOrchestrate(turns, [], 'stellar', json({ outcome: 'balance' }))).toEqual({
       outcome: 'balance',
