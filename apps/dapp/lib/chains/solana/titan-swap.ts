@@ -113,16 +113,18 @@ function u64(value: bigint): number[] {
   return Array.from({ length: 8 }, (_, i) => Number((value >> BigInt(8 * i)) & BigInt(0xff)))
 }
 
-function computeBudget(units: number): Instruction[] {
-  const program = COMPUTE_BUDGET_PROGRAM as Address
-  return [
-    { programAddress: program, accounts: [], data: Uint8Array.from([2, ...u32(units)]) },
-    {
-      programAddress: program,
-      accounts: [],
-      data: Uint8Array.from([3, ...u64(PRIORITY_MICRO_LAMPORTS)]),
-    },
-  ]
+const SET_LIMIT = 2
+const SET_PRICE = 3
+
+function budgetOf(tag: number, units: number): Instruction {
+  return {
+    programAddress: COMPUTE_BUDGET_PROGRAM as Address,
+    accounts: [],
+    data:
+      tag === SET_LIMIT
+        ? Uint8Array.from([SET_LIMIT, ...u32(units)])
+        : Uint8Array.from([SET_PRICE, ...u64(PRIORITY_MICRO_LAMPORTS)]),
+  }
 }
 
 /**
@@ -142,10 +144,16 @@ export function titanInstructions(route: z.infer<typeof Route>, account: string)
     })
     return { programAddress: keyText(raw.p) as Address, accounts, data: bytesFromBase64(raw.d) }
   })
-  const hasBudget = instructions.some((i) => i.programAddress === COMPUTE_BUDGET_PROGRAM)
-  return hasBudget
-    ? instructions
-    : [...computeBudget(route.computeUnitsSafe ?? FALLBACK_COMPUTE_UNITS), ...instructions]
+  // Titan's own budget asks for a bigger heap and the compute, and sets no price, which would leave
+  // the swap at the back of the queue. Whatever it leaves out is added; nothing it set is changed.
+  const set = new Set(
+    instructions.filter((i) => i.programAddress === COMPUTE_BUDGET_PROGRAM).map((i) => i.data?.[0])
+  )
+  const units = route.computeUnitsSafe ?? FALLBACK_COMPUTE_UNITS
+  const missing = [SET_LIMIT, SET_PRICE]
+    .filter((tag) => !set.has(tag))
+    .map((tag) => budgetOf(tag, units))
+  return [...missing, ...instructions]
 }
 
 export interface TitanSwapOptions {

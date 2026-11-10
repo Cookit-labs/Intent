@@ -112,9 +112,9 @@ export const RAYDIUM_SWAP_POLICY: SolanaVenuePolicy = {
 
 /**
  * Titan's swap program, from the example instruction in its Portal reference,
- * https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/reference/quote-swap. Not yet
- * seen in a live transaction, because Titan needs a key: until then a route that calls anything else
- * at the top level is refused, which is the safe way to be wrong.
+ * https://titan-exchange.gitbook.io/titan/developer-doc/developers-portal/reference/quote-swap, and
+ * the only program besides Compute Budget that live routes called on 10 November 2026, for USDC to
+ * SOL, SOL to USDC and USDC to JitoSOL. Each built transaction simulated cleanly on mainnet.
  */
 export const TITAN_SWAP_PROGRAM = 'T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT'
 

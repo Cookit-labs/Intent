@@ -156,8 +156,39 @@ describe('Titan on Solana', () => {
     const decoded = decodeSolanaTransaction(
       (prepared.signing as { transaction: string }).transaction
     )
-    expect(decoded.instructions).toHaveLength(2)
+    // Its limit is kept, and the price it left out is added: limit, price, then the swap.
+    expect(decoded.instructions).toHaveLength(3)
+    const limits = decoded.instructions.filter((i) => i.data[0] === 2)
+    expect(limits).toHaveLength(1)
+    expect(Array.from(limits[0]?.data ?? [])).toEqual([2, 0x40, 0x0d, 0x03, 0])
   })
+
+  /** What Titan's live route sent on 10 November 2026: a 256 KB heap, and no limit or price. */
+  const heap = (kb: number) => ({
+    p: 'ComputeBudget111111111111111111111111111111',
+    a: [],
+    d: Buffer.from([1, ...[0, 1, 2, 3].map((i) => ((kb * 1024) >> (8 * i)) & 0xff)]).toString(
+      'base64'
+    ),
+  })
+
+  it('takes the bigger heap Titan asks for, and adds a limit and a price', async () => {
+    answer(reply({}, { instructions: [heap(256), ...route().instructions] }))
+    const prepared = await venue().prepare(ASK, ME)
+    const decoded = decodeSolanaTransaction(
+      (prepared.signing as { transaction: string }).transaction
+    )
+    expect(decoded.instructions.map((i) => i.data[0])).toEqual([2, 3, 1, 1])
+    expect(() => venue().assertSafe(prepared.signing, ME)).not.toThrow()
+  })
+
+  it.each([512, 31, 100.5])(
+    'refuses a heap of %s KB, which the network would not take',
+    async (kb) => {
+      answer(reply({}, { instructions: [heap(kb), ...route().instructions] }))
+      await expect(venue().prepare(ASK, ME)).rejects.toThrow(/compute budget option/)
+    }
+  )
 
   it.each([
     [
