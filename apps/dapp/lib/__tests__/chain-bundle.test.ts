@@ -278,15 +278,31 @@ describe('which venue a follow-on goes to', () => {
 })
 
 describe('your sentence, on each chain as it stands', () => {
+  // A fixed balance: the fee check reads the wallet, and a live read made these pass or fail by chance.
+  const holding = (
+    chain: ChainModule,
+    symbol: string,
+    amount: string,
+    decimals: number
+  ): ChainModule =>
+    ({
+      ...chain,
+      balances: async () => ({ tokens: [{ symbol, amount, decimals, native: true }] }),
+    }) as unknown as ChainModule
+
   it('Solana lends SOL on Kamino', async () => {
     await expect(
-      resolveFollowOn(solanaModule, { kind: 'supply', tokenIn: 'SOL' }, SOL_ME)
+      resolveFollowOn(
+        holding(solanaModule, 'SOL', '1', 9),
+        { kind: 'supply', tokenIn: 'SOL' },
+        SOL_ME
+      )
     ).resolves.toEqual({ kind: 'supply', venue: 'Kamino Lend' })
   })
 
   it('Sui stakes SUI, since nothing here lends it', async () => {
     await expect(
-      resolveFollowOn(suiModule, { kind: 'supply', tokenIn: 'SUI' }, SUI_ME)
+      resolveFollowOn(holding(suiModule, 'SUI', '1', 9), { kind: 'supply', tokenIn: 'SUI' }, SUI_ME)
     ).resolves.toMatchObject({ kind: 'stake', venue: 'SpringSui' })
   })
 
@@ -299,29 +315,33 @@ describe('your sentence, on each chain as it stands', () => {
     expect(avalancheModule.venues.some((v) => v.id === 'uniswap-avalanche')).toBe(true)
   })
 
-  const holdingMon = (amount: string): ChainModule =>
-    ({
-      ...monadModule,
-      balances: async () => ({
-        tokens: [{ symbol: 'MON', amount, decimals: 18, native: true }],
-      }),
-    }) as unknown as ChainModule
-
   it('Monad stakes MON on FastLane', async () => {
     await expect(
-      resolveFollowOn(holdingMon('1'), { kind: 'supply', tokenIn: 'MON' }, EVM_ME)
+      resolveFollowOn(
+        holding(monadModule, 'MON', '1', 18),
+        { kind: 'supply', tokenIn: 'MON' },
+        EVM_ME
+      )
     ).resolves.toMatchObject({ kind: 'stake', venue: 'FastLane' })
   })
 
   it('Monad refuses before the swap when too little MON is left for both fees', async () => {
     await expect(
-      resolveFollowOn(holdingMon('0'), { kind: 'supply', tokenIn: 'MON' }, EVM_ME)
+      resolveFollowOn(
+        holding(monadModule, 'MON', '0', 18),
+        { kind: 'supply', tokenIn: 'MON' },
+        EVM_ME
+      )
     ).rejects.toThrow(/Keep at least/)
   })
 
   it('NEAR stakes NEAR, since a stake can follow a swap there', async () => {
     await expect(
-      resolveFollowOn(nearModule, { kind: 'supply', tokenIn: 'NEAR' }, 'someone.near')
+      resolveFollowOn(
+        holding(nearModule, 'NEAR', '1', 24),
+        { kind: 'supply', tokenIn: 'NEAR' },
+        'someone.near'
+      )
     ).resolves.toMatchObject({ kind: 'stake' })
   })
 
