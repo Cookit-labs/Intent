@@ -208,10 +208,34 @@ async function readSolana(read: ReadJson, listed: Listed[]): Promise<Read> {
     attempt(() => jupiterTop(read)),
     attempt(() => jupiterSearch(read, listed.map((t) => t.dataId).join(','))),
   ])
+  const jupiter = [...(mine ?? []), ...(top ?? [])]
+  // Jupiter counts a staked token's whole stake pool as its depth, so it reads as deep as its market
+  // cap. What its pools hold is what someone can actually trade against.
+  const pooled = jupiter.filter(
+    (row) =>
+      row.marketCapUsd !== undefined &&
+      row.liquidityUsd !== undefined &&
+      Math.abs(row.liquidityUsd - row.marketCapUsd) <= row.marketCapUsd * 0.01
+  )
+  const market =
+    pooled.length === 0
+      ? undefined
+      : await attempt(() =>
+          dexscreenerTokens(read, DEXSCREENER_CHAIN['solana'] as string, [
+            ...new Set(pooled.map((row) => row.id)),
+          ])
+        )
+  const depth = new Map((market ?? []).map((row) => [row.id, row.liquidityUsd]))
   return {
-    figures: [...(mine ?? []), ...(top ?? []), ...fromListed(listed)],
+    figures: [
+      ...jupiter.map((row) => {
+        const pools = depth.get(row.id)
+        return pools !== undefined && pooled.includes(row) ? { ...row, liquidityUsd: pools } : row
+      }),
+      ...fromListed(listed),
+    ],
     partial: top === undefined || mine === undefined,
-    sources: ['Jupiter'],
+    sources: depth.size > 0 ? ['Jupiter', 'DexScreener'] : ['Jupiter'],
   }
 }
 

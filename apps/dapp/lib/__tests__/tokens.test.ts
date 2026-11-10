@@ -161,6 +161,28 @@ describe('tokens on Solana', () => {
     expect(tokens.find((t) => t.symbol === 'SOL')?.name).toBe('Solana')
   })
 
+  it('reads a staked token’s depth from its pools, not the whole stake pool Jupiter counts', async () => {
+    const JITO = 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn'
+    const { read } = router({
+      toporganicscore: [{ ...jup(JITO, 'JitoSOL', true), mcap: 880, liquidity: 880 }],
+      'search?query': [],
+      'api.dexscreener.com': [dsPair([JITO, 'JitoSOL'], [SOL_USDC, 'USDC'], 25)],
+    })
+    const jito = (await tokenDirectory('solana', read)).tokens.find((t) => t.id === JITO)
+    expect(jito?.liquidityUsd).toBe(25)
+    expect(jito?.marketCapUsd).toBe(880)
+  })
+
+  it('keeps Jupiter’s depth for a staked token when no pool answers', async () => {
+    const JITO = 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn'
+    const { read } = router({
+      toporganicscore: [{ ...jup(JITO, 'JitoSOL', true), mcap: 880, liquidity: 880 }],
+      'search?query': [],
+    })
+    const jito = (await tokenDirectory('solana', read)).tokens.find((t) => t.id === JITO)
+    expect(jito?.liquidityUsd).toBe(880)
+  })
+
   it('drops an icon that is not plain https', async () => {
     const { read } = router({
       toporganicscore: [{ ...jup('X', 'X', false), icon: 'javascript:alert(1)' }],
