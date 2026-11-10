@@ -161,6 +161,28 @@ export function currencyNamedIn(turns: readonly string[]): CashoutCurrencyCode |
   return found.size === 1 ? [...found][0] : undefined
 }
 
+/**
+ * A cash-out of USDC the model read, however it worded its instruction: the form, with the
+ * currency the person said and an amount only if they typed it. Nothing for any other reading.
+ */
+export function cashoutFromReading(
+  read: { action: string; tokenIn: string; amountUsd: number; amountStated: boolean },
+  said: readonly string[],
+  chain: string
+): Exclude<CashoutRoute, { kind: 'pass' }> | undefined {
+  if (read.action !== 'offramp' || read.tokenIn.toUpperCase() !== 'USDC') return undefined
+  if (closedCashoutReply(chain) !== undefined) return { kind: 'token', token: 'USDC' }
+  const figure = read.amountStated ? String(read.amountUsd) : undefined
+  const amount =
+    figure !== undefined &&
+    said.some((s) => new RegExp(`(?<![\\d.])${figure.replace('.', '\\.')}(?![\\d])`).test(s))
+      ? figure
+      : undefined
+  const currency = currencyNamedIn(said)
+  const sized = amount === undefined ? {} : { amount }
+  return currency === undefined ? { kind: 'ask', ...sized } : { kind: 'open', currency, ...sized }
+}
+
 /** Plain decimal text, or nothing for a shape that is not an amount or is zero. */
 function readAmount(text: string): string | undefined {
   if (!AMOUNT.test(text) || !/[1-9]/.test(text)) return undefined

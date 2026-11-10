@@ -57,6 +57,21 @@ export function chainHelp(chainName: string, capabilities: readonly ChainCapabil
   return `I couldn't read that as something I can do on ${chainName}. Try ${examples.join(' or ')}.${orders}`
 }
 
+/**
+ * One short question when a message could not be read: what the person wants, with two examples
+ * at most. Asked as a question, so the answer is read together with what came before it.
+ */
+export function askAgain(chainName: string, capabilities: readonly ChainCapability[]): string {
+  const examples: string[] = []
+  const swap = capabilities.find((c) => c.kind === 'swap')
+  if (swap !== undefined) examples.push(`"swap 5 ${swap.symbol} to USDC"`)
+  const supply = capabilities.find((c) => c.kind === 'supply')
+  if (capabilities.some((c) => c.then?.includes('cashout'))) examples.push('"cash out 5 USDC"')
+  else if (supply !== undefined) examples.push(`"${EXAMPLE.supply(supply.symbol, supply.venue)}"`)
+  const tail = examples.length === 0 ? '' : ` You can say something like ${examples.join(' or ')}.`
+  return `I didn't quite follow that. What would you like to do on ${chainName}?${tail}`
+}
+
 export const RATE_LIMITED = "You're sending messages quickly. Wait a minute and try again."
 
 const RATE_LIMITED_TODAY = "You've sent a lot of messages today. Try again later."
@@ -74,5 +89,5 @@ export function helpForUnread(
 ): string | undefined {
   if (reason === 'rate_limited') return RATE_LIMITED
   if (reason === 'rate_limited_today') return RATE_LIMITED_TODAY
-  return said.some(looksLikeChainAction) ? chainHelp(chainName, capabilities) : undefined
+  return said.some(looksLikeChainAction) ? askAgain(chainName, capabilities) : undefined
 }

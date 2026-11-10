@@ -285,10 +285,16 @@ function refuseUnsaid(
 }
 
 /** The amount and token a model read, or why it cannot be used. Nothing is checked against words. */
-function swapOf(read: ReadSwap): ChainActionRequest | { refusal: string } {
+function swapOf(
+  read: ReadSwap
+): ChainActionRequest | { refusal: string } | { refusal: string; question: string } {
   const amount = String(read.amountUsd)
   if (!read.amountStated || read.amountOf === 'received' || !/^\d+(?:\.\d+)?$/.test(amount)) {
-    return refuseUnsaid(read, 'an amount of the token you are swapping')
+    const token = chainTokenWord(read.tokenIn).toUpperCase()
+    return {
+      ...refuseUnsaid(read, 'an amount of the token you are swapping'),
+      question: `How much ${token} do you want to swap? You can say a number, or "all my ${token}".`,
+    }
   }
   return {
     kind: 'swap',
@@ -483,6 +489,8 @@ export type ChainRoute =
   | { sequence: ChainSequenceRequest }
   | { action: ChainActionRequest }
   | { refusal: string }
+  /** Something the person can answer, such as how much: asked rather than refused. */
+  | { refusal: string; question: string }
 
 /** A limit order a model read, held to the person's words, or why not. Nothing when it is no limit. */
 function limitRouteFromReading(

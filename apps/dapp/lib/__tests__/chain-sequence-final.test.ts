@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { STEP_CARD_EXPIRED, stepErrorMessage } from '../agents/chain-race'
 import { chainCapabilities } from '../chains/capabilities'
-import { chainHelp, helpForUnread, RATE_LIMITED } from '../chains/explain'
+import { askAgain, chainHelp, helpForUnread, RATE_LIMITED } from '../chains/explain'
 import { looksLikeChainAction } from '../chains/parse-action'
 import {
   chainRouteFromReading,
@@ -115,17 +115,22 @@ describe('2. ordinary words reach the model', () => {
     })
   })
 
-  it('answers with what works when the model could not read a sentence with a verb', () => {
+  it('asks one short question when the model could not read a sentence with a verb', () => {
     const capabilities = chainCapabilities('solana') ?? []
-    const help = chainHelp('Solana', capabilities)
-    expect(helpForUnread('unreadable', ['swap some sol'], 'Solana', capabilities)).toBe(help)
+    const asked = helpForUnread('unreadable', ['swap some sol'], 'Solana', capabilities)
+    expect(asked).toBe(askAgain('Solana', capabilities))
+    expect(asked).toMatch(/^I didn't quite follow that. What would you like to do on Solana?/)
+    expect(asked).toContain('"swap 5 SOL to USDC"')
+    expect(asked).toContain('"cash out 5 USDC"')
+    // One or two examples, not the whole list.
+    expect((asked ?? '').match(/"/g)?.length).toBeLessThanOrEqual(4)
     expect(helpForUnread('unreadable', ['how are you'], 'Solana', capabilities)).toBeUndefined()
     expect(looksLikeChainAction('swap some sol')).toBe(true)
   })
 })
 
 describe('3. a currency as the token out', () => {
-  it.each(['solana', 'sui'] as const)('is a cash-out sequence on %s', (chain) => {
+  it.each(['solana', 'sui', 'avalanche'] as const)('is a cash-out sequence on %s', (chain) => {
     expect(readChainMessage('change 5 SOL into naira', chain, chain)).toEqual({
       kind: 'cashout',
       route: { kind: 'sequence', token: 'SOL', amount: '5', currency: 'NGN' },
@@ -167,7 +172,6 @@ describe('3. a currency as the token out', () => {
   it.each([
     ['near', 'NEAR'],
     ['monad', 'Monad'],
-    ['avalanche', 'Avalanche'],
   ] as const)('is refused before anything starts on %s', (chain, name) => {
     const refusal = followOnRefusal(chain, name, { kind: 'cashout' }, [])
     expect(refusal).toBeDefined()
@@ -302,7 +306,6 @@ describe('4. a follow-on the server cannot honour', () => {
     for (const [chain, name] of [
       ['near', 'NEAR'],
       ['monad', 'Monad'],
-      ['avalanche', 'Avalanche'],
     ] as [ChainWithActions, string][]) {
       expect(followOnRefusal(chain, name, route.sequence.followOn, [])).toMatch(
         /Nothing was signed or sent\./
