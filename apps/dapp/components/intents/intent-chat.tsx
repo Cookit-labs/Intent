@@ -80,6 +80,7 @@ import { useStandingRules } from '../../hooks/use-standing-rules'
 import { useStandingInbox } from '../../hooks/use-standing-inbox'
 import { ensureSession } from '../../lib/api/auth'
 import { balanceReplyDecision, chainBalanceReply } from '../../lib/chains/balance-reply'
+import { yieldReply, type VenueYield } from '../../lib/chat/yield-reply'
 import { chainCapabilities } from '../../lib/chains/capabilities'
 import { sizeInUnits } from '../../lib/chains/dollar-amount'
 import { chainHelp, helpForUnread } from '../../lib/chains/explain'
@@ -203,6 +204,7 @@ import { OpenOrders } from './open-orders'
 import { ComposerInput } from './composer-input'
 import { NativeCoinTicker } from './native-coin-ticker'
 import { PriceTicker } from './price-ticker'
+import { AgentText } from './agent-text'
 import { agentBubble, systemPill, userBubble } from './bubble'
 import { AgentAvatar } from '../agents/agent-avatar'
 import {
@@ -260,7 +262,7 @@ function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
           className={cn('flex', turn.role === 'user' ? 'justify-end' : 'justify-start')}
         >
           <div className={turn.role === 'user' ? userBubble : agentBubble}>
-            {turn.text}
+            {turn.role === 'user' ? turn.text : <AgentText text={turn.text} />}
             {turn.explorerUrl !== undefined ? (
               <a
                 href={turn.explorerUrl}
@@ -2424,6 +2426,29 @@ export function IntentChat({
     return chainBalanceReply(held, descriptor.name)
   }
 
+  /** Where an asset earns most on this chain, from rates read now. */
+  async function walletYieldsReply(asset: string): Promise<string> {
+    const account = isConnected ? address : undefined
+    if (slug !== 'stellar' && account === undefined) {
+      return `Connect your wallet to see what ${asset} earns on ${descriptor.name} right now.`
+    }
+    let rates: VenueYield[] = []
+    try {
+      const query = new URLSearchParams({ asset, ...(account !== undefined ? { account } : {}) })
+      const response = await fetch(`/api/chain/${slug}/yields?${query.toString()}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(30_000),
+      })
+      if (response.ok) {
+        const body = (await response.json()) as { rates?: VenueYield[] }
+        if (Array.isArray(body.rates)) rates = body.rates
+      }
+    } catch {
+      rates = []
+    }
+    return yieldReply({ asset, chainName: descriptor.name, rates })
+  }
+
   async function clarify(
     text: string,
     prior: ClarifyTurn[],
@@ -2461,7 +2486,9 @@ export function IntentChat({
       ? await readPositionsReply(slug, descriptor.name, isConnected ? address : undefined)
       : answer.outcome === 'balance'
         ? await walletBalanceReply()
-        : undefined
+        : answer.outcome === 'yields'
+          ? await walletYieldsReply(answer.asset ?? 'USDC')
+          : undefined
     clarifyRuns.current -= 1
     if (clarifyRuns.current === 0) setClarifyBusy(false)
     // The last wallet's question, answered after it left. A balance has its own rule below.
@@ -2514,7 +2541,7 @@ export function IntentChat({
       const reply =
         answer.outcome === 'help'
           ? (answer.reply ?? helpMessage(slug))
-          : answer.outcome === 'balance'
+          : answer.outcome === 'balance' || answer.outcome === 'yields'
             ? (balanceText as string)
             : answer.outcome === 'out_of_scope'
               ? outOfScopeMessage(slug, answer.reply)
@@ -2532,6 +2559,9 @@ export function IntentChat({
           text,
           [answer.reply, "That's outside what Intent does."].filter(Boolean).join(' ')
         )
+      } else if (answer.outcome === 'yields') {
+        // The rates it was told, so "put it there" in the next message has something to point at.
+        dialogue.current = rememberExchange(dialogue.current, text, reply)
       } else if (
         answer.outcome !== 'unavailable' &&
         'reply' in answer &&
@@ -3337,7 +3367,7 @@ export function IntentChat({
                           />
                         ) : null}
                         <div className={cn(agentBubble, 'whitespace-pre-line')}>
-                          {turn.reply.text}
+                          <AgentText text={turn.reply.text} />
                         </div>
                       </div>
                     </div>
@@ -3360,7 +3390,7 @@ export function IntentChat({
                   className={cn('flex', line.role === 'user' ? 'justify-end' : 'justify-start')}
                 >
                   <div className={line.role === 'user' ? userBubble : agentBubble}>
-                    {line.content}
+                    {line.role === 'user' ? line.content : <AgentText text={line.content} />}
                   </div>
                 </div>
               ))}
@@ -3401,7 +3431,9 @@ export function IntentChat({
                     .map((turn, i) =>
                       turn.role === 'assistant' ? (
                         <div key={`q-${i}`} className="flex justify-start">
-                          <div className={agentBubble}>{turn.content}</div>
+                          <div className={agentBubble}>
+                            <AgentText text={turn.content} />
+                          </div>
                         </div>
                       ) : (
                         <div key={`a-${i}`} className="flex justify-end">
@@ -3491,7 +3523,9 @@ export function IntentChat({
                 then fail. */}
               {affordError !== null ? (
                 <div className={cn(agentBubble, 'border-dashed')}>
-                  <p className="whitespace-pre-line">{affordError}</p>
+                  <p className="whitespace-pre-line">
+                    <AgentText text={affordError} />
+                  </p>
                 </div>
               ) : null}
 

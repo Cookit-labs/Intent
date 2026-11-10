@@ -26,6 +26,7 @@ export type OrchestrateAnswer =
   | { outcome: 'help'; reply?: string }
   | { outcome: 'out_of_scope'; reply?: string }
   | { outcome: 'balance' }
+  | { outcome: 'yields'; asset?: string }
   | { outcome: 'unclear'; reply?: string }
   | { outcome: 'unavailable'; reason: string; tokens: string[] }
 
@@ -99,6 +100,10 @@ export async function fetchOrchestrate(
         return { outcome: 'help', ...replyOf(a['reply']) }
       case 'balance':
         return { outcome: 'balance' }
+      case 'yields':
+        return typeof a['asset'] === 'string' && /^[A-Z0-9.]{1,12}$/.test(a['asset'])
+          ? { outcome: 'yields', asset: a['asset'] }
+          : { outcome: 'yields' }
       case 'out_of_scope':
         return { outcome: 'out_of_scope', ...replyOf(a['reply']) }
       case 'unclear':
