@@ -159,7 +159,11 @@ export function capabilitySheet(chain: string): string {
       )
     } else if (chain === 'monad') {
       lines.push(
-        'Cash out does not run from Monad. Move USDC to Solana, Avalanche or Sui with a bridge you trust.'
+        'Cash out does not run from Monad. Move USDC to Solana or Sui with a bridge you trust.'
+      )
+    } else if (chain === 'avalanche') {
+      lines.push(
+        'Cash out does not run from Avalanche right now: the bridge Weave uses no longer takes Avalanche USDC. Move USDC to Solana or Sui with a bridge you trust.'
       )
     }
   }

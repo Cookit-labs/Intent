@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createWeaveClient, quoteCostPercent, type WeaveOrderInput } from '../weave/client'
+import {
+  createWeaveClient,
+  quoteCostPercent,
+  type WeaveFailure,
+  type WeaveOrderInput,
+} from '../weave/client'
 
 const KEY = 'sk_test_never_shown'
 const PAYCREST =
@@ -51,6 +56,10 @@ const placed = {
   },
   depositInstruction: deposit,
   nextAction: { screen: 'collect_crypto', ...deposit },
+}
+
+function detailOf(result: WeaveFailure): string | undefined {
+  return 'detail' in result ? result.detail : undefined
 }
 
 afterEach(() => {
@@ -320,11 +329,39 @@ describe('createOrder', () => {
     expect(await weave.createOrder(order)).toMatchObject({ ok: false, code: 'duplicate' })
   })
 
-  it('reports a refusal without the provider text', async () => {
+  it('keeps the provider text out of the message, and in the detail for the log', async () => {
     const { weave } = client(() => json(400, { success: false, error: PAYCREST }))
     const result = await weave.createOrder(order)
     expect(result).toMatchObject({ ok: false, code: 'rejected' })
-    expect(JSON.stringify(result)).not.toContain('Paycrest')
+    if (result.ok) throw new Error('expected a refusal')
+    expect(result.message).not.toContain('Paycrest')
+    expect(detailOf(result)).toContain('Fiat currency BRL is not supported')
+  })
+
+  it('masks long digit runs in the detail, so an account number is never logged', async () => {
+    const { weave } = client(() =>
+      json(422, { success: false, message: 'Account 0123456789 could not be verified' })
+    )
+    const result = await weave.createOrder(order)
+    if (result.ok) throw new Error('expected a refusal')
+    expect(detailOf(result)).toContain('could not be verified')
+    expect(detailOf(result)).not.toContain('0123456789')
+  })
+
+  it('caps the detail', async () => {
+    const { weave } = client(() => json(400, { success: false, error: 'x'.repeat(5000) }))
+    const result = await weave.createOrder(order)
+    if (result.ok) throw new Error('expected a refusal')
+    expect(detailOf(result)?.length).toBeLessThanOrEqual(300)
+  })
+
+  it('names the order and its status when an accepted order has no deposit', async () => {
+    const { weave } = client(() => json(200, { success: true, data: { order: placed.order } }))
+    const result = await weave.createOrder(order)
+    expect(result).toMatchObject({ ok: false, code: 'unexpected' })
+    if (result.ok) throw new Error('expected a failure')
+    expect(detailOf(result)).toContain('ord_1')
+    expect(detailOf(result)).toContain('awaiting_deposit')
   })
 
   it('reports no answer as unknown, because the order may exist', async () => {
