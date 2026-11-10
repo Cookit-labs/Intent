@@ -103,7 +103,7 @@ function usdValue(
   return `~$${usd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
 }
 
-function amount(value: string | undefined): string {
+export function amount(value: string | undefined): string {
   if (value === undefined) return '—'
   const n = Number(value)
   // Seven decimals is exact but unreadable; four is enough to check a price.
@@ -111,7 +111,7 @@ function amount(value: string | undefined): string {
 }
 
 /** An icon in a round tint beside a title, as every tool card in the thread opens. */
-function CardHeader({
+export function CardHeader({
   icon,
   tone = 'brand',
   title,
@@ -153,7 +153,7 @@ function CardHeader({
 }
 
 /** One side of the trade: label, amount large, token pill, dollar value small. */
-function AmountRow({
+export function AmountRow({
   label,
   symbol,
   value,
@@ -182,7 +182,7 @@ function AmountRow({
 }
 
 /** The transaction hash, short, with a copy button: 64 characters say nothing at a glance. */
-function HashChip({ hash }: { hash: string }): JSX.Element {
+export function HashChip({ hash }: { hash: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   return (
     <button
@@ -206,7 +206,7 @@ function HashChip({ hash }: { hash: string }): JSX.Element {
  * The venue's mark beside its name. Stellar DEX is the network's own order
  * book, so it draws the Stellar mark; the others use their logos.
  */
-function SourceLogo({ source }: { source: string | undefined }): JSX.Element | null {
+export function SourceLogo({ source }: { source: string | undefined }): JSX.Element | null {
   if (source === undefined) return null
   if (source === 'horizon') {
     return <ChainMark chain="stellar" className="h-4 w-4 shrink-0 rounded-full" />
@@ -225,9 +225,9 @@ function SourceLogo({ source }: { source: string | undefined }): JSX.Element | n
   )
 }
 
-const PRIMARY =
+export const PRIMARY =
   'bg-bubble-me text-bubble-me-foreground hover:bg-brand hover:text-brand-foreground flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-60'
-const SECONDARY =
+export const SECONDARY =
   'border-bubble-agent-foreground/15 hover:bg-bubble-agent-foreground/5 h-11 shrink-0 rounded-full border px-5 text-sm transition-colors dark:border-white/15 dark:hover:bg-white/5'
 
 export function SwapConfirm({
