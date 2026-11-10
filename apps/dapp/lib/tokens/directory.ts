@@ -371,6 +371,11 @@ const holderCounts = new Map<string, Cached<number>>()
 const details = new Map<string, Cached<TokenRow>>()
 const inFlight = new Map<string, Promise<TokenDirectory>>()
 
+/** What a cached answer is for. Stellar serves two networks, and each has its own tokens. */
+function scopeOf(chain: TokenChain): string {
+  return chain === 'stellar' ? `stellar:${activeNetwork()}` : chain
+}
+
 export function resetTokenCache(): void {
   lists.clear()
   holderCounts.clear()
@@ -415,7 +420,7 @@ async function fillHolders(
   const limit = chain === 'sui' ? GECKO_HOLDERS_PER_LIST : HOLDERS_PER_LIST
   let asked = 0
   for (const id of ids) {
-    const key = `${chain}|${keyOf(chain, id)}`
+    const key = `${scopeOf(chain)}|${keyOf(chain, id)}`
     if (fresh(holderCounts.get(key), HOLDERS_MS, now) !== undefined) continue
     if (asked >= limit) return
     asked += 1
@@ -483,7 +488,7 @@ async function buildDirectory(
     native === undefined ? undefined : await attempt(() => nativeMarketCaps(read, [native.coinId]))
 
   const tokens = unique.map((figures) => {
-    const counted = holderCounts.get(`${chain}|${figures.id}`)?.value
+    const counted = holderCounts.get(`${scopeOf(chain)}|${figures.id}`)?.value
     const row = toRow(
       chain,
       figures.holders === undefined && counted !== undefined
@@ -515,21 +520,22 @@ export async function tokenDirectory(
   read: ReadJson = liveRead,
   now: number = Date.now()
 ): Promise<TokenDirectory> {
-  const held = lists.get(chain)
+  const scope = scopeOf(chain)
+  const held = lists.get(scope)
   const cached = fresh(held, LIST_MS, now)
   if (cached !== undefined) return cached
-  const running = inFlight.get(chain)
+  const running = inFlight.get(scope)
   if (running !== undefined) return running
 
   const work = buildDirectory(chain, read, now)
     .then((built) => {
       const empty = built.partial && built.tokens.every((t) => t.priceUsd === undefined)
       if (empty && held !== undefined) return { ...held.value, partial: true }
-      lists.set(chain, { value: built, at: built.partial ? now - LIST_MS + PARTIAL_LIST_MS : now })
+      lists.set(scope, { value: built, at: built.partial ? now - LIST_MS + PARTIAL_LIST_MS : now })
       return built
     })
-    .finally(() => inFlight.delete(chain))
-  inFlight.set(chain, work)
+    .finally(() => inFlight.delete(scope))
+  inFlight.set(scope, work)
   return work
 }
 
@@ -581,7 +587,7 @@ export async function tokenDetail(
   read: ReadJson = liveRead,
   now: number = Date.now()
 ): Promise<TokenRow | undefined> {
-  const cacheKey = `${chain}|${id}`
+  const cacheKey = `${scopeOf(chain)}|${id}`
   const cached = fresh(details.get(cacheKey), DETAIL_MS, now)
   if (cached !== undefined) return cached
   if (!looksLikeOneWord.test(id) && !id.includes(':')) return undefined
@@ -607,7 +613,7 @@ export async function tokenDetail(
   let holders = row.holders
   const reader = holdersReader(chain)
   if (holders === undefined && reader !== undefined) {
-    const key = `${chain}|${keyOf(chain, dataId)}`
+    const key = `${scopeOf(chain)}|${keyOf(chain, dataId)}`
     holders = fresh(holderCounts.get(key), HOLDERS_MS, now)
     if (holders === undefined) {
       holders = await attempt(() => reader(read, dataId))
