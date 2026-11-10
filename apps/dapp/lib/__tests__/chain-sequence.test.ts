@@ -170,7 +170,7 @@ describe('routeCashout with an amount', () => {
   })
 
   it('reads USDT as a sequence too', () => {
-    expect(routeCashout(parseCashout('cash out 5 USDT to KES'), 'sui')).toEqual({
+    expect(routeCashout(parseCashout('cash out 5 USDT to KES'), 'avalanche')).toEqual({
       kind: 'sequence',
       token: 'USDT',
       amount: '5',
@@ -282,7 +282,7 @@ describe('followOnRefusal', () => {
   })
 
   it('lists the chains that can cash out', () => {
-    expect([...SEQUENCE_CASHOUT_CHAINS]).toEqual(['solana', 'sui'])
+    expect([...SEQUENCE_CASHOUT_CHAINS]).toEqual(['solana', 'sui', 'avalanche'])
   })
 })
 
@@ -537,7 +537,7 @@ describe('chainHelp in the new forms', () => {
     expect(help('solana', 'Solana')).toContain('"swap 5 SOL to USDC then cash out"')
     expect(help('solana', 'Solana')).toContain('"swap 5 SOL to USDC then send to an address"')
     expect(help('sui', 'Sui')).toContain('"swap 5 SUI to USDC then cash out"')
-    expect(help('avalanche', 'Avalanche')).not.toContain('then cash out')
+    expect(help('avalanche', 'Avalanche')).toContain('"swap 5 AVAX to USDC then cash out"')
     expect(help('near', 'NEAR')).toContain('"swap 5 NEAR to USDC then deposit"')
     expect(help('near', 'NEAR')).not.toContain('then cash out')
     expect(help('near', 'NEAR')).not.toContain('then stake')

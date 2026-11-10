@@ -112,6 +112,8 @@ beforeEach(() => {
     supportsMemo: false,
     isAccount: (a: string) => a.endsWith('.near'),
     isDepositAddress: (a: string) => a.endsWith('.near'),
+    // Far more than any test asks for, so the amount is never fitted unless a test says so.
+    usdcBalance: vi.fn(async () => BigInt('1000000000000')),
   }
   vi.stubEnv('WEAVE_CASHOUT_CURRENCIES', 'NGN,KES')
 })
@@ -158,17 +160,10 @@ describe('checks before anything is asked of Weave', () => {
   it('refuses NEAR, which Weave cannot make an order for, in words that say what to do', async () => {
     const json = await refused(post({ chain: 'near' }), 422)
     expect(json['error']).toBe('chain_closed')
-    expect(json['message']).toMatch(/move your USDC to Solana or Sui/)
+    expect(json['message']).toMatch(/move your USDC to Solana, Avalanche or Sui/)
     expect(json['message']).toMatch(/Nothing was signed or sent\.$/)
     expect(called(state.weave['quote'])).not.toHaveBeenCalled()
     expect(called(state.weave['institutions'])).not.toHaveBeenCalled()
-  })
-
-  it('refuses Avalanche, whose USDC NEAR Intents no longer takes, before Weave is asked', async () => {
-    const json = await refused(post({ chain: 'avalanche' }), 422)
-    expect(json['error']).toBe('chain_closed')
-    expect(json['message']).toMatch(/move your USDC to Solana or Sui/)
-    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
   })
 
   it('refuses a Stellar cash-out off mainnet', async () => {
@@ -277,6 +272,31 @@ describe('the size of a cash-out', () => {
       value: { ...placed, deposit: { ...placed.deposit, amount: '50000' } },
     })
     expect((await POST(post({ amount: '50000' }))).status).toBe(200)
+  })
+})
+
+describe('an amount near the whole balance', () => {
+  it('is asked of Weave as the balance less its fee room, so the one order can be paid', async () => {
+    state.deposit = { ...state.deposit, usdcBalance: vi.fn(async () => BigInt('25500000')) }
+    await POST(post())
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25')
+  })
+
+  it('is asked as it was when the deposit already fits', async () => {
+    state.deposit = { ...state.deposit, usdcBalance: vi.fn(async () => BigInt('30000000')) }
+    await POST(post())
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25.5')
+  })
+
+  it('is asked as it was when the balance could not be read', async () => {
+    state.deposit = {
+      ...state.deposit,
+      usdcBalance: vi.fn(async () => {
+        throw new Error('rpc down')
+      }),
+    }
+    await POST(post())
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25.5')
   })
 })
 

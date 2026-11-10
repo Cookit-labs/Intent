@@ -101,9 +101,9 @@ describe('capabilitySheet multi-step forms', () => {
     return (await import('../orchestrate/capabilities')).capabilitySheet
   }
 
-  it('says swap then cash out runs on Solana and Sui', async () => {
+  it('says swap then cash out runs on Solana, Sui and Avalanche', async () => {
     const sheet = await sheetWith('k')
-    for (const chain of ['solana', 'sui']) {
+    for (const chain of ['solana', 'sui', 'avalanche']) {
       expect(sheet(chain)).toMatch(/Swap then cash out:/)
     }
     expect(sheet('solana')).toMatch(/Swap then deposit:/)
@@ -132,15 +132,6 @@ describe('capabilitySheet multi-step forms', () => {
     expect(monad).toMatch(/Swap then deposit:/)
     expect(monad).not.toMatch(/Swap then cash out:/)
     expect(monad).toMatch(/Cash out does not run from Monad/)
-    expect(monad).toContain('Move USDC to Solana or Sui')
-  }, 60_000)
-
-  it('says Avalanche does not cash out, and why', async () => {
-    const sheet = await sheetWith('k')
-    const avalanche = sheet('avalanche')
-    expect(avalanche).not.toMatch(/Swap then cash out:/)
-    expect(avalanche).toMatch(/Cash out does not run from Avalanche/)
-    expect(avalanche).toContain('Move USDC to Solana or Sui')
   }, 60_000)
 
   it('says which native coins cannot be sent yet', async () => {

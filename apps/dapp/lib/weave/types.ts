@@ -22,7 +22,7 @@ export function isCashoutChain(value: string): value is CashoutChain {
 }
 
 const MOVE_THEN_CASH_OUT =
-  'To cash out, move your USDC to Solana or Sui with a bridge you trust, connect that wallet here, and cash out from there. Weave has not paid out a real order in this app yet, so try a small amount first. Nothing was signed or sent.'
+  'To cash out, move your USDC to Solana, Avalanche or Sui with a bridge you trust, connect that wallet here, and cash out from there. Weave has not paid out a real order in this app yet, so try a small amount first. Nothing was signed or sent.'
 
 /**
  * Chains refused before any form opens. `weave-cashout-gaps.live.test.ts` rechecks the reasons.
@@ -32,10 +32,6 @@ const MOVE_THEN_CASH_OUT =
  * one, so Weave probably asks for the wrong mode. Open it only once an unfunded order comes back
  * with a deposit address and no memo.
  *
- * Avalanche: every Weave route from it starts with NEAR Intents, which since 2026-11-10 refuses
- * Avalanche USDC as an input and lists it as deprecated. Weave still makes the order, with no
- * deposit address, and answers with an error. The Avalanche cash-out of 2026-11-09 was paid.
- *
  * Monad: not on Weave's `/assets`, and no order has been tried. Paying Weave's address on another
  * chain through 1Click is not a way round: 1Click counts delivery as done, so a delivery after
  * Weave's order expired, or a refund from Weave, has no documented way back to the person on Monad.
@@ -44,10 +40,6 @@ const CLOSED_CASHOUTS = new Map<string, string>([
   [
     'near',
     `Cash-outs don't run from NEAR right now, because Weave can't open an order for a NEAR deposit. ${MOVE_THEN_CASH_OUT}`,
-  ],
-  [
-    'avalanche',
-    `Cash-outs don't run from Avalanche right now, because the bridge Weave uses no longer takes Avalanche USDC. ${MOVE_THEN_CASH_OUT}`,
   ],
   [
     'monad',
