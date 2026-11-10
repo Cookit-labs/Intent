@@ -299,16 +299,30 @@ describe('your sentence, on each chain as it stands', () => {
     expect(avalancheModule.venues.some((v) => v.id === 'uniswap-avalanche')).toBe(true)
   })
 
+  const holdingMon = (amount: string): ChainModule =>
+    ({
+      ...monadModule,
+      balances: async () => ({
+        tokens: [{ symbol: 'MON', amount, decimals: 18, native: true }],
+      }),
+    }) as unknown as ChainModule
+
   it('Monad stakes MON on FastLane', async () => {
     await expect(
-      resolveFollowOn(monadModule, { kind: 'supply', tokenIn: 'MON' }, EVM_ME)
+      resolveFollowOn(holdingMon('1'), { kind: 'supply', tokenIn: 'MON' }, EVM_ME)
     ).resolves.toMatchObject({ kind: 'stake', venue: 'FastLane' })
   })
 
-  it('NEAR says no before the swap, until a stake can follow one', async () => {
+  it('Monad refuses before the swap when too little MON is left for both fees', async () => {
+    await expect(
+      resolveFollowOn(holdingMon('0'), { kind: 'supply', tokenIn: 'MON' }, EVM_ME)
+    ).rejects.toThrow(/Keep at least/)
+  })
+
+  it('NEAR stakes NEAR, since a stake can follow a swap there', async () => {
     await expect(
       resolveFollowOn(nearModule, { kind: 'supply', tokenIn: 'NEAR' }, 'someone.near')
-    ).rejects.toThrow(/not NEAR/)
+    ).resolves.toMatchObject({ kind: 'stake' })
   })
 
   it.each([

@@ -195,6 +195,7 @@ export async function assertFollowOnCanRun(
   const request: ChainActionRequest = { ...step, amount: '0' }
   assertKnownTokens(chainApi, request)
   await assertVenueCanFollow(pickVenue(chainApi, request), step, account)
+  await assertFeesForBothSteps(chainApi, step, account)
 }
 
 async function assertVenueCanFollow(
@@ -206,7 +207,6 @@ async function assertVenueCanFollow(
     throw new ChainActionRefused(`${venue.name} can't follow a swap yet.`)
   }
   await venue.assertCanFollow(step, account)
-  await assertFeesForBothSteps(chainApi, step, account)
 }
 
 /**
@@ -295,12 +295,16 @@ export async function resolveFollowOn(
   }
   assertKnownTokens(chainApi, { ...step, amount: '0' })
   const asked = await firstTaking(chainApi, step, account)
-  if ('venue' in asked) return { kind: step.kind, venue: asked.venue.name }
+  if ('venue' in asked) {
+    await assertFeesForBothSteps(chainApi, step, account)
+    return { kind: step.kind, venue: asked.venue.name }
+  }
   if (step.kind !== 'supply') throw asked.refused
 
   const token = step.tokenIn.trim().toUpperCase()
   const stake = await firstTaking(chainApi, { ...step, kind: 'stake' }, account)
   if ('venue' in stake) {
+    await assertFeesForBothSteps(chainApi, step, account)
     const { name } = stake.venue
     return {
       kind: 'stake',
