@@ -115,6 +115,11 @@ describe('POST /api/intent/orchestrate', () => {
       outcome: 'out_of_scope',
       reply: 'That is outside what I do.',
     })
+    orchestrateWithLlm.mockResolvedValueOnce({ status: 'yields', asset: 'USDC' })
+    expect(await (await POST(post({ turns: turns('best usdc yield') }))).json()).toEqual({
+      outcome: 'yields',
+      asset: 'USDC',
+    })
     orchestrateWithLlm.mockResolvedValueOnce({ status: 'balance' })
     expect(await (await POST(post({ turns: turns('what is in my wallet') }))).json()).toEqual({
       outcome: 'balance',
