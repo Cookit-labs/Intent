@@ -16,6 +16,8 @@ export type TalkLine =
   | { kind: 'no_answer'; agent: string; to: string[] }
   | { kind: 'changed'; agent: string }
   | { kind: 'held'; agent: string }
+  /** The server checked this agent's answer against NEAR AI's attested enclave. Not talk. */
+  | { kind: 'verified'; agent: string }
 
 /** One entry in the thread, in the order it happened. A take's words are looked up by agent. */
 export type ThreadItem = { type: 'take'; agent: string } | { type: 'line'; line: TalkLine }
@@ -38,6 +40,8 @@ export function talkPill(line: TalkLine, nameOf: (key: string) => string): strin
       return `${nameOf(line.agent)} changed its strategy.`
     case 'held':
       return `${nameOf(line.agent)} would not do this now.`
+    case 'verified':
+      return `${nameOf(line.agent)}'s answer was signed inside a verified NEAR AI enclave.`
     default:
       return undefined
   }
@@ -82,7 +86,14 @@ export function waitingAgents(
  */
 export function showTakes(items: ThreadItem[], phase: string): boolean {
   if (phase !== 'decided') return true
-  return items.some((i) => i.type === 'line' && i.line.kind !== 'turn')
+  return items.some(
+    (i) => i.type === 'line' && i.line.kind !== 'turn' && i.line.kind !== 'verified'
+  )
+}
+
+/** A proof note stays whether or not the takes do, since no card says it. */
+export function isProofLine(item: ThreadItem): boolean {
+  return item.type === 'line' && item.line.kind === 'verified'
 }
 
 export const ALL_HELD_LINE =

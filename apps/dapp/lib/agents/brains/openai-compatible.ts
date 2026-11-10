@@ -17,6 +17,7 @@ import { restContextLines } from '../rest-option'
 import type { ChainRouteQuote } from '../chain-routes'
 import { promptSafe } from '../prompt-safe'
 import { SUBMIT_PROPOSAL_TOOL, validateProposal } from '../tool-schema'
+import { enclaveFor, proveReply, type ProofDeps, type ReplyProof } from './nearai-proof'
 import type { ProviderConfig } from './providers'
 import { PROVIDERS, modelFor } from './providers'
 
@@ -82,6 +83,12 @@ export interface BrainOptions {
   baseUrl?: string
   strictTools?: boolean
   fetchImpl?: typeof fetch
+  /** How an attested provider's replies are checked. The real services when unset. */
+  proofDeps?: ProofDeps
+}
+
+interface ChatCompletionReply {
+  id?: string
 }
 
 interface ChatCompletionResponse {
@@ -477,6 +484,10 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
     signal: AbortSignal | undefined
   ): Promise<TalkOutcome> {
     const startedAt = Date.now()
+    const requestBody = JSON.stringify(body)
+    // Started before the request, so the enclave evidence predates the reply it vouches for.
+    const enclave =
+      config.attested === true ? enclaveFor(model, baseUrl, options.proofDeps) : undefined
 
     let res: Response
     try {
@@ -486,7 +497,7 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body),
+        body: requestBody,
         ...(signal !== undefined ? { signal } : {}),
       })
     } catch (e) {
@@ -516,9 +527,12 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    let reply: ChatCompletionResponse
+    let reply: ChatCompletionResponse & ChatCompletionReply
+    // Read as text first: a signature covers the exact bytes, not a re-serialised object.
+    let responseBody: string
     try {
-      reply = (await res.json()) as ChatCompletionResponse
+      responseBody = await res.text()
+      reply = JSON.parse(responseBody) as ChatCompletionResponse & ChatCompletionReply
     } catch {
       return {
         ok: false,
@@ -557,7 +571,23 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
       }
     }
 
-    return { ok: true, args, meta: meta(config, model, Date.now() - startedAt, reply.usage) }
+    const chatId = reply.id
+    let proven: Promise<ReplyProof> | undefined
+    const proof =
+      enclave !== undefined && typeof chatId === 'string' && apiKey !== undefined
+        ? () =>
+            (proven ??= proveReply(
+              enclave,
+              { baseUrl, apiKey, chatId, requestBody, responseBody },
+              options.proofDeps
+            ))
+        : undefined
+    return {
+      ok: true,
+      args,
+      meta: meta(config, model, Date.now() - startedAt, reply.usage),
+      ...(proof !== undefined ? { proof } : {}),
+    }
   }
 
   return {
@@ -597,7 +627,8 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
         req.signal
       )
       if (!out.ok) return out
-      return toOutcome(req, out.args, out.meta)
+      const outcome = toOutcome(req, out.args, out.meta)
+      return outcome.ok && out.proof !== undefined ? { ...outcome, proof: out.proof } : outcome
     },
 
     async talk(call: TalkCall): Promise<TalkOutcome> {

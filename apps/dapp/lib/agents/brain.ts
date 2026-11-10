@@ -1,4 +1,5 @@
 import type { ParsedIntent } from '../parse-intent'
+import type { ReplyProof } from './brains/nearai-proof'
 import type { PerpFacts } from '../perps/market-facts'
 import type { RestOption } from './rest-option'
 
@@ -281,7 +282,7 @@ export interface TalkCall {
 
 /** The tool's arguments as the model wrote them. What makes them usable is decided by the caller. */
 export type TalkOutcome =
-  | { ok: true; args: unknown; meta: BrainMeta }
+  | { ok: true; args: unknown; meta: BrainMeta; proof?: () => Promise<ReplyProof> }
   | { ok: false; error: BrainErrorCode; meta: BrainMeta; retryAfterMs?: number }
 
 export type BrainErrorCode =
@@ -309,7 +310,13 @@ export interface BrainMeta {
  * guarantee when the failure is a value the caller must handle.
  */
 export type ProposalOutcome =
-  | { ok: true; proposal: AgentProposalResult; meta: BrainMeta }
+  | {
+      ok: true
+      proposal: AgentProposalResult
+      meta: BrainMeta
+      /** For a provider that signs its replies inside an attested enclave: checks this one. */
+      proof?: () => Promise<ReplyProof>
+    }
   | {
       ok: false
       error: BrainErrorCode
