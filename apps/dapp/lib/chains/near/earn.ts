@@ -351,7 +351,8 @@ function assertEarnSafe(payload: SigningPayload, account: string): void {
   if (payload.family === 'near' && Array.isArray(payload.transactions)) {
     const last = payload.transactions[payload.transactions.length - 1]
     if (last?.receiverId === INTENTS_CONTRACT) {
-      if (last.actions?.[0]?.params?.methodName === 'mt_transfer') {
+      const first = last.actions?.[0]
+      if (first?.type === 'FunctionCall' && first.params?.methodName === 'mt_transfer') {
         assertIntentsSaleSafe(payload, account, VAULT.assetId)
       } else {
         assertIntentsWithdrawalSafe(payload, account, USDC_NEAR)

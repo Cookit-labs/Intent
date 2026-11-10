@@ -20,6 +20,8 @@ export interface CashoutOrderView {
   currency: string
   amount: string
   estimatedDest: string
+  /** Which provider pays it out. Orders saved before this was sent leave it out. */
+  provider?: 'linq' | 'weave' | undefined
   /** The provider locked `estimatedDest` and pays exactly that, so it is no estimate. */
   exactDest?: boolean | undefined
   /** What a paid order actually paid out, which can be less than the estimate. */
@@ -139,22 +141,49 @@ export function isValidAmount(amount: string): boolean {
   return /^\d+(\.\d{1,6})?$/.test(amount) && /[1-9]/.test(amount)
 }
 
-/** Weave's docs don't say how or when a refund runs, and none has run here, so none is promised. */
-const REFUND_UNPROVEN =
-  "Refunds are Weave's to make and none has run in this app yet, so check your wallet and keep this order."
-
-const STATUS_TEXT: Record<CashoutStatus, string> = {
-  waiting: 'Waiting for your deposit to be confirmed.',
-  processing: 'Deposit received. The payout is on its way.',
-  paid: 'Paid. The money has been sent to the account.',
-  failed: `The payout failed. Any USDC you sent is due back to your connected wallet. ${REFUND_UNPROVEN}`,
-  expired: `No deposit arrived in time, so this cash-out was cancelled. Any USDC you sent is due back to your connected wallet. ${REFUND_UNPROVEN}`,
-  refunded:
-    'The payout did not complete. Weave says your USDC was refunded to your connected wallet, so check that it arrived.',
+export interface PayoutProvider {
+  id: 'linq' | 'weave'
+  name: string
+  logo: string
 }
 
-export function statusText(status: CashoutStatus): string {
-  return STATUS_TEXT[status]
+const PROVIDERS: Record<PayoutProvider['id'], PayoutProvider> = {
+  linq: { id: 'linq', name: 'Linq', logo: '/images/venues/linq.webp' },
+  weave: { id: 'weave', name: 'Weave', logo: '/images/venues/weave.webp' },
+}
+
+/** Who pays this order out. Only Linq locks its amount, so an older order is read from that. */
+export function payoutProvider(
+  order: Pick<CashoutOrderView, 'provider' | 'exactDest'>
+): PayoutProvider {
+  const id = order.provider ?? (order.exactDest === true ? 'linq' : 'weave')
+  return PROVIDERS[id]
+}
+
+/** Neither provider's docs say how or when a refund runs, and none has run here, so none is promised. */
+function refundUnproven(name: string): string {
+  return `Refunds are ${name}'s to make and none has run in this app yet, so check your wallet and keep this order.`
+}
+
+export function statusText(
+  status: CashoutStatus,
+  provider: PayoutProvider['id'] = 'weave'
+): string {
+  const name = PROVIDERS[provider].name
+  switch (status) {
+    case 'waiting':
+      return 'Waiting for your deposit to be confirmed.'
+    case 'processing':
+      return 'Deposit received. The payout is on its way.'
+    case 'paid':
+      return 'Paid. The money has been sent to the account.'
+    case 'failed':
+      return `The payout failed. Any USDC you sent is due back to your connected wallet. ${refundUnproven(name)}`
+    case 'expired':
+      return `No deposit arrived in time, so this cash-out was cancelled. Any USDC you sent is due back to your connected wallet. ${refundUnproven(name)}`
+    case 'refunded':
+      return `The payout did not complete. ${name} says your USDC was refunded to your connected wallet, so check that it arrived.`
+  }
 }
 
 export function shouldPoll(status: CashoutStatus): boolean {

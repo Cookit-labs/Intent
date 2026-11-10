@@ -171,6 +171,42 @@ export function assertOneClickSafe(payload: SigningPayload, account: string): vo
 }
 
 /**
+ * A send of native NEAR: one transaction to exactly this account, moving exactly this amount and
+ * doing nothing else. Native NEAR leaves on a plain Transfer, which runs no code and which the wallet
+ * shows for what it is.
+ */
+export function assertNativeTransferSafe(
+  payload: SigningPayload,
+  account: string,
+  recipient: string,
+  yocto: string
+): void {
+  if (payload.family !== 'near') refuse('it is not a NEAR transaction')
+  if (!NEAR_ACCOUNT.test(account)) refuse('the account is not a NEAR account')
+  if (!NEAR_ACCOUNT.test(recipient) || recipient === account) refuse('it pays the wrong account')
+  if (!isDigits(yocto) || BigInt(yocto) === BigInt(0)) refuse('it moves nothing')
+  const { transactions } = payload
+  if (!Array.isArray(transactions) || transactions.length !== 1) {
+    refuse('it is not exactly one transaction')
+  }
+  const transaction = transactions[0] as NearTransaction
+  if (!hasExactKeys(transaction, ['receiverId', 'actions'])) {
+    refuse('the transaction carries unexpected fields')
+  }
+  if (transaction.receiverId !== recipient) refuse('it pays the wrong account')
+  if (!Array.isArray(transaction.actions) || transaction.actions.length !== 1) {
+    refuse('it does more than one thing')
+  }
+  const action = transaction.actions[0] as NearTransaction['actions'][number]
+  if (action.type !== 'Transfer' || !hasExactKeys(action, ['type', 'params'])) {
+    refuse('it is not a plain transfer')
+  }
+  if (!hasExactKeys(action.params, ['deposit']) || action.params.deposit !== yocto) {
+    refuse('it moves the wrong amount')
+  }
+}
+
+/**
  * The same check, with the shape the transfer's receiver must have. Only for a caller that binds
  * the exact receiver itself afterwards, as a send does.
  */

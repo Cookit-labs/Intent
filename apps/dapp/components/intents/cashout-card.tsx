@@ -35,6 +35,7 @@ import {
   isValidAmount,
   NO_CASHOUTS,
   shouldPoll,
+  payoutProvider,
   statusText,
   withBankLogos,
   type CashoutInstitution,
@@ -112,6 +113,33 @@ function CardHeader({
   )
 }
 
+/** Which provider pays the order, with its logo, as one more row of the card's list. */
+function RoutedThrough({
+  order,
+  className,
+}: {
+  order: CashoutOrderView
+  className: string
+}): JSX.Element {
+  const provider = payoutProvider(order)
+  return (
+    <div className={cn('flex items-center justify-between gap-4', className)}>
+      <dt className="text-muted-foreground">Routed through</dt>
+      <dd className="flex items-center gap-1.5 text-right font-medium">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={provider.logo}
+          alt=""
+          width={18}
+          height={18}
+          className="h-[18px] w-[18px] rounded-full object-cover"
+        />
+        {provider.name}
+      </dd>
+    </div>
+  )
+}
+
 function PayoutProgress({
   order,
   bank,
@@ -158,7 +186,11 @@ function PayoutProgress({
                 ? 'Transfer sent, outcome not known yet'
                 : 'Payout in progress'
         }
-        subtitle={done ? `Paid to ${order.institutionName}` : statusText(order.status)}
+        subtitle={
+          done
+            ? `Paid to ${order.institutionName}`
+            : statusText(order.status, payoutProvider(order).id)
+        }
       />
 
       {unsure !== undefined && running ? (
@@ -241,6 +273,7 @@ function PayoutProgress({
             {order.institutionName} {order.accountMask}
           </dd>
         </div>
+        <RoutedThrough order={order} className="py-2" />
       </dl>
 
       {href !== undefined && isCashoutChain(order.chain) ? (
@@ -304,7 +337,7 @@ function BeforeYouSign({
           <span className="text-muted-foreground text-xs">
             {expired
               ? 'This payout will be cancelled. Use Edit to start a new one.'
-              : 'Unpaid orders are cancelled. Nothing is taken. Weave has not yet paid out a real order in this app.'}
+              : 'Unpaid orders are cancelled. Nothing is taken.'}
           </span>
         </div>
         <span
@@ -575,6 +608,7 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
               <dd className="text-right font-medium">{v}</dd>
             </div>
           ))}
+          <RoutedThrough order={order} className="py-2.5" />
           <div className="flex items-center justify-between gap-4 py-2.5">
             <dt className="text-muted-foreground">Pays to</dt>
             <dd className="text-right">

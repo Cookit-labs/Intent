@@ -143,9 +143,11 @@ describe('linqBank and sameHolder', () => {
     expect(linqBank('Not A Bank')).toBeUndefined()
   })
 
-  it('takes two lookups of a name as one holder, ignoring case and spacing only', () => {
+  it('takes two lookups of a name as one holder, ignoring case, spacing and word order', () => {
     expect(sameHolder('Jane  Adeyemi', HOLDER)).toBe(true)
+    expect(sameHolder('ADEYEMI, JANE', HOLDER)).toBe(true)
     expect(sameHolder('JANE ADEYEMI OKAFOR', HOLDER)).toBe(false)
+    expect(sameHolder('JANE ADEYEMIOKAFOR', HOLDER)).toBe(false)
     expect(sameHolder('', '')).toBe(false)
   })
 })
@@ -225,13 +227,13 @@ describe('placeWithLinq', () => {
     expect(await placeWithLinq(input())).toEqual({ skipped: 'not_offered' })
   })
 
-  it('leaves it with Weave when Weave pays more, or Linq has no rate', async () => {
-    expect(await placeWithLinq(input({ weaveNaira: 1400 }))).toEqual({
-      skipped: 'weave_pays_more',
-    })
+  it('places it with Linq even when Weave would pay more, because Linq locks its amount', async () => {
+    expect(await placeWithLinq(input({ weaveNaira: 1400 }))).toEqual({ placed: linqOrder })
+  })
+
+  it('needs no rate from Linq to place the order, which locks its own', async () => {
     state.linq = linq({ getRate: vi.fn(async () => ({ ok: false, code: 'unavailable' })) })
-    expect(await placeWithLinq(input())).toEqual({ skipped: 'weave_pays_more' })
-    expect(called(state.linq['createOrder'])).not.toHaveBeenCalled()
+    expect(await placeWithLinq(input())).toEqual({ placed: linqOrder })
   })
 
   it('makes no order for a bank Linq does not know, or a holder it names differently', async () => {
@@ -255,17 +257,15 @@ describe('placeWithLinq', () => {
     expect(await placeWithLinq(input())).toEqual({ skipped: reason })
   })
 
-  it('hands back to Weave when the naira Linq locked is below what Weave offers', async () => {
+  it('keeps what Linq locked even below Weave, and hands back only an order of nothing', async () => {
     state.linq = linq({
       createOrder: vi.fn(async () => ({ ok: true, value: { ...linqOrder, amountNGN: 1300 } })),
     })
-    expect(await placeWithLinq(input())).toEqual({ skipped: 'locked_lower' })
+    expect(await placeWithLinq(input())).toEqual({ placed: { ...linqOrder, amountNGN: 1300 } })
     state.linq = linq({
       createOrder: vi.fn(async () => ({ ok: true, value: { ...linqOrder, amountNGN: 0 } })),
     })
-    expect(await placeWithLinq(input({ weaveNaira: undefined }))).toEqual({
-      skipped: 'locked_lower',
-    })
+    expect(await placeWithLinq(input())).toEqual({ skipped: 'locked_nothing' })
   })
 })
 
@@ -291,7 +291,7 @@ describe('POST order, naira from Sui', () => {
     expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
   })
 
-  it('places it with Weave when Weave pays more', async () => {
+  it('places it with Linq even when Weave would pay more', async () => {
     state.weave = weave({
       quote: vi.fn(async () => ({
         ok: true,
@@ -299,11 +299,38 @@ describe('POST order, naira from Sui', () => {
       })),
     })
     expect((await POST(post())).status).toBe(200)
-    expect(called(state.linq['createOrder'])).not.toHaveBeenCalled()
-    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({
-      provider: 'weave',
-      providerOrder: 'wv_1',
-    })
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'linq' })
+  })
+
+  it.each([
+    [
+      'a bank Linq does not know',
+      { institutions: [{ name: 'Somewhere MFB', code: 'OPAYNGPC', type: 'bank' }] },
+      {},
+      'linq_no_bank',
+    ],
+    [
+      'a refused order',
+      {},
+      { createOrder: vi.fn(async () => ({ ok: false, code: 'rejected', message: 'x' })) },
+      'linq_order_refused',
+    ],
+    [
+      'a failed bank lookup',
+      {},
+      { verifyBank: vi.fn(async () => ({ ok: false, code: 'unavailable' })) },
+      'linq_not_verified',
+    ],
+  ])('falls back to Weave on %s, and reports why', async (_name, weaveOver, linqOver, reason) => {
+    const institutions = (weaveOver as { institutions?: unknown }).institutions
+    if (institutions !== undefined) {
+      state.weave = weave({ institutions: vi.fn(async () => ({ ok: true, value: institutions })) })
+    }
+    state.linq = linq(linqOver)
+    expect((await POST(post())).status).toBe(200)
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'weave' })
+    expect(state.report.map((r) => String(r[1]))).toContain(`Error: ${reason}`)
   })
 
   it('falls back to Weave, and reports it, when Linq answers with a different order', async () => {
@@ -337,7 +364,9 @@ describe('POST order, naira from Sui', () => {
     state.weave = weave({
       quote: vi.fn(async () => ({ ok: false, code: 'unavailable', message: 'x' })),
     })
-    state.linq = linq({ getRate: vi.fn(async () => ({ ok: false, code: 'unavailable' })) })
+    state.linq = linq({
+      createOrder: vi.fn(async () => ({ ok: false, code: 'unavailable', message: 'x' })),
+    })
     expect((await POST(post())).status).toBe(503)
     expect(called(state.repo['insert'])).not.toHaveBeenCalled()
   })
@@ -402,7 +431,7 @@ describe('POST order, naira from Solana', () => {
     expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
   })
 
-  it('places it with Weave when Weave pays more', async () => {
+  it('places it with Linq even when Weave would pay more', async () => {
     state.weave = weaveOnSolana({
       quote: vi.fn(async () => ({
         ok: true,
@@ -410,8 +439,8 @@ describe('POST order, naira from Solana', () => {
       })),
     })
     expect((await POST(postFromSolana())).status).toBe(200)
-    expect(called(state.linq['createOrder'])).not.toHaveBeenCalled()
-    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'weave' })
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'linq' })
   })
 
   it('falls back to Weave, and reports it, when Linq answers with a different order', async () => {
@@ -456,16 +485,27 @@ describe('GET quote, naira from Sui', () => {
     expect(await (await ask()).json()).toEqual({ destAmount: 1368.39, costPercent: 0, seconds: 90 })
   })
 
-  it("shows Weave's quote when Weave pays more, or for another currency", async () => {
+  it("shows Linq's naira even when Weave's estimate is higher", async () => {
     state.weave = weave({
       quote: vi.fn(async () => ({
         ok: true,
         value: { destAmount: 1400, netUsd: 0.99, seconds: 90 },
       })),
     })
-    expect((await (await ask()).json()).destAmount).toBe(1400)
+    expect((await (await ask()).json()).destAmount).toBe(1368.39)
+  })
+
+  it("shows Weave's quote when Linq has no rate, or for another currency", async () => {
+    state.weave = weave({
+      quote: vi.fn(async () => ({
+        ok: true,
+        value: { destAmount: 1400, netUsd: 0.99, seconds: 90 },
+      })),
+    })
     expect((await (await ask('sui', 'KES')).json()).destAmount).toBe(1400)
-    expect(called(state.linq['getRate'])).toHaveBeenCalledTimes(1)
+    expect(called(state.linq['getRate'])).not.toHaveBeenCalled()
+    state.linq = linq({ getRate: vi.fn(async () => ({ ok: false, code: 'unavailable' })) })
+    expect((await (await ask()).json()).destAmount).toBe(1400)
   })
 })
 

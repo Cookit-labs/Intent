@@ -56,6 +56,8 @@ export interface Destination {
   symbol: string
   decimals: number
   recipientType: 'DESTINATION_CHAIN' | 'INTENTS'
+  /** Who is paid, when it isn't the account paying. */
+  recipient?: string
 }
 
 /** What a swap spends, as 1Click names it. Off NEAR the id comes from `oneClickAssetId`. */
@@ -121,6 +123,7 @@ function assertQuoteMatches(
     destinationAsset: string
     amount: string
     account: string
+    recipient?: string | undefined
     recipientType: Destination['recipientType']
     deadline: string
     fromIntents?: boolean
@@ -135,7 +138,7 @@ function assertQuoteMatches(
     asked.originAsset === input.originAsset &&
     asked.destinationAsset === input.destinationAsset &&
     asked.amount === input.amount &&
-    asked.recipient === input.account &&
+    asked.recipient === (input.recipient ?? input.account) &&
     asked.recipientType === input.recipientType &&
     asked.refundTo === input.account &&
     asked.refundType === funding &&
@@ -260,6 +263,7 @@ interface DepositFlow {
   kind: PreparedAction['kind']
   summary: (amount: string, tokenIn: ChainToken) => string
   extraNotes: string[]
+  costWording?: CostWording
 }
 
 export function assertNearAccount(account: string): void {
@@ -287,6 +291,7 @@ export async function previewOneClick(
     destinationAsset: destination.assetId,
     amount,
     account,
+    recipient: destination.recipient,
     recipientType: destination.recipientType,
     slippageBps: SLIPPAGE_BPS,
     fromIntents,
@@ -383,12 +388,16 @@ export async function prepareOneClickDeposit(
       approximate: true,
     },
     notes: [
-      costNote(live, loss, destination.symbol, destination.decimals),
+      costNote(live, loss, destination.symbol, destination.decimals, flow.costWording),
       depositNote(live, tokenIn, account),
       ...flow.extraNotes,
     ],
     signing: { family: 'near', transactions: [transaction] },
-    context: { depositAddress, deadline },
+    context: {
+      depositAddress,
+      deadline,
+      ...(destination.recipient !== undefined ? { recipient: destination.recipient } : {}),
+    },
   }
 }
 
@@ -410,6 +419,11 @@ function swapTokens(request: ChainActionRequest): { tokenIn: ChainToken; tokenOu
 
 async function quoteSwap(request: ChainActionRequest, account: string): Promise<VenueQuote> {
   const { tokenIn, tokenOut } = swapTokens(request)
+  // It pays out wNEAR, so a winning quote would leave a person who asked for NEAR holding something
+  // else, and a stake or send after it with nothing to spend. Naming it is still a choice they can make.
+  if (tokenOut.id === WRAP_NEAR && request.venue === undefined) {
+    throw new ChainActionRefused('1Click pays wNEAR, so it only runs here when it is named.')
+  }
   return quoteOneClick(
     request.amount,
     tokenIn,
@@ -527,7 +541,7 @@ export async function submitOneClick(input: SubmitInput): Promise<SubmitResult> 
     const body = await depositStatus(depositAddress)
     lastStatus = body?.status ?? lastStatus
     const recipient = body?.quoteResponse?.quoteRequest?.recipient
-    if (recipient !== undefined && recipient !== account) {
+    if (recipient !== undefined && recipient !== (context?.['recipient'] ?? account)) {
       return {
         ok: false,
         pending: true,

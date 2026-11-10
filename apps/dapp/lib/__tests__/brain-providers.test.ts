@@ -107,6 +107,17 @@ describe('each provider is called at its own endpoint', () => {
     expect(seen[0]?.body.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
+  it('sends NEAR AI to its gateway without strict tools, on a model it can attest', async () => {
+    const seen: Captured[] = []
+    const brain = createBrain({ provider: 'nearai', apiKey: 'near-test', fetchImpl: capture(seen) })
+    await brain.propose(request)
+
+    expect(seen[0]?.url).toBe('https://cloud-api.near.ai/v1/chat/completions')
+    expect(seen[0]?.body.tools[0]?.function.strict).toBe(false)
+    expect(seen[0]?.body.model).toBe('z-ai/glm-5.3-flash')
+    expect(seen[0]?.headers['Authorization']).toBe('Bearer near-test')
+  })
+
   it('needs no key for a local daemon', async () => {
     // A local model is configured by being chosen. Whether it is running is a
     // request-time failure, which is a different thing from a missing key and
@@ -123,7 +134,7 @@ describe('each provider is called at its own endpoint', () => {
     // DeepSeek's thinking mode rejects a forced choice outright — "Thinking
     // mode does not support this tool_choice" — and Ollama ignores the field.
     // The brief instructs the model to call the tool instead.
-    for (const provider of ['deepseek', 'groq', 'ollama', 'openrouter'] as const) {
+    for (const provider of ['deepseek', 'groq', 'nearai', 'ollama', 'openrouter'] as const) {
       const seen: Captured[] = []
       await createBrain({ provider, apiKey: 'k', fetchImpl: capture(seen) }).propose(request)
       expect(seen[0]?.body.tool_choice).toBe('auto')
@@ -156,6 +167,26 @@ describe('spend is reported per provider', () => {
     const outcome = await brain.propose(request)
     expect(outcome.meta.costUsd).toBe(0)
     expect(outcome.meta.provider).toBe('groq')
+  })
+
+  it('charges NEAR AI credits at the rate of the model that ran', async () => {
+    const brain = createBrain({
+      provider: 'nearai',
+      apiKey: 'near-test',
+      fetchImpl: (() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [{ message: {} }],
+              usage: { prompt_tokens: 1_000_000, completion_tokens: 1_000_000 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        )) as unknown as typeof fetch,
+    })
+    const outcome = await brain.propose(request)
+    expect(outcome.meta.costUsd).toBeCloseTo(0.58)
+    expect(outcome.meta.provider).toBe('nearai')
   })
 })
 

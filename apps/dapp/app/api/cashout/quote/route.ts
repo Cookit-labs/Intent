@@ -2,13 +2,12 @@ import { NextResponse } from 'next/server'
 
 import { createLinqClient } from '../../../../lib/linq/client'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
-import { bestNairaOffer, nairaOffers } from '../../../../lib/weave/best-payout'
 import { createWeaveClient, quoteCostPercent } from '../../../../lib/weave/client'
 import { isCurrencyAllowed } from '../../../../lib/weave/corridors'
 import { depositChain } from '../../../../lib/weave/deposit'
 import { guardCashout } from '../../../../lib/weave/guard'
 import { comparesLinq } from '../../../../lib/weave/linq-cashout'
-import { MAX_COST_PERCENT, readUsdcAmount } from '../../../../lib/weave/orders'
+import { readUsdcAmount } from '../../../../lib/weave/orders'
 import { isCashoutChain } from '../../../../lib/weave/types'
 
 export const runtime = 'nodejs'
@@ -46,22 +45,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await createWeaveClient().quote({ chain, currency, amount })
   const linq = createLinqClient()
+  // Sui and Solana naira go to Linq whenever it answers, so its locked rate is what is shown.
   if (comparesLinq(chain) && currency === 'NGN' && linq.configured) {
-    const weaveCost = result.ok ? quoteCostPercent(amount, result.value.netUsd) : undefined
-    const offers = await nairaOffers(chain, amount, {
-      linqRate: async () => {
-        const rate = await linq.getRate()
-        return rate.ok ? rate.value.ngnPerUsd : undefined
-      },
-      weaveNaira: async () =>
-        result.ok && weaveCost !== undefined && weaveCost <= MAX_COST_PERCENT
-          ? result.value.destAmount
-          : undefined,
-    })
-    const best = bestNairaOffer(offers)
-    if (best?.provider === 'linq') {
+    const rate = await linq.getRate().catch(() => undefined)
+    const naira = rate?.ok === true ? rate.value.ngnPerUsd * Number(amount) : Number.NaN
+    if (Number.isFinite(naira) && naira > 0) {
       return NextResponse.json({
-        destAmount: Math.floor(best.naira * 100) / 100,
+        destAmount: Math.floor(naira * 100) / 100,
         costPercent: 0,
         seconds: result.ok ? result.value.seconds : 0,
       })

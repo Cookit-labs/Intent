@@ -6,13 +6,12 @@ import {
   type WalletBalances,
 } from '../types'
 import { NEAR_ACCOUNT } from './account'
-import { accountBalance, viewCall } from './rpc'
-import { nearTokens, WRAP_NEAR } from './tokens'
+import { spendableBalance, viewCall } from './rpc'
+import { NATIVE_NEAR, nearTokens, WRAP_NEAR } from './tokens'
 
 const FASTNEAR = 'https://api.fastnear.com/v1/account'
 const MAX_METADATA_READS = 20
 const NEAR_DECIMALS = 24
-const NATIVE_ID = 'near'
 
 interface FtHolding {
   contract_id?: string
@@ -93,7 +92,7 @@ export async function readNearBalances(
     throw new ChainActionRefused('That is not a NEAR account. Connect a NEAR wallet and try again.')
   }
   const [nativeBase, table, discovered] = await Promise.all([
-    accountBalance(account, signal),
+    spendableBalance(account, signal),
     Promise.all(nearTokens.map((token) => tableEntry(token, account, signal))),
     fastNearList(account, signal).catch((e: unknown) => {
       if (signal.aborted) throw e
@@ -102,7 +101,7 @@ export async function readNearBalances(
   ])
   const native: TokenBalance = {
     symbol: 'NEAR',
-    id: NATIVE_ID,
+    id: NATIVE_NEAR.id,
     amount: fromBaseUnits(nativeBase, NEAR_DECIMALS),
     decimals: NEAR_DECIMALS,
     native: true,

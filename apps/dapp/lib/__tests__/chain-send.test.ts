@@ -31,7 +31,7 @@ import { quoteChainRoutes } from '../agents/chain-routes'
 import { buildEvmVenues, avalancheModule, monadModule } from '../chains/evm/module'
 import { AVALANCHE_TOKENS, EVM_NATIVE_ID, MONAD_TOKENS } from '../chains/evm/tokens'
 import { buildNearVenues, nearModule } from '../chains/near/module'
-import { isRegistered, waitForTransaction } from '../chains/near/rpc'
+import { accountBalance, isRegistered, NearRpcError, waitForTransaction } from '../chains/near/rpc'
 import { assertOneClickSafe, TRANSFER_GAS } from '../chains/near/safety'
 import { USDC_NEAR, USDT_NEAR, WRAP_NEAR, nearTokens } from '../chains/near/tokens'
 import { parseChainAction, racesFirst } from '../chains/parse-action'
@@ -64,6 +64,7 @@ import {
   type SubmitResult,
 } from '../chains/types'
 import { venues } from '../venues'
+import type { NearFunctionCall } from '../chains/types'
 
 vi.hoisted(() => {
   process.env['AUTH_SECRET'] = 'x'.repeat(48)
@@ -113,6 +114,7 @@ vi.mock('../chains/evm/client', async (original) => ({
 
 vi.mock('../chains/near/rpc', async (original) => ({
   ...(await original<typeof import('../chains/near/rpc')>()),
+  accountBalance: vi.fn(),
   isRegistered: vi.fn(),
   waitForTransaction: vi.fn(),
 }))
@@ -460,7 +462,7 @@ describe('sendRefusal', () => {
   it.each([
     ['solana', 'SOL'],
     ['sui', 'SUI'],
-    ['near', 'NEAR'],
+    ['near', 'wNEAR'],
     ['near', 'USDT'],
   ] as const)('refuses to move %s %s, naming what can be sent', (chain, symbol) => {
     const to = { solana: SOL_TO, sui: SUI_TO, near: NEAR_TO }[chain]
@@ -476,6 +478,7 @@ describe('sendRefusal', () => {
     ['solana', 'ONyc', SOL_TO],
     ['sui', 'USDsui', SUI_TO],
     ['near', 'USDC', NEAR_TO],
+    ['near', 'NEAR', NEAR_TO],
     ['avalanche', 'AVAX', EVM_TO],
     ['avalanche', 'USDT', EVM_TO],
     ['monad', 'MON', EVM_TO],
@@ -1053,7 +1056,7 @@ describe('a send on NEAR', () => {
     const prepared = await venue.prepare(request({ recipient: NEAR_TO }), NEAR_ME)
     const base = prepared.signing as Extract<SigningPayload, { family: 'near' }>
     const tx = base.transactions[0] as (typeof base.transactions)[number]
-    const action = tx.actions[0] as (typeof tx.actions)[number]
+    const action = tx.actions[0] as NearFunctionCall
     const withArgs = (args: Record<string, unknown>): SigningPayload => ({
       family: 'near',
       transactions: [{ ...tx, actions: [{ ...action, params: { ...action.params, args } }] }],
@@ -1079,10 +1082,10 @@ describe('a send on NEAR', () => {
     }
   })
 
-  it('refuses every token but USDC, and native NEAR plainly', async () => {
+  it('refuses every token but USDC and NEAR, wrapped NEAR included', async () => {
     expect(
-      await refusalOf(venue.prepare(request({ recipient: NEAR_TO, tokenIn: 'NEAR' }), NEAR_ME))
-    ).toContain('Sending NEAR')
+      await refusalOf(venue.prepare(request({ recipient: NEAR_TO, tokenIn: 'wNEAR' }), NEAR_ME))
+    ).toContain('Sending wNEAR')
     expect(
       await refusalOf(venue.prepare(request({ recipient: NEAR_TO, tokenIn: 'USDT' }), NEAR_ME))
     ).toContain('Sending USDT')
@@ -1438,12 +1441,14 @@ describe('assertFollowOnCanRun', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('refuses a stake after a swap on NEAR, whose output may come wrapped', async () => {
-    const said = await refusalOf(
+  it('lets a stake follow a swap that ends in NEAR, and nothing else', async () => {
+    await expect(
       assertFollowOnCanRun(nearModule, step({ kind: 'stake', tokenIn: 'NEAR' }), NEAR_ME)
+    ).resolves.toBeUndefined()
+    const said = await refusalOf(
+      assertFollowOnCanRun(nearModule, step({ kind: 'stake', tokenIn: 'USDC' }), NEAR_ME)
     )
-    expect(said).toMatch(/wNEAR/)
-    expect(said).toMatch(/ Nothing was signed or sent\.$/)
+    expect(said).toMatch(/takes NEAR/)
   })
 
   it('refuses a token this chain does not list', async () => {
@@ -1566,5 +1571,194 @@ describe('the follow-on route', () => {
       params
     )
     expect(reply.status).toBe(400)
+  })
+})
+
+describe('a send of native NEAR', () => {
+  const venue = createSendVenue('near')
+  const TWO_AND_A_HALF = '2500000000000000000000000'
+  const nearSend = (over: Partial<ChainActionRequest> = {}): ChainActionRequest =>
+    request({ recipient: NEAR_TO, tokenIn: 'NEAR', amount: '2.5', ...over })
+
+  beforeEach(() => {
+    vi.mocked(accountBalance).mockReset()
+    vi.mocked(accountBalance).mockResolvedValue('1')
+  })
+
+  const paying = (to: string, deposit: string): SigningPayload => ({
+    family: 'near',
+    transactions: [{ receiverId: to, actions: [{ type: 'Transfer', params: { deposit } }] }],
+  })
+
+  it('builds one Transfer to the recipient, for exactly the amount', async () => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    expect(prepared.signing).toEqual(paying(NEAR_TO, TWO_AND_A_HALF))
+    expect(prepared.summary).toBe(`Send 2.5 NEAR to ${NEAR_TO}.`)
+    expect(prepared.notes).toContain(SEND_NOTE)
+    expect(() => venue.assertSafe(prepared.signing, NEAR_ME, prepared.context)).not.toThrow()
+  })
+
+  it('never asks a NEP-141 contract for NEAR, since that would move wNEAR', async () => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    const near = prepared.signing as Extract<SigningPayload, { family: 'near' }>
+    expect(near.transactions[0]?.receiverId).not.toBe(WRAP_NEAR)
+  })
+
+  it('refuses a named account that does not exist, naming it', async () => {
+    vi.mocked(accountBalance).mockRejectedValue(new NearRpcError('UNKNOWN_ACCOUNT'))
+    const said = await refusalOf(venue.prepare(nearSend(), NEAR_ME))
+    expect(said).toContain(NEAR_TO)
+    expect(said).toMatch(/doesn.t exist/)
+    expect(said).toMatch(/ Nothing was signed or sent\.$/)
+  })
+
+  it('refuses when a named account can’t be read, rather than guess', async () => {
+    vi.mocked(accountBalance).mockRejectedValue(new Error('rpc down'))
+    expect(await refusalOf(venue.prepare(nearSend(), NEAR_ME))).toMatch(/could not be read/)
+  })
+
+  it('takes an implicit account without reading it, since one exists once it is funded', async () => {
+    const implicit = 'a'.repeat(64)
+    const prepared = await venue.prepare(nearSend({ recipient: implicit }), NEAR_ME)
+    expect(prepared.signing).toEqual(paying(implicit, TWO_AND_A_HALF))
+    expect(accountBalance).not.toHaveBeenCalled()
+  })
+
+  it('refuses another recipient, another amount, or anything added to the transfer', async () => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    const good = paying(NEAR_TO, TWO_AND_A_HALF) as Extract<SigningPayload, { family: 'near' }>
+    const tx = good.transactions[0] as (typeof good.transactions)[number]
+    const call = {
+      type: 'FunctionCall' as const,
+      params: { methodName: 'x', args: {}, gas: '1', deposit: '0' },
+    }
+    for (const payload of [
+      paying(NEAR_THIEF, TWO_AND_A_HALF),
+      paying(NEAR_TO, '2500000000000000000000001'),
+      paying(NEAR_ME, TWO_AND_A_HALF),
+      { family: 'near', transactions: [tx, tx] },
+      { family: 'near', transactions: [{ ...tx, actions: [...tx.actions, call] }] },
+      { family: 'near', transactions: [{ ...tx, actions: [...tx.actions, ...tx.actions] }] },
+      { family: 'near', transactions: [{ ...tx, signerId: NEAR_THIEF }] },
+      {
+        family: 'near',
+        transactions: [
+          { ...tx, actions: [{ type: 'Transfer', params: { deposit: TWO_AND_A_HALF, x: 1 } }] },
+        ],
+      },
+      { family: 'near', transactions: [{ ...tx, actions: [call] }] },
+    ] as SigningPayload[]) {
+      expect(() => venue.assertSafe(payload, NEAR_ME, prepared.context)).toThrow(ChainActionRefused)
+    }
+  })
+
+  it('refuses a Transfer on every path that is not this one', async () => {
+    const usdc = await venue.prepare(request({ recipient: NEAR_TO }), NEAR_ME)
+    expect(() => venue.assertSafe(paying(NEAR_TO, '5000000'), NEAR_ME, usdc.context)).toThrow(
+      ChainActionRefused
+    )
+    expect(() => assertOneClickSafe(paying('a'.repeat(64), '5000000'), NEAR_ME)).toThrow(
+      /something other than a contract call/
+    )
+  })
+
+  async function submit(context: Record<string, string> | undefined): Promise<SubmitResult> {
+    return (await venue.submit?.({
+      account: NEAR_ME,
+      venueId: venue.id,
+      signed: { family: 'near', hashes: [NEAR_HASH] },
+      ...(context !== undefined ? { context } : {}),
+    })) as SubmitResult
+  }
+
+  const moved = (receiver: string, deposit: string, signer = NEAR_ME) => ({
+    signer,
+    receiver,
+    calls: [],
+    transfers: [deposit],
+  })
+
+  it('confirms what the chain shows', async () => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    vi.mocked(waitForTransaction).mockResolvedValue({
+      state: 'success',
+      ...moved(NEAR_TO, TWO_AND_A_HALF),
+    })
+    await expect(submit(prepared.context)).resolves.toMatchObject({ ok: true, hash: NEAR_HASH })
+  })
+
+  it.each([
+    ['another receiver', moved(NEAR_THIEF, TWO_AND_A_HALF)],
+    ['another amount', moved(NEAR_TO, '1')],
+    ['another signer', moved(NEAR_TO, TWO_AND_A_HALF, NEAR_THIEF)],
+    ['no transfer at all', { signer: NEAR_ME, receiver: NEAR_TO, calls: [], transfers: [] }],
+  ])('never confirms %s, and reads it as pending', async (_name, outcome) => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    vi.mocked(waitForTransaction).mockResolvedValue({ state: 'success', ...outcome })
+    await expect(submit(prepared.context)).resolves.toMatchObject({ ok: false, pending: true })
+  })
+
+  it('reads a failed or unseen transaction as pending', async () => {
+    const prepared = await venue.prepare(nearSend(), NEAR_ME)
+    vi.mocked(waitForTransaction).mockResolvedValue({
+      state: 'failed',
+      ...moved(NEAR_TO, TWO_AND_A_HALF),
+    })
+    await expect(submit(prepared.context)).resolves.toMatchObject({ ok: false, pending: true })
+    vi.mocked(waitForTransaction).mockResolvedValue({ state: 'unknown' })
+    await expect(submit(prepared.context)).resolves.toMatchObject({ ok: false, pending: true })
+  })
+
+  it('can follow a swap to NEAR, checked against the real recipient', async () => {
+    await expect(
+      venue.assertCanFollow?.({ kind: 'send', tokenIn: 'NEAR', recipient: NEAR_TO }, NEAR_ME)
+    ).resolves.toBeUndefined()
+    vi.mocked(accountBalance).mockRejectedValue(new NearRpcError('UNKNOWN_ACCOUNT'))
+    await expect(
+      venue.assertCanFollow?.({ kind: 'send', tokenIn: 'NEAR', recipient: NEAR_TO }, NEAR_ME)
+    ).rejects.toThrow(/doesn.t exist/)
+  })
+})
+
+describe('a step after a swap that spends the native coin', () => {
+  const holding = (amount: string) => ({
+    ...nearModule,
+    balances: async () => ({
+      account: NEAR_ME,
+      complete: true,
+      tokens: [{ symbol: 'NEAR', id: 'near', amount, decimals: 24, native: true, listed: true }],
+    }),
+  })
+
+  it('refuses before the swap is signed when too little is left for fees', async () => {
+    const said = await refusalOf(
+      assertFollowOnCanRun(
+        holding('0.02') as unknown as typeof nearModule,
+        { kind: 'stake', tokenIn: 'NEAR' },
+        NEAR_ME
+      )
+    )
+    expect(said).toMatch(/0\.1 NEAR/)
+    expect(said).toMatch(/ Nothing was signed or sent\.$/)
+  })
+
+  it('goes ahead with enough for both steps', async () => {
+    await expect(
+      assertFollowOnCanRun(
+        holding('0.5') as unknown as typeof nearModule,
+        { kind: 'stake', tokenIn: 'NEAR' },
+        NEAR_ME
+      )
+    ).resolves.toBeUndefined()
+  })
+
+  it('leaves a step that spends a token alone', async () => {
+    await expect(
+      assertFollowOnCanRun(
+        holding('0') as unknown as typeof nearModule,
+        { kind: 'supply', tokenIn: 'USDC' },
+        NEAR_ME
+      )
+    ).resolves.toBeUndefined()
   })
 })

@@ -10,7 +10,7 @@ import {
   type SubmitResult,
   type VenuePosition,
   type VenueQuote,
-  type FollowOnStep,
+  takesOnly,
 } from '../types'
 import { NEAR_ACCOUNT, NEAR_TX_HASH } from './account'
 import { accountBalance, isRegistered, viewCall, waitForTransaction } from './rpc'
@@ -46,16 +46,6 @@ const HOURS_PER_EPOCH = 7.2
 const MIN_PENDING_YOCTO = BigInt('10000000000000000000')
 /** rNEAR's contract keeps this much for itself and won't pay out of it. */
 const RNEAR_MIN_RESERVE_YOCTO = YOCTO_PER_NEAR
-
-/**
- * A swap to NEAR can arrive as NEAR or as wNEAR, and only the wrapped form can be measured by its
- * token, while a stake spends the native coin. So a stake can't be shown to spend what arrived.
- */
-async function refuseStakeAfterSwap(_step: FollowOnStep): Promise<void> {
-  throw new ChainActionRefused(
-    "A swap to NEAR can arrive as NEAR or wNEAR, so a stake can't follow it here. Swap first, then stake what arrives. Nothing was signed or sent."
-  )
-}
 
 function cannotRead(venue: string): ChainActionRefused {
   return new ChainActionRefused(
@@ -541,7 +531,7 @@ export const rnearVenue: ChainVenue = {
   id: RNEAR_VENUE_ID,
   name: 'rNEAR',
   kinds: ['stake', 'unstake', 'claim'],
-  assertCanFollow: refuseStakeAfterSwap,
+  assertCanFollow: takesOnly('rNEAR', ['NEAR']),
   quote: quoteRnear,
   prepare: prepareFor(RNEAR_EXIT, prepareRnear),
   positions: stakePositions(RNEAR_EXIT),
@@ -552,7 +542,7 @@ export const metapoolVenue: ChainVenue = {
   id: METAPOOL_VENUE_ID,
   name: 'Meta Pool',
   kinds: ['stake', 'unstake', 'claim'],
-  assertCanFollow: refuseStakeAfterSwap,
+  assertCanFollow: takesOnly('Meta Pool', ['NEAR']),
   quote: quoteMetapool,
   prepare: prepareFor(METAPOOL_EXIT, prepareMetapool),
   positions: stakePositions(METAPOOL_EXIT),

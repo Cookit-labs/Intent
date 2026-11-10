@@ -118,6 +118,28 @@ const NOT_ASKED = [
   '',
 ]
 
+describe('a warning on a position', () => {
+  it('reads after what to type, in the same line', () => {
+    const reply = positionsReply(
+      {
+        venues: [
+          {
+            id: 'rhea-lend',
+            name: 'Rhea Lend',
+            positions: [
+              { slot: 'borrowed', symbol: 'USDC', amount: '40', warning: 'Mind the level.' },
+            ],
+            kinds: ['repay'],
+          },
+        ],
+        unread: [],
+      } as unknown as Parameters<typeof positionsReply>[0],
+      'NEAR'
+    )
+    expect(reply).toMatch(/• 40 USDC on Rhea Lend.* Mind the level\./)
+  })
+})
+
 describe('asksForPositions', () => {
   it.each(ASKED)('hears %j', (text) => {
     expect(asksForPositions(text)).toBe(true)

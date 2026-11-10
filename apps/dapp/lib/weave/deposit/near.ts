@@ -51,7 +51,8 @@ function assertSafe(payload: SigningPayload, expectation: DepositExpectation): v
 
   const transaction = payload.transactions[0]
   if (transaction?.receiverId !== USDC.id) refuse('This transfer is not USDC.')
-  const args = transaction.actions[transaction.actions.length - 1]?.params.args
+  const last = transaction.actions[transaction.actions.length - 1]
+  const args = last?.type === 'FunctionCall' ? last.params.args : undefined
   if (args?.['receiver_id'] !== expectation.depositAddress) {
     refuse('This transfer does not go to this order’s deposit address.')
   }

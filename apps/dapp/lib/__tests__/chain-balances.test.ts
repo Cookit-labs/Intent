@@ -305,7 +305,7 @@ describe('NEAR balances', () => {
     const result = await readNearBalances('alice.near')
     expect(result.complete).toBe(true)
     expect(result.tokens).toContainEqual(
-      expect.objectContaining({ symbol: 'NEAR', amount: '2.5', native: true })
+      expect.objectContaining({ symbol: 'NEAR', amount: '2.49', native: true })
     )
     expect(result.tokens).toContainEqual(
       expect.objectContaining({ symbol: 'USDC', amount: '3', listed: true })
@@ -356,7 +356,7 @@ describe('NEAR balances', () => {
     const result = await readNearBalances('alice.near')
     expect(result.complete).toBe(false)
     expect(result.tokens.find((t) => t.symbol === 'USDC')?.amount).toBe('1')
-    expect(result.tokens.find((t) => t.native)?.amount).toBe('2.5')
+    expect(result.tokens.find((t) => t.native)?.amount).toBe('2.49')
   })
 
   it('caps metadata reads at 20 and says the list is incomplete', async () => {

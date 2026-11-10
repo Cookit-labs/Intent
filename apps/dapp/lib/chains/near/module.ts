@@ -2,6 +2,7 @@ import { canIssueOneClick } from '../oneclick-origin'
 import { createSendVenue, SEND_VENUE_ID } from '../send'
 import type { ChainModule, ChainVenue } from '../types'
 import { readNearBalances } from './balances'
+import { crossChainVenue, isCrossChainRecipient } from './cross-chain'
 import { EARN_VENUE_ID, earnVenue } from './earn'
 import { assetIdOf, oneClickPrice } from './oneclick'
 import { RHEA_VENUE_ID, rheaBook, rheaVenue } from './rhea-dcl'
@@ -23,7 +24,8 @@ export function buildNearVenues(
     rnearVenue,
     earnVenue,
     rheaVenue,
-    ...(canIssueOneClick(env) ? [createSendVenue('near')] : []),
+    // Sends come together: a deployment that can't offer one offers neither, and says so.
+    ...(canIssueOneClick(env) ? [createSendVenue('near'), crossChainVenue] : []),
   ]
 }
 
@@ -57,4 +59,7 @@ export const nearModule: ChainModule = {
   submit: confirmStake,
   balances: readNearBalances,
   limitBook: rheaBook(),
+  crossChainSend: canIssueOneClick(process.env)
+    ? { venue: crossChainVenue, reaches: isCrossChainRecipient }
+    : undefined,
 }

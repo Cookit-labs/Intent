@@ -26,7 +26,7 @@ import type { RestOption } from './rest-option'
  *
  * See `brains/providers.ts` for each one's endpoint, limits and cost.
  */
-export type BrainProvider = 'anthropic' | 'deepseek' | 'groq' | 'ollama' | 'openrouter'
+export type BrainProvider = 'anthropic' | 'deepseek' | 'groq' | 'nearai' | 'ollama' | 'openrouter'
 
 /**
  * Which agent. `provider:model`, built by `identity.ts` — an agent is a

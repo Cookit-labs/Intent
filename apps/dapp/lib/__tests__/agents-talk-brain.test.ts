@@ -63,6 +63,11 @@ describe('brain.talk', () => {
     await createBrain({ provider: 'groq', apiKey: 'k', model: 'x', fetchImpl: groq }).talk?.(call)
     expect(sentBody(groq)['max_tokens']).toBe(300)
     expect(sentBody(groq)['reasoning_effort']).toBeUndefined()
+
+    const near = replying(toolReply)
+    await createBrain({ provider: 'nearai', apiKey: 'k', model: 'x', fetchImpl: near }).talk?.(call)
+    expect(sentBody(near)['reasoning_effort']).toBe('low')
+    expect(sentBody(near)['max_tokens']).toBe(400)
   })
 
   it('reports an abort as a timeout', async () => {
