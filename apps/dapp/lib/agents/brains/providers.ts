@@ -105,6 +105,9 @@ export interface ProviderConfig {
  * tried and refused (403: "only available on agentic harnesses"), and
  * Nemotron 3 Super was dropped when Nvidia's endpoint began answering 404.
  *
+ * Revised 2026-11-11: Laguna XS 2.1 dropped; OpenRouter answered 404 "no provider serves this
+ * model anymore" in every race.
+ *
  * Not here on purpose: `qwen/qwen3.8-27b:free` is the model the Groq slot
  * already runs, and Nemotron 3 Ultra (550B) was degraded and is slow enough
  * on the free tier to meet the agent timeout. Either can be named by raw id
@@ -113,8 +116,6 @@ export interface ProviderConfig {
 export const OPENROUTER_MODELS: Record<string, string> = {
   /** 26B with 4B active, so fast for its size. */
   'gemma-4': 'google/gemma-4-26b-a4b-it:free',
-  /** Code-trained; disciplined about structured output. */
-  'laguna-xs': 'poolside/laguna-xs-2.1:free',
   /** Cohere's Command lineage, which has done tool calling longest. */
   'north-mini': 'cohere/north-mini-code:free',
 }
@@ -293,7 +294,6 @@ export const PROVIDERS: Record<BrainProvider, ProviderConfig> = {
     aliases: OPENROUTER_MODELS,
     displayNames: {
       'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B',
-      'poolside/laguna-xs-2.1:free': 'Laguna XS 2.1',
       'cohere/north-mini-code:free': 'North Mini Code',
     },
     talk: { body: { reasoning: { enabled: false } }, maxTokens: 400 },

@@ -214,10 +214,16 @@ describe('OpenRouter models can be named by alias', () => {
     expect(modelFor('openrouter', env)).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
-  it('curates three models, each from a different lab', () => {
+  it('curates two models, each from a different lab', () => {
     const ids = Object.values(OPENROUTER_MODELS)
-    expect(ids).toHaveLength(3)
+    expect(ids).toHaveLength(2)
     const labs = new Set(ids.map((id) => id.split('/')[0]))
-    expect(labs.size).toBe(3)
+    expect(labs.size).toBe(2)
+  })
+
+  it('races no model OpenRouter has stopped serving', () => {
+    // poolside/laguna-xs-2.1:free answered 404 "no provider serves this model anymore" in every
+    // prod race on 11 November 2026.
+    expect(Object.values(OPENROUTER_MODELS)).not.toContain('poolside/laguna-xs-2.1:free')
   })
 })

@@ -80,7 +80,10 @@ jobs:
         with:
           name: dapp-build
           path: apps/dapp/.next
-      - run: npx playwright install --with-deps chromium
+      # The system packages come from Ubuntu's mirrors, which the runner couldn't reach for hours on
+      # 11 November 2026. The runner image already has what Chromium needs, so the browser alone is
+      # installed when they can't be fetched.
+      - run: npx playwright install --with-deps chromium || npx playwright install chromium
         working-directory: apps/dapp
       # No wallet, no model key, no database; playwright.config.ts sets the
       # server env. `start` because the build was downloaded above.

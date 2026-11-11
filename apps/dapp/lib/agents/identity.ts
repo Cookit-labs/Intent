@@ -35,8 +35,30 @@ function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+/**
+ * The codename each racing model goes by, keyed by model id so it is the same on every chain and
+ * in every race. The real model stays beside it in small text. Chosen by the user, 11 November 2026.
+ */
+export const CODENAMES: Readonly<Record<string, string>> = {
+  'claude-sonnet-5-5': 'Vega',
+  'deepseek-v4-flash': 'Orion',
+  'qwen/qwen3.8-27b': 'Lyra',
+  'z-ai/glm-5.3-flash': 'Nova',
+  'google/gemma-4-26b-a4b-it:free': 'Atlas',
+  'cohere/north-mini-code:free': 'Polaris',
+}
+
+/** The model's own readable name, whichever provider serves it. */
+export function modelLabel(model: string): string {
+  for (const config of Object.values(PROVIDERS)) {
+    const named = config.displayNames?.[model]
+    if (named !== undefined) return named
+  }
+  return prettyModel(model)
+}
+
 export function agentName(provider: BrainProvider, model: string): string {
-  return PROVIDERS[provider].displayNames?.[model] ?? prettyModel(model)
+  return CODENAMES[model] ?? PROVIDERS[provider].displayNames?.[model] ?? prettyModel(model)
 }
 
 /**

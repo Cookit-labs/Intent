@@ -63,17 +63,17 @@ describe('getRoster', () => {
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
     const roster = getRoster() ?? []
-    expect(roster).toHaveLength(3)
-    expect(new Set(roster.map((a) => a.model)).size).toBe(3)
+    expect(roster).toHaveLength(2)
+    expect(new Set(roster.map((a) => a.model)).size).toBe(2)
     expect(roster.every((a) => a.provider === 'openrouter')).toBe(true)
   })
 
-  it('is five agents with the three hosted keys', async () => {
+  it('is four agents with the three hosted keys', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['GROQ_API_KEY'] = 'test-key'
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
-    expect(getRoster()).toHaveLength(5)
+    expect(getRoster()).toHaveLength(4)
   })
 
   it('fields NEAR AI under its own name when its key is set', async () => {
@@ -82,7 +82,7 @@ describe('getRoster', () => {
     const roster = getRoster() ?? []
     expect(roster.map((a) => a.key)).toEqual(['nearai:z-ai/glm-5.3-flash'])
     expect(publicRoster(roster)[0]).toMatchObject({
-      name: 'GLM 5.3 Flash',
+      name: 'Nova',
       providerName: 'NEAR AI',
       free: false,
     })
@@ -104,7 +104,7 @@ describe('getRoster', () => {
       'openrouter:google/gemma-4-26b-a4b-it:free',
       'deepseek:deepseek-v4-flash',
     ])
-    expect(roster[0]?.name).toBe('Gemma 4 26B')
+    expect(roster[0]?.name).toBe('Atlas')
     expect(roster[0]?.brain.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
@@ -179,7 +179,7 @@ describe('publicRoster', () => {
     const rows = publicRoster(getRoster() ?? [])
     expect(rows[0]).toEqual({
       key: 'deepseek:deepseek-v4-flash',
-      name: 'DeepSeek V4 Flash',
+      name: 'Orion',
       gradient: expect.stringMatching(/^linear-gradient\(/) as string,
       provider: 'deepseek',
       providerName: 'DeepSeek',
