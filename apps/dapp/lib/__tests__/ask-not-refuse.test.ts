@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { chainRouteFromReading, type ReadSwap } from '../chains/parse-sequence'
 import type { ChainWithActions } from '../chains/types'
+import { shareOfCoin, sizeShare } from '../chat/share-amount'
 
 /**
  * When the model understood a request but the person's own words don't carry the figure that would
@@ -159,5 +160,32 @@ describe('the answer to the question, as the model writes it out', () => {
     expect(route).toMatchObject({
       action: { kind: 'swap', amount: '0.05', tokenIn: 'SOL', tokenOut: 'USDC' },
     })
+  })
+})
+
+describe('answering "how much" with a share of what is held', () => {
+  const held = { NEAR: '1.2104410944', USDC: '10' }
+  const sized = (answer: string): unknown => sizeShare(shareOfCoin(answer, 'NEAR'), held)
+
+  it.each([
+    '40% of my current near tokens holding in my wallet',
+    '40% of my entire near',
+    '40% of it',
+    'about 40% of my balance',
+    '40% of what i currently have',
+    'stake 40% of what i have',
+    '40 percent of my near',
+    '40%',
+  ])('reads "%s" as 40% of the NEAR held', (answer) => {
+    expect(sized(answer)).toMatchObject({ line: '40% of your NEAR is 0.48417643 NEAR.' })
+  })
+
+  it('reads "half of it" and "all of it" against the coin asked about', () => {
+    expect(sized('half of it')).toMatchObject({ line: '50% of your NEAR is 0.60522054 NEAR.' })
+    expect(sized('all of it')).toMatchObject({ line: '100% of your NEAR is 1.2104410944 NEAR.' })
+  })
+
+  it('keeps a coin the person named themselves', () => {
+    expect(sized('40% of my usdc')).toMatchObject({ line: '40% of your USDC is 4 USDC.' })
   })
 })

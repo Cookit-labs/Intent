@@ -13,7 +13,7 @@ export interface FoundShare {
 }
 
 // "of my", "in the", and "of what I have in (my)", which is how people often say it.
-const OF_MY = String.raw`(?:\s+(?:of|in))?(?:\s+what\s+i\s+(?:have|hold|own|(?:'ve\s+)?got)(?:\s+(?:in|of))?)?\s*(?:my|the)?\s*`
+const OF_MY = String.raw`(?:\s+(?:of|in))?(?:\s+what\s+i\s+(?:currently\s+)?(?:have|hold|own|(?:'ve\s+)?got)(?:\s+(?:in|of))?)?\s*(?:my|the)?\s*(?:(?:current|entire|whole|total|available|remaining)\s+)?`
 const COIN = String.raw`([a-z][a-z0-9.]{1,11})`
 
 const PATTERNS: { re: RegExp; percent: (m: RegExpExecArray) => number }[] = [
@@ -52,7 +52,25 @@ const NOT_A_COIN = new Set([
   'balance',
   'token',
   'tokens',
+  'current',
+  'entire',
+  'whole',
+  'total',
+  'available',
+  'remaining',
+  'holdings',
+  'funds',
+  'coin',
+  'coins',
 ])
+
+/**
+ * A share at the start of an answer, in any words after it: "40% of it", "about 40% of my
+ * balance", "stake 40% of what I currently have", "half of what's there".
+ */
+const SHARE_LEAD = new RegExp(
+  String.raw`^(?:(?:about|around|roughly|like|maybe|just|only|stake|swap|use|put|send|deposit|supply|sell)\s+)*(?:(\d{1,3}(?:\.\d+)?)\s*(?:%|percent|per cent)|(half|a quarter|all|everything))(?:\s+of\b.*)?$`
+)
 
 /** A part share is cut to this many places, rounded down, so it can be read and typed back. */
 const SHARE_PLACES = 8
@@ -104,6 +122,15 @@ export function shareOfCoin(answer: string, coin: string): string {
   if (/^half(?: of it)?$/.test(bare)) return `half of my ${coin}`
   const percent = /^(\d{1,3}(?:\.\d+)?)\s*(%|percent)$/.exec(bare)
   if (percent !== null) return `${percent[1]}${percent[2] === '%' ? '%' : ' percent'} of my ${coin}`
+  // Said in other words, it still answers the question about this coin, unless it names a coin of
+  // its own: "40% of my USDC" stays USDC.
+  if (findShare(answer) === undefined) {
+    const lead = SHARE_LEAD.exec(bare)
+    if (lead?.[1] !== undefined) return `${lead[1]}% of my ${coin}`
+    if (lead?.[2] === 'half') return `half of my ${coin}`
+    if (lead?.[2] === 'a quarter') return `a quarter of my ${coin}`
+    if (lead !== null) return `all of my ${coin}`
+  }
   return answer
 }
 
