@@ -37,8 +37,9 @@ describe('prettyModel', () => {
 })
 
 describe('agentName', () => {
-  it('prefers the curated display name', () => {
-    expect(agentName('deepseek', 'deepseek-v4-flash')).toBe('DeepSeek V4 Flash')
+  it('prefers the codename, then the curated display name', () => {
+    expect(agentName('deepseek', 'deepseek-v4-flash')).toBe('Orion')
+    expect(agentName('deepseek', 'deepseek-v4-pro')).toBe('DeepSeek V4 Pro')
     expect(agentName('openrouter', 'inclusionai/ling-3.0-flash-fin:free')).toBe(
       'Ling 3.0 Flash Fin'
     )

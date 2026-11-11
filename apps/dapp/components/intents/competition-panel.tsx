@@ -14,6 +14,7 @@ import {
   unansweredLine,
 } from '../../lib/agents/chain-race'
 import { describePlan } from '../../lib/agents/competition'
+import { modelLabel } from '../../lib/agents/identity'
 import { restAlternativeLine } from '../../lib/agents/rest-option'
 import {
   ALL_HELD_LINE,
@@ -75,10 +76,10 @@ function vsOracle(pct: number | undefined): string {
  * the model. The vendor prefix and the `:latest` tag say nothing a reader
  * needs.
  */
+/** The real model beside an agent's codename, by its readable name. */
 function shortModel(model: string | undefined): string {
   if (model === undefined || model === '') return ''
-  const withoutVendor = model.includes('/') ? (model.split('/').pop() ?? model) : model
-  return withoutVendor.replace(/:latest$/, '')
+  return modelLabel(model)
 }
 
 function failureText(code: string): string {

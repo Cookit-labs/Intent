@@ -70,8 +70,8 @@ sign or send anything.
 | `where is my money`                      | Every position, what to type next, and how far a loan is from liquidation | Contract reads                |
 
 **NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect
-(`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent runs
-GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested.
+(`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent, Nova,
+runs GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested.
 
 **Checked attestation:** the server checks every answer from that agent before the chat says it
 was signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation report and checks
@@ -84,8 +84,8 @@ these:
 - NEAR AI's signature over the SHA-256 of the exact request and response bytes recovers to that
   attested address. The signature is the model's own, not the gateway's.
 
-Only then does the race show a note: "GLM 5.3 Flash's answer was signed inside a verified NEAR
-AI enclave". Anything unproven shows nothing. A passed enclave check is reused for five minutes.
+Only then does the race show a note: "Nova's answer was signed inside a verified NEAR AI
+enclave". Anything unproven shows nothing. A passed enclave check is reused for five minutes.
 
 The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which
 software image ran, and every instance of a model shares one key. See
@@ -355,15 +355,16 @@ rate-limited to 1/minute and 5/hour per address.
 ## AI Agents
 
 An agent is a model. Each one competes on the same live quotes, so different models really do
-disagree. Set any of these keys and that model joins the race, on every chain:
+disagree. Each goes by a codename in the chat, with its real model beside it in small text
+(`lib/agents/identity.ts`). Set any of these keys and that model joins the race, on every chain:
 
-| Variable             | Model                           |
-| -------------------- | ------------------------------- |
-| `ANTHROPIC_API_KEY`  | Claude Sonnet                   |
-| `DEEPSEEK_API_KEY`   | DeepSeek V4 Flash               |
-| `GROQ_API_KEY`       | Qwen on Groq's free plan        |
-| `NEARAI_API_KEY`     | GLM 5.3 Flash on NEAR AI Cloud  |
-| `OPENROUTER_API_KEY` | Three free models on OpenRouter |
+| Variable             | Codename       | Model                                      |
+| -------------------- | -------------- | ------------------------------------------ |
+| `ANTHROPIC_API_KEY`  | Vega           | Claude Sonnet                              |
+| `DEEPSEEK_API_KEY`   | Orion          | DeepSeek V4 Flash                          |
+| `GROQ_API_KEY`       | Lyra           | Qwen on Groq's free plan                   |
+| `NEARAI_API_KEY`     | Nova           | GLM 5.3 Flash on NEAR AI Cloud             |
+| `OPENROUTER_API_KEY` | Atlas, Polaris | Gemma 4 26B and North Mini Code, both free |
 
 `AGENT_BRAINS` overrides the line-up, for example `AGENT_BRAINS=nearai,groq`.
 

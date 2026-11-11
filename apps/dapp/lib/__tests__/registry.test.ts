@@ -82,7 +82,7 @@ describe('getRoster', () => {
     const roster = getRoster() ?? []
     expect(roster.map((a) => a.key)).toEqual(['nearai:z-ai/glm-5.3-flash'])
     expect(publicRoster(roster)[0]).toMatchObject({
-      name: 'GLM 5.3 Flash',
+      name: 'Nova',
       providerName: 'NEAR AI',
       free: false,
     })
@@ -104,7 +104,7 @@ describe('getRoster', () => {
       'openrouter:google/gemma-4-26b-a4b-it:free',
       'deepseek:deepseek-v4-flash',
     ])
-    expect(roster[0]?.name).toBe('Gemma 4 26B')
+    expect(roster[0]?.name).toBe('Atlas')
     expect(roster[0]?.brain.model).toBe('google/gemma-4-26b-a4b-it:free')
   })
 
@@ -179,7 +179,7 @@ describe('publicRoster', () => {
     const rows = publicRoster(getRoster() ?? [])
     expect(rows[0]).toEqual({
       key: 'deepseek:deepseek-v4-flash',
-      name: 'DeepSeek V4 Flash',
+      name: 'Orion',
       gradient: expect.stringMatching(/^linear-gradient\(/) as string,
       provider: 'deepseek',
       providerName: 'DeepSeek',
