@@ -357,13 +357,13 @@ rate-limited to 1/minute and 5/hour per address.
 An agent is a model. Each one competes on the same live quotes, so different models really do
 disagree. Set any of these keys and that model joins the race, on every chain:
 
-| Variable             | Model                           |
-| -------------------- | ------------------------------- |
-| `ANTHROPIC_API_KEY`  | Claude Sonnet                   |
-| `DEEPSEEK_API_KEY`   | DeepSeek V4 Flash               |
-| `GROQ_API_KEY`       | Qwen on Groq's free plan        |
-| `NEARAI_API_KEY`     | GLM 5.3 Flash on NEAR AI Cloud  |
-| `OPENROUTER_API_KEY` | Three free models on OpenRouter |
+| Variable             | Model                          |
+| -------------------- | ------------------------------ |
+| `ANTHROPIC_API_KEY`  | Claude Sonnet                  |
+| `DEEPSEEK_API_KEY`   | DeepSeek V4 Flash              |
+| `GROQ_API_KEY`       | Qwen on Groq's free plan       |
+| `NEARAI_API_KEY`     | GLM 5.3 Flash on NEAR AI Cloud |
+| `OPENROUTER_API_KEY` | Two free models on OpenRouter  |
 
 `AGENT_BRAINS` overrides the line-up, for example `AGENT_BRAINS=nearai,groq`.
 
