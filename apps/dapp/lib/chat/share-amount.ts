@@ -12,7 +12,8 @@ export interface FoundShare {
   word: string
 }
 
-const OF_MY = String.raw`(?:\s+(?:of|in))?\s*(?:my|the)?\s*`
+// "of my", "in the", and "of what I have in (my)", which is how people often say it.
+const OF_MY = String.raw`(?:\s+(?:of|in))?(?:\s+what\s+i\s+(?:have|hold|own|(?:'ve\s+)?got)(?:\s+(?:in|of))?)?\s*(?:my|the)?\s*`
 const COIN = String.raw`([a-z][a-z0-9.]{1,11})`
 
 const PATTERNS: { re: RegExp; percent: (m: RegExpExecArray) => number }[] = [
@@ -44,7 +45,17 @@ const NOT_A_COIN = new Set([
   'are',
   'of',
   'the',
+  'what',
+  'my',
+  'i',
+  'wallet',
+  'balance',
+  'token',
+  'tokens',
 ])
+
+/** A part share is cut to this many places, rounded down, so it can be read and typed back. */
+const SHARE_PLACES = 8
 
 export function findShare(text: string): FoundShare | undefined {
   for (const { re, percent } of PATTERNS) {
@@ -73,8 +84,9 @@ export function unitsForShare(held: string, percent: number): string | undefined
   if (part <= BigInt(0)) return undefined
   const digits = part.toString().padStart(places + 1, '0')
   if (places === 0) return digits
-  const text = `${digits.slice(0, -places)}.${digits.slice(-places)}`
-  return text.replace(/\.?0+$/, '')
+  const kept = percent < 100 ? digits.slice(-places).slice(0, SHARE_PLACES) : digits.slice(-places)
+  const text = `${digits.slice(0, -places)}.${kept}`.replace(/\.?0+$/, '')
+  return /^0(?:\.0*)?$/.test(text) ? undefined : text
 }
 
 /**
