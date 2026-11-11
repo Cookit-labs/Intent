@@ -63,17 +63,17 @@ describe('getRoster', () => {
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
     const roster = getRoster() ?? []
-    expect(roster).toHaveLength(3)
-    expect(new Set(roster.map((a) => a.model)).size).toBe(3)
+    expect(roster).toHaveLength(2)
+    expect(new Set(roster.map((a) => a.model)).size).toBe(2)
     expect(roster.every((a) => a.provider === 'openrouter')).toBe(true)
   })
 
-  it('is five agents with the three hosted keys', async () => {
+  it('is four agents with the three hosted keys', async () => {
     process.env['DEEPSEEK_API_KEY'] = 'test-key'
     process.env['GROQ_API_KEY'] = 'test-key'
     process.env['OPENROUTER_API_KEY'] = 'test-key'
     const { getRoster } = await registry()
-    expect(getRoster()).toHaveLength(5)
+    expect(getRoster()).toHaveLength(4)
   })
 
   it('fields NEAR AI under its own name when its key is set', async () => {
