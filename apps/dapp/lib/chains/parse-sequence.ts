@@ -22,7 +22,7 @@ import {
   type ChainSequenceRequest,
   type FollowOn,
 } from './sequence'
-import { dollarsSaid, sequenceWordsMatch, swapOrderSaid } from './sequence-flow'
+import { dollarsSaid, sequenceWordsMatch, swapOrderSaid, tokenSaid } from './sequence-flow'
 import type { ChainActionKind, ChainActionRequest, ChainWithActions } from './types'
 
 const TOKEN = String.raw`([a-z][a-z0-9.+]{0,11})`
@@ -102,7 +102,7 @@ function followOnOf(text: string): FollowOn | { refusal: string } | null {
  */
 export function parseChainSequence(
   text: string
-): ChainSequenceRequest | { refusal: string } | null {
+): ChainSequenceRequest | { refusal: string; question?: string } | null {
   const match = SEQUENCE.exec(text.trim())
   if (match === null) return null
   const followOn = followOnOf((match[4] as string).trim())
@@ -263,24 +263,80 @@ const EXAMPLE_AFTER: Record<string, string> = {
 function exampleOf(read: ReadSwap, asked: ChainActionKind | undefined): string {
   const kind = read.followOn?.kind
   const after = kind === undefined ? '' : (EXAMPLE_AFTER[kind] ?? '')
-  const tokenIn = chainTokenWord(read.tokenIn)
+  const tokenIn = cleanToken(read.tokenIn)
+  // An example of what was asked: a stake is shown a stake, never a swap.
+  if (kind === undefined && asked !== undefined && asked !== 'swap') {
+    const verb = VERB[asked] ?? asked
+    return asked === 'send' ? `send 5 ${tokenIn} to an address` : `${verb} 5 ${tokenIn}`
+  }
   if (tokenIn.toUpperCase() !== 'USDC') return `swap 5 ${tokenIn} to USDC${after}`
   if (kind === 'offramp') return 'cash out 5 USDC'
-  const tokenOut = chainTokenWord(read.tokenOut)
+  const tokenOut = cleanToken(read.tokenOut)
   if (tokenOut.toUpperCase() !== 'USDC') return `swap 5 USDC to ${tokenOut}${after}`
   if (kind === 'send' || asked === 'send') return 'send 5 USDC to an address'
   if (kind === 'stake' || asked === 'stake') return 'stake 5 USDC'
   return 'deposit 5 USDC'
 }
 
+/** A token as the person would write it: the chain's coin for its name, with no stray punctuation. */
+function cleanToken(token: string): string {
+  return chainTokenWord(token.trim().replace(/[.,!?;:]+$/, '')).toUpperCase()
+}
+
+/** The verb a question uses for each kind of action. */
+const VERB: Partial<Record<string, string>> = {
+  swap: 'swap',
+  stake: 'stake',
+  supply: 'deposit',
+  lend: 'deposit',
+  send: 'send',
+  unstake: 'unstake',
+  withdraw: 'withdraw',
+  borrow: 'borrow',
+  repay: 'repay',
+  claim: 'claim',
+  offramp: 'cash out',
+}
+
+/**
+ * The one question that gets what is missing from the person's own words. The model understood
+ * them; what it read just can't be signed until they say the figure, the token or the address
+ * themselves, so they are asked for exactly that, and their answer is read with what came before.
+ */
+function questionFor(
+  read: ReadSwap,
+  what: string,
+  asked: ChainActionKind | undefined,
+  said: readonly string[]
+): string {
+  if (what === 'that address') {
+    return 'Which address should it go to? Paste the full address, exactly as it is.'
+  }
+  if (what === 'what to do after the swap') {
+    return 'What should happen after the swap: cash out, deposit, stake or send it?'
+  }
+  if (what === 'that venue') return 'Which app do you want to deposit with?'
+  const verb = VERB[asked ?? 'swap'] ?? asked ?? 'swap'
+  const token = cleanToken(read.tokenIn)
+  if (!tokenSaid(token, said)) return `Which token do you want to ${verb}?`
+  const amountSaid =
+    read.amountStated && sequenceWordsMatch({ amount: String(read.amountUsd), token }, said)
+  if (amountSaid && (asked ?? 'swap') === 'swap')
+    return `What do you want to get for your ${token}?`
+  return `How much ${token} do you want to ${verb}? Say a number, or "half" or "all".`
+}
+
 function refuseUnsaid(
   read: ReadSwap,
   what: string,
   /** What was asked, where the reading alone doesn't say. */
-  asked?: ChainActionKind
-): { refusal: string } {
+  asked?: ChainActionKind,
+  /** The person's own turns. With them, the missing part is asked for rather than refused. */
+  said?: readonly string[]
+): { refusal: string; question?: string } {
   return {
     refusal: `I could not find ${what} in what you typed, and only your own words decide what is signed. Say it in full, for example "${exampleOf(read, asked)}". Nothing was signed or sent.`,
+    ...(said !== undefined ? { question: questionFor(read, what, asked, said) } : {}),
   }
 }
 
@@ -399,13 +455,13 @@ export function requestSaid(
 export function sequenceFromReading(
   read: ReadSwap,
   said: readonly string[]
-): ChainSequenceRequest | { refusal: string } | null {
+): ChainSequenceRequest | { refusal: string; question?: string } | null {
   const model = read.followOn ?? refusedFollowOn(read, said)
   if (model === null) return null
   const read$ = withOwnDigits(swapOf(read), said)
   if ('refusal' in read$) return read$
   if (!requestSaid(read$, said, model.kind === 'offramp')) {
-    return refuseUnsaid(read, 'that amount, token and token to receive')
+    return refuseUnsaid(read, 'that amount, token and token to receive', 'swap', said)
   }
   const swap = countedInStable(read$, said)
 
@@ -419,16 +475,16 @@ export function sequenceFromReading(
     followOn = withCurrency({ kind: 'cashout' }, said)
   } else if (model.kind === 'lend') {
     if (model.venueNamed === true && !venueSaid(model.venue, said)) {
-      return refuseUnsaid(read, 'that venue')
+      return refuseUnsaid(read, 'that venue', 'supply', said)
     }
     followOn =
       model.venueNamed === true ? { kind: 'supply', venue: model.venue } : { kind: 'supply' }
   } else if (model.kind === 'send') {
     const recipient = model.recipient ?? ''
-    if (!typedExactly(recipient, said)) return refuseUnsaid(read, 'that address')
+    if (!typedExactly(recipient, said)) return refuseUnsaid(read, 'that address', 'send', said)
     followOn = { kind: 'send', recipient }
   } else {
-    return refuseUnsaid(read, 'what to do after the swap')
+    return refuseUnsaid(read, 'what to do after the swap', 'swap', said)
   }
   return withSwap(swap, followOn)
 }
@@ -485,12 +541,17 @@ function moreAfterSwap(instruction: string, said: readonly string[]): boolean {
 export function swapFromReading(
   read: ReadSwap,
   said: readonly string[]
-): ChainActionRequest | { refusal: string } {
+): ChainActionRequest | { refusal: string; question?: string } {
   const swap = withOwnDigits(swapOf(read), said)
   if ('refusal' in swap) return swap
   return requestSaid(swap, said)
     ? countedInStable(swap, said)
-    : refuseUnsaid({ ...read, followOn: null }, 'that amount, token and token to receive')
+    : refuseUnsaid(
+        { ...read, followOn: null },
+        'that amount, token and token to receive',
+        'swap',
+        said
+      )
 }
 
 /** A reading's name for each follow-on, which is what the examples go by. */
@@ -553,7 +614,8 @@ export function chainRouteFromReading(
   said: readonly string[],
   chain?: ChainWithActions
 ): ChainRoute | null {
-  const instruction = ownDigits(modelInstruction, said)
+  // The model ends its sentence with a full stop, which is no part of the last token or address.
+  const instruction = ownDigits(modelInstruction.trim().replace(/[.!?]+$/, ''), said)
   const limit = limitRouteFromReading(read, instruction, said, chain)
   if (limit !== undefined) return limit
   if (read.followOn !== null || read.followOnRefused !== undefined) {
@@ -575,16 +637,28 @@ export function chainRouteFromReading(
         }
       : refuseUnsaid(
           { ...read, followOn: { kind: READING_KIND[followOn.kind], venue: '' } },
-          'that request'
+          'that request',
+          'swap',
+          said
         )
   }
   const action = parseChainAction(instruction)
+  // An action the model read with no size: asked how much, in that action's words, rather than
+  // handed back with nothing to say.
+  if (action === null && read.action !== 'swap' && !read.amountStated) {
+    const asked = read.action as ChainActionKind
+    if (VERB[asked] !== undefined && tokenSaid(cleanToken(read.tokenIn), said)) {
+      return refuseUnsaid(read, 'that amount', asked, said) as { refusal: string; question: string }
+    }
+  }
   if (action === null && read.action !== 'swap') return null
   if (moreAfterSwap(instruction, said)) {
     const kind = followOnKindSaid(instruction, said)
     return refuseUnsaid(
       { ...read, followOn: kind === undefined ? null : { kind, venue: '' } },
-      'what to do after the swap'
+      'what to do after the swap',
+      'swap',
+      said
     )
   }
   if (action !== null) {
@@ -603,7 +677,8 @@ export function chainRouteFromReading(
             followOn: null,
           },
           'that request',
-          action.kind
+          action.kind,
+          said
         )
   }
   const swap = swapFromReading(read, said)

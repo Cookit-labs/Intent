@@ -194,7 +194,11 @@ const FILLER =
   /(?<=\S)\s+(?:(?:tokens?|coins?)(?:\s+(?:in|from)\s*my\s+wallet)?|(?:in|from)\s*my\s+wallet)(?=\s+(?:to|for|into|on|with|via)\b|\s*$)/gi
 
 function withoutFiller(text: string): string {
-  return text.trim().replace(FILLER, '')
+  // A sentence's own full stop is not part of the last word: "Stake 0.2 NEAR." stakes NEAR.
+  return text
+    .trim()
+    .replace(/[.!?]+$/, '')
+    .replace(FILLER, '')
 }
 
 export function parseChainAction(text: string): ChainActionRequest | null {
