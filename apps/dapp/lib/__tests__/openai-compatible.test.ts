@@ -320,6 +320,29 @@ describe('an incomplete first take from a fast model', () => {
 
   const missingReasoning = JSON.stringify({ ...JSON.parse(goodArguments()), reasoning: undefined })
 
+  it('tells the model which field it left out when it asks again', async () => {
+    const sent: { role: string; content: string | null }[][] = []
+    let n = 0
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      sent.push(
+        (JSON.parse(String(init.body)) as { messages: { role: string; content: string | null }[] })
+          .messages
+      )
+      const args = n === 0 ? missingReasoning : goodArguments()
+      n += 1
+      return new Response(JSON.stringify(toolResponse(args)))
+    }) as unknown as typeof fetch
+    const brain = createBrain({ provider: 'nearai', apiKey: SECRET, fetchImpl, proofDeps: noProof })
+    expect((await brain.propose(request)).ok).toBe(true)
+    const [first, second] = sent
+    expect(second?.length).toBe((first?.length ?? 0) + 2)
+    expect(second?.at(-2)).toMatchObject({ role: 'assistant' })
+    expect(second?.at(-2)?.content).toContain('submit_proposal')
+    expect(second?.at(-1)).toMatchObject({ role: 'user' })
+    expect(second?.at(-1)?.content).toMatch(/left out reasoning/)
+    expect(second?.at(-1)?.content).toMatch(/every field/)
+  })
+
   it('asks NEAR AI again, and takes the complete answer', async () => {
     const { fetchImpl, calls } = replies(missingReasoning, goodArguments())
     const brain = createBrain({ provider: 'nearai', apiKey: SECRET, fetchImpl, proofDeps: noProof })

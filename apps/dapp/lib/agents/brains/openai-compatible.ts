@@ -469,6 +469,29 @@ function retryAfter(headers: Headers): number | undefined {
   return undefined
 }
 
+/** Every field the proposal tool needs. */
+const PROPOSAL_FIELDS: readonly string[] = SUBMIT_PROPOSAL_TOOL.function.parameters.required
+
+/**
+ * The model's incomplete call and a line naming what it left out, so the next try fixes that.
+ * The reasoning field gets a word on what it is, since that is the one a fast model drops.
+ */
+export function repairTurn(args: unknown): { role: string; content: string }[] {
+  const given = typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {}
+  const missing = PROPOSAL_FIELDS.filter((field) => given[field] === undefined)
+  const what =
+    missing.length > 0
+      ? `That call left out ${missing.join(', ')}.${missing.includes('reasoning') ? ' reasoning is one or two sentences the person reads, saying why you chose this route.' : ''}`
+      : 'That call did not pass the checks.'
+  return [
+    { role: 'assistant', content: `submit_proposal(${JSON.stringify(given)})` },
+    {
+      role: 'user',
+      content: `${what} Call submit_proposal again with every field filled in, using only the routes and figures given above.`,
+    },
+  ]
+}
+
 export function createBrain(options: BrainOptions = {}): AgentBrain {
   const config = PROVIDERS[options.provider ?? 'deepseek']
 
@@ -622,9 +645,10 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
             function: { ...SUBMIT_PROPOSAL_TOOL.function, strict: false },
           }
 
-      const body = {
+      const brief = buildMessages(req)
+      const body: Record<string, unknown> = {
         model,
-        messages: buildMessages(req),
+        messages: brief,
         tools: [tool],
         // 'auto' for every provider today. DeepSeek's models reason in
         // thinking mode, which rejects a forced tool_choice outright:
@@ -653,6 +677,9 @@ export function createBrain(options: BrainOptions = {}): AgentBrain {
           Date.now() - startedAt < retry.withinMs &&
           req.signal?.aborted !== true
         if (!again) return outcome
+        // Told what it left out, with its own call beside it: a model fixes a named slip far more
+        // reliably than it redoes the whole answer, which repeats the slip.
+        if (out.ok) body['messages'] = [...brief, ...repairTurn(out.args)]
       }
     },
 
