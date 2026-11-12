@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { notifyDeposit } from '../../../../../../lib/chains/near/oneclick'
 import { ChainActionRefused, type SignedPayload } from '../../../../../../lib/chains/types'
 import { logExecution } from '../../../../../../lib/server/analytics'
 import { enforceRateLimit } from '../../../../../../lib/server/rate-limit'
@@ -205,6 +206,14 @@ export async function POST(
         "This transfer is already on record as a deposit, so it does not pay this cash-out. Do not send it again. Check your wallet's activity.",
         409
       )
+    }
+
+    // Weave bridges every chain but Stellar through NEAR Intents, which otherwise waits to
+    // notice the deposit on its own: a confirmed one is passed straight on.
+    if (result.ok && hashText !== undefined && row.provider !== 'linq' && row.chain !== 'stellar') {
+      await (row.chain === 'near'
+        ? notifyDeposit(row.depositAddress, hashText, row.account)
+        : notifyDeposit(row.depositAddress, hashText))
     }
 
     // The status moves only on what Weave says, so even a good answer here changes

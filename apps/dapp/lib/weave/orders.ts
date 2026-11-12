@@ -1,5 +1,6 @@
 import { getPool, withTimeout, type QueryFn } from '../server/db'
 import type { LinqClient } from '../linq/client'
+import { normaliseStatus } from '../naira/status'
 import type { PayoutProvider as CashoutProvider } from './best-payout'
 import type { WeaveClient, WeaveOrder } from './client'
 import { isFinal, mapProviderStatus, nextLinqStatus, nextStatus, type WeaveStatus } from './status'
@@ -594,7 +595,7 @@ export interface PayRefusal {
 
 /**
  * Why an order may not be paid now, or nothing. A deposit is only ever built for
- * a status Weave has positively said is waiting. If it could not be asked, or used
+ * a status its provider has positively said is waiting. If it could not be asked, or used
  * a word this app does not know, the order stays `waiting` in the record but is
  * not paid: paying into an order that already has its deposit would be paying twice.
  */
@@ -621,7 +622,11 @@ export function payRefusal(synced: SyncedOrder, now: number = Date.now()): PayRe
       reason: 'This cash-out has expired. Review it again to start a new one.',
     }
   }
-  if (!reached || mapProviderStatus(row.providerStatus) !== 'waiting') {
+  const saysWaiting =
+    row.provider === 'linq'
+      ? normaliseStatus(row.providerStatus) === 'waiting'
+      : mapProviderStatus(row.providerStatus) === 'waiting'
+  if (!reached || !saysWaiting) {
     return {
       code: 'unconfirmed',
       status: 503,

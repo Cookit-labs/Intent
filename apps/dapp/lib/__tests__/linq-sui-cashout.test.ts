@@ -29,7 +29,7 @@ vi.mock('../server/report', () => ({
 import { POST } from '../../app/api/cashout/orders/route'
 import { GET as quote } from '../../app/api/cashout/quote/route'
 import { linqBank, placeWithLinq, sameHolder } from '../weave/linq-cashout'
-import { syncOrder, type WeaveOrderRow } from '../weave/orders'
+import { payRefusal, syncOrder, type WeaveOrderRow } from '../weave/orders'
 import { nextLinqStatus } from '../weave/status'
 import { WALLET_HEADER } from '../wallet-header'
 
@@ -575,5 +575,28 @@ describe('syncOrder for an order Linq holds', () => {
 
   it('says Linq could not be asked when there is no Linq client', async () => {
     expect((await syncOrder(repo(), row(), neverWeave)).reached).toBe(false)
+  })
+
+  it.each(['initiated', 'processing: wallet worker on it..'])(
+    'lets a deposit be sent to a Linq order Linq calls %s',
+    async (status) => {
+      const synced = await syncOrder(repo(), row(), neverWeave, {
+        getStatus: async () => ({
+          ok: true,
+          value: { id: 'lq_1', status, amountCoin: 1, amountNGN: 1368.39 },
+        }),
+      })
+      expect(payRefusal(synced)).toBeUndefined()
+    }
+  )
+
+  it('still refuses a deposit to a Linq order Linq has settled', async () => {
+    const synced = await syncOrder(repo(), row(), neverWeave, {
+      getStatus: async () => ({
+        ok: true,
+        value: { id: 'lq_1', status: 'disbursed', amountCoin: 1, amountNGN: 1368.39 },
+      }),
+    })
+    expect(payRefusal(synced)).toBeDefined()
   })
 })
