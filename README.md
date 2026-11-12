@@ -34,18 +34,31 @@ Built at NEAR HACKATHON. **Only the NEAR integration below was built in the hack
 submitted for judging.**
 
 **Disclosure.** Intent existed before the hackathon as a chat app for trading on Stellar. That
-product, including its chat, agent race and interface, is baseline. The sections after this one
-describe the wider project, and some predate the current app.
+product, including its chat, agent race and interface, is baseline. The NEAR side is new: its first
+commit is from 4 November 2026, two weeks into the window. The sections after this one describe the
+wider project, and some predate the current app.
 
-- Baseline: tag `pre-hackathon`
-- Submitted: tag `hackathon-submission`
+### When the NEAR work was built
+
+| Date         | What                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 17 Oct       | Tag `pre-hackathon` (`940b6fb`), the last commit before the 19 Oct announcement. It has no NEAR code.                                                                        |
+| 4 Nov        | First NEAR commit (`326753f`, swap, earn and stake on NEAR)                                                                                                                  |
+| 5 to 6 Nov   | NEAR wallets, the agent race on NEAR, onchain venues with a way back out of each (#150, #151, #154, #155)                                                                    |
+| 10 Nov       | NEAR build-out (#167), NEAR AI as a competing agent (#168), its checked enclave proof (#177), LiNEAR (#178), the prompt-injection guard (#179)                               |
+| 11 to 12 Nov | Plain-English amounts (#182), asking for what is missing instead of refusing (#183), off-ramp from NEAR to a bank (#188, #190), finished cards kept in the chat (#187, #189) |
+| 14 Nov       | Tag `hackathon-submission`                                                                                                                                                   |
+
 - Diff: [`pre-hackathon...hackathon-submission`](https://github.com/Cookit-labs/Intent/compare/pre-hackathon...hackathon-submission)
+- The NEAR code alone: 24 files and about 7,300 lines in
+  [`apps/dapp/lib/chains/near/`](apps/dapp/lib/chains/near),
+  [`apps/dapp/lib/wallet/near-connector.ts`](apps/dapp/lib/wallet/near-connector.ts),
+  [`apps/dapp/lib/weave/deposit/near.ts`](apps/dapp/lib/weave/deposit/near.ts) and
+  [`apps/dapp/lib/agents/brains/nearai-proof.ts`](apps/dapp/lib/agents/brains/nearai-proof.ts), with
+  20 `near-*` and `rhea*` test files in [`apps/dapp/lib/__tests__/`](apps/dapp/lib/__tests__).
 
-That diff also carries work on other chains. The NEAR work is in
-[`apps/dapp/lib/chains/near/`](apps/dapp/lib/chains/near),
-[`apps/dapp/lib/wallet/near-connector.ts`](apps/dapp/lib/wallet/near-connector.ts) and the
-`near-*` and `rhea*` files in [`apps/dapp/lib/__tests__/`](apps/dapp/lib/__tests__). A full
-file map and the scope for reviewers is in [`AGENTS.md`](AGENTS.md).
+That diff also carries work on other chains. A full file map and the scope for reviewers is in
+[`AGENTS.md`](AGENTS.md).
 
 ### The problem and the product
 
@@ -55,27 +68,94 @@ Intent you type what you want in a chat. AI agents compare real quotes, question
 choices in the chat and propose a route. You read a card and sign in your own wallet. Agents can't
 sign or send anything.
 
+<p align="center">
+  <img src="docs/media/intent-on-near.gif" alt="Intent on NEAR: a typed request, agents comparing Rhea and 1Click, Nova's NEAR AI proof note, then a swap on Rhea DEX and a LiNEAR stake" width="480" />
+</p>
+<p align="center">
+  <a href="docs/media/intent-on-near.mp4">Watch with sound (MP4, 32 seconds)</a>. Amounts in the video are illustrative; the
+  transactions under <a href="#proven-on-near-mainnet-with-a-real-wallet">Proven on NEAR mainnet</a> are real.
+</p>
+
+Tracks: Unstoppable DeFi, AI Swarms, Real-World Money, Privacy & Private AI, AI Security & Defense.
+
+### How it fits together
+
+<p align="center">
+  <img src="docs/media/intent-architecture.gif" alt="System architecture for Intent on NEAR: the system map, one request traced end to end, the ChainVenue and ChainModule interfaces, the NEAR AI proof sequence, the safety checks and the off-ramp sequence" width="100%" />
+</p>
+<p align="center">
+  <a href="docs/media/intent-architecture.mp4">Full-size video (MP4, 32 seconds)</a>
+</p>
+
+![System Architecture for Intent on NEAR: the client, API routes, core modules and external services, with one request traced through them in eight steps](docs/media/intent-architecture.png)
+
+```mermaid
+flowchart TD
+    you(["You, in the chat"]) --> reader["Message reader<br/>plain-English amounts,<br/>prompt-injection guard"]
+    reader -->|"clear instruction"| race
+    reader -->|"anything else"| model["Orchestrator model<br/>asks for what is missing"]
+    model --> race
+    race["Agent race<br/>Vega, Orion, Lyra, Atlas, Polaris<br/>and Nova on NEAR AI Cloud"] -->|"live quotes"| near
+    near["NEAR module<br/>Rhea DEX, Lend and DCL<br/>NEAR Intents 1Click<br/>Meta Pool, rNEAR, LiNEAR"]
+    race --> card["Card you read"]
+    card --> checks["Server checks the transaction<br/>receiver, method, amount"]
+    checks --> wallet["Your NEAR wallet signs"]
+    wallet --> chain[("NEAR mainnet")]
+    card -->|"off-ramp"| weave["Weave order<br/>NEAR Intents to Base,<br/>Paycrest to a bank"]
+```
+
 ### What runs on NEAR
 
-| You type                                 | What happens                                                              | Built on                      |
-| ---------------------------------------- | ------------------------------------------------------------------------- | ----------------------------- |
-| `swap 5 USDC to NEAR`                    | Agents race live quotes, you sign the winner                              | Rhea DEX, NEAR Intents 1Click |
-| `swap 5 USDC to NEAR then stake`         | Swap, then stake what arrived, as two steps                               | Rhea DEX, Meta Pool           |
-| `stake 1 NEAR with Meta Pool`            | Stake, and later unstake and claim                                        | Meta Pool, rNEAR, LiNEAR      |
-| `supply 25 USDC on 1Click Earn`          | Deposit and withdraw                                                      | NEAR Intents                  |
-| `supply 25 USDC on Rhea Lend`            | Supply, withdraw, borrow, repay                                           | Rhea Lend                     |
-| `send 1 NEAR to bob.near`                | A plain NEAR transfer                                                     | Protocol `Transfer` action    |
-| `send 5 USDC to <Solana or Sui address>` | Pays out on that chain, refund comes back to NEAR                         | NEAR Intents 1Click           |
-| a limit order on NEAR and USDC           | Rests in the pool until filled or cancelled                               | Rhea DCL                      |
-| `where is my money`                      | Every position, what to type next, and how far a loan is from liquidation | Contract reads                |
+| You type                                       | What happens                                                              | Built on                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------- |
+| `swap 0.1 NEAR to USDC`                        | Agents race live quotes, you sign the winner                              | Rhea DEX, NEAR Intents 1Click |
+| `swap 40% of my near to usdc`                  | The share is worked out from your balance first                           | Contract reads                |
+| `swap 0.2 NEAR to USDC then off-ramp to naira` | Swap, then pay what arrived to a bank account                             | Rhea DEX, NEAR Intents, Weave |
+| `stake 0.1 NEAR on linear`                     | Stake, and later unstake and claim                                        | LiNEAR, rNEAR, Meta Pool      |
+| `supply 0.25 USDC to rhea lend`                | Supply, withdraw, borrow, repay                                           | Rhea Lend                     |
+| `supply 25 USDC on 1Click Earn`                | Deposit and withdraw                                                      | NEAR Intents                  |
+| `send 0.01 NEAR to bob.near`                   | A plain NEAR transfer, keeping enough NEAR for fees                       | Protocol `Transfer` action    |
+| `send 5 USDC to <Solana or Sui address>`       | Pays out on that chain, refund comes back to NEAR                         | NEAR Intents 1Click           |
+| a limit order on NEAR and USDC                 | Rests in the pool until filled or cancelled                               | Rhea DCL                      |
+| `where is my money`                            | Every position, what to type next, and how far a loan is from liquidation | Contract reads                |
 
-**NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect
-(`@hot-labs/near-connect`) and, for one of the competing agents, NEAR AI Cloud. That agent, Nova,
-runs GLM 5.3 Flash, which NEAR's model catalogue lists as verifiable and attested.
+A message with a piece missing, such as `swap some near to usdc`, gets one question back ("How much
+NEAR do you want to swap?") instead of a refusal.
 
-**Checked attestation:** the server checks every answer from that agent before the chat says it
-was signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation report and checks
-these:
+**NEAR ecosystem partners used:** NEAR Intents (1Click quotes, cross-chain sends, 1Click Earn and the
+bridge behind every NEAR off-ramp), Rhea (DEX, Lend, DCL and rNEAR), NEAR AI (Nova, with a checked
+enclave proof) and HOT (wallet connection through NEAR Connect, `@hot-labs/near-connect`).
+
+**NEAR technology used:** NEAR Intents 1Click API, NEP-141 tokens, NEAR Connect and, for one of the
+competing agents, NEAR AI Cloud. That agent, Nova, runs GLM 5.3 Flash, which NEAR's model catalogue
+lists as verifiable and attested.
+
+### The agent race, and Nova's proof
+
+```mermaid
+sequenceDiagram
+    participant You
+    participant Server as Intent server
+    participant Venues as Rhea and 1Click
+    participant Agents as Five model agents
+    participant Nova as Nova on NEAR AI Cloud
+    You->>Server: swap 0.1 NEAR to USDC
+    Server->>Venues: live quote for every route
+    Server->>Agents: the same quotes and brief
+    Server->>Nova: the same quotes and brief
+    Agents-->>Server: proposals, then questions to each other
+    Nova-->>Server: proposal and reply id
+    Server->>Nova: attestation report for a fresh nonce, and the reply's signature
+    Server->>Server: Intel TDX quote, NVIDIA GPUs, signature over the exact bytes
+    Server-->>You: the race in the chat, Nova's proof note, the winning card
+    You->>Server: confirm
+    Server->>Server: rebuild the transaction and check it
+    Server-->>You: unsigned transaction
+    You->>You: sign in your NEAR wallet
+```
+
+**Checked attestation:** the server checks every answer from Nova before the chat says it was
+signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation report and checks these:
 
 - The Intel TDX quote verifies against Intel's own collateral, is up to date, and isn't running in
   debug mode.
@@ -84,15 +164,64 @@ these:
 - NEAR AI's signature over the SHA-256 of the exact request and response bytes recovers to that
   attested address. The signature is the model's own, not the gateway's.
 
-Only then does the race show a note: "Nova's answer was signed inside a verified NEAR AI
-enclave". Anything unproven shows nothing. A passed enclave check is reused for five minutes.
+Only then does the race show a note: "Nova's answer was signed inside a verified NEAR AI enclave".
+Anything unproven shows nothing. A passed enclave check is reused for five minutes.
 
-The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which
-software image ran, and every instance of a model shares one key. See
-`apps/dapp/lib/agents/brains/nearai-proof.ts`.
+The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which software
+image ran, and every instance of a model shares one key. See
+[`nearai-proof.ts`](apps/dapp/lib/agents/brains/nearai-proof.ts).
 
-**Libraries and tools:** see `apps/dapp/package.json`. Much of the code was written with AI coding
-tools. The Stellar app and its shared chat code are this team's own pre-hackathon work.
+### What stands between a message and your money
+
+```mermaid
+flowchart TD
+    msg["Your message"] --> guard["Prompt-injection guard<br/>outside text can't steer a model"]
+    guard --> read["Reading of the message"]
+    read --> own{"Amount, token and recipient<br/>all in your own words?"}
+    own -->|"something missing"| ask["One question back"]
+    own -->|"yes"| build["Server builds the transaction"]
+    build --> safe{"Server check: receiver,<br/>method, amount, deposit address"}
+    safe -->|"anything else"| refuse["Refused. Nothing was signed or sent."]
+    safe -->|"matches"| sign["Card, then your wallet signs"]
+```
+
+- Outside text (quotes, token names, other agents' words) reaches a model only as data:
+  [`prompt-safe.ts`](apps/dapp/lib/agents/prompt-safe.ts).
+- A model never picks a figure you didn't type:
+  [`parse-sequence.ts`](apps/dapp/lib/chains/parse-sequence.ts).
+- Every NEAR transaction is checked on the server before the wallet sees it:
+  [`safety.ts`](apps/dapp/lib/chains/near/safety.ts),
+  [`rhea-safety.ts`](apps/dapp/lib/chains/near/rhea-safety.ts),
+  [`weave/deposit/near.ts`](apps/dapp/lib/weave/deposit/near.ts).
+- A send keeps about 0.05 NEAR back, so a wallet can't strand itself without gas.
+
+### Off-ramp from NEAR to a bank
+
+```mermaid
+flowchart LR
+    near["NEAR in your wallet"] -->|"Rhea DEX swap"| usdc["USDC on NEAR"]
+    usdc -->|"one transfer you sign,<br/>to the order's deposit address"| intents["NEAR Intents"]
+    intents --> base["USDC on Base"]
+    base -->|"Paycrest"| bank["Naira in a bank account"]
+```
+
+The off-ramp form opens at all the USDC the swap delivered. Weave adds its fee on top of the order,
+so an order for most of a balance is sized to leave room for it
+([`orders.ts`](apps/dapp/lib/weave/orders.ts)). The deposit is built from the stored order and
+checked against it before signing.
+
+### Proven on NEAR mainnet with a real wallet
+
+| When (UTC)    | What                                               | Transaction                                                                           |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 11 Nov, 10:42 | Stake 0.18 NEAR with rNEAR                         | [`EJVPX2D…`](https://nearblocks.io/txns/EJVPX2D1gNoGiGszDCrQPBPjsJR7iHhAtFbSqbyu3EgC) |
+| 11 Nov, 22:52 | Unstake it                                         | [`CMuQUyu…`](https://nearblocks.io/txns/CMuQUyuCPixFsarG76ZkhJkrBQWDDSqdUd9FRcdcFThC) |
+| 12 Nov, 02:14 | Swap 0.25 NEAR to 0.900614 USDC on Rhea DEX        | [`HHSztpw…`](https://nearblocks.io/txns/HHSztpwPJ7e66pGU4bZ3jgjfVzsQtHym9SYiadc91rkr) |
+| 12 Nov, 02:15 | Off-ramp deposit, paid ₦1,159.98 to a bank         | [`AN8RBZf…`](https://nearblocks.io/txns/AN8RBZfwh6VCFfQU7ewFz9XS63i5LbdJrqTkm6Uh51uK) |
+| 12 Nov, 03:18 | Swap 0.3 NEAR to 1.065345 USDC on Rhea DEX         | [`6TeQs8V…`](https://nearblocks.io/txns/6TeQs8VvN2kM2KJ5HkjtPXJs6aBfMbvyTKBX5dFicKPE) |
+| 12 Nov, 03:18 | Off-ramp deposit, quoted ₦1,431.28, paid ₦1,431.64 | [`BtC6hBd…`](https://nearblocks.io/txns/BtC6hBdcwangTeBarSFAtXk5HjaMQXrfF3GMfQLVdcTq) |
+
+Nova's proof note showed in each of the seven NEAR races checked on production between 11 and 12 November.
 
 ### Try it with no wallet and no funds
 
@@ -113,8 +242,9 @@ Everything here runs on mainnet, so use small amounts. The app is at
 [app.runintent.xyz](https://app.runintent.xyz) and needs a NEAR wallet.
 
 1. Open the app and connect a NEAR wallet. You should land in the chat on NEAR.
-2. Type `swap 1 USDC to NEAR`. You should see agents post proposals and question each other, then a
-   swap card with the amount you'd receive. Your wallet asks you to sign only when you confirm.
+2. Type `swap 0.1 NEAR to USDC`. You should see the agents post proposals and question each other,
+   Nova's proof note, then a swap card with the amount you'd receive. Your wallet asks you to sign
+   only when you confirm.
 3. Type `where is my money`. You should see what you hold in each app and what to type next.
 
 To run it locally, follow [Quick Start](#quick-start), then set one model key in
@@ -122,11 +252,14 @@ To run it locally, follow [Quick Start](#quick-start), then set one model key in
 
 ### Not done or not proven
 
-- **Real wallet runs:** an rNEAR stake and unstake have run through this app from a real NEAR wallet.
-  The other NEAR flows are covered by tests and live read-only checks only.
-- **Off-ramp to a bank:** open from NEAR since 12 November 2026, when the payout provider fixed NEAR
-  deposits. An unfunded order returns a NEAR deposit address, but no real NEAR off-ramp has paid out
-  yet. Its quote from NEAR is about 2.8% below one from Base, for the bridge it runs through.
+- **Real wallet runs:** the rNEAR stake and unstake, Rhea DEX swaps and two off-ramps above. The
+  rest is covered by tests. LiNEAR stakes, Rhea Lend supplies, NEAR sends and USDC sends to Solana
+  were also built on production on 12 November, but not signed.
+- **1Click Earn:** NEAR Intents answers "No liquidity available" for its vault, Gauntlet USDC Prime,
+  as of 12 November, so deposits are refused with that reason.
+- **Meta Pool** takes at least 1 NEAR per stake.
+- **Off-ramp cost from NEAR:** about 1.9% goes to the bridge to Base, and the payout provider has a
+  $0.50 minimum.
 - **Sends to EVM chains:** refused, because a 0x address doesn't say which chain it means.
 - **Swaps into NEAR through 1Click:** these arrive as wNEAR, so 1Click only runs for them when it's
   named. A stake or send after one stops and says the swap went through.
