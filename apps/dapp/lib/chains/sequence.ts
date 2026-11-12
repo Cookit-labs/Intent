@@ -54,16 +54,22 @@ export function deliveredAmount(
   return fromBase(b - a, decimals)
 }
 
+/** The places a cash-out amount carries, which every chain's USDC has. */
+const CASHOUT_PLACES = 6
+/** Below a cent there is nothing a payout provider will take. */
+const LEAST_CASHOUT = BigInt(10) ** BigInt(CASHOUT_PLACES - 2)
+
 /**
- * What to ask Weave for, leaving room for the 2% it may take over the order:
- * floor(delivered / 1.02) to 2 places. Nothing for zero or for text that is not an amount.
+ * What the off-ramp form opens with after a swap: all of what arrived, cut to 6 places. Linq takes
+ * exactly that. For a Weave order, whose fee goes on top, the order route fits it to the wallet
+ * (`fitToHeld`). Nothing below a cent, or for text that is not an amount.
  */
 export function cashoutAmountFrom(delivered: string): string | undefined {
-  const places = delivered.includes('.') ? (delivered.split('.')[1] ?? '').length : 0
-  const base = toBase(delivered, places)
-  if (base === undefined) return undefined
-  const hundredths = (base * BigInt(10000)) / (BigInt(102) * BigInt(10) ** BigInt(places))
-  return hundredths === BigInt(0) ? undefined : fromBase(hundredths, 2)
+  const [whole = '', fraction = ''] = delivered.split('.')
+  const cut = fraction === '' ? whole : `${whole}.${fraction.slice(0, CASHOUT_PLACES)}`
+  const base = toBase(cut, CASHOUT_PLACES)
+  if (base === undefined || base < LEAST_CASHOUT) return undefined
+  return fromBase(base, CASHOUT_PLACES)
 }
 
 /**
