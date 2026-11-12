@@ -80,6 +80,13 @@ Tracks: Unstoppable DeFi, AI Swarms, Real-World Money, Privacy & Private AI, AI 
 
 ### How it fits together
 
+<p align="center">
+  <img src="docs/media/intent-architecture.gif" alt="System architecture for Intent on NEAR: the system map, one request traced end to end, the ChainVenue and ChainModule interfaces, the NEAR AI proof sequence, the safety checks and the off-ramp sequence" width="100%" />
+</p>
+<p align="center">
+  <a href="docs/media/intent-architecture.mp4">Watch with sound (MP4, 32 seconds)</a>
+</p>
+
 ```mermaid
 flowchart TD
     you(["You, in the chat"]) --> reader["Message reader<br/>plain-English amounts,<br/>prompt-injection guard"]
