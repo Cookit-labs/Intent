@@ -1,5 +1,6 @@
 import { SEND_VENUE_NAME } from '../chains/recipient'
 import { accountMismatch } from '../weave/cashout-view'
+import { toTurnCard, type TurnCard } from './turn-card'
 
 /**
  * What was said in the chat, kept until New chat.
@@ -14,6 +15,8 @@ export interface LiveTurn {
   text: string
   explorerUrl?: string
   at: number
+  /** The last screen of the card this line closed, shown in its place. */
+  card?: TurnCard
 }
 
 const STORAGE_BASE = 'intent.chat.live.v1'
@@ -53,11 +56,18 @@ function storedText(text: string): string {
 /** Rebuilt field by field, so nothing else in an entry can come through. */
 function toLiveTurn(value: unknown): LiveTurn | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const { role, text, at, explorerUrl } = value as Record<string, unknown>
+  const { role, text, at, explorerUrl, card } = value as Record<string, unknown>
   if (role !== 'user' && role !== 'agent') return undefined
   if (typeof text !== 'string' || typeof at !== 'number' || !Number.isFinite(at)) return undefined
   const link = httpsUrl(explorerUrl)
-  return { role, text: storedText(text), at, ...(link !== undefined ? { explorerUrl: link } : {}) }
+  const kept = role === 'agent' && card !== undefined ? toTurnCard(card) : undefined
+  return {
+    role,
+    text: storedText(text),
+    at,
+    ...(link !== undefined ? { explorerUrl: link } : {}),
+    ...(kept !== undefined ? { card: kept } : {}),
+  }
 }
 
 export function loadLiveSession(

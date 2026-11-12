@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useChain } from '../../providers/chain-provider'
 import { useCompetition } from '../../hooks/use-competition'
 import { classifyFollowUp, raceContext, type ThreadTurn } from '../../lib/chat/thread'
+import { chainTurnCard, payoutLine, type TurnCard } from '../../lib/chat/turn-card'
 import { fetchOrchestrate, type ActReading } from '../../lib/chat/orchestrate-client'
 import {
   balanceMessage,
@@ -124,6 +125,7 @@ import { ChainActionConfirm } from './chain-action-confirm'
 import { ChainSequenceSteps } from './chain-sequence-steps'
 import { fetchCashoutCurrencies, useCashout } from '../../hooks/use-cashout'
 import { CashoutCard } from './cashout-card'
+import { FrozenTurnCard } from './frozen-turn-card'
 import { CashoutCurrencyQuestion, type CashoutQuestionState } from './cashout-currency-question'
 import {
   cashoutChoices,
@@ -263,19 +265,25 @@ function SavedTurns({ turns }: { turns: LiveTurn[] }): JSX.Element {
           key={`${turn.at}-${i}`}
           className={cn('flex', turn.role === 'user' ? 'justify-end' : 'justify-start')}
         >
-          <div className={turn.role === 'user' ? userBubble : agentBubble}>
-            {turn.role === 'user' ? turn.text : <AgentText text={turn.text} />}
-            {turn.explorerUrl !== undefined ? (
-              <a
-                href={turn.explorerUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 block text-xs underline underline-offset-2 opacity-70"
-              >
-                View transaction
-              </a>
-            ) : null}
-          </div>
+          {turn.card !== undefined ? (
+            <div className="w-full">
+              <FrozenTurnCard card={turn.card} />
+            </div>
+          ) : (
+            <div className={turn.role === 'user' ? userBubble : agentBubble}>
+              {turn.role === 'user' ? turn.text : <AgentText text={turn.text} />}
+              {turn.explorerUrl !== undefined ? (
+                <a
+                  href={turn.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block text-xs underline underline-offset-2 opacity-70"
+                >
+                  View transaction
+                </a>
+              ) : null}
+            </div>
+          )}
         </div>
       ))}
     </>
@@ -415,6 +423,31 @@ export function IntentChat({
   // What the orders, positions or tokens card showed, in words. The card goes when the next
   // message is sent; these stay as the turn's reply, and in the saved chat.
   const [cardReply, setCardReply] = useState<string | null>(null)
+  // The payout screen the off-ramp card is showing, kept with the turn once it is behind the person.
+  const [payoutCard, setPayoutCard] = useState<TurnCard | null>(null)
+  const payoutSaved = useRef<string | null>(null)
+  function notePayout(card: TurnCard): void {
+    setPayoutCard(card)
+    const line = payoutLine(card)
+    if (line === undefined) return
+    // Once per order and outcome: the card reports again whenever its screen redraws.
+    const id =
+      card.kind === 'weave'
+        ? card.order.id
+        : card.kind === 'linq'
+          ? card.order.paymentHash
+          : undefined
+    const key = `${id ?? ''}:${line}`
+    if (payoutSaved.current === key) return
+    payoutSaved.current = key
+    recordLive(
+      'agent',
+      line,
+      card.kind === 'weave' ? card.explorerUrl : undefined,
+      chatOwner.current,
+      card
+    )
+  }
   const cardReplySaved = useRef(-1)
   function noteCardReply(turn: number, text: string): void {
     if (turn !== latest.current.turn) return
@@ -475,7 +508,8 @@ export function IntentChat({
     role: LiveTurn['role'],
     text: string,
     explorerUrl?: string,
-    account: string | undefined = chatOwner.current
+    account: string | undefined = chatOwner.current,
+    card?: TurnCard
   ): void {
     if (account === undefined) return
     appendLiveTurn(liveSessionStorage(), segment, account, {
@@ -483,6 +517,7 @@ export function IntentChat({
       text,
       at: Date.now(),
       ...(explorerUrl !== undefined ? { explorerUrl } : {}),
+      ...(card !== undefined ? { card } : {}),
     })
   }
 
@@ -993,7 +1028,11 @@ export function IntentChat({
       'agent',
       chainOutcome,
       chainAction.phase === 'settled' ? chainAction.explorerUrl : undefined,
-      chainAction.account ?? chatOwner.current
+      chainAction.account ?? chatOwner.current,
+      chainTurnCard({
+        ...chainAction,
+        error: stepErrorMessage(chainAction.error, chainSequence.settled, typedStep),
+      })
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chainOutcome])
@@ -1226,7 +1265,19 @@ export function IntentChat({
     if (proposal?.reasoning !== undefined && proposal.reasoning !== '') {
       return { text: proposal.reasoning, agentKey: proposal.key, agentName: proposal.name }
     }
+    if (sequenceLine !== undefined) return { text: sequenceLine }
     if (restored?.outcome !== undefined) return { text: restored.outcome }
+    return undefined
+  }
+
+  /** The card the open turn ended on, as its last screen. A payout still under way stays live. */
+  function openTurnCard(): TurnCard | undefined {
+    const chain = chainTurnCard({
+      ...chainAction,
+      error: stepErrorMessage(chainAction.error, chainSequence.settled, typedStep),
+    })
+    if (chain !== undefined) return chain
+    if (payoutCard !== null && !cashout.locked) return payoutCard
     return undefined
   }
 
@@ -1235,6 +1286,7 @@ export function IntentChat({
     if (message === null) return
     const previous = message
     const reply = openTurnReply()
+    const card = openTurnCard()
     setThread((t) => [
       ...t,
       {
@@ -1243,8 +1295,11 @@ export function IntentChat({
         executed: turnExecuted,
         attempted: parsed !== null || nairaForm !== null || sequence.phase !== 'idle',
         ...(reply !== undefined ? { reply } : {}),
+        ...(card !== undefined ? { card } : {}),
       },
     ])
+    if (card?.kind === 'weave') cashout.dismiss()
+    setPayoutCard(null)
     setNotes([])
   }
 
@@ -3496,6 +3551,7 @@ export function IntentChat({
                       </div>
                     </div>
                   ) : null}
+                  {turn.card !== undefined ? <FrozenTurnCard card={turn.card} /> : null}
                 </div>
               ))}
 
@@ -3672,6 +3728,7 @@ export function IntentChat({
                   {...(balances?.trustlines?.['USDC']?.balance !== undefined
                     ? { balanceUsdc: balances.trustlines['USDC'].balance }
                     : {})}
+                  onFinal={notePayout}
                   onOrder={(order) => {
                     recordStellarTx('The cash-out payment was sent.', order.paymentHash)
                     if (turnId === null) return
@@ -3825,7 +3882,7 @@ export function IntentChat({
               ) : null}
 
               {cashout.session !== null ? (
-                <CashoutCard key={cashout.session.key} cashout={cashout} />
+                <CashoutCard key={cashout.session.key} cashout={cashout} onFinal={notePayout} />
               ) : null}
 
               {/* A leveraged position. One transaction, one signature, and a
@@ -3948,6 +4005,7 @@ export function IntentChat({
                       ? { initialXlm: cashOutUsdc }
                       : {})}
                     {...(usdcHeld !== undefined ? { balanceUsdc: usdcHeld } : {})}
+                    onFinal={notePayout}
                     onOrder={(order) => {
                       // An order now exists for this swap's USDC — the thing
                       // the reminder below exists to chase is done, whatever
