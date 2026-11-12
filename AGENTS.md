@@ -47,7 +47,7 @@ and the off-ramp order sizing (`apps/dapp/lib/weave/orders.ts`).
 The README's "Proven on NEAR mainnet with a real wallet" table links each transaction on NearBlocks:
 an rNEAR stake and unstake, two Rhea DEX swaps, and two off-ramps from NEAR that paid naira to a bank
 account. The rest was run end to end on production with a real NEAR account and is covered by the
-tests below; the README's "How each flow was tested" section says which.
+tests below; the README's "Proven on NEAR mainnet with a real wallet" section says which.
 
 ## How to check it runs
 
@@ -66,4 +66,4 @@ run only with `NEARAI_API_KEY` set. `near-ai-proof.test.ts` covers every way the
 with no network.
 
 See the [NEAR Hackathon section of the README](README.md#near-hackathon) for the product, what
-each chat command does, and how each flow was tested.
+each chat command does, and what has run on mainnet.
