@@ -66,9 +66,18 @@ describe('a figure in dollars never reads as that many tokens', () => {
 
   it('leaves Stellar and chains that cannot finish it as they were', () => {
     expect(routeCashout(parseCashout('cash out $5 xlm'), 'stellar')).toEqual({ kind: 'pass' })
-    expect(routeCashout(parseCashout('cash out $5 near'), 'near')).toEqual({
+    expect(routeCashout(parseCashout('cash out $5 near'), 'monad')).toEqual({
       kind: 'token',
       token: 'NEAR',
+    })
+  })
+
+  it('swaps $5 of NEAR to USDC first on NEAR, then off-ramps it', () => {
+    expect(routeCashout(parseCashout('cash out $5 near'), 'near')).toEqual({
+      kind: 'sequence',
+      token: 'NEAR',
+      amount: '5',
+      amountIsUsd: true,
     })
   })
 })

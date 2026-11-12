@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { weaveAssetKey, type CashoutChain } from './types'
+import { weaveAssetKey, weaveFlow, type CashoutChain } from './types'
 
 /**
  * Server-side client for Weave: USDC in, local currency out to a bank or mobile money
@@ -324,6 +324,7 @@ export function createWeaveClient(options: WeaveClientOptions = {}): WeaveClient
         to: `fiat:${currency}`,
         amount,
       })
+      if (weaveFlow(chain) !== 'external') query.set('flow', weaveFlow(chain))
       const res = await read(
         `/quotes?${query.toString()}`,
         'No price is available for this cash-out right now. No money has moved.'
@@ -363,7 +364,7 @@ export function createWeaveClient(options: WeaveClientOptions = {}): WeaveClient
         },
         amount: input.amount,
         amountIn: 'source',
-        flow: 'external',
+        flow: weaveFlow(input.chain),
         refundAddress: input.account,
         reference: input.reference,
         customer: input.customer,

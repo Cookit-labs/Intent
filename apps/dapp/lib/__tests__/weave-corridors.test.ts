@@ -30,8 +30,10 @@ describe('cashOutPrompt', () => {
     expect(cashOutPrompt('monad', live)).toBe('')
   })
 
-  it('promises nothing from NEAR, which has a deposit path but no order Weave will make', () => {
-    expect(cashOutPrompt('near', live)).toBe('')
+  it('offers off-ramps from NEAR, which Weave makes orders for since 12 November 2026', () => {
+    expect(cashOutPrompt('near', live)).toMatch(
+      /^Cashing out pays to a bank or mobile money account/
+    )
   })
 
   it('says Weave has paid out real orders, and that what lands can be below the quote', () => {

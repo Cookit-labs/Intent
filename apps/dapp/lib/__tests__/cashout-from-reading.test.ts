@@ -27,8 +27,15 @@ describe('cashoutFromReading', () => {
     expect(cashoutFromReading({ ...read, tokenIn: 'SOL' }, ['x'], 'solana')).toBeUndefined()
   })
 
-  it('opens no form on a chain whose cash-outs are closed', () => {
+  it('opens the form on NEAR, open since 12 November 2026', () => {
     expect(cashoutFromReading(read, ['Swap to NGN'], 'near')).toEqual({
+      kind: 'open',
+      currency: 'NGN',
+    })
+  })
+
+  it('opens no form on a chain whose cash-outs are closed', () => {
+    expect(cashoutFromReading(read, ['Swap to NGN'], 'monad')).toEqual({
       kind: 'token',
       token: 'USDC',
     })

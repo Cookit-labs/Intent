@@ -155,7 +155,7 @@ export function capabilitySheet(chain: string): string {
     }
     if (chain === 'near') {
       lines.push(
-        "Off-ramps don't run from NEAR yet: Weave's NEAR deposits aren't working. To off-ramp, swap to USDC and send it to a Solana or Sui address, then off-ramp from that chain. Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request."
+        'Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request.'
       )
     } else if (chain === 'monad') {
       lines.push(

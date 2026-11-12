@@ -157,13 +157,16 @@ describe('checks before anything is asked of Weave', () => {
     await refused(post({ chain: 'stellar', currency: 'NGN' }), 400)
   })
 
-  it('refuses NEAR, which Weave cannot make an order for, in words that say what to do', async () => {
-    const json = await refused(post({ chain: 'near' }), 422)
-    expect(json['error']).toBe('chain_closed')
-    expect(json['message']).toMatch(/send the USDC to your Solana or Sui address/)
-    expect(json['message']).toMatch(/Nothing was signed or sent\.$/)
-    expect(called(state.weave['quote'])).not.toHaveBeenCalled()
-    expect(called(state.weave['institutions'])).not.toHaveBeenCalled()
+  it('makes an order from NEAR, which Weave takes since 12 November 2026', async () => {
+    const fromNear = {
+      ...placed,
+      sourceAssetKey: 'crypto:NEAR:USDC',
+      deposit: { ...placed.deposit, chain: 'NEAR' },
+    }
+    state.weave = weave({ createOrder: vi.fn(async () => ({ ok: true, value: fromNear })) })
+    const res = await POST(post({ chain: 'near' }))
+    expect(res.status).toBe(200)
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].chain).toBe('near')
   })
 
   it('refuses a Stellar cash-out off mainnet', async () => {

@@ -122,10 +122,11 @@ To run it locally, follow [Quick Start](#quick-start), then set one model key in
 
 ### Not done or not proven
 
-- **Real wallet runs:** the NEAR flows are covered by tests and live read-only checks. No transaction
-  through this app has yet been confirmed on NEAR by a real wallet.
-- **Cash-out to a bank:** closed from NEAR, because the payout provider can't open an order for a
-  NEAR deposit yet. Sending USDC to Solana and cashing out there is the way around it.
+- **Real wallet runs:** an rNEAR stake and unstake have run through this app from a real NEAR wallet.
+  The other NEAR flows are covered by tests and live read-only checks only.
+- **Off-ramp to a bank:** open from NEAR since 12 November 2026, when the payout provider fixed NEAR
+  deposits. An unfunded order returns a NEAR deposit address, but no real NEAR off-ramp has paid out
+  yet. Its quote from NEAR is about 2.8% below one from Base, for the bridge it runs through.
 - **Sends to EVM chains:** refused, because a 0x address doesn't say which chain it means.
 - **Swaps into NEAR through 1Click:** these arrive as wNEAR, so 1Click only runs for them when it's
   named. A stake or send after one stops and says the swap went through.

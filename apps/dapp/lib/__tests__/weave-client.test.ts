@@ -172,6 +172,14 @@ describe('quote', () => {
     expect(result).toEqual({ ok: true, value: { destAmount: 3200.5, netUsd: 24.75, seconds: 90 } })
   })
 
+  it('asks Stellar for its own flow, which Weave needs since 12 November 2026, and no other chain', async () => {
+    const { weave, fetchImpl } = client(() => json(200, body))
+    await weave.quote({ chain: 'stellar', currency: 'NGN', amount: '5' })
+    await weave.quote({ chain: 'near', currency: 'NGN', amount: '5' })
+    const flows = fetchImpl.mock.calls.map((c) => new URL(String(c[0])).searchParams.get('flow'))
+    expect(flows).toEqual(['stellar', null])
+  })
+
   it('needs none of the fields that are only in the docs', async () => {
     const { weave } = client(() => json(200, body))
     expect((await weave.quote({ chain: 'near', currency: 'KES', amount: '25' })).ok).toBe(true)
@@ -219,6 +227,16 @@ describe('quoteCostPercent', () => {
 })
 
 describe('createOrder', () => {
+  it('places a Stellar order on the Stellar flow, and every other on the external one', async () => {
+    const { weave, fetchImpl } = client(() => json(200, placed))
+    await weave.createOrder({ ...order, chain: 'stellar' })
+    await weave.createOrder(order)
+    const flows = fetchImpl.mock.calls.map(
+      (c) => (JSON.parse((c[1] as RequestInit).body as string) as { flow: string }).flow
+    )
+    expect(flows).toEqual(['stellar', 'external'])
+  })
+
   it('sends the documented body', async () => {
     const { weave, fetchImpl } = client(() => json(200, placed))
     await weave.createOrder(order)

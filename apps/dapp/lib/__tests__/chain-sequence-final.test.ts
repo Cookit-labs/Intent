@@ -169,21 +169,21 @@ describe('3. a currency as the token out', () => {
     })
   })
 
-  it.each([
-    ['near', 'NEAR'],
-    ['monad', 'Monad'],
-  ] as const)('is refused before anything starts on %s', (chain, name) => {
-    const refusal = followOnRefusal(chain, name, { kind: 'cashout' }, [])
-    expect(refusal).toBeDefined()
-    expect(readChainMessage('change 5 SOL into naira', chain, name)).toEqual({
-      kind: 'refusal',
-      refusal,
-    })
-    expect(readChainMessage('swap 5 SOL to euros', chain, name)).toEqual({
-      kind: 'refusal',
-      refusal,
-    })
-  })
+  it.each([['monad', 'Monad']] as const)(
+    'is refused before anything starts on %s',
+    (chain, name) => {
+      const refusal = followOnRefusal(chain, name, { kind: 'cashout' }, [])
+      expect(refusal).toBeDefined()
+      expect(readChainMessage('change 5 SOL into naira', chain, name)).toEqual({
+        kind: 'refusal',
+        refusal,
+      })
+      expect(readChainMessage('swap 5 SOL to euros', chain, name)).toEqual({
+        kind: 'refusal',
+        refusal,
+      })
+    }
+  )
 
   it('leaves a real token alone', () => {
     expect(readChainMessage('swap 5 SOL to USDT', 'solana', 'Solana')).toMatchObject({
@@ -303,10 +303,7 @@ describe('4. a follow-on the server cannot honour', () => {
     )
     expect(route).toMatchObject({ sequence: { followOn: { kind: 'cashout' } } })
     if (route === null || !('sequence' in route)) throw new Error('expected a sequence')
-    for (const [chain, name] of [
-      ['near', 'NEAR'],
-      ['monad', 'Monad'],
-    ] as [ChainWithActions, string][]) {
+    for (const [chain, name] of [['monad', 'Monad']] as [ChainWithActions, string][]) {
       expect(followOnRefusal(chain, name, route.sequence.followOn, [])).toMatch(
         /Nothing was signed or sent\./
       )
@@ -397,9 +394,9 @@ describe('6. offramp on NEAR', () => {
     expect(chat).not.toContain('unsupportedTokenReply(route.token)')
   })
 
-  it('reads "offramp 5 near" as that refusal', () => {
+  it('reads "offramp 5 near" as a swap to USDC, then the off-ramp', () => {
     const route = routeCashout({ unsupportedToken: 'NEAR', amount: '5' }, 'near')
-    expect(route).toEqual({ kind: 'token', token: 'NEAR' })
+    expect(route).toEqual({ kind: 'sequence', token: 'NEAR', amount: '5' })
   })
 })
 
