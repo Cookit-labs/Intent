@@ -21,6 +21,7 @@ import { useNairaPayout } from '../../hooks/use-naira-payout'
 import type { NairaOrderView } from '../../lib/naira/orders'
 import type { NairaStatus } from '../../lib/naira/status'
 import { TokenIcon } from '../ui/token-icon'
+import type { TurnCard } from '../../lib/chat/turn-card'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
 import { toolCard, toolPanel } from './bubble'
 import { payoutProvider } from '../../lib/weave/cashout-view'
@@ -343,6 +344,15 @@ function BeforeYouSign({ address }: { address: string }): JSX.Element {
   )
 }
 
+/** A naira payout's last screen, kept in the chat once its turn is behind it. */
+export function FrozenNairaCard({
+  card,
+}: {
+  card: Extract<TurnCard, { kind: 'linq' }>
+}): JSX.Element {
+  return <PayoutProgress status={card.status} order={card.order} bank={card.bank} />
+}
+
 export function NairaPayoutCard({
   initialXlm,
   xlmPriceUsd,
@@ -351,6 +361,7 @@ export function NairaPayoutCard({
   balanceUsdc,
   onConvertFirst,
   onOrder,
+  onFinal,
   sourceSymbol,
   balanceOther,
 }: {
@@ -374,6 +385,8 @@ export function NairaPayoutCard({
   onConvertFirst?: (v: { amountXlm: number; bankCode: string; accountNumber: string }) => void
   /** Told each time the order changes, so the chat can keep how the cash-out went. */
   onOrder?: (order: NairaOrderView) => void
+  /** Told the payout screen's contents each time they change, so the chat can keep it. */
+  onFinal?: (card: Extract<TurnCard, { kind: 'linq' }>) => void
 }): JSX.Element {
   const { state, create, pay, edit } = useNairaPayout()
   const seenOrder = state.order
@@ -466,7 +479,20 @@ export function NairaPayoutCard({
     banks.data?.find((b) => b.code === bankCode) ??
     banks.data?.find((b) => b.name === order?.bankName)
 
-  if (phase === 'tracking' && order !== undefined) {
+  const tracking = phase === 'tracking' && order !== undefined
+  useEffect(() => {
+    if (!tracking || onFinal === undefined) return
+    onFinal({
+      kind: 'linq',
+      status: order.status,
+      order,
+      ...(reviewBank !== undefined ? { bank: reviewBank } : {}),
+    })
+    // Said again only when what the screen shows changes; a new callback each render is not that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracking, order, reviewBank])
+
+  if (tracking) {
     return <PayoutProgress status={order.status} order={order} bank={reviewBank} onRetry={edit} />
   }
 

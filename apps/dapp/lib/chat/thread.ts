@@ -1,3 +1,5 @@
+import type { TurnCard } from './turn-card'
+
 /**
  * The conversation around an intent.
  *
@@ -17,6 +19,8 @@ export interface ThreadTurn {
   attempted?: boolean
   /** What was said back, kept so the chat shows both sides once the turn is behind it. */
   reply?: { text: string; agentKey?: string; agentName?: string }
+  /** The last screen of the card the turn ended on, shown as it was. */
+  card?: TurnCard
 }
 
 export type FollowUpKind = 'note' | 'new'

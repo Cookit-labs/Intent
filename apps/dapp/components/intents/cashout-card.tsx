@@ -46,6 +46,7 @@ import { currencyFlag, payoutWord } from '../../lib/weave/currency-flag'
 import { isCashoutChain } from '../../lib/weave/types'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
+import type { TurnCard } from '../../lib/chat/turn-card'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
 import { toolCard, toolPanel } from './bubble'
 
@@ -154,7 +155,8 @@ function PayoutProgress({
   explorerUrl?: string | undefined
   /** Set while a transfer may have gone out and its outcome isn't known. */
   unsure?: string | undefined
-  onRetry: () => void
+  /** Absent on a card kept in the chat after its turn, which offers nothing to press. */
+  onRetry?: (() => void) | undefined
 }): JSX.Element {
   const done = order.status === 'paid'
   // What Weave says reached the account, after every fee. Only this is shown once paid.
@@ -229,7 +231,7 @@ function PayoutProgress({
           })}
         </ol>
       ) : null}
-      {bad ? (
+      {bad && onRetry !== undefined ? (
         <button
           type="button"
           onClick={onRetry}
@@ -387,7 +389,30 @@ const BACK_BUTTON =
  * The account number is held here and in the requests that check and use it, and
  * nowhere else: not in the chat, its history or any log.
  */
-export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | null {
+/** A payout's last screen, kept in the chat once its turn is behind it. */
+export function FrozenPayoutCard({
+  card,
+}: {
+  card: Extract<TurnCard, { kind: 'weave' }>
+}): JSX.Element {
+  return (
+    <PayoutProgress
+      order={card.order}
+      bank={card.bank}
+      hash={card.hash}
+      explorerUrl={card.explorerUrl}
+    />
+  )
+}
+
+export function CashoutCard({
+  cashout,
+  onFinal,
+}: {
+  cashout: Cashout
+  /** Told the payout screen's contents each time they change, so the chat can keep it. */
+  onFinal?: (card: Extract<TurnCard, { kind: 'weave' }>) => void
+}): JSX.Element | null {
   const { slug, descriptor } = useChain()
   const { address, isWrongNetwork, switchNetwork, isSwitching } = useWallet()
   const seed = cashout.session?.seed
@@ -518,6 +543,20 @@ export function CashoutCard({ cashout }: { cashout: Cashout }): JSX.Element | nu
 
   const { phase, order } = cashout
   const reviewBank = banks?.find((b) => b.code === bankCode || b.name === order?.institutionName)
+
+  const tracking = (phase === 'tracking' || phase === 'pending') && order !== undefined
+  useEffect(() => {
+    if (!tracking || onFinal === undefined) return
+    onFinal({
+      kind: 'weave',
+      order,
+      ...(reviewBank !== undefined ? { bank: reviewBank } : {}),
+      ...(cashout.hash !== undefined ? { hash: cashout.hash } : {}),
+      ...(cashout.explorerUrl !== undefined ? { explorerUrl: cashout.explorerUrl } : {}),
+    })
+    // Said again only when what the screen shows changes; a new callback each render is not that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracking, order, reviewBank, cashout.hash, cashout.explorerUrl])
 
   if (cashout.session === null) return null
 

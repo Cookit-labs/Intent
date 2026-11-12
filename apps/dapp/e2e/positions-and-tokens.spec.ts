@@ -356,6 +356,47 @@ test.describe('open positions in the chat', () => {
     await shot(page, 'chat-cards-kept')
   })
 
+  test('a sent card stays in the chat, as it ended, after the next message', async ({ page }) => {
+    await stubPosition(page)
+    await page.route('**/api/chain/solana/submit', (route) =>
+      route.fulfill({
+        json: { ok: true, hash: 'abc123def456', explorerUrl: 'https://solscan.io/tx/abc123def456' },
+      })
+    )
+    await connect(page)
+
+    await say(page, 'withdraw 5 USDC from kamino lend')
+    await page.getByRole('button', { name: 'Sign and send' }).click()
+    await expect(page.getByRole('link', { name: /abc123/ })).toBeVisible()
+
+    await say(page, 'show my positions')
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await expect(page.getByText('Built withdraw of 5 USDC on Kamino Lend.')).toBeVisible()
+    await expect(page.getByRole('link', { name: /abc123/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sign and send' })).toHaveCount(0)
+    await shot(page, 'chat-sent-card-kept')
+  })
+
+  test('a refusal stays in the chat after the next message', async ({ page }) => {
+    await stubPosition(page)
+    await page.route('**/api/chain/solana/prepare', (route) =>
+      route.fulfill({
+        status: 422,
+        json: { error: 'Kamino Lend holds only 12.5 USDC for you. Nothing was signed or sent.' },
+      })
+    )
+    await connect(page)
+
+    await say(page, 'withdraw 50 USDC from kamino lend')
+    const refusal = page.getByText(/Kamino Lend holds only 12\.5 USDC/)
+    await expect(refusal).toBeVisible()
+
+    await say(page, 'show my positions')
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await expect(refusal).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Dismiss' })).toHaveCount(0)
+  })
+
   test('say so when nothing is open', async ({ page }) => {
     await page.route('**/api/chain/solana/positions*', (route) =>
       route.fulfill({ json: { venues: [], unread: [] } })

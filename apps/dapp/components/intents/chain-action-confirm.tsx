@@ -284,6 +284,7 @@ export function ChainActionConfirm({
   sequenceSettled = false,
   typedStep,
   bare = false,
+  frozen = false,
 }: {
   action: ChainAction
   /** This card is step 2, after a swap that was signed and settled. */
@@ -292,6 +293,8 @@ export function ChainActionConfirm({
   typedStep?: string | undefined
   /** Inside a panel that is already its own surface, so it draws no box of its own. */
   bare?: boolean
+  /** Kept in the chat after its turn: shown as it ended, with nothing to press. */
+  frozen?: boolean
 }): JSX.Element {
   const { phase, prepared, hash, explorerUrl, earlier } = action
   const { slug } = useChain()
@@ -325,11 +328,13 @@ export function ChainActionConfirm({
           <p role="alert" className="text-sm leading-relaxed">
             {error}
           </p>
-          <div>
-            <Button variant="ghost" size="sm" onClick={action.reset}>
-              Dismiss
-            </Button>
-          </div>
+          {frozen ? null : (
+            <div>
+              <Button variant="ghost" size="sm" onClick={action.reset}>
+                Dismiss
+              </Button>
+            </div>
+          )}
         </>
       ) : null}
 
@@ -338,11 +343,13 @@ export function ChainActionConfirm({
           <p role="status" className="text-sm leading-relaxed">
             {error}
           </p>
-          <div>
-            <Button variant="ghost" size="sm" onClick={action.reset}>
-              Done
-            </Button>
-          </div>
+          {frozen ? null : (
+            <div>
+              <Button variant="ghost" size="sm" onClick={action.reset}>
+                Done
+              </Button>
+            </div>
+          )}
         </>
       ) : null}
 
