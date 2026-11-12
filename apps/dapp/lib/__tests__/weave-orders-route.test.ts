@@ -282,7 +282,18 @@ describe('an amount near the whole balance', () => {
   it('is asked of Weave as the balance less its fee room, so the one order can be paid', async () => {
     state.deposit = { ...state.deposit, usdcBalance: vi.fn(async () => BigInt('25500000')) }
     await POST(post())
-    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25')
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25.217606')
+  })
+
+  it('is asked whole on Stellar, whose flow takes exactly the amount asked', async () => {
+    // Weave's Stellar flow of 12 November 2026 answered 5 asked with a deposit of exactly 5.
+    state.deposit = {
+      ...state.deposit,
+      usdcDecimals: 7,
+      usdcBalance: vi.fn(async () => BigInt('255000000')),
+    }
+    await POST(post({ chain: 'stellar', account: 'alice.near' }))
+    expect(called(state.weave['createOrder']).mock.calls[0]?.[0].amount).toBe('25.5')
   })
 
   it('is asked as it was when the deposit already fits', async () => {

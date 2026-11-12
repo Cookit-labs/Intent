@@ -810,9 +810,9 @@ describe('measureDelivered', () => {
 })
 
 describe('readyAction', () => {
-  it('opens the form at the measured amount, less the room Weave may take', () => {
-    expect(readyAction('10.2', false, ALICE, ALICE)).toEqual({ kind: 'open', amount: '10' })
-    expect(readyAction('5', false, ALICE, ALICE)).toEqual({ kind: 'open', amount: '4.9' })
+  it('opens the form at all of the measured amount, which the order route fits to Weave', () => {
+    expect(readyAction('10.2', false, ALICE, ALICE)).toEqual({ kind: 'open', amount: '10.2' })
+    expect(readyAction('5', false, ALICE, ALICE)).toEqual({ kind: 'open', amount: '5' })
   })
 
   it('offers nothing for an amount too small to cash out, and says what arrived', () => {
@@ -1156,8 +1156,8 @@ describe('swapLine', () => {
 })
 
 describe('quoteStep', () => {
-  it('asks about what the button would open, not the whole receive', () => {
-    expect(quoteStep('10.2')).toEqual({ kind: 'ask', amount: '10' })
+  it('asks about what the button would open, which is the whole receive', () => {
+    expect(quoteStep('10.2')).toEqual({ kind: 'ask', amount: '10.2' })
   })
 
   it('needs no answer for an amount that rounds to nothing or cannot be read', () => {

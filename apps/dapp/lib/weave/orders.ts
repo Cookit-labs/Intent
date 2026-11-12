@@ -456,15 +456,25 @@ function fromUnits(units: bigint, decimals: number): string {
 }
 
 /**
+ * The most Weave has added on top of an order: 0.97% to 1.30% plus a little that does not grow with
+ * the amount, on its real orders of 5, 5.115078 and 0.88 USDC. Room for 1.1% plus half a cent covers
+ * each, and leaves well under 1% of a balance behind. A flat 2% left about 1% behind every time.
+ */
+const FEE_ROOM_PER_THOUSAND = BigInt(11)
+const FEE_ROOM_FIXED_THOUSANDTHS = BigInt(5)
+
+/**
  * What to ask Weave for so the deposit it answers with still fits the wallet. Weave adds its fee
- * on top of the amount asked, about 1%, so asking for the whole balance made an order that could
- * never be paid, and the person then made a second, smaller one. An amount near the balance is
- * asked as the balance less the most an order may add; anything else is left as it was.
+ * on top of the amount asked, so asking for the whole balance made an order that could never be
+ * paid, and the person then made a second, smaller one. An amount near the balance is asked as the
+ * balance less the most an order adds; anything else is left as it was.
  */
 export function fitToHeld(amount: string, held: bigint, decimals: number): string {
   const asked = toUnits(amount, decimals)
   if (asked === undefined || asked > held) return amount
-  const most = (held * BigInt(100)) / BigInt(100 + MAX_DEPOSIT_OVER_PERCENT)
+  const fixed = (FEE_ROOM_FIXED_THOUSANDTHS * BigInt(10) ** BigInt(decimals)) / BigInt(1000)
+  if (held <= fixed) return amount
+  const most = ((held - fixed) * BigInt(1000)) / (BigInt(1000) + FEE_ROOM_PER_THOUSAND)
   return asked <= most ? amount : fromUnits(most, decimals)
 }
 

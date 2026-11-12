@@ -47,6 +47,7 @@ import { isCashoutChain } from '../../lib/weave/types'
 import { useChain } from '../../providers/chain-provider'
 import { TokenIcon } from '../ui/token-icon'
 import type { TurnCard } from '../../lib/chat/turn-card'
+import { cashoutAmountFrom } from '../../lib/chains/sequence'
 import { BankMark, BankPicker, type Bank } from './bank-picker'
 import { toolCard, toolPanel } from './bubble'
 
@@ -778,7 +779,7 @@ export function CashoutCard({
                 {maxAmount !== undefined && maxAmount > 0 ? (
                   <button
                     type="button"
-                    onClick={() => setAmount(String(Math.floor(maxAmount * 100) / 100))}
+                    onClick={() => setAmount(cashoutAmountFrom(balance) ?? '')}
                     className="bg-bubble-me text-bubble-me-foreground hover:bg-bubble-me/80 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
                   >
                     Max

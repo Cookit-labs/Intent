@@ -231,15 +231,16 @@ describe('deliveredAmount', () => {
 })
 
 describe('cashoutAmountFrom', () => {
-  it('leaves room for the fee, rounding down to 2 places', () => {
-    expect(cashoutAmountFrom('5')).toBe('4.9')
-    expect(cashoutAmountFrom('5.05')).toBe('4.95')
-    expect(cashoutAmountFrom('0.02')).toBe('0.01')
-    expect(cashoutAmountFrom('1.234567')).toBe('1.21')
+  it('offers all of what arrived, to the 6 places USDC has: the server fits a Weave order to it', () => {
+    // 2026-11-12: 0.900614 arrived and the form offered 0.88, leaving 0.009157 behind.
+    expect(cashoutAmountFrom('0.900614')).toBe('0.900614')
+    expect(cashoutAmountFrom('5')).toBe('5')
+    expect(cashoutAmountFrom('5.05')).toBe('5.05')
+    expect(cashoutAmountFrom('1.2345678')).toBe('1.234567')
   })
 
-  it('gives nothing for zero or what is not an amount', () => {
-    expect(cashoutAmountFrom('0.01')).toBeUndefined()
+  it('gives nothing below a cent, for zero, or for what is not an amount', () => {
+    expect(cashoutAmountFrom('0.009')).toBeUndefined()
     expect(cashoutAmountFrom('abc')).toBeUndefined()
     expect(cashoutAmountFrom('0')).toBeUndefined()
   })

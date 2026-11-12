@@ -25,7 +25,7 @@ import {
   type WeaveOrderRow,
 } from '../../../../lib/weave/orders'
 import { nextStatus } from '../../../../lib/weave/status'
-import { closedCashoutReply, isCashoutChain } from '../../../../lib/weave/types'
+import { closedCashoutReply, isCashoutChain, weaveFlow } from '../../../../lib/weave/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -278,7 +278,11 @@ export async function POST(request: Request): Promise<Response> {
   // Weave adds its fee on top of what is asked. Asked for the whole balance, its deposit was more
   // than the wallet held, so that order could never be paid and a second, smaller one followed.
   // A read that fails leaves the amount as asked: the deposit check still says what is short.
-  const held = await deposit.usdcBalance(input.account).catch(() => undefined)
+  // Stellar's flow takes exactly the amount asked, so it keeps all of it.
+  const held =
+    weaveFlow(chain) === 'stellar'
+      ? undefined
+      : await deposit.usdcBalance(input.account).catch(() => undefined)
   const asked = held === undefined ? amount : fitToHeld(amount, held, deposit.usdcDecimals)
 
   const made = await weave.createOrder({
