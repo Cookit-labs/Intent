@@ -84,8 +84,10 @@ Tracks: Unstoppable DeFi, AI Swarms, Real-World Money, Privacy & Private AI, AI 
   <img src="docs/media/intent-architecture.gif" alt="System architecture for Intent on NEAR: the system map, one request traced end to end, the ChainVenue and ChainModule interfaces, the NEAR AI proof sequence, the safety checks and the off-ramp sequence" width="100%" />
 </p>
 <p align="center">
-  <a href="docs/media/intent-architecture.mp4">Watch with sound (MP4, 32 seconds)</a>
+  <a href="docs/media/intent-architecture.mp4">Full-size video (MP4, 32 seconds)</a>
 </p>
+
+![System Architecture for Intent on NEAR: the client, API routes, core modules and external services, with one request traced through them in eight steps](docs/media/intent-architecture.png)
 
 ```mermaid
 flowchart TD
