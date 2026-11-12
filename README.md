@@ -68,6 +68,14 @@ Intent you type what you want in a chat. AI agents compare real quotes, question
 choices in the chat and propose a route. You read a card and sign in your own wallet. Agents can't
 sign or send anything.
 
+<p align="center">
+  <img src="docs/media/intent-on-near.gif" alt="Intent on NEAR: a typed request, agents comparing Rhea and 1Click, Nova's NEAR AI proof note, then a swap on Rhea DEX and a LiNEAR stake" width="480" />
+</p>
+<p align="center">
+  <a href="docs/media/intent-on-near.mp4">Watch with sound (MP4, 32 seconds)</a>. Amounts in the video are illustrative; the
+  transactions under <a href="#proven-on-near-mainnet-with-a-real-wallet">Proven on NEAR mainnet</a> are real.
+</p>
+
 Tracks: Unstoppable DeFi, AI Swarms, Real-World Money, Privacy & Private AI, AI Security & Defense.
 
 ### How it fits together
