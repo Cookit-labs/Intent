@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   mainnet: true,
@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   deposit: {} as Record<string, unknown>,
   report: [] as unknown[][],
   session: undefined as { email: string } | undefined,
+  linq: undefined as Record<string, unknown> | undefined,
 }))
 
 vi.mock('../server/session', () => ({ readSessionFromRequest: () => state.session }))
@@ -23,6 +24,10 @@ vi.mock('../weave/orders', async (original) => ({
   getWeaveOrderRepo: async () => state.repo,
 }))
 vi.mock('../weave/deposit', () => ({ depositChain: () => state.deposit }))
+vi.mock('../linq/client', async (original) => {
+  const actual = await original<typeof import('../linq/client')>()
+  return { ...actual, createLinqClient: () => state.linq ?? actual.createLinqClient() }
+})
 vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
 vi.mock('../server/report', () => ({
   reportError: (...args: unknown[]) => state.report.push(args),
@@ -107,6 +112,7 @@ beforeEach(() => {
   state.session = undefined
   state.weave = weave()
   state.repo = repo()
+  state.linq = undefined
   state.deposit = {
     usdcDecimals: 6,
     supportsMemo: false,
@@ -587,5 +593,64 @@ describe('a good order', () => {
     )
     expect(report).not.toContain(DIGITS)
     expect(report).not.toContain(HOLDER)
+  })
+})
+
+describe('the naira limit, on every chain', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  const naira = (destAmount: number) =>
+    weave({
+      quote: vi.fn(async () => ({ ok: true, value: { destAmount, netUsd: 25, seconds: 90 } })),
+      createOrder: vi.fn(async () => ({
+        ok: true,
+        value: { ...placed, destAssetKey: 'fiat:NGN' },
+      })),
+    })
+
+  it('refuses a naira payout over ₦2,000,000 before any order is made', async () => {
+    state.weave = naira(2_000_001)
+    const res = await POST(post({ currency: 'NGN' }))
+    expect(res.status).toBe(422)
+    const json = (await res.json()) as { error: string; message: string }
+    expect(json.error).toBe('over_limit')
+    expect(json.message).toMatch(/₦2,000,000/)
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
+  })
+
+  it('makes a naira payout of up to ₦2,000,000', async () => {
+    state.weave = naira(2_000_000)
+    expect((await POST(post({ currency: 'NGN' }))).status).toBe(200)
+  })
+
+  it('leaves payouts in other currencies alone', async () => {
+    state.weave = weave({
+      quote: vi.fn(async () => ({
+        ok: true,
+        value: { destAmount: 3_200_000, netUsd: 25, seconds: 90 },
+      })),
+    })
+    expect((await POST(post({ currency: 'KES' }))).status).toBe(200)
+  })
+
+  it('takes NAIRA_MAX_NGN when it is set', async () => {
+    vi.stubEnv('NAIRA_MAX_NGN', '5000000')
+    state.weave = naira(3_000_000)
+    expect((await POST(post({ currency: 'NGN' }))).status).toBe(200)
+  })
+
+  it('counts what Linq would pay, which can be more than Weave, before Linq makes an order', async () => {
+    state.weave = naira(1_900_000)
+    const linqOrder = vi.fn()
+    state.linq = {
+      configured: true,
+      getRate: vi.fn(async () => ({ ok: true, value: { ngnPerUsd: 90_000 } })),
+      verifyBank: vi.fn(),
+      createOrder: linqOrder,
+    }
+    const res = await POST(post({ currency: 'NGN', chain: 'sui' }))
+    expect(res.status).toBe(422)
+    expect(linqOrder).not.toHaveBeenCalled()
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
   })
 })

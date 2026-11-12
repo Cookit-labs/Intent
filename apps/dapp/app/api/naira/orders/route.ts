@@ -14,15 +14,10 @@ import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { requesterOf } from '../../../../lib/server/requester'
 import { fromBaseUnits, toBaseUnits } from '../../../../lib/swap/assets'
 import { balanceOf } from '../../../../lib/swap/delivered-balance'
+import { maxNgn, nairaLimitMessage } from '../../../../lib/naira/limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-/** Per-order ceiling in naira, so one mistake or one stolen session is bounded. */
-function maxNgn(): number {
-  const raw = Number(process.env['NAIRA_MAX_NGN'])
-  return Number.isFinite(raw) && raw > 0 ? raw : 200_000
-}
 
 const common = {
   account: z.string().refine((a) => StrKey.isValidEd25519PublicKey(a)),
@@ -119,7 +114,7 @@ function overLimit(): Response {
   return NextResponse.json(
     {
       error: 'over_limit',
-      message: `One payout is limited to ₦${maxNgn().toLocaleString('en-US')}.`,
+      message: nairaLimitMessage(),
     },
     { status: 400 }
   )
