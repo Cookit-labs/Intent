@@ -22,11 +22,12 @@ export interface PayoutOffer {
  * no real order has run on either yet.
  *
  * Weave's Stellar orders route through LI.FI and come back with no deposit address, which nothing
- * here can pay (Weave's own order history, 4 November 2026). NEAR is closed in `types.ts`.
+ * here can pay (Weave's own order history, 4 November 2026). Weave's Stellar flow of 12 November
+ * fixed that, but Stellar naira stays on Linq's flow, which people have used. NEAR opened the same day.
  */
 export const PAYS_NAIRA: Readonly<Record<PayoutProvider, readonly CashoutChain[]>> = {
   linq: ['stellar', 'sui', 'solana'],
-  weave: ['solana', 'avalanche', 'sui'],
+  weave: ['solana', 'avalanche', 'sui', 'near'],
 }
 
 export interface OfferSources {

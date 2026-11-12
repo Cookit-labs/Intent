@@ -186,9 +186,11 @@ describe('routeCashout with an amount', () => {
       kind: 'token',
       token: 'SOL',
     })
-    expect(routeCashout({ unsupportedToken: 'SOL', amount: '0.5' }, 'near')).toEqual({
-      kind: 'token',
-      token: 'SOL',
+    expect(routeCashout({ unsupportedToken: 'NEAR', dollars: '0.5' }, 'near')).toEqual({
+      kind: 'sequence',
+      token: 'NEAR',
+      amount: '0.5',
+      amountIsUsd: true,
     })
     expect(routeCashout({ unsupportedToken: 'SOL', amount: '0.5' }, 'monad')).toEqual({
       kind: 'token',
@@ -201,10 +203,8 @@ describe('routeCashout with an amount', () => {
     expect(parseCashout('cash out $5 sol')).toEqual({ unsupportedToken: 'SOL', dollars: '5' })
   })
 
-  it('says on NEAR only what is true there', () => {
-    const reply = unsupportedTokenReply('SOL', 'near')
-    expect(reply).toMatch(/NEAR/)
-    expect(reply).not.toMatch(/Swap your SOL/i)
+  it('answers NEAR as every other open chain', () => {
+    expect(unsupportedTokenReply('NEAR', 'near')).toBe(unsupportedTokenReply('NEAR', 'sui'))
     expect(unsupportedTokenReply('SOL', 'solana')).toMatch(/Swap your SOL to USDC first/)
   })
 })
@@ -250,9 +250,7 @@ describe('followOnRefusal', () => {
   const earnVenue = [{ kinds: ['swap', 'supply', 'stake'] as const }]
 
   it('names why a cash-out cannot run', () => {
-    expect(followOnRefusal('near', 'NEAR', { kind: 'cashout' }, swapVenue)).toMatch(
-      /don't run from NEAR.*Weave can't open an order/
-    )
+    expect(followOnRefusal('near', 'NEAR', { kind: 'cashout' }, swapVenue)).toBeUndefined()
     expect(followOnRefusal('monad', 'Monad', { kind: 'cashout' }, swapVenue)).toMatch(
       /don't run from Monad.*Weave doesn't list Monad/
     )
@@ -273,7 +271,6 @@ describe('followOnRefusal', () => {
 
   it('ends every refusal the same way', () => {
     for (const r of [
-      followOnRefusal('near', 'NEAR', { kind: 'cashout' }, []),
       followOnRefusal('monad', 'Monad', { kind: 'cashout' }, []),
       followOnRefusal('sui', 'Sui', { kind: 'supply' }, []),
     ]) {
@@ -282,7 +279,7 @@ describe('followOnRefusal', () => {
   })
 
   it('lists the chains that can cash out', () => {
-    expect([...SEQUENCE_CASHOUT_CHAINS]).toEqual(['solana', 'sui', 'avalanche'])
+    expect([...SEQUENCE_CASHOUT_CHAINS]).toEqual(['solana', 'sui', 'avalanche', 'near'])
   })
 })
 

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 /**
- * Why cash-outs stay closed on NEAR and Monad, and what keeps Avalanche open, as far as can be read without Weave's key. Every
- * quote here is `dry: true`, which makes no deposit address and moves nothing. A failure means a
- * reason in `closedCashoutReply` may have gone, so look again at the question before changing this.
+ * Why cash-outs stay closed on Monad, and what keeps NEAR and Avalanche open, as far as can be read
+ * without Weave's key. Every quote here is `dry: true`, which makes no deposit address and moves
+ * nothing. A failure means a reason in `closedCashoutReply` may have gone, or come back.
  *
- * What only a key can settle: an unfunded POST /orders from `crypto:NEAR:USDC` must come back with
- * a deposit address and no memo before NEAR opens.
+ * What only a key can settle: on 12 November 2026 an unfunded POST /orders from `crypto:NEAR:USDC`
+ * came back with a deposit address and no memo, which is what opened NEAR.
  */
 
 const SKIP = process.env['SKIP_LIVE'] === '1'
@@ -44,17 +44,17 @@ async function dryQuote(
   return { status: response.status, message: body.message }
 }
 
-describe.skipIf(SKIP)('what keeps NEAR closed', () => {
-  const fromNear = { originAsset: NEAR_USDC, destinationAsset: BASE_USDC, refundTo: 'root.near' }
-
-  it('gives the words Weave passed on, for memo mode', async () => {
-    const memo = await dryQuote({ ...fromNear, depositMode: 'MEMO' })
-    expect(memo).toEqual({ status: 400, message: 'Incorrect depositMode' })
-  }, 30_000)
-
-  it('does not give them for plain mode, so the mode is what they are about', async () => {
-    const plain = await dryQuote({ ...fromNear, depositMode: 'SIMPLE' })
-    expect(plain.message).not.toBe('Incorrect depositMode')
+describe.skipIf(SKIP)('what keeps NEAR open', () => {
+  // Weave asked 1Click for memo mode until 12 November 2026, which NEAR refuses. It now asks for
+  // plain mode. If this fails, close NEAR in `closedCashoutReply` again.
+  it('has NEAR Intents quoting NEAR USDC in plain mode, the first leg of every Weave route from it', async () => {
+    const plain = await dryQuote({
+      originAsset: NEAR_USDC,
+      destinationAsset: BASE_USDC,
+      refundTo: 'root.near',
+      depositMode: 'SIMPLE',
+    })
+    expect(plain.status).toBe(201)
   }, 30_000)
 })
 

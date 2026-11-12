@@ -50,10 +50,10 @@ describe('nairaOffers', () => {
     ])
   })
 
-  it('pays naira from Linq on Stellar, Sui and Solana, and from Weave nowhere on Stellar or NEAR', () => {
+  it('pays naira from Linq on Stellar, Sui and Solana, and from Weave on NEAR but not Stellar', () => {
     expect(PAYS_NAIRA.linq).toEqual(['stellar', 'sui', 'solana'])
     expect(PAYS_NAIRA.weave).not.toContain('stellar')
-    expect(PAYS_NAIRA.weave).not.toContain('near')
+    expect(PAYS_NAIRA.weave).toContain('near')
   })
 })
 

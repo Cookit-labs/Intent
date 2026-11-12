@@ -103,7 +103,7 @@ describe('capabilitySheet multi-step forms', () => {
 
   it('says swap then cash out runs on Solana, Sui and Avalanche', async () => {
     const sheet = await sheetWith('k')
-    for (const chain of ['solana', 'sui', 'avalanche']) {
+    for (const chain of ['solana', 'sui', 'avalanche', 'near']) {
       expect(sheet(chain)).toMatch(/Swap then cash out:/)
       expect(sheet(chain)).not.toMatch(/has not yet paid out/)
     }
@@ -116,16 +116,13 @@ describe('capabilitySheet multi-step forms', () => {
     expect(sheet('solana')).not.toMatch(/cash out/i)
   }, 60_000)
 
-  it('says NEAR runs swap then deposit and send, and why cash-out and stake do not', async () => {
+  it('says NEAR runs swap then deposit, send and off-ramp, and why stake does not', async () => {
     const sheet = await sheetWith('k')
     const near = sheet('near')
     expect(near).toMatch(/Swap then deposit:/)
     expect(near).toMatch(/Swap then send:/)
-    expect(near).not.toMatch(/Swap then cash out:/)
-    expect(near).toContain(
-      "Off-ramps don't run from NEAR yet: Weave's NEAR deposits aren't working."
-    )
-    expect(near).toMatch(/send it to a Solana or Sui address/)
+    expect(near).toMatch(/Swap then cash out:/)
+    expect(near).not.toMatch(/Off-ramps don't run from NEAR/)
     expect(near).toMatch(/stake after a swap is not available on NEAR/i)
   }, 60_000)
 

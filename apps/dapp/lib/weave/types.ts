@@ -26,20 +26,14 @@ const NOTHING_SENT = 'Nothing was signed or sent.'
 /**
  * Chains refused before any form opens. `weave-cashout-gaps.live.test.ts` rechecks the reasons.
  *
- * NEAR: a live order on 2026-11-04 answered `NEAR Intents 400: Incorrect depositMode`. 1Click says
- * exactly that to `depositMode: MEMO` on a chain with no memo, and Weave's docs list NEAR as needing
- * one, so Weave probably asks for the wrong mode. Open it only once an unfunded order comes back
- * with a deposit address and no memo.
+ * NEAR reopened on 12 November 2026: Weave fixed `NEAR Intents 400: Incorrect depositMode`, and an
+ * unfunded order came back with a deposit address and no memo.
  *
  * Monad: not on Weave's `/assets`, and no order has been tried. Paying Weave's address on another
  * chain through 1Click is not a way round: 1Click counts delivery as done, so a delivery after
  * Weave's order expired, or a refund from Weave, has no documented way back to the person on Monad.
  */
 const CLOSED_CASHOUTS = new Map<string, string>([
-  [
-    'near',
-    `Off-ramps don't run from NEAR yet, because Weave can't open an order for a NEAR deposit. To off-ramp, swap your NEAR to USDC here (skip this if you hold USDC), send the USDC to your Solana or Sui address, for example "send 5 USDC to" and the address, then connect that wallet and off-ramp from there. ${NOTHING_SENT}`,
-  ],
   [
     'monad',
     `Off-ramps don't run from Monad yet, because Weave doesn't list Monad for deposits. To off-ramp, swap your MON to USDC here (skip this if you hold USDC), move the USDC to Solana, Avalanche or Sui with a bridge you trust, then connect that wallet and off-ramp from there. ${NOTHING_SENT}`,
@@ -61,6 +55,15 @@ const WEAVE_CHAIN_ID: Record<CashoutChain, string> = {
 
 export function weaveChainId(chain: CashoutChain): string {
   return WEAVE_CHAIN_ID[chain]
+}
+
+/**
+ * How Weave takes the deposit. Stellar has its own flow since 12 November 2026: a USDC payment with a
+ * memo to Weave's own Stellar account, and Weave refuses a Stellar quote on any other. Every other
+ * chain pays a NEAR Intents deposit address.
+ */
+export function weaveFlow(chain: CashoutChain): 'stellar' | 'external' {
+  return chain === 'stellar' ? 'stellar' : 'external'
 }
 
 /** The asset Weave is told the deposit is in. */
