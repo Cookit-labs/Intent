@@ -105,3 +105,14 @@ export function limitSettledNote(chain: string): string {
     ? `${base} Collecting what it fills takes another signature.`
     : base
 }
+
+const ORDERS_UNREAD = 'Your orders could not be read just now. Nothing was signed or sent.'
+
+/** What the orders card showed, in words the chat keeps once the card has gone. */
+export function ordersReply(orders: readonly RestingOrder[] | undefined): string {
+  if (orders === undefined) return ORDERS_UNREAD
+  if (orders.length === 0) return 'You have no resting limit orders here.'
+  return ['Your limit orders:', ...orders.map((o) => `${orderLine(o)}, via ${o.venueId}`)].join(
+    '\n'
+  )
+}

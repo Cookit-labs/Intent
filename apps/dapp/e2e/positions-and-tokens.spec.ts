@@ -338,6 +338,24 @@ test.describe('open positions in the chat', () => {
     await shot(page, 'chat-position-open')
   })
 
+  test('stay answered in the chat after the next message, and so do tokens', async ({ page }) => {
+    await stubPosition(page)
+    await stubTokens(page)
+    await connect(page)
+
+    await say(page, 'do i have any open positions?')
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await say(page, 'give me a list of tokens on this chain')
+    await expect(page.getByText('Tokens on Solana', { exact: true })).toBeVisible()
+    await expect(page.getByText(/Here's what I can read on Solana/)).toBeVisible()
+    await expect(page.getByText(/12\.5 USDC/).first()).toBeVisible()
+
+    await say(page, 'show my positions')
+    await expect(page.getByRole('button', { name: ROW })).toBeVisible()
+    await expect(page.getByText(/^Tokens on Solana:/)).toBeVisible()
+    await shot(page, 'chat-cards-kept')
+  })
+
   test('say so when nothing is open', async ({ page }) => {
     await page.route('**/api/chain/solana/positions*', (route) =>
       route.fulfill({ json: { venues: [], unread: [] } })

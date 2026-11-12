@@ -140,7 +140,7 @@ export function capabilitySheet(chain: string): string {
       (SEQUENCE_CASHOUT_CHAINS as readonly string[]).includes(chain) && cashOutPrompt(chain) !== ''
     if (cashesOut) {
       lines.push(
-        `Swap then cash out: swap into USDC and pay it to a bank or mobile money account as one request, for example "swap 5 ${own} to USDC then cash out". You sign the swap, then start the cash-out yourself. Weave has not yet paid out a real order in this app.`
+        `Swap then cash out: swap into USDC and pay it to a bank or mobile money account as one request, for example "swap 5 ${own} to USDC then cash out". You sign the swap, then start the cash-out yourself.`
       )
     }
     if (offered('supply')) {
@@ -155,11 +155,11 @@ export function capabilitySheet(chain: string): string {
     }
     if (chain === 'near') {
       lines.push(
-        "Cash out does not run from NEAR: Weave's NEAR deposits aren't working yet. Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request."
+        "Off-ramps don't run from NEAR yet: Weave's NEAR deposits aren't working. To off-ramp, swap to USDC and send it to a Solana or Sui address, then off-ramp from that chain. Stake after a swap is not available on NEAR, since a swap to NEAR can arrive as NEAR or wNEAR, so stake what arrives as a second request."
       )
     } else if (chain === 'monad') {
       lines.push(
-        'Cash out does not run from Monad. Move USDC to Solana, Avalanche or Sui with a bridge you trust.'
+        "Off-ramps don't run from Monad yet. Move USDC to Solana, Avalanche or Sui with a bridge you trust, and off-ramp from there."
       )
     }
   }
