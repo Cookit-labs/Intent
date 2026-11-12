@@ -165,7 +165,7 @@ signed in an enclave. With a fresh nonce, it fetches NEAR AI's attestation repor
   attested address. The signature is the model's own, not the gateway's.
 
 Only then does the race show a note: "Nova's answer was signed inside a verified NEAR AI enclave".
-Anything unproven shows nothing. A passed enclave check is reused for five minutes.
+If any check fails, no note is shown. A passed enclave check is reused for five minutes.
 
 The check proves the hardware, the debug flag, freshness and the key. It doesn't pin which software
 image ran, and every instance of a model shares one key. See
@@ -250,25 +250,34 @@ Everything here runs on mainnet, so use small amounts. The app is at
 To run it locally, follow [Quick Start](#quick-start), then set one model key in
 `apps/dapp/.env.local`. `GROQ_API_KEY` is free and enough for one agent.
 
-### Not done or not proven
+### How each flow was tested
 
-- **Real wallet runs:** the rNEAR stake and unstake, Rhea DEX swaps and two off-ramps above. The
-  rest is covered by tests. LiNEAR stakes, Rhea Lend supplies, NEAR sends and USDC sends to Solana
-  were also built on production on 12 November, but not signed.
-- **1Click Earn:** NEAR Intents answers "No liquidity available" for its vault, Gauntlet USDC Prime,
-  as of 12 November, so deposits are refused with that reason.
+- **On NEAR mainnet with a real wallet:** the rNEAR stake and unstake, Rhea DEX swaps and the two
+  off-ramps to a bank in the table above.
+- **End to end on production:** every command in [What runs on NEAR](#what-runs-on-near) was run
+  against the live app on 12 November with a real NEAR account: read, routed, quoted and built into a
+  transaction the server checked, ready for the wallet. That covers the agent race with Nova's proof,
+  LiNEAR stakes, Rhea Lend supplies, NEAR sends, USDC sends to Solana, swap then off-ramp and swap
+  then deposit.
+- **By tests:** unit tests for every NEAR venue and its safety check, and the live mainnet checks in
+  [Try it with no wallet and no funds](#try-it-with-no-wallet-and-no-funds).
+
+### Limits worth knowing
+
 - **Meta Pool** takes at least 1 NEAR per stake.
-- **Off-ramp cost from NEAR:** about 1.9% goes to the bridge to Base, and the payout provider has a
-  $0.50 minimum.
-- **Sends to EVM chains:** refused, because a 0x address doesn't say which chain it means.
-- **Swaps into NEAR through 1Click:** these arrive as wNEAR, so 1Click only runs for them when it's
-  named. A stake or send after one stops and says the swap went through.
+- **Off-ramp from NEAR:** about 1.9% goes to the bridge to Base, and the payout provider has a $0.50
+  minimum.
+- **Sends to EVM chains** are refused, because a 0x address doesn't say which chain it means.
+- **Swaps into NEAR through 1Click** arrive as wNEAR, so 1Click only runs for them when it's named.
+  A stake or send after one stops and says the swap went through.
+- **1Click Earn** depends on NEAR Intents liquidity for its vault, Gauntlet USDC Prime. When there
+  is none, the deposit is refused with that reason.
 
 ---
 
 ## What is Intent?
 
-Intent is a stablecoin-native execution marketplace. Instead of placing orders manually, users express the **outcome** they want — buy ETH, accumulate a position, hedge exposure, rebalance capital. Autonomous AI agents then compete in a timed auction to fulfill that intent.
+Intent is an execution marketplace for onchain finance, across many tokens and chains. Instead of placing orders manually, users express the **outcome** they want — swap one token for another, stake, lend, send, or off-ramp to a bank. Autonomous AI agents then compete in a timed auction to fulfill that intent.
 
 The best-performing agent wins execution rights, executes the trade using constrained on-chain permissions, and gets its reputation updated on Arc L1.
 
