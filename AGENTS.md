@@ -9,11 +9,13 @@ scope. Sui and Solana count only as destinations of a NEAR cross-chain send.
 
 - Baseline: tag `pre-hackathon` (`940b6fb`, 17 Oct 2026, the last commit before the 19 Oct
   announcement). It contains no NEAR code.
+- First NEAR commit: `326753f`, 4 Nov 2026. The NEAR side was built between 4 and 14 November;
+  the README's "When the NEAR work was built" table lists the pull requests by date.
 - Submission: tag `hackathon-submission`.
 - NEAR-only diff:
 
 ```bash
-git diff pre-hackathon hackathon-submission -- apps/dapp/lib/chains/near apps/dapp/lib/wallet/near-connector.ts apps/dapp/lib/weave/deposit/near.ts
+git diff pre-hackathon hackathon-submission -- apps/dapp/lib/chains/near apps/dapp/lib/wallet/near-connector.ts apps/dapp/lib/weave/deposit/near.ts apps/dapp/lib/agents/brains/nearai-proof.ts
 ```
 
 ## Where the NEAR code is
@@ -24,7 +26,8 @@ git diff pre-hackathon hackathon-submission -- apps/dapp/lib/chains/near apps/da
 | `apps/dapp/lib/chains/near/oneclick.ts`, `quote-signature.ts`  | NEAR Intents 1Click quotes, deposit addresses and quote signature checks       |
 | `apps/dapp/lib/chains/near/cross-chain.ts`                     | USDC sends from NEAR to Solana or Sui through 1Click                           |
 | `apps/dapp/lib/chains/near/rhea-*.ts`                          | Rhea DEX swaps, Rhea Lend supply, borrow and repay, Rhea DCL limit orders      |
-| `apps/dapp/lib/chains/near/stake.ts`, `earn.ts`                | Meta Pool, rNEAR and LiNEAR staking, 1Click Earn                               |
+| `apps/dapp/lib/chains/near/stake.ts`, `earn.ts`                | Meta Pool, rNEAR and LiNEAR staking, unstaking and claims, 1Click Earn         |
+| `apps/dapp/lib/weave/deposit/near.ts`                          | The deposit for an off-ramp from NEAR to a bank, checked against the order     |
 | `apps/dapp/lib/chains/near/safety.ts`, `rhea-safety.ts`        | Server-side checks on every NEAR transaction before the wallet signs           |
 | `apps/dapp/lib/chains/near/rpc.ts`, `balances.ts`, `tokens.ts` | RPC with failover, spendable balances, NEP-141 tokens                          |
 | `apps/dapp/lib/wallet/near-connector.ts`                       | Wallet connection through NEAR Connect (`@hot-labs/near-connect`)              |
@@ -34,7 +37,16 @@ git diff pre-hackathon hackathon-submission -- apps/dapp/lib/chains/near apps/da
 | `apps/dapp/lib/__tests__/near-*.test.ts`, `rhea*.test.ts`      | Unit tests, and `*.live.test.ts` checks against NEAR mainnet that sign nothing |
 
 The chat, agent race and cards in `apps/dapp/components/` are shared with every chain and predate
-the hackathon.
+the hackathon. Some shared code was also changed in the window and applies to NEAR along with the
+other chains: the prompt-injection guard (`apps/dapp/lib/agents/prompt-safe.ts`), the check that an
+amount, token and recipient come from the person's own words (`apps/dapp/lib/chains/parse-sequence.ts`),
+and the off-ramp order sizing (`apps/dapp/lib/weave/orders.ts`).
+
+## What has run on mainnet
+
+The README's "Proven on NEAR mainnet with a real wallet" table links each transaction on NearBlocks:
+an rNEAR stake and unstake, two Rhea DEX swaps, and two off-ramps from NEAR that paid naira to a bank
+account. Everything else is covered by the tests below and is listed under "Not done or not proven".
 
 ## How to check it runs
 
