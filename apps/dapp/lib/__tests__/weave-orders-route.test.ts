@@ -160,7 +160,7 @@ describe('checks before anything is asked of Weave', () => {
   it('refuses NEAR, which Weave cannot make an order for, in words that say what to do', async () => {
     const json = await refused(post({ chain: 'near' }), 422)
     expect(json['error']).toBe('chain_closed')
-    expect(json['message']).toMatch(/move your USDC to Solana, Avalanche or Sui/)
+    expect(json['message']).toMatch(/send the USDC to your Solana or Sui address/)
     expect(json['message']).toMatch(/Nothing was signed or sent\.$/)
     expect(called(state.weave['quote'])).not.toHaveBeenCalled()
     expect(called(state.weave['institutions'])).not.toHaveBeenCalled()

@@ -301,8 +301,10 @@ describe('routeCashout', () => {
       for (const token of ['USDC', 'SOL']) {
         const reply = unsupportedTokenReply(token, chain)
         expect(reply).toBe(closedCashoutReply(chain))
-        expect(reply).toMatch(/move your USDC to Solana, Avalanche or Sui/)
-        expect(reply).toMatch(/has not paid out a real order/)
+        expect(reply).toMatch(/^Off-ramps don't run from /)
+        expect(reply).toMatch(/to USDC here \(skip this if you hold USDC\)/)
+        expect(reply).not.toMatch(/cash[- ]?out/i)
+        expect(reply).not.toMatch(/has not paid out/)
         expect(reply).toMatch(/ Nothing was signed or sent\.$/)
         expect(reply).not.toMatch(/Swap your/)
       }

@@ -7,7 +7,14 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ChainAction } from '../../hooks/use-chain-action'
 import { useWallet } from '../../hooks/use-wallet'
 import type { RestingOrder } from '../../lib/chains/limit'
-import { exitsFor, freshExit, GONE, orderLine, type OrderExit } from '../../lib/chains/orders-view'
+import {
+  exitsFor,
+  freshExit,
+  GONE,
+  orderLine,
+  ordersReply,
+  type OrderExit,
+} from '../../lib/chains/orders-view'
 import { useChain } from '../../providers/chain-provider'
 
 const UNAVAILABLE = 'Your orders could not be read just now. Nothing was signed or sent.'
@@ -19,9 +26,12 @@ const UNAVAILABLE = 'Your orders could not be read just now. Nothing was signed 
 export function ChainOrdersCard({
   action,
   asked,
+  onRead,
 }: {
   action: ChainAction
   asked: string
+  /** What the card showed, in words, each time it is read. */
+  onRead?: (text: string) => void
 }): JSX.Element {
   const { slug } = useChain()
   const { address } = useWallet()
@@ -46,15 +56,20 @@ export function ChainOrdersCard({
     void read().then((found) => {
       if (!current) return
       if (found === undefined) {
-        setError(address === undefined ? 'Connect a wallet to see your orders.' : UNAVAILABLE)
+        const why = address === undefined ? 'Connect a wallet to see your orders.' : UNAVAILABLE
+        setError(why)
+        onRead?.(why)
         return
       }
       setError(undefined)
       setOrders(found)
+      onRead?.(ordersReply(found))
     })
     return () => {
       current = false
     }
+    // Said on each read; a new callback each render must not read again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [read, address, settledHash])
 
   async function press(listed: RestingOrder, wanted: OrderExit): Promise<void> {

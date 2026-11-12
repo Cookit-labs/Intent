@@ -22,10 +22,13 @@ export function isCashoutCurrency(value: string): value is CashoutCurrency {
 
 type Env = Record<string, string | undefined>
 
+/** Weave paid real naira orders here by 10 November 2026; Avalanche order 53959efa landed below its quote. */
+const PAID_OUT =
+  'has paid out real orders in this app, though what lands can be a little below the quote. If asked whether this works, say so, and suggest a small amount first.'
+
 /**
  * The currencies an order may name right now. Naira only unless the deployment says
- * otherwise, the one currency Weave's own list names. Weave has not paid out a real
- * order in this app in any of them, naira included. A list that names nothing known
+ * otherwise, the one currency Weave's own list names. A list that names nothing known
  * opens nothing: someone set it on purpose, and falling back would pay out where they
  * did not ask.
  */
@@ -64,8 +67,8 @@ export function cashOutPrompt(chain: string, env: Env = process.env): string {
     'If they ask for another currency, say it is not available and list these.',
     stellar ? 'The asset is USDC, or XLM when the payout is in naira.' : 'The asset is USDC.',
     stellar
-      ? 'Weave, which pays every currency here but naira, has not paid out a real order in this app yet. If asked whether this has worked, say so.'
-      : 'Weave, which pays these, has not paid out a real order in this app yet. If asked whether this has worked, say so.',
+      ? `Weave, which pays every currency here but naira, ${PAID_OUT}`
+      : `Weave, which pays these, ${PAID_OUT}`,
   ].join(' ')
 }
 

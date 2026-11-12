@@ -4,9 +4,10 @@ import { cn } from '@intent/ui'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, Loader2 } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { TokenAsk } from '../../lib/tokens/ask'
+import { TOKEN_LIST_SIZE, tokenListReply, tokenReply, TOKENS_UNREAD } from '../../lib/tokens/reply'
 import {
   countFigure,
   fetchTokens,
@@ -19,7 +20,7 @@ import { toolCard } from '../intents/bubble'
 import { TokenIcon } from '../ui/token-icon'
 import { ChangePill, TokenSheet, TrustChips } from './token-parts'
 
-const LIST_SIZE = 6
+const LIST_SIZE = TOKEN_LIST_SIZE
 
 /** The token someone most likely means by a word: its exact symbol, the verified one first. */
 export function bestMatch(tokens: readonly TokenRow[], query: string): TokenRow | undefined {
@@ -58,7 +59,14 @@ function Figure({ label, value }: { label: string; value: string }): JSX.Element
 }
 
 /** The answer to "list the tokens" or "is WAL verified", in the thread. Read-only: it moves nothing. */
-export function TokenChatCard({ ask }: { ask: TokenAsk }): JSX.Element {
+export function TokenChatCard({
+  ask,
+  onRead,
+}: {
+  ask: TokenAsk
+  /** What the card showed, in words, once it has been read. */
+  onRead?: (text: string) => void
+}): JSX.Element {
   const { slug, segment, descriptor } = useChain()
   const [open, setOpen] = useState<TokenRow | null>(null)
   const query = ask.kind === 'token' ? ask.query : ''
@@ -67,6 +75,16 @@ export function TokenChatCard({ ask }: { ask: TokenAsk }): JSX.Element {
     queryFn: () => fetchTokens(slug, query),
     staleTime: 2 * 60_000,
   })
+
+  useEffect(() => {
+    if (isLoading || onRead === undefined) return
+    if (isError || data === undefined) onRead(TOKENS_UNREAD(descriptor.name))
+    else if (ask.kind === 'token') {
+      onRead(tokenReply(bestMatch(data.tokens, ask.query), ask.query, descriptor.name))
+    } else onRead(tokenListReply(data.tokens, descriptor.name))
+    // Read once per answer; a new callback each render must not say it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, isError, isLoading, ask, descriptor.name])
 
   if (isLoading) {
     return (

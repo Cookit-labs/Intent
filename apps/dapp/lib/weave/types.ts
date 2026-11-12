@@ -1,8 +1,8 @@
 import type { ChainToken, SignedPayload, SigningPayload, SubmitResult } from '../chains/types'
 
 /**
- * The chains with a deposit path written for Weave. Only USDC, on every one of them. Weave has not
- * paid out a real order in this app from any of them, and `closedCashoutReply` refuses some.
+ * The chains with a deposit path written for Weave. Only USDC, on every one of them.
+ * `closedCashoutReply` refuses some.
  */
 export type CashoutChain = 'stellar' | 'solana' | 'avalanche' | 'sui' | 'near'
 
@@ -21,8 +21,7 @@ export function isCashoutChain(value: string): value is CashoutChain {
   return (CASHOUT_CHAINS as readonly string[]).includes(value)
 }
 
-const MOVE_THEN_CASH_OUT =
-  'To cash out, move your USDC to Solana, Avalanche or Sui with a bridge you trust, connect that wallet here, and cash out from there. Weave has not paid out a real order in this app yet, so try a small amount first. Nothing was signed or sent.'
+const NOTHING_SENT = 'Nothing was signed or sent.'
 
 /**
  * Chains refused before any form opens. `weave-cashout-gaps.live.test.ts` rechecks the reasons.
@@ -39,11 +38,11 @@ const MOVE_THEN_CASH_OUT =
 const CLOSED_CASHOUTS = new Map<string, string>([
   [
     'near',
-    `Cash-outs don't run from NEAR right now, because Weave can't open an order for a NEAR deposit. ${MOVE_THEN_CASH_OUT}`,
+    `Off-ramps don't run from NEAR yet, because Weave can't open an order for a NEAR deposit. To off-ramp, swap your NEAR to USDC here (skip this if you hold USDC), send the USDC to your Solana or Sui address, for example "send 5 USDC to" and the address, then connect that wallet and off-ramp from there. ${NOTHING_SENT}`,
   ],
   [
     'monad',
-    `Cash-outs don't run from Monad yet, because Weave doesn't list Monad for deposits. ${MOVE_THEN_CASH_OUT}`,
+    `Off-ramps don't run from Monad yet, because Weave doesn't list Monad for deposits. To off-ramp, swap your MON to USDC here (skip this if you hold USDC), move the USDC to Solana, Avalanche or Sui with a bridge you trust, then connect that wallet and off-ramp from there. ${NOTHING_SENT}`,
   ],
 ])
 

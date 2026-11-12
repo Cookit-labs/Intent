@@ -34,10 +34,17 @@ describe('cashOutPrompt', () => {
     expect(cashOutPrompt('near', live)).toBe('')
   })
 
-  it('says Weave has paid out no real order, wherever it names a Weave currency', () => {
-    expect(cashOutPrompt('sui', live)).toMatch(/has not paid out a real order/)
+  it('says Weave has paid out real orders, and that what lands can be below the quote', () => {
+    for (const prompt of [
+      cashOutPrompt('sui', live),
+      cashOutPrompt('stellar', { ...live, WEAVE_CASHOUT_CURRENCIES: 'KES' }),
+    ]) {
+      expect(prompt).toMatch(/has paid out real orders in this app/)
+      expect(prompt).toMatch(/a little below the quote/)
+      expect(prompt).not.toMatch(/has not paid out/)
+    }
     expect(cashOutPrompt('stellar', { ...live, WEAVE_CASHOUT_CURRENCIES: 'KES' })).toMatch(
-      /every currency here but naira, has not paid out a real order/
+      /every currency here but naira/
     )
   })
 

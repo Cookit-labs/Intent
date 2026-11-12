@@ -105,6 +105,7 @@ describe('capabilitySheet multi-step forms', () => {
     const sheet = await sheetWith('k')
     for (const chain of ['solana', 'sui', 'avalanche']) {
       expect(sheet(chain)).toMatch(/Swap then cash out:/)
+      expect(sheet(chain)).not.toMatch(/has not yet paid out/)
     }
     expect(sheet('solana')).toMatch(/Swap then deposit:/)
     expect(sheet('solana')).toMatch(/Swap then send:/)
@@ -121,7 +122,10 @@ describe('capabilitySheet multi-step forms', () => {
     expect(near).toMatch(/Swap then deposit:/)
     expect(near).toMatch(/Swap then send:/)
     expect(near).not.toMatch(/Swap then cash out:/)
-    expect(near).toContain("Weave's NEAR deposits aren't working yet")
+    expect(near).toContain(
+      "Off-ramps don't run from NEAR yet: Weave's NEAR deposits aren't working."
+    )
+    expect(near).toMatch(/send it to a Solana or Sui address/)
     expect(near).toMatch(/stake after a swap is not available on NEAR/i)
   }, 60_000)
 
@@ -131,7 +135,7 @@ describe('capabilitySheet multi-step forms', () => {
     expect(monad).toMatch(/Swap then send:/)
     expect(monad).toMatch(/Swap then deposit:/)
     expect(monad).not.toMatch(/Swap then cash out:/)
-    expect(monad).toMatch(/Cash out does not run from Monad/)
+    expect(monad).toMatch(/Off-ramps don't run from Monad/)
   }, 60_000)
 
   it('says which native coins cannot be sent yet', async () => {

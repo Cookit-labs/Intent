@@ -412,6 +412,17 @@ export function IntentChat({
   /** Open positions asked for in the thread, and the venue if one was named. */
   const [positionsShown, setPositionsShown] = useState<{ venue?: string } | null>(null)
   const [tokensShown, setTokensShown] = useState<TokenAsk | null>(null)
+  // What the orders, positions or tokens card showed, in words. The card goes when the next
+  // message is sent; these stay as the turn's reply, and in the saved chat.
+  const [cardReply, setCardReply] = useState<string | null>(null)
+  const cardReplySaved = useRef(-1)
+  function noteCardReply(turn: number, text: string): void {
+    if (turn !== latest.current.turn) return
+    setCardReply(text)
+    if (cardReplySaved.current === turn) return
+    cardReplySaved.current = turn
+    recordLive('agent', text)
+  }
   const [parsing, setParsing] = useState(false)
   // The conversation around the open intent. `thread` holds the turns that came
   // before it, kept in view so the chat reads as one; `notes` are things the
@@ -1206,6 +1217,7 @@ export function IntentChat({
   /** What was said back to the open turn, in the words it was shown. */
   function openTurnReply(): ThreadTurn['reply'] {
     if (affordError !== null) return { text: affordError }
+    if (cardReply !== null) return { text: cardReply }
     if (nairaForm !== null) {
       return { text: cashoutFormOutcome(nairaSymbol(nairaForm), nairaForm.amountXlm) }
     }
@@ -2322,6 +2334,7 @@ export function IntentChat({
     setOrdersShown(null)
     setPositionsShown(null)
     setTokensShown(null)
+    setCardReply(null)
     const cashoutRoute = routeCashout(parseCashout(text), slug, isMainnet())
     const capabilities = chainCapabilities(slug)
     const chainRead =
@@ -2355,15 +2368,22 @@ export function IntentChat({
           : asksToManagePosition(text)
     if (!refused && (tokenAsk !== null || positionAsk !== null)) {
       setClarifying(null)
-      setMessage(text)
       if (chainSequence.sequence === null) {
+        archiveOpenTurn()
         resetTurnState()
         setParsed(null)
         setTurnId(null)
         chainAction.reset()
       }
+      setMessage(text)
       if (tokenAsk !== null) setTokensShown(tokenAsk)
-      else setPositionsShown(positionAsk)
+      else {
+        setPositionsShown(positionAsk)
+        const turn = latest.current.turn
+        void readPositionsReply(slug, descriptor.name, address).then((reply) =>
+          noteCardReply(turn, reply)
+        )
+      }
       return
     }
 
@@ -2425,6 +2445,7 @@ export function IntentChat({
       }
       if (chainRead.kind === 'orders') {
         setClarifying(null)
+        archiveOpenTurn()
         setMessage(text)
         resetTurnState()
         setParsed(null)
@@ -3783,7 +3804,11 @@ export function IntentChat({
                 </div>
               ) : null}
               {ordersShown !== null ? (
-                <ChainOrdersCard action={chainAction} asked={ordersShown} />
+                <ChainOrdersCard
+                  action={chainAction}
+                  asked={ordersShown}
+                  onRead={(text) => noteCardReply(latest.current.turn, text)}
+                />
               ) : null}
               {positionsShown !== null ? (
                 slug === 'stellar' ? (
@@ -3792,7 +3817,12 @@ export function IntentChat({
                   <ChainPositions inChat venue={positionsShown.venue} />
                 )
               ) : null}
-              {tokensShown !== null ? <TokenChatCard ask={tokensShown} /> : null}
+              {tokensShown !== null ? (
+                <TokenChatCard
+                  ask={tokensShown}
+                  onRead={(text) => noteCardReply(latest.current.turn, text)}
+                />
+              ) : null}
 
               {cashout.session !== null ? (
                 <CashoutCard key={cashout.session.key} cashout={cashout} />
