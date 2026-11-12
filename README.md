@@ -68,23 +68,12 @@ Intent you type what you want in a chat. AI agents compare real quotes, question
 choices in the chat and propose a route. You read a card and sign in your own wallet. Agents can't
 sign or send anything.
 
-<p align="center">
-  <img src="docs/media/intent-on-near.gif" alt="Intent on NEAR: a typed request, agents comparing Rhea and 1Click, Nova's NEAR AI proof note, then a swap on Rhea DEX and a LiNEAR stake" width="480" />
-</p>
-<p align="center">
-  <a href="docs/media/intent-on-near.mp4">Watch with sound (MP4, 32 seconds)</a>. Amounts in the video are illustrative; the
-  transactions under <a href="#proven-on-near-mainnet-with-a-real-wallet">Proven on NEAR mainnet</a> are real.
-</p>
-
 Tracks: Unstoppable DeFi, AI Swarms, Real-World Money, Privacy & Private AI, AI Security & Defense.
 
 ### How it fits together
 
 <p align="center">
   <img src="docs/media/intent-architecture.gif" alt="System architecture for Intent on NEAR: the system map, one request traced end to end, the ChainVenue and ChainModule interfaces, the NEAR AI proof sequence, the safety checks and the off-ramp sequence" width="100%" />
-</p>
-<p align="center">
-  <a href="docs/media/intent-architecture.mp4">Full-size video (MP4, 32 seconds)</a>
 </p>
 
 ![System Architecture for Intent on NEAR: the client, API routes, core modules and external services, with one request traced through them in eight steps](docs/media/intent-architecture.png)
