@@ -164,10 +164,22 @@ function PayoutProgress({
   const paid = done ? order.paidDest : undefined
   const running = shouldPoll(order.status)
   const bad = !done && !running
-  const reached = order.status === 'waiting' ? 0 : order.status === 'processing' ? 1 : 2
+  const known = order.depositHash ?? hash
+  // This app confirmed the deposit on chain; the provider may still say it is waiting.
+  const confirmedOn =
+    known !== undefined && known !== '' && unsure === undefined && isCashoutChain(order.chain)
+      ? order.chain
+      : undefined
+  const reached =
+    order.status === 'waiting'
+      ? confirmedOn !== undefined
+        ? 1
+        : 0
+      : order.status === 'processing'
+        ? 1
+        : 2
   const isNaira = order.currency === 'NGN'
   const steps = ['Deposit', isNaira ? 'Bank transfer' : 'Payout', 'Paid']
-  const known = order.depositHash ?? hash
   const href =
     known === undefined || known === ''
       ? undefined
@@ -192,7 +204,7 @@ function PayoutProgress({
         subtitle={
           done
             ? `Paid to ${order.institutionName}`
-            : statusText(order.status, payoutProvider(order).id)
+            : statusText(order.status, payoutProvider(order).id, confirmedOn)
         }
       />
 

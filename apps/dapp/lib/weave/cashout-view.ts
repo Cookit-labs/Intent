@@ -165,14 +165,29 @@ function refundUnproven(name: string): string {
   return `Refunds are ${name}'s to make and none has run in this app yet, so check your wallet and keep this order.`
 }
 
+const DEPOSIT_CHAIN_NAME: Record<CashoutChain, string> = {
+  stellar: 'Stellar',
+  solana: 'Solana',
+  avalanche: 'Avalanche',
+  sui: 'Sui',
+  near: 'NEAR',
+}
+
+/**
+ * `confirmedOn` is the chain this app saw the deposit confirmed on. The provider can go on
+ * saying it waits until its own bridge has moved the money, which is not the person's to wait on.
+ */
 export function statusText(
   status: CashoutStatus,
-  provider: PayoutProvider['id'] = 'weave'
+  provider: PayoutProvider['id'] = 'weave',
+  confirmedOn?: CashoutChain
 ): string {
   const name = PROVIDERS[provider].name
   switch (status) {
     case 'waiting':
-      return 'Waiting for your deposit to be confirmed.'
+      return confirmedOn === undefined
+        ? 'Waiting for your deposit to be confirmed.'
+        : `Deposit confirmed on ${DEPOSIT_CHAIN_NAME[confirmedOn]}. ${name} is sending your payout.`
     case 'processing':
       return 'Deposit received. The payout is on its way.'
     case 'paid':

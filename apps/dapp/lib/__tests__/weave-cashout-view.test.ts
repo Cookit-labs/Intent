@@ -161,6 +161,20 @@ describe('status', () => {
     expect(statusText('refunded')).toMatch(/Weave says .* check that it arrived/)
   })
 
+  it('says the deposit is confirmed once the chain confirmed it, while the provider still says waiting', () => {
+    expect(statusText('waiting', 'weave', 'avalanche')).toBe(
+      'Deposit confirmed on Avalanche. Weave is sending your payout.'
+    )
+    expect(statusText('waiting', 'linq', 'stellar')).toBe(
+      'Deposit confirmed on Stellar. Linq is sending your payout.'
+    )
+    expect(statusText('waiting', 'weave', 'near')).toMatch(/^Deposit confirmed on NEAR\./)
+  })
+
+  it('still waits when no deposit has been confirmed', () => {
+    expect(statusText('waiting', 'weave')).toBe('Waiting for your deposit to be confirmed.')
+  })
+
   it.each(['failed', 'expired', 'refunded'] as const)(
     'names Linq, not Weave, on a %s Linq order',
     (status) => {

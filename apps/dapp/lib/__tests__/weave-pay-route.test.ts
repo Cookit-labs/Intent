@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   deposit: {} as Record<string, unknown>,
   report: [] as unknown[][],
   logged: [] as unknown[],
+  notified: [] as unknown[][],
 }))
 
 vi.mock('@intent/config', async (original) => ({
@@ -22,6 +23,16 @@ vi.mock('../weave/orders', async (original) => ({
   getWeaveOrderRepo: async () => state.repo,
 }))
 vi.mock('../weave/deposit', () => ({ depositChain: () => state.deposit }))
+vi.mock('../linq/client', () => ({
+  createLinqClient: () => ({
+    getStatus: async () => ({ ok: true, value: { status: 'initiated', amountNGN: 0 } }),
+  }),
+}))
+vi.mock('../chains/near/oneclick', () => ({
+  notifyDeposit: async (...args: unknown[]) => {
+    state.notified.push(args)
+  },
+}))
 vi.mock('../server/rate-limit', () => ({ enforceRateLimit: async () => undefined }))
 vi.mock('../server/report', () => ({
   reportError: (...args: unknown[]) => state.report.push(args),
@@ -110,6 +121,7 @@ beforeEach(() => {
   state.mainnet = true
   state.report = []
   state.logged = []
+  state.notified = []
   live('awaiting_deposit')
   stored()
   state.deposit = {
@@ -482,5 +494,60 @@ describe('POST submit', () => {
     expect(res.status).toBe(200)
     expect((await res.json()).hash).toBe('hash1')
     expect(state.report).toHaveLength(1)
+  })
+})
+
+describe('telling NEAR Intents the deposit has landed', () => {
+  it.each([
+    ['solana', SIGNED],
+    ['sui', { family: 'sui', transaction: 'dHg=', signature: 'c2ln' }],
+    ['avalanche', { family: 'evm', hash: '0xabc' }],
+  ] as const)(
+    'passes a confirmed %s deposit on, so its bridge need not find it',
+    async (chain, signed) => {
+      stored({ chain })
+      const res = await submit(req('submit', { signed }), context)
+      expect(res.status).toBe(200)
+      expect(state.notified).toEqual([['weaveDeposit', 'hash1']])
+    }
+  )
+
+  it('names the sending account on NEAR', async () => {
+    stored({ chain: 'near' })
+    await submit(req('submit', { signed: { family: 'near', hashes: ['h1'] } }), context)
+    expect(state.notified).toEqual([['weaveDeposit', 'hash1', 'alice']])
+  })
+
+  it("leaves Stellar alone, because Weave's Stellar flow does not bridge through NEAR Intents", async () => {
+    stored({ chain: 'stellar' })
+    await submit(req('submit', { signed: { family: 'stellar', signedXdr: 'AAAA' } }), context)
+    expect(state.notified).toEqual([])
+  })
+
+  it('leaves a Linq order alone', async () => {
+    stored({ chain: 'sui', provider: 'linq' })
+    const res = await submit(
+      req('submit', { signed: { family: 'sui', transaction: 'dHg=', signature: 'c2ln' } }),
+      context
+    )
+    expect(res.status).toBe(200)
+    expect(state.notified).toEqual([])
+  })
+
+  it('says nothing for a transfer not yet confirmed', async () => {
+    state.deposit['submit'] = vi.fn(async () => ({
+      ok: false,
+      pending: true,
+      hash: 'hash1',
+      error: 'x',
+    }))
+    await submit(req('submit', { signed: SIGNED }), context)
+    expect(state.notified).toEqual([])
+  })
+
+  it('says nothing for a hash already counted', async () => {
+    state.repo['setDepositHash'] = vi.fn(async () => 'reused')
+    await submit(req('submit', { signed: SIGNED }), context)
+    expect(state.notified).toEqual([])
   })
 })
