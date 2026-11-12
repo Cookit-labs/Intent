@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 import { createLinqClient } from '../../../../lib/linq/client'
+import { largestNaira, maxNgn, nairaLimitMessage } from '../../../../lib/naira/limit'
 import { databaseConfigured } from '../../../../lib/server/db'
 import { enforceRateLimit } from '../../../../lib/server/rate-limit'
 import { reportError } from '../../../../lib/server/report'
@@ -11,7 +12,7 @@ import { createWeaveClient, quoteCostPercent } from '../../../../lib/weave/clien
 import { isCurrencyAllowed } from '../../../../lib/weave/corridors'
 import { depositChain } from '../../../../lib/weave/deposit'
 import { chainRefusal, guardCashout } from '../../../../lib/weave/guard'
-import { placeWithLinq } from '../../../../lib/weave/linq-cashout'
+import { comparesLinq, placeWithLinq } from '../../../../lib/weave/linq-cashout'
 import {
   cleanMemo,
   fitToHeld,
@@ -223,8 +224,33 @@ export async function POST(request: Request): Promise<Response> {
 
   const quote = await weave.quote({ chain, currency, amount })
   const weaveCost = quote.ok ? quoteCostPercent(amount, quote.value.netUsd) : undefined
+  const linq = createLinqClient()
+
+  // One naira ceiling per payout on every chain, checked before either provider makes an order.
+  // Linq can pay more than Weave's estimate, so where it may take the order its rate counts too.
+  if (currency === 'NGN') {
+    const linqMayPay = comparesLinq(chain) && linq.configured
+    const linqNaira = linqMayPay
+      ? await linq
+          .getRate()
+          .then((rate) => (rate.ok ? Number(amount) * rate.value.ngnPerUsd : undefined))
+          .catch(() => undefined)
+      : undefined
+    const naira = largestNaira([quote.ok ? quote.value.destAmount : undefined, linqNaira])
+    if (naira === undefined && linqMayPay) {
+      return refusal(
+        'unavailable',
+        'No naira price is available right now, so this payout was not started. Nothing was signed or sent.',
+        503
+      )
+    }
+    if (naira !== undefined && naira > maxNgn()) {
+      return refusal('over_limit', nairaLimitMessage(), 422)
+    }
+  }
+
   const viaLinq = await placeWithLinq({
-    linq: createLinqClient(),
+    linq,
     chain,
     currency,
     amount,

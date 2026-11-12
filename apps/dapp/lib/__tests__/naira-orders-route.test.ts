@@ -138,6 +138,23 @@ describe('POST /api/naira/orders, USDC', () => {
     expect(linq.createOrder).not.toHaveBeenCalled()
   })
 
+  it('allows a payout up to ₦2,000,000, the limit on every chain', async () => {
+    // 29.87312349 USDC at ₦66,900 is about ₦1,998,500.
+    linq.getRate.mockResolvedValue({ ok: true, value: { ngnPerUsd: 66_900 } })
+    const { POST } = await route()
+    const res = await POST(post(usdcBody))
+    expect(res.status).toBe(200)
+    expect(linq.createOrder).toHaveBeenCalled()
+  })
+
+  it('says the ₦2,000,000 limit when a payout is over it', async () => {
+    linq.getRate.mockResolvedValue({ ok: true, value: { ngnPerUsd: 70_000 } })
+    const { POST } = await route()
+    const json = (await (await POST(post(usdcBody))).json()) as { error: string; message: string }
+    expect(json.error).toBe('over_limit')
+    expect(json.message).toMatch(/₦2,000,000/)
+  })
+
   it('returns the order already made when the same attempt is retried', async () => {
     const { toPublic } = await import('../naira/orders')
     repo.getByIdempotencyKey.mockResolvedValue({
