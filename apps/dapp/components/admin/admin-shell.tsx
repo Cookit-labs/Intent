@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  Inbox,
   Layers,
   LayoutDashboard,
   ListChecks,
@@ -47,6 +48,7 @@ const NAV: NavItem[] = [
   { href: '/admin/intents', label: 'Intents', icon: Brain },
   { href: '/admin/wallets', label: 'Wallets', icon: Wallet },
   { href: '/admin/payouts', label: 'Payouts', icon: Banknote },
+  { href: '/admin/tickets', label: 'Tickets', icon: Inbox },
   { href: '/admin/waitlist', label: 'Waitlist', icon: ListChecks, chainless: true },
 ]
 
