@@ -394,6 +394,24 @@ describe('linq client', () => {
     expect(calls[0]?.url).toBe('https://linq.test/b2b/status?id=ord-1')
   })
 
+  it('reads the deposit digest, and keeps a missing one apart from an empty one', async () => {
+    const read = async (body: Record<string, unknown>) => {
+      const { fetchImpl } = server(() => ({ status: 200, body }))
+      return createLinqClient({ ...config, fetchImpl }).getStatus('ord-1')
+    }
+    const base = { id: 'ord-1', status: 'processing: in order queue' }
+    expect(await read({ ...base, depositDigest: '' })).toMatchObject({
+      ok: true,
+      value: { depositDigest: '' },
+    })
+    expect(await read({ ...base, depositDigest: 'ab12' })).toMatchObject({
+      ok: true,
+      value: { depositDigest: 'ab12' },
+    })
+    const missing = await read(base)
+    expect(missing.ok && 'depositDigest' in missing.value).toBe(false)
+  })
+
   it('is not configured without a key', () => {
     expect(createLinqClient({ baseUrl: 'https://linq.test', apiKey: '' }).configured).toBe(false)
     expect(createLinqClient(config).configured).toBe(true)

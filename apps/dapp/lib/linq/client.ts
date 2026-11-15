@@ -79,6 +79,8 @@ export interface LinqOrder {
   /** Naira per unit of `coin`, locked for this order. */
   rate: number
   status: string
+  /** As on `LinqStatus`: `''` when Linq says no deposit, absent when it doesn't say. */
+  depositDigest?: string
 }
 
 export interface LinqStatus {
@@ -86,6 +88,8 @@ export interface LinqStatus {
   status: string
   amountCoin: number
   amountNGN: number
+  /** The deposit Linq has seen, `''` when it says none. Absent when Linq doesn't say. */
+  depositDigest?: string
 }
 
 export interface LinqClientOptions {
@@ -343,6 +347,9 @@ export function createLinqClient(options: LinqClientOptions = {}): {
           amountNGN: num(body['amountNGN']),
           rate: num(body['rate']),
           status: str(body['status']),
+          ...(typeof body['depositDigest'] === 'string'
+            ? { depositDigest: body['depositDigest'].trim() }
+            : {}),
         },
       }
     },
@@ -350,6 +357,7 @@ export function createLinqClient(options: LinqClientOptions = {}): {
     async getStatus(id) {
       const res = await call(`/b2b/status?id=${encodeURIComponent(id)}`, { method: 'GET' })
       if (!res.ok) return res
+      const digest = res.value['depositDigest']
       return {
         ok: true,
         value: {
@@ -357,6 +365,7 @@ export function createLinqClient(options: LinqClientOptions = {}): {
           status: str(res.value['status']),
           amountCoin: num(res.value['amountStableCoin']),
           amountNGN: num(res.value['amountNGN']),
+          ...(typeof digest === 'string' ? { depositDigest: digest.trim() } : {}),
         },
       }
     },

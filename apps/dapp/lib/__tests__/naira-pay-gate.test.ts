@@ -38,6 +38,7 @@ import { reconcileBeforePay } from '../naira/reconcile'
 
 const WATCHING = 'processing: wallet worker on it..'
 const IN_QUEUE = 'processing: in bank queue'
+const QUEUED = 'processing: in order queue'
 
 function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -85,6 +86,26 @@ describe('reconcileBeforePay', () => {
     linq.getStatus.mockResolvedValue(live(IN_QUEUE))
     const out = await reconcileBeforePay(repo, row() as never, linq)
     expect(out.status).toBe('processing')
+  })
+
+  it('lets a deposit go to an order queued with no deposit yet', async () => {
+    linq.getStatus.mockResolvedValue({
+      ok: true,
+      value: { ...live(QUEUED).value, depositDigest: '' },
+    })
+    const out = await reconcileBeforePay(repo, row({ status: 'processing' }) as never, linq)
+    expect(out.status).toBe('waiting')
+    expect(repo.setStatus).toHaveBeenCalledWith('prov-1', 'waiting', QUEUED)
+  })
+
+  it('refuses a queued order once the provider has seen a deposit, or does not say', async () => {
+    linq.getStatus.mockResolvedValue({
+      ok: true,
+      value: { ...live(QUEUED).value, depositDigest: 'ab12' },
+    })
+    expect((await reconcileBeforePay(repo, row() as never, linq)).status).toBe('processing')
+    linq.getStatus.mockResolvedValue(live(QUEUED))
+    expect((await reconcileBeforePay(repo, row() as never, linq)).status).toBe('processing')
   })
 
   it('never writes amounts back, so a waiting order keeps what it was made for', async () => {

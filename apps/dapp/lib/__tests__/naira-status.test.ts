@@ -24,6 +24,16 @@ describe('normaliseStatus, from the provider’s own strings', () => {
     expect(normaliseStatus('')).toBe('processing')
   })
 
+  // Linq's new orders read "processing: in order queue" from 15 November 2026, with an
+  // empty deposit digest. Reading it as processing refused every naira deposit.
+  it('reads an order queued with no deposit as waiting, only when the digest says so', () => {
+    expect(normaliseStatus('processing: in order queue', '')).toBe('waiting')
+    expect(normaliseStatus('Processing: In order queue', '')).toBe('waiting')
+    expect(normaliseStatus('processing: in order queue', 'ab12')).toBe('processing')
+    expect(normaliseStatus('processing: in order queue')).toBe('processing')
+    expect(normaliseStatus('processing: in bank queue', '')).toBe('processing')
+  })
+
   it('knows which states cannot change', () => {
     expect(isTerminal('paid')).toBe(true)
     expect(isTerminal('expired')).toBe(true)

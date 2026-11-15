@@ -11,13 +11,18 @@
  */
 export type NairaStatus = 'waiting' | 'processing' | 'paid' | 'expired' | 'failed'
 
-export function normaliseStatus(provider: string): NairaStatus {
+export function normaliseStatus(provider: string, depositDigest?: string): NairaStatus {
   const s = provider.trim().toLowerCase()
   if (s === 'initiated') return 'waiting'
   // The provider's "processing: wallet worker on it.." means its worker is
   // watching the deposit wallet, which is before any deposit. Treating it as a
   // deposit received refused the payment the order was waiting for.
   if (s.startsWith('processing') && /wallet worker|watching/.test(s)) return 'waiting'
+  // New orders read "processing: in order queue" from 15 November 2026. It counts as
+  // waiting only beside a live read whose deposit digest is present and empty.
+  if (s.startsWith('processing') && s.includes('order queue') && depositDigest === '') {
+    return 'waiting'
+  }
   if (s.startsWith('timeout')) return 'expired'
   if (s === 'disbursed' || s.startsWith('settled')) return 'paid'
   if (s === 'failed' || s.startsWith('failed')) return 'failed'

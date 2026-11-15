@@ -28,7 +28,7 @@ export async function GET(
   if (!isTerminal(row.status)) {
     const live = await createLinqClient().getStatus(row.providerOrder)
     if (live.ok && live.value.status !== '') {
-      const status = normaliseStatus(live.value.status)
+      const status = normaliseStatus(live.value.status, live.value.depositDigest)
       await repo.setStatus(
         row.providerOrder,
         status,

@@ -107,6 +107,27 @@ describe('POST /api/naira/orders, USDC', () => {
     expect(JSON.stringify(body)).not.toContain('1234567890')
   })
 
+  it('stores a new order Linq queues with no deposit as waiting', async () => {
+    linq.createOrder.mockResolvedValue({
+      ok: true,
+      value: {
+        id: 'prov-1',
+        depositAddress: DEPOSIT,
+        coin: 'usdc',
+        amountCoin: 29.8731234,
+        amountNGN: 47797,
+        rate: 1600,
+        status: 'processing: in order queue',
+        depositDigest: '',
+      },
+    })
+    const { POST } = await route()
+    expect((await POST(post(usdcBody))).status).toBe(200)
+    expect(repo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'waiting', providerStatus: 'processing: in order queue' })
+    )
+  })
+
   it('refuses more USDC than the account holds, before asking the provider', async () => {
     balanceOf.mockResolvedValue(BigInt(100_000_000)) // 10 USDC
     const { POST } = await route()
