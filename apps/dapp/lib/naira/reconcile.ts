@@ -28,7 +28,7 @@ export async function reconcileBeforePay(
   const live = await linq.getStatus(row.providerOrder)
   if (!live.ok || live.value.status === '') return row
 
-  const status = normaliseStatus(live.value.status)
+  const status = normaliseStatus(live.value.status, live.value.depositDigest)
   if (status !== row.status || live.value.status !== row.providerStatus) {
     await repo.setStatus(row.providerOrder, status, live.value.status)
   }

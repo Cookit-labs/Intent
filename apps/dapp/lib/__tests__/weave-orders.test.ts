@@ -257,6 +257,46 @@ describe('syncOrder', () => {
   })
 })
 
+describe('a Linq order queued with no deposit', () => {
+  const QUEUED = 'processing: in order queue'
+  const linqRow = row({ provider: 'linq', chain: 'sui', providerStatus: 'initiated' })
+  const repo = () => ({
+    setStatus: vi.fn(async () => undefined),
+    setPaid: vi.fn(async () => undefined),
+  })
+  const weave = { getOrder: vi.fn() }
+  const linqSays = (depositDigest?: string) => ({
+    getStatus: async () => ({
+      ok: true as const,
+      value: {
+        id: 'ord_1',
+        status: QUEUED,
+        amountCoin: 25.5,
+        amountNGN: 35000,
+        ...(depositDigest === undefined ? {} : { depositDigest }),
+      },
+    }),
+  })
+
+  it('can be paid when Linq shows no deposit', async () => {
+    const synced = await syncOrder(repo(), linqRow, weave, linqSays(''))
+    expect(payRefusal(synced, NOW)).toBeUndefined()
+  })
+
+  it('cannot be paid when Linq has a deposit, or does not say', async () => {
+    const seen = await syncOrder(repo(), linqRow, weave, linqSays('ab12'))
+    expect(payRefusal(seen, NOW)).toMatchObject({ status: 503 })
+    const silent = await syncOrder(repo(), linqRow, weave, linqSays())
+    expect(payRefusal(silent, NOW)).toMatchObject({ status: 503 })
+  })
+
+  it('cannot be paid from a stored copy of the status alone', () => {
+    expect(
+      payRefusal({ row: { ...linqRow, providerStatus: QUEUED }, reached: true }, NOW)
+    ).toMatchObject({ status: 503 })
+  })
+})
+
 describe('payRefusal', () => {
   const reached = (over: Partial<WeaveOrderRow> = {}) => ({ row: row(over), reached: true })
 

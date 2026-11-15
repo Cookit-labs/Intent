@@ -297,7 +297,7 @@ export async function POST(request: Request): Promise<Response> {
     amount: order.amountCoin.toFixed(7),
     amountNgn: String(order.amountNGN),
     rate: String(order.rate),
-    status: normaliseStatus(order.status),
+    status: normaliseStatus(order.status, order.depositDigest),
     providerStatus: order.status,
   }
   await repo.insert(row)

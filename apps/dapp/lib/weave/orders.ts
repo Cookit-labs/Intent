@@ -517,6 +517,8 @@ export interface SyncedOrder {
   row: WeaveOrderRow
   /** False when Weave could not be asked or its answer could not be read. */
   reached: boolean
+  /** For a Linq order just asked: whether Linq said, with its deposit digest, that it waits. */
+  linqWaiting?: boolean
 }
 
 /**
@@ -530,7 +532,11 @@ async function readLive(
   weave: Pick<WeaveClient, 'getOrder'>,
   linq: Pick<LinqClient, 'getStatus'> | undefined
 ): Promise<
-  { ok: true; value: { status: string; destAmount?: number | undefined } } | { ok: false }
+  | {
+      ok: true
+      value: { status: string; destAmount?: number | undefined; depositDigest?: string }
+    }
+  | { ok: false }
 > {
   if (row.provider !== 'linq') return weave.getOrder(row.providerOrder)
   if (linq === undefined) return { ok: false }
@@ -538,9 +544,14 @@ async function readLive(
   if (!res.ok) return { ok: false }
   // Linq states the naira when the order is made and pays exactly that.
   const naira = res.value.amountNGN
+  const { depositDigest } = res.value
   return {
     ok: true,
-    value: { status: res.value.status, ...(naira > 0 ? { destAmount: naira } : {}) },
+    value: {
+      status: res.value.status,
+      ...(naira > 0 ? { destAmount: naira } : {}),
+      ...(depositDigest === undefined ? {} : { depositDigest }),
+    },
   }
 }
 
@@ -579,6 +590,11 @@ export async function syncOrder(
       ...(paid !== undefined ? { paidDest: paid } : {}),
     },
     reached: true,
+    ...(row.provider === 'linq'
+      ? {
+          linqWaiting: normaliseStatus(live.value.status, live.value.depositDigest) === 'waiting',
+        }
+      : {}),
   }
 }
 
@@ -624,7 +640,7 @@ export function payRefusal(synced: SyncedOrder, now: number = Date.now()): PayRe
   }
   const saysWaiting =
     row.provider === 'linq'
-      ? normaliseStatus(row.providerStatus) === 'waiting'
+      ? (synced.linqWaiting ?? normaliseStatus(row.providerStatus) === 'waiting')
       : mapProviderStatus(row.providerStatus) === 'waiting'
   if (!reached || !saysWaiting) {
     return {
