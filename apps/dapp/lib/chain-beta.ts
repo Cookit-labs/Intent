@@ -1,7 +1,7 @@
 import type { ChainSlug } from '@intent/types'
 
 /** Raising this shows the notice again on every beta chain, once, for the next round of changes. */
-export const BETA_RELEASE = 'v1'
+export const BETA_RELEASE = 'v2'
 
 /** Every chain but Stellar, which has been running longest. */
 export function isBetaChain(slug: ChainSlug): boolean {
