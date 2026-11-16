@@ -250,6 +250,15 @@ export function HelpWidget(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!intro) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') dismissIntro()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [intro, dismissIntro])
+
+  useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setOpen(false)
@@ -374,296 +383,318 @@ export function HelpWidget(): JSX.Element {
             status: thread !== undefined ? STATUS_TEXT[thread.status] : 'Loading',
           }
 
+  const spotlight = intro && !open
+
   return (
-    <div className="pointer-events-none fixed bottom-24 right-4 z-40 flex flex-col items-end gap-3 lg:bottom-6 lg:right-6">
-      {open ? (
-        <section
-          role="dialog"
-          aria-label="Help"
-          className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground pointer-events-auto flex h-[min(640px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] dark:border-white/[0.06] dark:bg-[#0F0F0F]"
-        >
-          <header className="border-border flex items-center gap-2.5 border-b px-3 py-3">
-            {view.name !== 'chat' ? (
+    <>
+      {spotlight ? (
+        // Dims the page so the help button is the one bright thing on it. A click anywhere closes it.
+        <div
+          aria-hidden="true"
+          onClick={dismissIntro}
+          className="animate-in fade-in fixed inset-0 z-[45] bg-black/55 duration-300 motion-reduce:animate-none"
+        />
+      ) : null}
+      <div
+        className={cn(
+          'pointer-events-none fixed bottom-24 right-4 flex flex-col items-end gap-3 lg:bottom-6 lg:right-6',
+          spotlight ? 'z-50' : 'z-40'
+        )}
+      >
+        {open ? (
+          <section
+            role="dialog"
+            aria-label="Help"
+            className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground pointer-events-auto flex h-[min(640px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+          >
+            <header className="border-border flex items-center gap-2.5 border-b px-3 py-3">
+              {view.name !== 'chat' ? (
+                <button
+                  type="button"
+                  aria-label="Back"
+                  onClick={() =>
+                    setView(view.name === 'thread' ? { name: 'tickets' } : { name: 'chat' })
+                  }
+                  className="text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full p-1.5"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+              ) : null}
+              <Avatar />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <h2 className="truncate text-sm font-semibold">{heading.name}</h2>
+                <p className="text-muted-foreground truncate text-xs">{heading.status}</p>
+              </div>
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  aria-label={unread > 0 ? `More, ${unread} new` : 'More'}
+                  aria-haspopup="menu"
+                  aria-expanded={menu}
+                  onClick={() => setMenu((v) => !v)}
+                  className="text-muted-foreground hover:text-foreground hover:bg-muted/60 relative rounded-full p-1.5"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  {unread > 0 ? (
+                    <span className="bg-brand text-brand-foreground ring-bubble-agent absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ring-2 dark:ring-[#0F0F0F]">
+                      {unread}
+                    </span>
+                  ) : null}
+                </button>
+                {menu ? (
+                  <div
+                    role="menu"
+                    className="border-border bg-background absolute right-0 z-10 mt-1.5 w-48 rounded-xl border p-1 shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenu(false)
+                        startOver()
+                      }}
+                      className="hover:bg-muted/60 w-full rounded-lg px-3 py-2 text-left text-sm"
+                    >
+                      New conversation
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenu(false)
+                        setView({ name: 'tickets' })
+                      }}
+                      className="hover:bg-muted/60 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm"
+                    >
+                      Your tickets
+                      {unread > 0 ? (
+                        <span className="text-brand text-xs font-medium">{unread} new</span>
+                      ) : null}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
-                aria-label="Back"
-                onClick={() =>
-                  setView(view.name === 'thread' ? { name: 'tickets' } : { name: 'chat' })
-                }
+                aria-label="Close help"
+                onClick={() => setOpen(false)}
                 className="text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full p-1.5"
               >
-                <ArrowLeft className="h-4 w-4" />
+                <X className="h-4 w-4" />
               </button>
+            </header>
+
+            {view.name === 'chat' ? (
+              <>
+                <Thread>
+                  {turns.length === 0 && note === undefined ? (
+                    <div className="flex flex-1 flex-col items-center justify-between gap-6 pt-2">
+                      <p className="text-muted-foreground max-w-[30ch] text-center text-sm">
+                        {GREETING}
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {QUICK_STARTS.map((q) => (
+                          <button
+                            key={q}
+                            type="button"
+                            onClick={() => void ask(q)}
+                            className="bg-brand/10 text-brand hover:bg-brand/15 dark:bg-brand/30 dark:hover:bg-brand/40 rounded-full px-3 py-1.5 text-sm transition-colors dark:text-white/90"
+                          >
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {turns.map((t, i) => (
+                    <div
+                      key={i}
+                      className={t.role === 'user' ? cn(userBubble, 'self-end') : agentBubble}
+                    >
+                      {t.text}
+                    </div>
+                  ))}
+                  {busy ? <Typing /> : null}
+                  {note?.kind === 'offer' ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void fileTicket(
+                          turns.length > 0 ? turns : [{ role: 'user', text: note.draft.summary }],
+                          note.draft
+                        )
+                      }
+                      className="bg-brand text-brand-foreground focus-visible:ring-brand/40 self-start rounded-full px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50"
+                    >
+                      Send this to the team
+                    </button>
+                  ) : null}
+                  {note?.kind === 'filed' ? (
+                    <div className={systemPill}>
+                      <span>
+                        Sent to the team. Their reply will show up here, under{' '}
+                        <button
+                          type="button"
+                          onClick={() => void openThread(note.id)}
+                          className="text-brand underline-offset-2 hover:underline"
+                        >
+                          your tickets
+                        </button>
+                        .
+                      </span>
+                    </div>
+                  ) : null}
+                  {note?.kind === 'error' ? <div className={systemPill}>{note.text}</div> : null}
+                </Thread>
+                {note?.kind === 'filed' ? (
+                  <div className="border-border border-t p-3">
+                    <button
+                      type="button"
+                      onClick={startOver}
+                      className="border-border hover:bg-muted/60 w-full rounded-2xl border px-4 py-2.5 text-sm"
+                    >
+                      Ask something else
+                    </button>
+                  </div>
+                ) : (
+                  <Composer placeholder="Message…" busy={busy} onSend={(t) => void ask(t)} />
+                )}
+              </>
             ) : null}
-            <Avatar />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <h2 className="truncate text-sm font-semibold">{heading.name}</h2>
-              <p className="text-muted-foreground truncate text-xs">{heading.status}</p>
-            </div>
-            <div ref={menuRef} className="relative">
+
+            {view.name === 'tickets' ? (
+              <ul className="flex-1 divide-y overflow-y-auto">
+                {tickets.length === 0 ? (
+                  <li className="text-muted-foreground px-6 py-10 text-center text-sm">
+                    No tickets yet. Anything you send to the team shows up here.
+                  </li>
+                ) : null}
+                {tickets.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      onClick={() => void openThread(t.id)}
+                      className="hover:bg-muted/50 flex w-full flex-col gap-0.5 px-4 py-3 text-left"
+                    >
+                      <span className={cn('truncate text-sm', t.unread && 'font-semibold')}>
+                        {t.title}
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {t.unread ? 'New reply from the team' : STATUS_TEXT[t.status]},{' '}
+                        {when(t.updatedAt)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {view.name === 'thread' ? (
+              <>
+                <Thread>
+                  {thread === undefined ? (
+                    <div className={systemPill}>Loading the conversation…</div>
+                  ) : (
+                    thread.messages?.map((m, i) =>
+                      m.author === 'user' ? (
+                        <div key={i} className={cn(userBubble, 'self-end')}>
+                          {m.body}
+                        </div>
+                      ) : (
+                        <div key={i} className="flex flex-col gap-1">
+                          <span className="text-muted-foreground px-1 text-xs">
+                            {m.author === 'admin' ? 'Intent team' : 'Assistant'}
+                          </span>
+                          <div className={agentBubble}>{m.body}</div>
+                        </div>
+                      )
+                    )
+                  )}
+                  {thread?.status === 'closed' ? (
+                    <div className={systemPill}>
+                      This ticket is closed. Ask in Help to start a new one.
+                    </div>
+                  ) : null}
+                </Thread>
+                {thread !== undefined && thread.status !== 'closed' ? (
+                  <Composer
+                    placeholder="Reply to the team…"
+                    busy={busy}
+                    onSend={(t) => void reply(t)}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
+        {intro && !open ? (
+          <section
+            aria-label="Help is here"
+            className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground animate-in fade-in slide-in-from-bottom-2 pointer-events-auto relative w-[min(300px,calc(100vw-2rem))] rounded-2xl border p-4 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] duration-300 motion-reduce:animate-none dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+          >
+            <p className="text-sm font-semibold">Help, tickets and suggestions are here</p>
+            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+              Stuck on an order or something not working? Ask here and the assistant helps right
+              away. Anything it can&apos;t fix goes to the team as a ticket, and ideas for Intent
+              are welcome too.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
               <button
                 type="button"
-                aria-label={unread > 0 ? `More, ${unread} new` : 'More'}
-                aria-haspopup="menu"
-                aria-expanded={menu}
-                onClick={() => setMenu((v) => !v)}
-                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 relative rounded-full p-1.5"
+                onClick={() => {
+                  dismissIntro()
+                  setOpen(true)
+                }}
+                className="bg-brand text-brand-foreground focus-visible:ring-brand/40 rounded-full px-3.5 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2"
               >
-                <MoreHorizontal className="h-4 w-4" />
-                {unread > 0 ? (
-                  <span className="bg-brand text-brand-foreground ring-bubble-agent absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ring-2 dark:ring-[#0F0F0F]">
-                    {unread}
-                  </span>
-                ) : null}
+                Open help
               </button>
-              {menu ? (
-                <div
-                  role="menu"
-                  className="border-border bg-background absolute right-0 z-10 mt-1.5 w-48 rounded-xl border p-1 shadow-lg"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenu(false)
-                      startOver()
-                    }}
-                    className="hover:bg-muted/60 w-full rounded-lg px-3 py-2 text-left text-sm"
-                  >
-                    New conversation
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setMenu(false)
-                      setView({ name: 'tickets' })
-                    }}
-                    className="hover:bg-muted/60 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm"
-                  >
-                    Your tickets
-                    {unread > 0 ? (
-                      <span className="text-brand text-xs font-medium">{unread} new</span>
-                    ) : null}
-                  </button>
-                </div>
-              ) : null}
+              <button
+                type="button"
+                onClick={dismissIntro}
+                className="text-muted-foreground hover:text-foreground rounded-full px-3 py-1.5 text-sm"
+              >
+                Got it
+              </button>
             </div>
-            <button
-              type="button"
-              aria-label="Close help"
-              onClick={() => setOpen(false)}
-              className="text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full p-1.5"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </header>
-
-          {view.name === 'chat' ? (
-            <>
-              <Thread>
-                {turns.length === 0 && note === undefined ? (
-                  <div className="flex flex-1 flex-col items-center justify-between gap-6 pt-2">
-                    <p className="text-muted-foreground max-w-[30ch] text-center text-sm">
-                      {GREETING}
-                    </p>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {QUICK_STARTS.map((q) => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => void ask(q)}
-                          className="bg-brand/10 text-brand hover:bg-brand/15 dark:bg-brand/30 dark:hover:bg-brand/40 rounded-full px-3 py-1.5 text-sm transition-colors dark:text-white/90"
-                        >
-                          {q}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                {turns.map((t, i) => (
-                  <div
-                    key={i}
-                    className={t.role === 'user' ? cn(userBubble, 'self-end') : agentBubble}
-                  >
-                    {t.text}
-                  </div>
-                ))}
-                {busy ? <Typing /> : null}
-                {note?.kind === 'offer' ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void fileTicket(
-                        turns.length > 0 ? turns : [{ role: 'user', text: note.draft.summary }],
-                        note.draft
-                      )
-                    }
-                    className="bg-brand text-brand-foreground focus-visible:ring-brand/40 self-start rounded-full px-4 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50"
-                  >
-                    Send this to the team
-                  </button>
-                ) : null}
-                {note?.kind === 'filed' ? (
-                  <div className={systemPill}>
-                    <span>
-                      Sent to the team. Their reply will show up here, under{' '}
-                      <button
-                        type="button"
-                        onClick={() => void openThread(note.id)}
-                        className="text-brand underline-offset-2 hover:underline"
-                      >
-                        your tickets
-                      </button>
-                      .
-                    </span>
-                  </div>
-                ) : null}
-                {note?.kind === 'error' ? <div className={systemPill}>{note.text}</div> : null}
-              </Thread>
-              {note?.kind === 'filed' ? (
-                <div className="border-border border-t p-3">
-                  <button
-                    type="button"
-                    onClick={startOver}
-                    className="border-border hover:bg-muted/60 w-full rounded-2xl border px-4 py-2.5 text-sm"
-                  >
-                    Ask something else
-                  </button>
-                </div>
-              ) : (
-                <Composer placeholder="Message…" busy={busy} onSend={(t) => void ask(t)} />
-              )}
-            </>
-          ) : null}
-
-          {view.name === 'tickets' ? (
-            <ul className="flex-1 divide-y overflow-y-auto">
-              {tickets.length === 0 ? (
-                <li className="text-muted-foreground px-6 py-10 text-center text-sm">
-                  No tickets yet. Anything you send to the team shows up here.
-                </li>
-              ) : null}
-              {tickets.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => void openThread(t.id)}
-                    className="hover:bg-muted/50 flex w-full flex-col gap-0.5 px-4 py-3 text-left"
-                  >
-                    <span className={cn('truncate text-sm', t.unread && 'font-semibold')}>
-                      {t.title}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      {t.unread ? 'New reply from the team' : STATUS_TEXT[t.status]},{' '}
-                      {when(t.updatedAt)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {view.name === 'thread' ? (
-            <>
-              <Thread>
-                {thread === undefined ? (
-                  <div className={systemPill}>Loading the conversation…</div>
-                ) : (
-                  thread.messages?.map((m, i) =>
-                    m.author === 'user' ? (
-                      <div key={i} className={cn(userBubble, 'self-end')}>
-                        {m.body}
-                      </div>
-                    ) : (
-                      <div key={i} className="flex flex-col gap-1">
-                        <span className="text-muted-foreground px-1 text-xs">
-                          {m.author === 'admin' ? 'Intent team' : 'Assistant'}
-                        </span>
-                        <div className={agentBubble}>{m.body}</div>
-                      </div>
-                    )
-                  )
-                )}
-                {thread?.status === 'closed' ? (
-                  <div className={systemPill}>
-                    This ticket is closed. Ask in Help to start a new one.
-                  </div>
-                ) : null}
-              </Thread>
-              {thread !== undefined && thread.status !== 'closed' ? (
-                <Composer
-                  placeholder="Reply to the team…"
-                  busy={busy}
-                  onSend={(t) => void reply(t)}
-                />
-              ) : null}
-            </>
-          ) : null}
-        </section>
-      ) : null}
-
-      {intro && !open ? (
-        <section
-          aria-label="Help is here"
-          className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground animate-in fade-in slide-in-from-bottom-2 pointer-events-auto relative w-[min(300px,calc(100vw-2rem))] rounded-2xl border p-4 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] duration-300 motion-reduce:animate-none dark:border-white/[0.06] dark:bg-[#0F0F0F]"
-        >
-          <p className="text-sm font-semibold">Stuck, or have an idea?</p>
-          <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-            Ask here any time. The assistant can sort out most things, and anything it can&apos;t
-            goes to the team as a ticket you can follow from here.
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                dismissIntro()
-                setOpen(true)
-              }}
-              className="bg-brand text-brand-foreground focus-visible:ring-brand/40 rounded-full px-3.5 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2"
-            >
-              Open help
-            </button>
-            <button
-              type="button"
-              onClick={dismissIntro}
-              className="text-muted-foreground hover:text-foreground rounded-full px-3 py-1.5 text-sm"
-            >
-              Not now
-            </button>
-          </div>
-          <span
-            aria-hidden="true"
-            className="bg-bubble-agent border-bubble-agent-border absolute -bottom-[7px] right-5 h-3 w-3 rotate-45 border-b border-r dark:border-white/[0.06] dark:bg-[#0F0F0F]"
-          />
-        </section>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => {
-          if (intro) dismissIntro()
-          setOpen((v) => !v)
-        }}
-        aria-expanded={open}
-        aria-label={
-          open
-            ? 'Close help'
-            : unread > 0
-              ? `Help, ${unread} new ${unread === 1 ? 'reply' : 'replies'}`
-              : 'Help'
-        }
-        title="Help"
-        className="bg-brand text-brand-foreground focus-visible:ring-brand/40 pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgb(63_68_167/0.6)] focus-visible:outline-none focus-visible:ring-2"
-      >
-        {open ? <X className="h-5 w-5" /> : <MessageCircleQuestion className="h-6 w-6" />}
-        {unread > 0 && !open ? (
-          <span className="bg-background text-brand ring-brand absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold ring-2">
-            {unread}
-          </span>
+            <span
+              aria-hidden="true"
+              className="bg-bubble-agent border-bubble-agent-border absolute -bottom-[7px] right-5 h-3 w-3 rotate-45 border-b border-r dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+            />
+          </section>
         ) : null}
-      </button>
-    </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (intro) dismissIntro()
+            setOpen((v) => !v)
+          }}
+          aria-expanded={open}
+          aria-label={
+            open
+              ? 'Close help'
+              : unread > 0
+                ? `Help, ${unread} new ${unread === 1 ? 'reply' : 'replies'}`
+                : 'Help'
+          }
+          title="Help"
+          className={cn(
+            'bg-brand text-brand-foreground focus-visible:ring-brand/40 pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgb(63_68_167/0.6)] transition-shadow focus-visible:outline-none focus-visible:ring-2',
+            spotlight &&
+              'shadow-[0_0_0_6px_rgb(255_255_255/0.9),0_0_0_14px_rgb(99_104_210/0.45),0_0_40px_12px_rgb(99_104_210/0.5)]'
+          )}
+        >
+          {open ? <X className="h-5 w-5" /> : <MessageCircleQuestion className="h-6 w-6" />}
+          {unread > 0 && !open ? (
+            <span className="bg-background text-brand ring-brand absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold ring-2">
+              {unread}
+            </span>
+          ) : null}
+        </button>
+      </div>
+    </>
   )
 }
