@@ -224,7 +224,6 @@ function Workspace({
             <span className="text-muted-foreground text-sm">Admin</span>
           </div>
           <div className="flex items-center md:hidden">
-            <ThemeToggle />
             <Button variant="ghost" size="sm" onClick={onSignOut} aria-label="Sign out">
               <LogOut className="h-4 w-4" />
             </Button>
@@ -233,8 +232,7 @@ function Workspace({
         <div className="-mx-1 overflow-x-auto px-1 md:mx-0 md:overflow-visible md:px-0">
           <Sidebar />
         </div>
-        <div className="mt-auto hidden items-center justify-between md:flex">
-          <ThemeToggle />
+        <div className="mt-auto hidden items-center justify-end md:flex">
           <Button variant="ghost" size="sm" onClick={onSignOut} className="gap-1.5">
             <LogOut className="h-4 w-4" />
             Sign out
@@ -245,7 +243,12 @@ function Workspace({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 md:h-16 md:py-0">
           {chainless ? (
-            <p className="text-muted-foreground text-sm">The waitlist is shared by every chain.</p>
+            <>
+              <p className="text-muted-foreground text-sm">
+                The waitlist is shared by every chain.
+              </p>
+              <ThemeToggle />
+            </>
           ) : (
             <>
               <ScopeSwitcher />
@@ -261,6 +264,7 @@ function Workspace({
                   Refresh
                 </button>
                 <RangePicker />
+                <ThemeToggle />
               </div>
             </>
           )}

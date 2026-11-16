@@ -19,6 +19,10 @@ import type {
   SeriesPoint,
   WaitlistCounts,
   WalletRow,
+  ChainRow,
+  ChainTypeRow,
+  VenueRow,
+  NairaChainRow,
 } from '../../lib/server/admin-metrics'
 
 import { scopeQuery, useScope } from './scope'
@@ -28,6 +32,10 @@ export interface Stats {
   series: SeriesPoint[]
   kinds: KindRow[]
   pairs: PairRow[]
+  chains: ChainRow[]
+  types: ChainTypeRow[]
+  venues: VenueRow[]
+  naira: NairaChainRow[]
   wallets: WalletRow[]
   agents: AgentsReport
   intents: IntentsReport
@@ -79,12 +87,19 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
     }
     Promise.all(['overview', 'wallets', 'agents', 'intents', 'waitlist'].map(get))
       .then(([overview, wallets, agents, intents, waitlist]) => {
-        const o = overview as unknown as Pick<Stats, 'overview' | 'series' | 'kinds' | 'pairs'>
+        const o = overview as unknown as Pick<
+          Stats,
+          'overview' | 'series' | 'kinds' | 'pairs' | 'chains' | 'types' | 'venues' | 'naira'
+        >
         setStats({
           overview: o.overview,
           series: o.series,
           kinds: o.kinds,
           pairs: o.pairs,
+          chains: o.chains,
+          types: o.types,
+          venues: o.venues,
+          naira: o.naira,
           wallets: (wallets as unknown as Pick<Stats, 'wallets'>).wallets,
           agents: (agents as unknown as { agents: AgentsReport }).agents,
           intents: (intents as unknown as { intents: IntentsReport }).intents,
@@ -141,6 +156,22 @@ export function formatUsd(value: number, compact = false): string {
   return compact && Math.abs(value) >= 10_000 ? usdCompact.format(value) : usd.format(value)
 }
 
+const ngnCompact = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+const ngnFull = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  maximumFractionDigits: 0,
+})
+
+export function formatNgn(value: number, compact = false): string {
+  return compact && Math.abs(value) >= 100_000 ? ngnCompact.format(value) : ngnFull.format(value)
+}
+
 export function formatCount(value: number): string {
   return value.toLocaleString('en-US')
 }
@@ -155,7 +186,9 @@ export const KIND_LABELS: Record<string, string> = {
   offer: 'Limit orders',
   send: 'Sends',
   lend: 'Lending',
-  offramp: 'Cash-outs',
+  offramp: 'Off-ramps',
+  stake: 'Staking',
+  unstake: 'Unstaking',
   perp: 'Perpetuals',
   withdraw: 'Withdrawals',
   borrow: 'Borrows',

@@ -57,6 +57,44 @@ function repo(): MetricsRepo {
     }),
     byKind: record('byKind', []),
     pairs: record('pairs', []),
+    byChain: record('byChain', [
+      {
+        chain: 'sui',
+        transactions: 3,
+        failed: 0,
+        successRate: 1,
+        volumeUsd: 40,
+        wallets: 2,
+        unknown: 1,
+        unvalued: 0,
+        series: [{ day: '2026-10-09', value: 40 }],
+      },
+    ]),
+    typesByChain: record('typesByChain', [
+      { chain: 'sui', type: 'stake', transactions: 1, volumeUsd: 5 },
+    ]),
+    venues: record('venues', [{ chain: 'sui', venue: 'cetus', transactions: 2, volumeUsd: 35 }]),
+    nairaByChain: record('nairaByChain', [{ chain: 'sui', orders: 1, ngn: 28000 }]),
+    offRamps: record('offRamps', {
+      byChain: [{ chain: 'sui', orders: 2, deposited: 1, paid: 1, paidUsd: 20, paidNgn: 28000 }],
+      byProvider: [{ provider: 'linq', orders: 2, paid: 1, paidUsd: 20 }],
+      attention: [
+        {
+          id: 'w1',
+          chain: 'sui',
+          provider: 'linq',
+          status: 'processing',
+          providerStatus: 'processing: in bank queue',
+          amount: '20',
+          currency: 'NGN',
+          estimate: 28000,
+          at: '2026-10-09T00:00:00.000Z',
+          depositHash: 'SuiDigest1',
+          institution: 'GTBank',
+          accountTail: '6789',
+        },
+      ],
+    }),
     wallets: record('wallets', []),
     transactions: async (scope, filter) => {
       state.calls.push({ fn: 'transactions', scope, filter })
@@ -69,6 +107,8 @@ function repo(): MetricsRepo {
             hash: 'ab'.repeat(32),
             account: 'G',
             kind: 'swap',
+            action: null,
+            venue: null,
             ok: true,
             failure: null,
             feeSponsored: false,
@@ -84,6 +124,8 @@ function repo(): MetricsRepo {
             hash: null,
             account: 'G',
             kind: 'swap',
+            action: null,
+            venue: null,
             ok: false,
             failure: 'x',
             feeSponsored: false,
@@ -291,5 +333,30 @@ describe('GET /api/admin/metrics', () => {
     const res = await GET(get('view=overview'))
     expect(res.status).toBe(503)
     expect(JSON.stringify(await res.json())).not.toContain('boom')
+  })
+
+  it('breaks the overview down by chain, type and app', async () => {
+    const res = await GET(get('view=overview'))
+    const body = (await res.json()) as {
+      chains: { chain: string }[]
+      types: { type: string }[]
+      venues: { venue: string }[]
+      naira: { chain: string; ngn: number }[]
+    }
+    expect(body.chains.map((c) => c.chain)).toEqual(['sui'])
+    expect(body.types.map((t) => t.type)).toEqual(['stake'])
+    expect(body.venues.map((v) => v.venue)).toEqual(['cetus'])
+    expect(body.naira).toEqual([{ chain: 'sui', orders: 1, ngn: 28000 }])
+  })
+
+  it('answers off-ramps on every chain with a deposit link on the chain each ran on', async () => {
+    const res = await GET(get('view=payouts'))
+    const body = (await res.json()) as {
+      offRamps: { attention: { explorerUrl: string }[]; byChain: { chain: string }[] }
+    }
+    expect(body.offRamps.byChain.map((c) => c.chain)).toEqual(['sui'])
+    expect(body.offRamps.attention[0]?.explorerUrl).toBe(
+      'https://suiscan.xyz/mainnet/tx/SuiDigest1'
+    )
   })
 })
