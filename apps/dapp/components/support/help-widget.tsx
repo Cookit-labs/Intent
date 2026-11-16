@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { ArrowLeft, ArrowUp, X } from 'lucide-react'
+import { ArrowLeft, ArrowUp, MessageCircleQuestion, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import { walletFetch } from '../../lib/api/network-fetch'
@@ -62,6 +62,26 @@ const STATUS_TEXT: Record<Status, string> = {
 }
 
 const POLL_MS = 60_000
+
+/** Set once the person has seen the note about the help button, so it shows only once. */
+const INTRO_KEY = 'intent:help-intro-seen'
+const INTRO_DELAY_MS = 1500
+
+function introSeen(): boolean {
+  try {
+    return window.localStorage.getItem(INTRO_KEY) === '1'
+  } catch {
+    return true
+  }
+}
+
+function markIntroSeen(): void {
+  try {
+    window.localStorage.setItem(INTRO_KEY, '1')
+  } catch {
+    // Storage is blocked; the note may show again on the next visit.
+  }
+}
 
 async function readJson<T>(res: Response): Promise<T & { message?: string }> {
   return (await res.json().catch(() => ({}))) as T & { message?: string }
@@ -147,6 +167,7 @@ function Typing(): JSX.Element {
 export function HelpWidget(): JSX.Element {
   const { slug } = useChain()
   const [open, setOpen] = useState(false)
+  const [intro, setIntro] = useState(false)
   const [view, setView] = useState<View>({ name: 'chat' })
   const [turns, setTurns] = useState<Turn[]>([])
   const [note, setNote] = useState<Note | undefined>(undefined)
@@ -168,6 +189,23 @@ export function HelpWidget(): JSX.Element {
     const id = setInterval(() => void loadTickets(), POLL_MS)
     return () => clearInterval(id)
   }, [loadTickets])
+
+  // A short note beside the button the first time someone lands with a wallet connected.
+  // It waits for any other notice on screen, such as a chain's beta notice, to be closed first.
+  useEffect(() => {
+    if (introSeen()) return
+    const id = setInterval(() => {
+      if (document.querySelector('[aria-modal="true"]') !== null) return
+      clearInterval(id)
+      setIntro(true)
+    }, INTRO_DELAY_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  const dismissIntro = useCallback(() => {
+    setIntro(false)
+    markIntroSeen()
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -455,18 +493,62 @@ export function HelpWidget(): JSX.Element {
         </section>
       ) : null}
 
+      {intro && !open ? (
+        <section
+          aria-label="Help is here"
+          className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground animate-in fade-in slide-in-from-bottom-2 pointer-events-auto relative w-[min(300px,calc(100vw-2rem))] rounded-2xl border p-4 shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] duration-300 motion-reduce:animate-none dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+        >
+          <p className="text-sm font-semibold">Stuck, or have an idea?</p>
+          <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+            Ask here any time. The assistant can sort out most things, and anything it can&apos;t
+            goes to the team as a ticket you can follow from here.
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                dismissIntro()
+                setOpen(true)
+              }}
+              className="bg-brand text-brand-foreground focus-visible:ring-brand/40 rounded-full px-3.5 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2"
+            >
+              Open help
+            </button>
+            <button
+              type="button"
+              onClick={dismissIntro}
+              className="text-muted-foreground hover:text-foreground rounded-full px-3 py-1.5 text-sm"
+            >
+              Not now
+            </button>
+          </div>
+          <span
+            aria-hidden="true"
+            className="bg-bubble-agent border-bubble-agent-border absolute -bottom-[7px] right-5 h-3 w-3 rotate-45 border-b border-r dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+          />
+        </section>
+      ) : null}
+
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (intro) dismissIntro()
+          setOpen((v) => !v)
+        }}
         aria-expanded={open}
         aria-label={
-          unread > 0 ? `Help, ${unread} new ${unread === 1 ? 'reply' : 'replies'}` : 'Help'
+          open
+            ? 'Close help'
+            : unread > 0
+              ? `Help, ${unread} new ${unread === 1 ? 'reply' : 'replies'}`
+              : 'Help'
         }
-        className="bg-brand text-brand-foreground focus-visible:ring-brand/40 pointer-events-auto flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium shadow-[0_6px_20px_-6px_rgb(63_68_167/0.6)] focus-visible:outline-none focus-visible:ring-2"
+        title="Help"
+        className="bg-brand text-brand-foreground focus-visible:ring-brand/40 pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full shadow-[0_6px_20px_-6px_rgb(63_68_167/0.6)] focus-visible:outline-none focus-visible:ring-2"
       >
-        {open ? 'Close' : 'Help'}
+        {open ? <X className="h-5 w-5" /> : <MessageCircleQuestion className="h-6 w-6" />}
         {unread > 0 && !open ? (
-          <span className="bg-brand-foreground text-brand flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold">
+          <span className="bg-background text-brand ring-brand absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold ring-2">
             {unread}
           </span>
         ) : null}
