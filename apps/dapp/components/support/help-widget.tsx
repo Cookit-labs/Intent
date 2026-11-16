@@ -1,7 +1,8 @@
 'use client'
 
 import { cn } from '@intent/ui'
-import { ArrowLeft, ArrowUp, MessageCircleQuestion, X } from 'lucide-react'
+import { ArrowLeft, ArrowUp, MessageCircleQuestion, MoreHorizontal, X } from 'lucide-react'
+import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import { walletFetch } from '../../lib/api/network-fetch'
@@ -52,8 +53,7 @@ type Note =
 
 type View = { name: 'chat' } | { name: 'tickets' } | { name: 'thread'; id: string }
 
-const GREETING =
-  'What can I help with? Ask about an order, how to do something, or leave a suggestion for the team.'
+const GREETING = 'Ask about an order, get unstuck, or share an idea with the team.'
 
 const STATUS_TEXT: Record<Status, string> = {
   open: 'With the team',
@@ -114,34 +114,65 @@ function Composer({
     onSend(value)
     setText('')
   }
+  const empty = text.trim() === ''
   return (
-    <form onSubmit={submit} className="border-border flex items-end gap-2 border-t p-3">
-      <label className="sr-only" htmlFor="help-composer">
-        {placeholder}
-      </label>
-      <textarea
-        id="help-composer"
-        rows={1}
-        value={text}
-        maxLength={2000}
-        placeholder={placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) submit(e)
-        }}
-        className="border-border bg-background focus-visible:ring-brand/40 max-h-32 min-h-[40px] flex-1 resize-none rounded-2xl border px-3.5 py-2.5 text-sm outline-none focus-visible:ring-2"
-      />
-      <button
-        type="submit"
-        disabled={busy || text.trim() === ''}
-        aria-label="Send"
-        className="bg-brand text-brand-foreground focus-visible:ring-brand/40 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-opacity focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40"
-      >
-        <ArrowUp className="h-4 w-4" />
-      </button>
+    <form onSubmit={submit} className="p-3">
+      <div className="border-border bg-background focus-within:border-brand focus-within:ring-brand/15 rounded-2xl border px-3.5 pb-2.5 pt-3 transition-shadow focus-within:ring-4">
+        <label className="sr-only" htmlFor="help-composer">
+          {placeholder}
+        </label>
+        <textarea
+          id="help-composer"
+          rows={2}
+          value={text}
+          maxLength={2000}
+          placeholder={placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) submit(e)
+          }}
+          className="placeholder:text-muted-foreground max-h-32 w-full resize-none bg-transparent text-sm outline-none"
+        />
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <span className="text-muted-foreground hidden text-xs sm:inline">
+            Shift + Enter for a new line
+          </span>
+          <button
+            type="submit"
+            disabled={busy || empty}
+            aria-label="Send"
+            className={cn(
+              'focus-visible:ring-brand/40 ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2',
+              busy || empty ? 'bg-muted text-muted-foreground' : 'bg-brand text-brand-foreground'
+            )}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </form>
   )
 }
+
+function Avatar(): JSX.Element {
+  return (
+    <span className="bg-brand flex h-9 w-9 shrink-0 items-center justify-center rounded-full">
+      <Image
+        src="/images/intent-logo.png"
+        alt=""
+        width={512}
+        height={361}
+        className="h-3.5 w-auto invert"
+      />
+    </span>
+  )
+}
+
+const QUICK_STARTS = [
+  'My off-ramp is stuck',
+  'Something is not working',
+  'I have an idea for Intent',
+]
 
 function Thread({ children }: { children: ReactNode }): JSX.Element {
   const end = useRef<HTMLDivElement>(null)
@@ -168,6 +199,8 @@ export function HelpWidget(): JSX.Element {
   const { slug } = useChain()
   const [open, setOpen] = useState(false)
   const [intro, setIntro] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ name: 'chat' })
   const [turns, setTurns] = useState<Turn[]>([])
   const [note, setNote] = useState<Note | undefined>(undefined)
@@ -189,6 +222,15 @@ export function HelpWidget(): JSX.Element {
     const id = setInterval(() => void loadTickets(), POLL_MS)
     return () => clearInterval(id)
   }, [loadTickets])
+
+  useEffect(() => {
+    if (!menu) return
+    const onDown = (e: PointerEvent): void => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenu(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [menu])
 
   // A short note beside the button the first time someone lands with a wallet connected.
   // It waits for any other notice on screen, such as a chain's beta notice, to be closed first.
@@ -319,12 +361,18 @@ export function HelpWidget(): JSX.Element {
     setView({ name: 'chat' })
   }
 
-  const title =
+  const heading =
     view.name === 'chat'
-      ? 'Help'
+      ? { name: 'Intent', status: 'The assistant answers right away' }
       : view.name === 'tickets'
-        ? 'Your tickets'
-        : (thread?.title ?? 'Ticket')
+        ? {
+            name: 'Your tickets',
+            status: `${tickets.length} conversation${tickets.length === 1 ? '' : 's'} with the team`,
+          }
+        : {
+            name: thread?.title ?? 'Ticket',
+            status: thread !== undefined ? STATUS_TEXT[thread.status] : 'Loading',
+          }
 
   return (
     <div className="pointer-events-none fixed bottom-24 right-4 z-40 flex flex-col items-end gap-3 lg:bottom-6 lg:right-6">
@@ -332,9 +380,9 @@ export function HelpWidget(): JSX.Element {
         <section
           role="dialog"
           aria-label="Help"
-          className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground pointer-events-auto flex h-[min(560px,calc(100dvh-9rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] dark:border-white/[0.06] dark:bg-[#0F0F0F]"
+          className="bg-bubble-agent text-bubble-agent-foreground border-bubble-agent-border dark:text-foreground pointer-events-auto flex h-[min(640px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border shadow-[0_12px_40px_-12px_rgb(0_0_0/0.25)] dark:border-white/[0.06] dark:bg-[#0F0F0F]"
         >
-          <header className="border-border flex items-center gap-2 border-b px-4 py-3">
+          <header className="border-border flex items-center gap-2.5 border-b px-3 py-3">
             {view.name !== 'chat' ? (
               <button
                 type="button"
@@ -342,26 +390,70 @@ export function HelpWidget(): JSX.Element {
                 onClick={() =>
                   setView(view.name === 'thread' ? { name: 'tickets' } : { name: 'chat' })
                 }
-                className="text-muted-foreground hover:text-foreground -ml-1 rounded-full p-1"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full p-1.5"
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
             ) : null}
-            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
-            {view.name === 'chat' && tickets.length > 0 ? (
+            <Avatar />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <h2 className="truncate text-sm font-semibold">{heading.name}</h2>
+              <p className="text-muted-foreground truncate text-xs">{heading.status}</p>
+            </div>
+            <div ref={menuRef} className="relative">
               <button
                 type="button"
-                onClick={() => setView({ name: 'tickets' })}
-                className="text-brand text-sm underline-offset-2 hover:underline"
+                aria-label={unread > 0 ? `More, ${unread} new` : 'More'}
+                aria-haspopup="menu"
+                aria-expanded={menu}
+                onClick={() => setMenu((v) => !v)}
+                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 relative rounded-full p-1.5"
               >
-                Your tickets{unread > 0 ? ` (${unread} new)` : ''}
+                <MoreHorizontal className="h-4 w-4" />
+                {unread > 0 ? (
+                  <span className="bg-brand text-brand-foreground ring-bubble-agent absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ring-2 dark:ring-[#0F0F0F]">
+                    {unread}
+                  </span>
+                ) : null}
               </button>
-            ) : null}
+              {menu ? (
+                <div
+                  role="menu"
+                  className="border-border bg-background absolute right-0 z-10 mt-1.5 w-48 rounded-xl border p-1 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false)
+                      startOver()
+                    }}
+                    className="hover:bg-muted/60 w-full rounded-lg px-3 py-2 text-left text-sm"
+                  >
+                    New conversation
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false)
+                      setView({ name: 'tickets' })
+                    }}
+                    className="hover:bg-muted/60 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm"
+                  >
+                    Your tickets
+                    {unread > 0 ? (
+                      <span className="text-brand text-xs font-medium">{unread} new</span>
+                    ) : null}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               aria-label="Close help"
               onClick={() => setOpen(false)}
-              className="text-muted-foreground hover:text-foreground rounded-full p-1"
+              className="text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full p-1.5"
             >
               <X className="h-4 w-4" />
             </button>
@@ -370,7 +462,25 @@ export function HelpWidget(): JSX.Element {
           {view.name === 'chat' ? (
             <>
               <Thread>
-                <div className={agentBubble}>{GREETING}</div>
+                {turns.length === 0 && note === undefined ? (
+                  <div className="flex flex-1 flex-col items-center justify-between gap-6 pt-2">
+                    <p className="text-muted-foreground max-w-[30ch] text-center text-sm">
+                      {GREETING}
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {QUICK_STARTS.map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => void ask(q)}
+                          className="bg-brand/10 text-brand hover:bg-brand/15 dark:bg-brand/30 dark:hover:bg-brand/40 rounded-full px-3 py-1.5 text-sm transition-colors dark:text-white/90"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {turns.map((t, i) => (
                   <div
                     key={i}
@@ -423,17 +533,18 @@ export function HelpWidget(): JSX.Element {
                   </button>
                 </div>
               ) : (
-                <Composer
-                  placeholder="Describe what is going on"
-                  busy={busy}
-                  onSend={(t) => void ask(t)}
-                />
+                <Composer placeholder="Message…" busy={busy} onSend={(t) => void ask(t)} />
               )}
             </>
           ) : null}
 
           {view.name === 'tickets' ? (
             <ul className="flex-1 divide-y overflow-y-auto">
+              {tickets.length === 0 ? (
+                <li className="text-muted-foreground px-6 py-10 text-center text-sm">
+                  No tickets yet. Anything you send to the team shows up here.
+                </li>
+              ) : null}
               {tickets.map((t) => (
                 <li key={t.id}>
                   <button
@@ -483,7 +594,7 @@ export function HelpWidget(): JSX.Element {
               </Thread>
               {thread !== undefined && thread.status !== 'closed' ? (
                 <Composer
-                  placeholder="Reply to the team"
+                  placeholder="Reply to the team…"
                   busy={busy}
                   onSend={(t) => void reply(t)}
                 />
