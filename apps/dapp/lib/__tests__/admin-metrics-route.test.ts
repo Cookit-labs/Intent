@@ -18,6 +18,12 @@ vi.mock('next/server', async (original) => ({
   after: (task: () => unknown) => state.after.push(task),
 }))
 vi.mock('../server/backfill-values', () => ({ valuePastTransactions: async () => undefined }))
+vi.mock('../linq/client', () => ({
+  createLinqClient: () => ({
+    configured: true,
+    getRate: async () => ({ ok: true, value: { ngnPerUsd: 1400 } }),
+  }),
+}))
 
 import { GET } from '../../app/api/admin/metrics/route'
 
@@ -342,11 +348,13 @@ describe('GET /api/admin/metrics', () => {
       types: { type: string }[]
       venues: { venue: string }[]
       naira: { chain: string; ngn: number }[]
+      ngnPerUsd: number | null
     }
     expect(body.chains.map((c) => c.chain)).toEqual(['sui'])
     expect(body.types.map((t) => t.type)).toEqual(['stake'])
     expect(body.venues.map((v) => v.venue)).toEqual(['cetus'])
     expect(body.naira).toEqual([{ chain: 'sui', orders: 1, ngn: 28000 }])
+    expect(body.ngnPerUsd).toBe(1400)
   })
 
   it('answers off-ramps on every chain with a deposit link on the chain each ran on', async () => {

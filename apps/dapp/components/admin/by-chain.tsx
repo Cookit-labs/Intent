@@ -71,9 +71,11 @@ function Sparkline({ data, label }: { data: { day: string; value: number }[]; la
 export function ChainTable({
   rows,
   naira,
+  ngnPerUsd,
 }: {
   rows: ChainRow[]
   naira: NairaChainRow[]
+  ngnPerUsd: number | null
 }): JSX.Element {
   const ngn = new Map(naira.map((n) => [n.chain, n.ngn]))
   const total = rows.reduce((t, r) => t + r.volumeUsd, 0)
@@ -85,7 +87,7 @@ export function ChainTable({
             <th className="py-2 pr-4 font-normal">Chain</th>
             <th className="py-2 pr-4 text-right font-normal">Volume</th>
             <th className="py-2 pr-4 text-right font-normal">Share</th>
-            <th className="py-2 pr-4 text-right font-normal">Naira paid out</th>
+            <th className="py-2 pr-4 text-right font-normal">In naira</th>
             <th className="py-2 pr-4 font-normal">Per day</th>
             <th className="py-2 pr-4 text-right font-normal">Transactions</th>
             <th className="py-2 pr-4 text-right font-normal">Accepted</th>
@@ -106,11 +108,16 @@ export function ChainTable({
                 {total === 0 ? '—' : formatPercent(r.volumeUsd / total)}
               </td>
               <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                {(ngn.get(r.chain) ?? 0) > 0 ? (
-                  formatNgn(ngn.get(r.chain) ?? 0)
-                ) : (
+                {ngnPerUsd === null ? (
                   <span className="text-muted-foreground">—</span>
+                ) : (
+                  formatNgn(r.volumeUsd * ngnPerUsd, true)
                 )}
+                {(ngn.get(r.chain) ?? 0) > 0 ? (
+                  <span className="text-muted-foreground block text-xs">
+                    {formatNgn(ngn.get(r.chain) ?? 0, true)} paid out
+                  </span>
+                ) : null}
               </td>
               <td className="py-1 pr-4">
                 <Sparkline data={r.series} label={chainName(r.chain)} />

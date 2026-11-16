@@ -36,6 +36,8 @@ export interface Stats {
   types: ChainTypeRow[]
   venues: VenueRow[]
   naira: NairaChainRow[]
+  /** Today's naira per dollar, to show dollar totals in naira. Null when it can't be read. */
+  ngnPerUsd: number | null
   wallets: WalletRow[]
   agents: AgentsReport
   intents: IntentsReport
@@ -89,7 +91,15 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
       .then(([overview, wallets, agents, intents, waitlist]) => {
         const o = overview as unknown as Pick<
           Stats,
-          'overview' | 'series' | 'kinds' | 'pairs' | 'chains' | 'types' | 'venues' | 'naira'
+          | 'overview'
+          | 'series'
+          | 'kinds'
+          | 'pairs'
+          | 'chains'
+          | 'types'
+          | 'venues'
+          | 'naira'
+          | 'ngnPerUsd'
         >
         setStats({
           overview: o.overview,
@@ -100,6 +110,7 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
           types: o.types,
           venues: o.venues,
           naira: o.naira,
+          ngnPerUsd: o.ngnPerUsd ?? null,
           wallets: (wallets as unknown as Pick<Stats, 'wallets'>).wallets,
           agents: (agents as unknown as { agents: AgentsReport }).agents,
           intents: (intents as unknown as { intents: IntentsReport }).intents,
