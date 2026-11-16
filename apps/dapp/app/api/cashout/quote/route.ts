@@ -20,7 +20,7 @@ function refuse(error: string, message: string): Response {
 /**
  * What a cash-out would pay, what it would cost, and how long it should take.
  *
- * A naira cash-out from Sui or Solana is priced by whichever of Weave and Linq pays more, as the
+ * A naira cash-out from Sui, Solana or Avalanche is priced by whichever of Weave and Linq pays more, as the
  * order route places it. Linq's figure is the naira it pays; it states no fee of its own.
  */
 export async function GET(request: Request): Promise<Response> {
@@ -45,7 +45,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const result = await createWeaveClient().quote({ chain, currency, amount })
   const linq = createLinqClient()
-  // Sui and Solana naira go to Linq whenever it answers, so its locked rate is what is shown.
+  // Sui, Solana and Avalanche naira go to Linq whenever it answers, so its locked rate is what is shown.
   if (comparesLinq(chain) && currency === 'NGN' && linq.configured) {
     const rate = await linq.getRate().catch(() => undefined)
     const naira = rate?.ok === true ? rate.value.ngnPerUsd * Number(amount) : Number.NaN

@@ -245,6 +245,77 @@ describe('linq client', () => {
     expect(xlm.calls).toHaveLength(0)
   })
 
+  it('orders USDC on Avalanche, held to the C-Chain, native USDC and exactly the USDC asked', async () => {
+    const NATIVE_USDC = '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'
+    const AVAX_DEPOSIT = `0x${'7a'.repeat(20)}`
+    const avax = {
+      ...usdcBase,
+      chain: 'avalanche' as const,
+      amountStableCoin: 1.25,
+      refundAddress: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6f',
+    }
+    const answer = (over: Record<string, unknown> = {}) =>
+      goodOrder({
+        chain: 'avalanche',
+        coin: 'usdc',
+        coinType: NATIVE_USDC,
+        walletAddress: AVAX_DEPOSIT,
+        amountStableCoin: 1.25,
+        amountNGN: 1710.48,
+        ...over,
+      })
+
+    const good = server(() => ({ status: 201, body: answer() }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: good.fetchImpl }).createOrder(avax)
+    ).toMatchObject({
+      ok: true,
+      value: { depositAddress: AVAX_DEPOSIT, amountCoin: 1.25, amountNGN: 1710.48 },
+    })
+    // Linq refuses a refund address with a bad checksum, so it goes checksummed.
+    expect(JSON.parse(good.calls[0]?.init.body ?? '{}')).toMatchObject({
+      chain: 'avalanche',
+      coin: 'usdc',
+      amountStableCoin: 1.25,
+      manualDeposit: true,
+      refundAddress: '0xb97ef9Ef8734C71904d8002F8B6BC66dd9c48A6F',
+    })
+
+    for (const right of [{ coinType: NATIVE_USDC.toLowerCase() }, { coin: undefined }]) {
+      const ok = server(() => ({ status: 201, body: answer(right) }))
+      expect(
+        await createLinqClient({ ...config, fetchImpl: ok.fetchImpl }).createOrder(avax)
+      ).toMatchObject({ ok: true })
+    }
+
+    for (const wrong of [
+      { chain: 'solana' },
+      { coinType: '0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664' },
+      { coinType: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7' },
+      { coinType: '' },
+      { coin: 'usdt' },
+      { walletAddress: DEPOSIT },
+      { walletAddress: `0x${'ab'.repeat(32)}` },
+      { walletAddress: `0x${'00'.repeat(20)}` },
+      { walletAddress: NATIVE_USDC },
+      { amountStableCoin: 1.26 },
+    ]) {
+      const bad = server(() => ({ status: 201, body: answer(wrong) }))
+      expect(
+        await createLinqClient({ ...config, fetchImpl: bad.fetchImpl }).createOrder(avax)
+      ).toMatchObject({ ok: false, code: 'unexpected_order' })
+    }
+
+    const notEvm = server(() => ({ status: 201, body: answer() }))
+    expect(
+      await createLinqClient({ ...config, fetchImpl: notEvm.fetchImpl }).createOrder({
+        ...avax,
+        refundAddress: REFUND,
+      })
+    ).toMatchObject({ ok: false, code: 'rejected' })
+    expect(notEvm.calls).toHaveLength(0)
+  })
+
   it('checks a USDC trustline, and treats an unreachable ledger as unknown', async () => {
     const yes = server(() => ({ status: 200, body: { valid: true, trustsUSDC: true } }))
     expect(

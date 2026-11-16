@@ -27,7 +27,8 @@ import type { DepositChain, DepositExpectation } from '../types'
 
 const USDC_DECIMALS = 6
 /** Circle's native USDC on the C-Chain, not the bridged USDC.e. */
-const USDC: Address = '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'
+export const AVALANCHE_USDC: Address = '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E'
+const USDC = AVALANCHE_USDC
 const RPC_TIMEOUT_MS = 8_000
 const RECEIPT_TIMEOUT_MS = 20_000
 const EXPLORER_TX = 'https://snowtrace.io/tx/'
