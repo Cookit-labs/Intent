@@ -22,6 +22,7 @@ import type {
   ChainRow,
   ChainTypeRow,
   VenueRow,
+  NairaChainRow,
 } from '../../lib/server/admin-metrics'
 
 import { scopeQuery, useScope } from './scope'
@@ -34,6 +35,7 @@ export interface Stats {
   chains: ChainRow[]
   types: ChainTypeRow[]
   venues: VenueRow[]
+  naira: NairaChainRow[]
   wallets: WalletRow[]
   agents: AgentsReport
   intents: IntentsReport
@@ -87,7 +89,7 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
       .then(([overview, wallets, agents, intents, waitlist]) => {
         const o = overview as unknown as Pick<
           Stats,
-          'overview' | 'series' | 'kinds' | 'pairs' | 'chains' | 'types' | 'venues'
+          'overview' | 'series' | 'kinds' | 'pairs' | 'chains' | 'types' | 'venues' | 'naira'
         >
         setStats({
           overview: o.overview,
@@ -97,6 +99,7 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
           chains: o.chains,
           types: o.types,
           venues: o.venues,
+          naira: o.naira,
           wallets: (wallets as unknown as Pick<Stats, 'wallets'>).wallets,
           agents: (agents as unknown as { agents: AgentsReport }).agents,
           intents: (intents as unknown as { intents: IntentsReport }).intents,
@@ -151,6 +154,22 @@ const usdCompact = new Intl.NumberFormat('en-US', {
 
 export function formatUsd(value: number, compact = false): string {
   return compact && Math.abs(value) >= 10_000 ? usdCompact.format(value) : usd.format(value)
+}
+
+const ngnCompact = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  notation: 'compact',
+  maximumFractionDigits: 1,
+})
+const ngnFull = new Intl.NumberFormat('en-NG', {
+  style: 'currency',
+  currency: 'NGN',
+  maximumFractionDigits: 0,
+})
+
+export function formatNgn(value: number, compact = false): string {
+  return compact && Math.abs(value) >= 100_000 ? ngnCompact.format(value) : ngnFull.format(value)
 }
 
 export function formatCount(value: number): string {

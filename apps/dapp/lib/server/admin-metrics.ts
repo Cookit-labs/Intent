@@ -198,6 +198,13 @@ export interface OffRampChainRow {
   paidNgn: number
 }
 
+/** Naira paid to banks on one chain: every provider's off-ramps, and on Stellar the naira form. */
+export interface NairaChainRow {
+  chain: string
+  orders: number
+  ngn: number
+}
+
 export interface OffRampProviderRow {
   provider: string
   orders: number
@@ -351,6 +358,7 @@ export interface MetricsRepo {
   typesByChain: (scope: Scope, now?: Date) => Promise<ChainTypeRow[]>
   venues: (scope: Scope, now?: Date) => Promise<VenueRow[]>
   offRamps: (scope: Scope, now?: Date) => Promise<OffRampReport>
+  nairaByChain: (scope: Scope, now?: Date) => Promise<NairaChainRow[]>
   wallets: (scope: Scope, now?: Date) => Promise<WalletRow[]>
   transactions: (
     scope: Scope,
@@ -608,6 +616,50 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
         transactions: num(r['txs']),
         volumeUsd: money(r['volume']),
       }))
+    },
+
+    async nairaByChain(scope, now) {
+      const from = since(scope, now)
+      const [offRamps, form] = await Promise.all([
+        // Off-ramp orders are mainnet only, and their table has no network column.
+        scope.network !== 'mainnet'
+          ? Promise.resolve({ rows: [] })
+          : orEmpty(
+              query(
+                `SELECT chain, count(*) AS orders,
+                        coalesce(sum(nullif(coalesce(paid_dest, estimated_dest), '')::numeric), 0) AS ngn
+                 FROM weave_orders
+                 WHERE status = 'paid' AND currency = 'NGN'
+                   AND ($1::timestamptz IS NULL OR created_at >= $1)${onChain(scope)}
+                 GROUP BY chain`,
+                [from]
+              )
+            ),
+        orEmpty(
+          query(
+            `SELECT count(*) AS orders, coalesce(sum(amount_ngn), 0) AS ngn
+             FROM naira_orders
+             WHERE network = $1${nairaOn(scope)} AND status = 'paid'
+               AND ($2::timestamptz IS NULL OR created_at >= $2)`,
+            [scope.network, from]
+          )
+        ),
+      ])
+      const byChain = new Map<string, NairaChainRow>()
+      for (const r of offRamps.rows) {
+        const chain = String(r['chain'])
+        byChain.set(chain, { chain, orders: num(r['orders']), ngn: money(r['ngn']) })
+      }
+      const f = form.rows[0]
+      if (f !== undefined && num(f['orders']) > 0) {
+        const stellar = byChain.get('stellar') ?? { chain: 'stellar', orders: 0, ngn: 0 }
+        byChain.set('stellar', {
+          chain: 'stellar',
+          orders: stellar.orders + num(f['orders']),
+          ngn: money(stellar.ngn + num(f['ngn'])),
+        })
+      }
+      return [...byChain.values()].sort((a, b) => b.ngn - a.ngn)
     },
 
     async offRamps(scope, now) {

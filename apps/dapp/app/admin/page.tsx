@@ -4,7 +4,13 @@ import { ChainTable, TypeMatrix, VenueTable, chainName } from '../../components/
 import { DonutChart, OutcomeBars, RankedBars, TrendChart } from '../../components/admin/charts'
 import { EmptyNote, Kpi, PageTitle, Panel, WithStats } from '../../components/admin/parts'
 import { useScope } from '../../components/admin/scope'
-import { formatCount, formatPercent, formatUsd, kindLabel } from '../../components/admin/stats'
+import {
+  formatCount,
+  formatNgn,
+  formatPercent,
+  formatUsd,
+  kindLabel,
+} from '../../components/admin/stats'
 
 /**
  * The types the headline volume adds up, so the donut and the total agree.
@@ -25,11 +31,13 @@ export default function AdminOverviewPage(): JSX.Element {
         hint="Everything people did on the chain and network chosen above, over the chosen dates."
       />
       <WithStats>
-        {({ overview, series, kinds, pairs, chains, types, venues }) => {
+        {({ overview, series, kinds, pairs, chains, types, venues, naira }) => {
+          const ngnPaid = naira.reduce((t, n) => t + n.ngn, 0)
+          const ngnOrders = naira.reduce((t, n) => t + n.orders, 0)
           const valued = kinds.filter((k) => k.volumeUsd > 0 && COUNTED.includes(k.kind))
           return (
             <>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <Kpi
                   label="Total volume"
                   value={formatUsd(overview.volumeUsd, true)}
@@ -37,6 +45,15 @@ export default function AdminOverviewPage(): JSX.Element {
                     overview.unvalued > 0
                       ? `${formatCount(overview.unvalued)} transactions had no price`
                       : 'Swaps, limit and standing orders, sends, off-ramps'
+                  }
+                />
+                <Kpi
+                  label="Naira paid out"
+                  value={formatNgn(ngnPaid, true)}
+                  note={
+                    ngnOrders === 0
+                      ? 'No naira off-ramps paid in this period'
+                      : `${formatCount(ngnOrders)} off-ramp${ngnOrders === 1 ? '' : 's'} paid to banks`
                   }
                 />
                 <Kpi
@@ -68,7 +85,7 @@ export default function AdminOverviewPage(): JSX.Element {
                   {chains.length === 0 ? (
                     <EmptyNote>Nothing ran on any chain in this period.</EmptyNote>
                   ) : (
-                    <ChainTable rows={chains} />
+                    <ChainTable rows={chains} naira={naira} />
                   )}
                 </Panel>
               ) : null}

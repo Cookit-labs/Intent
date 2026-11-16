@@ -76,7 +76,7 @@ function flag(value: string | null): boolean | undefined {
 async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSearchParams) {
   switch (view) {
     case 'overview': {
-      const [overview, series, kinds, pairs, chains, types, venues] = await Promise.all([
+      const [overview, series, kinds, pairs, chains, types, venues, naira] = await Promise.all([
         repo.overview(scope),
         repo.series(scope),
         repo.byKind(scope),
@@ -84,8 +84,9 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
         repo.byChain(scope),
         repo.typesByChain(scope),
         repo.venues(scope),
+        repo.nairaByChain(scope),
       ])
-      return { overview, series, kinds, pairs, chains, types, venues }
+      return { overview, series, kinds, pairs, chains, types, venues, naira }
     }
     case 'wallets': {
       const [overview, series, wallets] = await Promise.all([

@@ -4,9 +4,14 @@ import { ChainMark } from '@intent/ui'
 import type { ChainSlug } from '@intent/types'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 
-import type { ChainRow, ChainTypeRow, VenueRow } from '../../lib/server/admin-metrics'
+import type {
+  ChainRow,
+  ChainTypeRow,
+  NairaChainRow,
+  VenueRow,
+} from '../../lib/server/admin-metrics'
 import { SERIES } from './charts'
-import { formatCount, formatPercent, formatUsd, kindLabel } from './stats'
+import { formatCount, formatNgn, formatPercent, formatUsd, kindLabel } from './stats'
 
 export const CHAIN_NAMES: Record<string, string> = {
   stellar: 'Stellar',
@@ -63,7 +68,14 @@ function Sparkline({ data, label }: { data: { day: string; value: number }[]; la
 }
 
 /** One row per chain: what ran there, its value, who used it and how it went. */
-export function ChainTable({ rows }: { rows: ChainRow[] }): JSX.Element {
+export function ChainTable({
+  rows,
+  naira,
+}: {
+  rows: ChainRow[]
+  naira: NairaChainRow[]
+}): JSX.Element {
+  const ngn = new Map(naira.map((n) => [n.chain, n.ngn]))
   const total = rows.reduce((t, r) => t + r.volumeUsd, 0)
   return (
     <div className="overflow-x-auto">
@@ -73,6 +85,7 @@ export function ChainTable({ rows }: { rows: ChainRow[] }): JSX.Element {
             <th className="py-2 pr-4 font-normal">Chain</th>
             <th className="py-2 pr-4 text-right font-normal">Volume</th>
             <th className="py-2 pr-4 text-right font-normal">Share</th>
+            <th className="py-2 pr-4 text-right font-normal">Naira paid out</th>
             <th className="py-2 pr-4 font-normal">Per day</th>
             <th className="py-2 pr-4 text-right font-normal">Transactions</th>
             <th className="py-2 pr-4 text-right font-normal">Accepted</th>
@@ -91,6 +104,13 @@ export function ChainTable({ rows }: { rows: ChainRow[] }): JSX.Element {
               </td>
               <td className="text-muted-foreground py-2.5 pr-4 text-right tabular-nums">
                 {total === 0 ? '—' : formatPercent(r.volumeUsd / total)}
+              </td>
+              <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                {(ngn.get(r.chain) ?? 0) > 0 ? (
+                  formatNgn(ngn.get(r.chain) ?? 0)
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </td>
               <td className="py-1 pr-4">
                 <Sparkline data={r.series} label={chainName(r.chain)} />

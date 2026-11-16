@@ -221,6 +221,8 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
     expect(all.byProvider).toEqual([{ provider: 'weave', orders: 1, paid: 1, paidUsd: 25 }])
     expect(all.attention).toEqual([])
     expect((await repo.offRamps(scope('solana'))).byChain).toEqual([])
+    expect(await repo.nairaByChain(scope('all'))).toEqual([{ chain: 'sui', orders: 1, ngn: 37000 }])
+    expect(await repo.nairaByChain(scope('near'))).toEqual([])
     expect(
       (await repo.offRamps({ network: 'testnet', range: '30d', chain: 'stellar' })).byChain
     ).toEqual([])

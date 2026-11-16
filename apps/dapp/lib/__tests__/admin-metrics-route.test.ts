@@ -74,6 +74,7 @@ function repo(): MetricsRepo {
       { chain: 'sui', type: 'stake', transactions: 1, volumeUsd: 5 },
     ]),
     venues: record('venues', [{ chain: 'sui', venue: 'cetus', transactions: 2, volumeUsd: 35 }]),
+    nairaByChain: record('nairaByChain', [{ chain: 'sui', orders: 1, ngn: 28000 }]),
     offRamps: record('offRamps', {
       byChain: [{ chain: 'sui', orders: 2, deposited: 1, paid: 1, paidUsd: 20, paidNgn: 28000 }],
       byProvider: [{ provider: 'linq', orders: 2, paid: 1, paidUsd: 20 }],
@@ -340,10 +341,12 @@ describe('GET /api/admin/metrics', () => {
       chains: { chain: string }[]
       types: { type: string }[]
       venues: { venue: string }[]
+      naira: { chain: string; ngn: number }[]
     }
     expect(body.chains.map((c) => c.chain)).toEqual(['sui'])
     expect(body.types.map((t) => t.type)).toEqual(['stake'])
     expect(body.venues.map((v) => v.venue)).toEqual(['cetus'])
+    expect(body.naira).toEqual([{ chain: 'sui', orders: 1, ngn: 28000 }])
   })
 
   it('answers off-ramps on every chain with a deposit link on the chain each ran on', async () => {
