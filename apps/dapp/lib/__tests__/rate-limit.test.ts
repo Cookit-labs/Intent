@@ -106,6 +106,7 @@ describe('limitFor', () => {
       'resolve',
       'standing',
       'auth',
+      'support',
     ] as const) {
       expect(limitFor(family, {})).toEqual(RATE_LIMIT_DEFAULTS[family])
       expect(RATE_LIMIT_DEFAULTS[family].limit).toBeGreaterThan(0)

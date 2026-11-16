@@ -27,6 +27,7 @@ export type RateLimitFamily =
   | 'resolve'
   | 'standing'
   | 'auth'
+  | 'support'
 
 export interface RateLimitWindow {
   limit: number
@@ -55,6 +56,8 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitFamily, RateLimitWind
   resolve: { limit: 30, windowSeconds: 60 },
   standing: { limit: 30, windowSeconds: 60 },
   auth: { limit: 10, windowSeconds: 60 },
+  // The help assistant: every message is one paid model call.
+  support: { limit: 10, windowSeconds: 60 },
 }
 
 /**
@@ -73,6 +76,7 @@ export const RATE_LIMIT_DEFAULTS: Readonly<Record<RateLimitFamily, RateLimitWind
  */
 export const RATE_LIMIT_DAILY: Readonly<Partial<Record<RateLimitFamily, RateLimitWindow>>> = {
   compete: { limit: 150, windowSeconds: 24 * 60 * 60 },
+  support: { limit: 100, windowSeconds: 24 * 60 * 60 },
 }
 
 type Env = Record<string, string | undefined>

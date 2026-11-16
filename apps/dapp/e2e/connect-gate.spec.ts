@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { BETA_NOTICE_ACCEPT } from '../lib/chain-beta'
 import { BETA_NOTICE_SEEN } from './beta-notice-seen'
 
 /**
@@ -282,14 +283,14 @@ test('toggling between chains warns once on each, then never again', async ({ pa
   await dialog(page).getByRole('button', { name: 'Solana' }).click()
   await dialog(page).getByRole('button', { name: 'Fake Solana' }).click()
   await expect(page.getByRole('alertdialog', { name: 'Solana is in beta' })).toBeVisible()
-  await page.getByRole('button', { name: 'I understand' }).click()
+  await page.getByRole('button', { name: BETA_NOTICE_ACCEPT }).click()
   await expect(notice).toHaveCount(0)
 
   await page.getByRole('button', { name: /Switch chain/ }).click()
   await page.getByRole('menuitem', { name: /Sui mainnet/ }).click()
   await dialog(page).getByRole('button', { name: 'Fake Sui' }).click()
   await expect(page.getByRole('alertdialog', { name: 'Sui is in beta' })).toBeVisible()
-  await page.getByRole('button', { name: 'I understand' }).click()
+  await page.getByRole('button', { name: BETA_NOTICE_ACCEPT }).click()
   await expect(notice).toHaveCount(0)
 
   for (let round = 0; round < 2; round += 1) {

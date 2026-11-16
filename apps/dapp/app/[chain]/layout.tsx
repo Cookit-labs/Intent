@@ -6,6 +6,7 @@ import { WalletGate } from '../../components/connect/wallet-gate'
 import { ChatHost } from '../../components/intents/chat-host'
 import { AppShell } from '../../components/layout/app-shell'
 import { BetaChainNotice } from '../../components/layout/beta-chain-notice'
+import { HelpWidget } from '../../components/support/help-widget'
 import { ChainProvider } from '../../providers/chain-provider'
 
 /**
@@ -42,6 +43,7 @@ export default async function ChainLayout({
         <AppShell>
           <ChatHost key={chain}>{children}</ChatHost>
         </AppShell>
+        <HelpWidget />
       </WalletGate>
     </ChainProvider>
   )

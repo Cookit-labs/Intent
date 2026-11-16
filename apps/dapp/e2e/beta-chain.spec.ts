@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { BETA_NOTICE_ACCEPT } from '../lib/chain-beta'
+
 /**
  * A chain in beta says so in its switcher, and warns once on the way in. Stellar does neither. The
  * shared config marks the notice as seen so other specs aren't blocked, so this starts clean.
@@ -29,11 +31,17 @@ test('a beta chain warns once, and carries its tag', async ({ page }) => {
   // Long enough for a dev server's first compile of this page.
   await expect(notice).toBeVisible({ timeout: 45_000 })
   await expect(notice).toContainText('A transaction can fail')
-  await expect(notice.getByRole('button', { name: 'I understand' })).toBeFocused()
+  await expect(notice.getByRole('button', { name: BETA_NOTICE_ACCEPT })).toBeFocused()
 
-  await notice.getByRole('button', { name: 'I understand' }).click()
+  await notice.getByRole('button', { name: BETA_NOTICE_ACCEPT }).click()
   await expect(notice).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Chain: Solana.*, beta/ })).toContainText('Beta')
+
+  // Then the help button is pointed out, once.
+  const help = page.getByRole('region', { name: 'Help is here' })
+  await expect(help).toBeVisible()
+  await help.getByRole('button', { name: 'Got it' }).click()
+  await expect(help).toHaveCount(0)
 
   // The dev server can abort a navigation while it recompiles.
   await expect(async () => {
@@ -41,6 +49,7 @@ test('a beta chain warns once, and carries its tag', async ({ page }) => {
   }).toPass()
   await expect(page.getByRole('button', { name: /^Chain: Solana/ })).toBeVisible()
   await expect(notice).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Help is here' })).toHaveCount(0)
 })
 
 test('each beta chain warns on its own', async ({ page }) => {

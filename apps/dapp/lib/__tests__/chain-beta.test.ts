@@ -63,6 +63,8 @@ describe('when the notice shows', () => {
 
 describe('what the notice says', () => {
   it('warns that a transaction can fail and costs a fee', () => {
-    expect(BETA_NOTICE_POINTS.join(' ')).toMatch(/transaction can fail.*network fee/)
+    expect(BETA_NOTICE_POINTS.map((p) => p.detail).join(' ')).toMatch(
+      /transaction can fail.*network fee/
+    )
   })
 })

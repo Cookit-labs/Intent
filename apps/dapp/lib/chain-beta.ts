@@ -1,7 +1,7 @@
 import type { ChainSlug } from '@intent/types'
 
 /** Raising this shows the notice again on every beta chain, once, for the next round of changes. */
-export const BETA_RELEASE = 'v1'
+export const BETA_RELEASE = 'v2'
 
 /** Every chain but Stellar, which has been running longest. */
 export function isBetaChain(slug: ChainSlug): boolean {
@@ -21,13 +21,23 @@ export function betaNoticeIntro(chainName: string): string {
   return `Intent on ${chainName} is new and still being tested with real transactions.`
 }
 
+/** What can go wrong while a chain is in beta: a short lead to scan, then the plain detail. */
 export const BETA_NOTICE_POINTS = [
-  'A transaction can fail, and you may still pay the network fee.',
-  'An app can be slow, refuse a request or be unavailable for a while.',
-  'Apps here run on their own contracts, and a sent transaction can’t be reversed.',
+  { lead: 'It can fail', detail: 'A transaction can fail, and you may still pay the network fee.' },
+  {
+    lead: 'Apps can stall',
+    detail: 'An app can be slow, refuse a request or be unavailable for a while.',
+  },
+  {
+    lead: 'Sent is final',
+    detail: 'Apps here run on their own contracts, and a sent transaction can’t be reversed.',
+  },
 ] as const
 
 export const BETA_NOTICE_ADVICE = 'Start with a small amount, and read each card before you sign.'
+
+/** The button that closes the notice, which is also the promise it asks for. */
+export const BETA_NOTICE_ACCEPT = 'I’ll start small'
 
 type NoticeStorage = Pick<Storage, 'getItem' | 'setItem'>
 
