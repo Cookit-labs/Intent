@@ -5,6 +5,7 @@ import type { ChainSlug } from '@intent/types'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { ChainLabel, venueLabel } from '../../../components/admin/by-chain'
 import { EmptyNote, PageTitle, Panel } from '../../../components/admin/parts'
 import { scopeQuery, useScope } from '../../../components/admin/scope'
 import {
@@ -21,6 +22,8 @@ interface Row {
   hash: string | null
   account: string
   kind: string
+  action: string | null
+  venue: string | null
   ok: boolean
   failure: string | null
   feeSponsored: boolean
@@ -152,7 +155,9 @@ export default function AdminTransactionsPage(): JSX.Element {
                   <thead className="text-muted-foreground">
                     <tr>
                       <th className="py-2 pr-4 font-normal">When</th>
+                      <th className="py-2 pr-4 font-normal">Chain</th>
                       <th className="py-2 pr-4 font-normal">Type</th>
+                      <th className="py-2 pr-4 font-normal">App</th>
                       <th className="py-2 pr-4 font-normal">Wallet</th>
                       <th className="py-2 pr-4 font-normal">Moved</th>
                       <th className="py-2 pr-4 text-right font-normal">Value</th>
@@ -166,14 +171,26 @@ export default function AdminTransactionsPage(): JSX.Element {
                         <td className="text-muted-foreground whitespace-nowrap py-2.5 pr-4">
                           {when(r.at)}
                         </td>
+                        <td className="whitespace-nowrap py-2.5 pr-4">
+                          <ChainLabel chain={r.chain} />
+                        </td>
                         <td className="py-2.5 pr-4">
-                          <span className="inline-flex items-center gap-2">
-                            <ChainMark
-                              chain={r.chain as ChainSlug}
-                              className="h-3.5 w-3.5 shrink-0"
-                            />
-                            {kindLabel(r.kind)}
-                          </span>
+                          {r.action === 'stake' || r.action === 'unstake'
+                            ? kindLabel(r.action)
+                            : kindLabel(r.kind)}
+                          {r.action !== null &&
+                          r.action !== r.kind &&
+                          r.action !== 'stake' &&
+                          r.action !== 'unstake' ? (
+                            <span className="text-muted-foreground block text-xs">{r.action}</span>
+                          ) : null}
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          {r.venue === null ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            venueLabel(r.venue)
+                          )}
                         </td>
                         <td className="py-2.5 pr-4 font-mono" title={r.account}>
                           {shortAddress(r.account)}

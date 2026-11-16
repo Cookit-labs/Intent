@@ -182,6 +182,50 @@ describe.skipIf(SKIP)('every chain in the dashboard, against a real database', (
     expect((await repo.naira(scope('sui'))).cashedOut).toMatchObject({ count: 1, usd: 25 })
   })
 
+  it('lines every chain up side by side, busiest first, each over the same days', async () => {
+    const chains = await repo.byChain(scope('all'))
+    expect(chains.map((c) => c.chain)).toEqual(['solana', 'sui', 'near', 'stellar', 'monad'])
+    expect(chains[0]).toMatchObject({ transactions: 2, volumeUsd: 75, wallets: 2, unknown: 1 })
+    expect(chains.find((c) => c.chain === 'monad')).toMatchObject({ transactions: 1, volumeUsd: 0 })
+    for (const c of chains) expect(c.series).toHaveLength(30)
+    expect((await repo.byChain(scope('near'))).map((c) => c.chain)).toEqual(['near'])
+  })
+
+  it('counts each type on each chain, with staking told apart from lending', async () => {
+    const id = randomUUID()
+    await client.query(
+      `INSERT INTO usage_executions
+         (id, network, hash, account, kind, action, venue, fee_sponsored, ok, submitted_at, chain)
+       VALUES ($1, 'mainnet', $2, 'W-stake', 'lend', 'stake', 'linear', false, true, now(), 'near')`,
+      [id, hash()]
+    )
+    try {
+      const types = await repo.typesByChain(scope('all'))
+      expect(types).toContainEqual({ chain: 'near', type: 'stake', transactions: 1, volumeUsd: 0 })
+      expect(types).toContainEqual({ chain: 'monad', type: 'lend', transactions: 1, volumeUsd: 10 })
+      expect(await repo.venues(scope('near'))).toEqual([
+        { chain: 'near', venue: 'linear', transactions: 1, volumeUsd: 0 },
+      ])
+      const pairs = await repo.pairs(scope('all'))
+      expect(pairs[0]).toMatchObject({ chain: 'solana', assetIn: 'X' })
+    } finally {
+      await client.query(`DELETE FROM usage_executions WHERE id = $1`, [id])
+    }
+  })
+
+  it('reports off-ramp orders on every chain, and on one chain alone', async () => {
+    const all = await repo.offRamps(scope('all'))
+    expect(all.byChain).toEqual([
+      { chain: 'sui', orders: 1, deposited: 1, paid: 1, paidUsd: 25, paidNgn: 37000 },
+    ])
+    expect(all.byProvider).toEqual([{ provider: 'weave', orders: 1, paid: 1, paidUsd: 25 }])
+    expect(all.attention).toEqual([])
+    expect((await repo.offRamps(scope('solana'))).byChain).toEqual([])
+    expect(
+      (await repo.offRamps({ network: 'testnet', range: '30d', chain: 'stellar' })).byChain
+    ).toEqual([])
+  })
+
   it('values past transactions from their chain once, and leaves a node that did not answer to retry', async () => {
     const query = async (sql: string, params?: unknown[]) => ({
       rows: (await client.query(sql, params)).rows as Record<string, unknown>[],

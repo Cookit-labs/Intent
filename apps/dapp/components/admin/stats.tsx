@@ -19,6 +19,9 @@ import type {
   SeriesPoint,
   WaitlistCounts,
   WalletRow,
+  ChainRow,
+  ChainTypeRow,
+  VenueRow,
 } from '../../lib/server/admin-metrics'
 
 import { scopeQuery, useScope } from './scope'
@@ -28,6 +31,9 @@ export interface Stats {
   series: SeriesPoint[]
   kinds: KindRow[]
   pairs: PairRow[]
+  chains: ChainRow[]
+  types: ChainTypeRow[]
+  venues: VenueRow[]
   wallets: WalletRow[]
   agents: AgentsReport
   intents: IntentsReport
@@ -79,12 +85,18 @@ export function StatsProvider({ children }: { children: ReactNode }): JSX.Elemen
     }
     Promise.all(['overview', 'wallets', 'agents', 'intents', 'waitlist'].map(get))
       .then(([overview, wallets, agents, intents, waitlist]) => {
-        const o = overview as unknown as Pick<Stats, 'overview' | 'series' | 'kinds' | 'pairs'>
+        const o = overview as unknown as Pick<
+          Stats,
+          'overview' | 'series' | 'kinds' | 'pairs' | 'chains' | 'types' | 'venues'
+        >
         setStats({
           overview: o.overview,
           series: o.series,
           kinds: o.kinds,
           pairs: o.pairs,
+          chains: o.chains,
+          types: o.types,
+          venues: o.venues,
           wallets: (wallets as unknown as Pick<Stats, 'wallets'>).wallets,
           agents: (agents as unknown as { agents: AgentsReport }).agents,
           intents: (intents as unknown as { intents: IntentsReport }).intents,
@@ -155,7 +167,9 @@ export const KIND_LABELS: Record<string, string> = {
   offer: 'Limit orders',
   send: 'Sends',
   lend: 'Lending',
-  offramp: 'Cash-outs',
+  offramp: 'Off-ramps',
+  stake: 'Staking',
+  unstake: 'Unstaking',
   perp: 'Perpetuals',
   withdraw: 'Withdrawals',
   borrow: 'Borrows',

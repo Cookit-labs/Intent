@@ -41,6 +41,15 @@ const DAY_MS = 86_400_000
  */
 const VALUE_USD = `coalesce(volume_usd, CASE WHEN asset_in = 'USDC' THEN amount_in END)`
 
+/**
+ * What a transaction was, for the admin. The logged kind, except that staking and unstaking are
+ * logged as lending and withdrawing, and are told apart here by their action.
+ */
+const TYPE_SQL = `CASE WHEN action IN ('stake', 'unstake') THEN action ELSE kind END`
+
+/** Rows logged before the chain was recorded were all Stellar's. */
+const CHAIN_OF = `coalesce(chain, 'stellar')`
+
 export type AdminChain = 'all' | ExecutionChain
 
 export const ADMIN_CHAINS: readonly AdminChain[] = [
@@ -140,10 +149,85 @@ export interface KindRow {
 }
 
 export interface PairRow {
+  chain: string
   assetIn: string
   assetOut: string | null
   transactions: number
   volumeUsd: number
+}
+
+/** One chain's activity over the range, with its volume day by day. */
+export interface ChainRow {
+  chain: string
+  transactions: number
+  failed: number
+  successRate: number | null
+  volumeUsd: number
+  wallets: number
+  /** Accepted transactions whose type was not recorded. */
+  unknown: number
+  /** Accepted transactions in the headline whose value could not be priced. */
+  unvalued: number
+  series: { day: string; value: number }[]
+}
+
+/** How many transactions of one type ran on one chain, and their value. */
+export interface ChainTypeRow {
+  chain: string
+  type: string
+  transactions: number
+  volumeUsd: number
+}
+
+/** An app a transaction went through, on chains that record one. */
+export interface VenueRow {
+  chain: string
+  venue: string
+  transactions: number
+  volumeUsd: number
+}
+
+/** Off-ramp orders on one chain: how many were made, deposited into and paid. */
+export interface OffRampChainRow {
+  chain: string
+  orders: number
+  deposited: number
+  paid: number
+  paidUsd: number
+  /** Naira paid, for orders paid in naira. */
+  paidNgn: number
+}
+
+export interface OffRampProviderRow {
+  provider: string
+  orders: number
+  paid: number
+  paidUsd: number
+}
+
+/**
+ * An off-ramp whose deposit left the user's wallet and that is not paid or refunded. Holds no
+ * account number or holder name: the last four digits tell two orders apart.
+ */
+export interface OffRampAttentionRow {
+  id: string
+  chain: string
+  provider: string
+  status: string
+  providerStatus: string
+  amount: string
+  currency: string
+  estimate: number
+  at: string
+  depositHash: string
+  institution: string
+  accountTail: string
+}
+
+export interface OffRampReport {
+  byChain: OffRampChainRow[]
+  byProvider: OffRampProviderRow[]
+  attention: OffRampAttentionRow[]
 }
 
 export interface WalletRow {
@@ -160,6 +244,10 @@ export interface TransactionRow {
   hash: string | null
   account: string
   kind: string
+  /** The finer action on chains that record one: stake, supply, repay and the like. */
+  action: string | null
+  /** The app it went through, on chains that record one. */
+  venue: string | null
   ok: boolean
   failure: string | null
   feeSponsored: boolean
@@ -259,6 +347,10 @@ export interface MetricsRepo {
   series: (scope: Scope, now?: Date) => Promise<SeriesPoint[]>
   byKind: (scope: Scope, now?: Date) => Promise<KindRow[]>
   pairs: (scope: Scope, now?: Date) => Promise<PairRow[]>
+  byChain: (scope: Scope, now?: Date) => Promise<ChainRow[]>
+  typesByChain: (scope: Scope, now?: Date) => Promise<ChainTypeRow[]>
+  venues: (scope: Scope, now?: Date) => Promise<VenueRow[]>
+  offRamps: (scope: Scope, now?: Date) => Promise<OffRampReport>
   wallets: (scope: Scope, now?: Date) => Promise<WalletRow[]>
   transactions: (
     scope: Scope,
@@ -409,19 +501,185 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
 
     async pairs(scope, now) {
       const { rows } = await query(
-        `SELECT asset_in, asset_out, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume
+        `SELECT ${CHAIN_OF} AS chain, asset_in, asset_out, count(*) AS txs,
+                coalesce(sum(${VALUE_USD}), 0) AS volume
          FROM usage_executions
          WHERE network = $1${onChain(scope)} AND ok AND asset_in IS NOT NULL AND kind = ANY($3)
            AND ($2::timestamptz IS NULL OR submitted_at >= $2)
-         GROUP BY asset_in, asset_out ORDER BY volume DESC, txs DESC LIMIT 8`,
+         GROUP BY 1, asset_in, asset_out ORDER BY volume DESC, txs DESC LIMIT 8`,
         [scope.network, since(scope, now), headline]
       )
       return rows.map((r) => ({
+        chain: String(r['chain']),
         assetIn: String(r['asset_in']),
         assetOut: r['asset_out'] === null ? null : String(r['asset_out']),
         transactions: num(r['txs']),
         volumeUsd: money(r['volume']),
       }))
+    },
+
+    async byChain(scope, now = new Date()) {
+      const from = since(scope, now)
+      const where = `network = $1${onChain(scope)} AND ($2::timestamptz IS NULL OR submitted_at >= $2)`
+      const [totals, days] = await Promise.all([
+        query(
+          `SELECT ${CHAIN_OF} AS chain,
+                  count(*) FILTER (WHERE ok)                                          AS txs,
+                  count(*) FILTER (WHERE NOT ok)                                      AS failed,
+                  coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = ANY($3)), 0)   AS volume,
+                  count(DISTINCT account) FILTER (WHERE ok)                           AS wallets,
+                  count(*) FILTER (WHERE ok AND kind = 'unknown')                     AS unknown,
+                  count(*) FILTER (WHERE ok AND kind = ANY($3) AND ${VALUE_USD} IS NULL) AS unvalued
+           FROM usage_executions WHERE ${where}
+           GROUP BY 1 ORDER BY volume DESC, txs DESC, 1`,
+          [scope.network, from, headline]
+        ),
+        query(
+          `SELECT ${CHAIN_OF} AS chain, date_trunc('day', submitted_at AT TIME ZONE 'UTC') AS day,
+                  coalesce(sum(${VALUE_USD}) FILTER (WHERE ok AND kind = ANY($3)), 0) AS volume
+           FROM usage_executions WHERE ${where}
+           GROUP BY 1, 2 ORDER BY 2`,
+          [scope.network, from, headline]
+        ),
+      ])
+      const start = rangeStart(scope.range, now)
+      const firstDay =
+        days.rows[0] === undefined ? null : new Date(`${day(days.rows[0]['day'])}T00:00:00Z`)
+      return totals.rows.map((r) => {
+        const chain = String(r['chain'])
+        const points = days.rows
+          .filter((d) => String(d['chain']) === chain)
+          .map((d) => ({
+            day: day(d['day']),
+            transactions: 0,
+            failed: 0,
+            volumeUsd: money(d['volume']),
+            wallets: 0,
+          }))
+        const transactions = num(r['txs'])
+        const failed = num(r['failed'])
+        return {
+          chain,
+          transactions,
+          failed,
+          successRate: transactions + failed === 0 ? null : transactions / (transactions + failed),
+          volumeUsd: money(r['volume']),
+          wallets: num(r['wallets']),
+          unknown: num(r['unknown']),
+          unvalued: num(r['unvalued']),
+          // Every chain over the same days, so their lines can be read side by side.
+          series: fillDays(points, start ?? firstDay, now).map((p) => ({
+            day: p.day,
+            value: p.volumeUsd,
+          })),
+        }
+      })
+    },
+
+    async typesByChain(scope, now) {
+      const { rows } = await query(
+        `SELECT ${CHAIN_OF} AS chain, ${TYPE_SQL} AS type, count(*) AS txs,
+                coalesce(sum(${VALUE_USD}), 0) AS volume
+         FROM usage_executions
+         WHERE network = $1${onChain(scope)} AND ok AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+         GROUP BY 1, 2 ORDER BY 1, txs DESC`,
+        [scope.network, since(scope, now)]
+      )
+      return rows.map((r) => ({
+        chain: String(r['chain']),
+        type: String(r['type']),
+        transactions: num(r['txs']),
+        volumeUsd: money(r['volume']),
+      }))
+    },
+
+    async venues(scope, now) {
+      const { rows } = await query(
+        `SELECT ${CHAIN_OF} AS chain, venue, count(*) AS txs, coalesce(sum(${VALUE_USD}), 0) AS volume
+         FROM usage_executions
+         WHERE network = $1${onChain(scope)} AND ok AND venue IS NOT NULL
+           AND ($2::timestamptz IS NULL OR submitted_at >= $2)
+         GROUP BY 1, 2 ORDER BY txs DESC, volume DESC LIMIT 10`,
+        [scope.network, since(scope, now)]
+      )
+      return rows.map((r) => ({
+        chain: String(r['chain']),
+        venue: String(r['venue']),
+        transactions: num(r['txs']),
+        volumeUsd: money(r['volume']),
+      }))
+    },
+
+    async offRamps(scope, now) {
+      // Off-ramp orders are mainnet only, and their table has no network column.
+      if (scope.network !== 'mainnet') return { byChain: [], byProvider: [], attention: [] }
+      const from = since(scope, now)
+      const inRange = `($1::timestamptz IS NULL OR created_at >= $1)${onChain(scope)}`
+      const usd = `coalesce(sum(nullif(amount, '')::numeric) FILTER (WHERE status = 'paid'), 0)`
+      const [chains, providers, attention] = await Promise.all([
+        orEmpty(
+          query(
+            `SELECT chain, count(*) AS orders,
+                    count(*) FILTER (WHERE deposit_hash IS NOT NULL) AS deposited,
+                    count(*) FILTER (WHERE status = 'paid') AS paid,
+                    ${usd} AS paid_usd,
+                    coalesce(sum(nullif(coalesce(paid_dest, estimated_dest), '')::numeric)
+                      FILTER (WHERE status = 'paid' AND currency = 'NGN'), 0) AS paid_ngn
+             FROM weave_orders WHERE ${inRange}
+             GROUP BY chain ORDER BY paid_usd DESC, orders DESC`,
+            [from]
+          )
+        ),
+        orEmpty(
+          query(
+            `SELECT coalesce(provider, 'weave') AS provider, count(*) AS orders,
+                    count(*) FILTER (WHERE status = 'paid') AS paid, ${usd} AS paid_usd
+             FROM weave_orders WHERE ${inRange}
+             GROUP BY 1 ORDER BY paid_usd DESC, orders DESC`,
+            [from]
+          )
+        ),
+        orEmpty(
+          query(
+            `SELECT id, chain, coalesce(provider, 'weave') AS provider, status, provider_status,
+                    amount, currency, estimated_dest, created_at, deposit_hash, institution_name,
+                    right(account_identifier, 4) AS tail
+             FROM weave_orders
+             WHERE deposit_hash IS NOT NULL AND status NOT IN ('paid', 'refunded')${onChain(scope)}
+             ORDER BY created_at LIMIT 50`
+          )
+        ),
+      ])
+      return {
+        byChain: chains.rows.map((r) => ({
+          chain: String(r['chain']),
+          orders: num(r['orders']),
+          deposited: num(r['deposited']),
+          paid: num(r['paid']),
+          paidUsd: money(r['paid_usd']),
+          paidNgn: money(r['paid_ngn']),
+        })),
+        byProvider: providers.rows.map((r) => ({
+          provider: String(r['provider']),
+          orders: num(r['orders']),
+          paid: num(r['paid']),
+          paidUsd: money(r['paid_usd']),
+        })),
+        attention: attention.rows.map((r) => ({
+          id: String(r['id']),
+          chain: String(r['chain']),
+          provider: String(r['provider']),
+          status: String(r['status']),
+          providerStatus: String(r['provider_status']),
+          amount: String(r['amount']),
+          currency: String(r['currency']),
+          estimate: money(r['estimated_dest']),
+          at: new Date(String(r['created_at'])).toISOString(),
+          depositHash: String(r['deposit_hash']),
+          institution: String(r['institution_name']),
+          accountTail: String(r['tail']),
+        })),
+      }
     },
 
     async wallets(scope, now) {
@@ -457,7 +715,7 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
       const [count, page] = await Promise.all([
         query(`SELECT count(*) AS n FROM usage_executions WHERE ${where}`, params),
         query(
-          `SELECT id, chain, hash, account, kind, ok, failure, fee_sponsored, submitted_at,
+          `SELECT id, chain, hash, account, kind, action, venue, ok, failure, fee_sponsored, submitted_at,
                   asset_in, asset_out, amount_in, ${VALUE_USD} AS volume_usd
            FROM usage_executions WHERE ${where}
            ORDER BY submitted_at DESC, id LIMIT $6 OFFSET $7`,
@@ -472,6 +730,8 @@ export function createMetricsRepo(query: QueryFn): MetricsRepo {
           hash: r['hash'] === null ? null : String(r['hash']),
           account: String(r['account']),
           kind: String(r['kind']),
+          action: r['action'] === null || r['action'] === undefined ? null : String(r['action']),
+          venue: r['venue'] === null || r['venue'] === undefined ? null : String(r['venue']),
           ok: r['ok'] === true,
           failure: r['failure'] === null ? null : String(r['failure']),
           feeSponsored: r['fee_sponsored'] === true,

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { OffRampSection, type OffRampView } from '../../../components/admin/off-ramps'
 import { EmptyNote, Kpi, PageTitle, Panel } from '../../../components/admin/parts'
 import { scopeQuery, useScope } from '../../../components/admin/scope'
 import { formatCount, formatUsd } from '../../../components/admin/stats'
@@ -38,15 +39,18 @@ function age(iso: string): string {
 export default function AdminPayoutsPage(): JSX.Element {
   const { scope, range } = useScope()
   const [report, setReport] = useState<Report | null>(null)
+  const [offRamps, setOffRamps] = useState<OffRampView | null>(null)
   const [error, setError] = useState<string | undefined>(undefined)
   const [tick, setTick] = useState(0)
 
-  // Naira payouts run on Stellar only, so all chains shows Stellar's.
-  const query = scope.chain === 'stellar' || scope.chain === 'all' ? scopeQuery(scope) : undefined
+  const query = scopeQuery(scope)
   const tracked = query !== undefined
+  // Direct naira payouts run on Stellar only, so all chains shows Stellar's.
+  const nairaShown = scope.chain === 'stellar' || scope.chain === 'all'
 
   useEffect(() => {
     setReport(null)
+    setOffRamps(null)
     setError(undefined)
     if (!tracked) return
     const controller = new AbortController()
@@ -54,9 +58,16 @@ export default function AdminPayoutsPage(): JSX.Element {
       signal: controller.signal,
     })
       .then(async (res) => {
-        const body = (await res.json().catch(() => ({}))) as { naira?: Report; error?: string }
-        if (!res.ok || body.naira === undefined) throw new Error(body.error ?? 'unavailable')
+        const body = (await res.json().catch(() => ({}))) as {
+          naira?: Report
+          offRamps?: OffRampView
+          error?: string
+        }
+        if (!res.ok || body.naira === undefined || body.offRamps === undefined) {
+          throw new Error(body.error ?? 'unavailable')
+        }
         setReport(body.naira)
+        setOffRamps(body.offRamps)
       })
       .catch((e: unknown) => {
         if (e instanceof DOMException && e.name === 'AbortError') return
@@ -81,14 +92,12 @@ export default function AdminPayoutsPage(): JSX.Element {
     <>
       <PageTitle
         title="Payouts"
-        hint="Cash-outs to naira: what was paid, and what was sent but not paid out yet."
+        hint="Off-ramps to a bank on every chain: what was paid, and what was sent but not paid out yet."
       />
 
       {!tracked ? (
         <Panel title={`${scope.name} payouts`}>
-          <EmptyNote>
-            Naira payouts only run on Stellar, so there is nothing to show here.
-          </EmptyNote>
+          <EmptyNote>Off-ramps are not recorded for this chain.</EmptyNote>
         </Panel>
       ) : error !== undefined ? (
         <Panel title="Could not load the payouts">
@@ -101,7 +110,7 @@ export default function AdminPayoutsPage(): JSX.Element {
             Try again
           </button>
         </Panel>
-      ) : report === null ? (
+      ) : report === null || offRamps === null ? (
         <div aria-busy="true" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div
@@ -112,144 +121,156 @@ export default function AdminPayoutsPage(): JSX.Element {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <Kpi label="Orders" value={formatCount(report.orders)} />
-            <Kpi label="Paid out" value={formatCount(report.paid.count)} />
-            <Kpi label="Naira paid out" value={naira(report.paid.ngn)} />
-            <Kpi
-              label="Cashed out"
-              value={formatUsd(report.cashedOut.usd)}
-              note={
-                report.cashedOut.unvalued > 0
-                  ? `${report.cashedOut.unvalued} cash-out${report.cashedOut.unvalued === 1 ? '' : 's'} could not be priced`
-                  : `${formatCount(report.cashedOut.count)} payment${report.cashedOut.count === 1 ? '' : 's'} sent`
-              }
-            />
-            <Kpi
-              label="Needs attention"
-              value={formatCount(report.attention.length)}
-              note="Payment sent, not paid out"
-            />
-          </div>
+          <OffRampSection report={offRamps} />
 
-          <Panel
-            title="Needs attention"
-            hint="The payment left the user's wallet and the payout has not completed. Not limited to the date range."
-          >
-            {report.attention.length === 0 ? (
-              <EmptyNote>Every payment that was sent has been paid out.</EmptyNote>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-4 font-normal">Waiting</th>
-                      <th className="py-2 pr-4 font-normal">Status</th>
-                      <th className="py-2 pr-4 font-normal">Route</th>
-                      <th className="py-2 pr-4 text-right font-normal">Sent</th>
-                      <th className="py-2 pr-4 text-right font-normal">Naira</th>
-                      <th className="py-2 pr-4 font-normal">Bank</th>
-                      <th className="py-2 text-right font-normal">Payment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-border divide-y">
-                    {report.attention.map((o) => (
-                      <tr key={o.id}>
-                        <td className="py-2.5 pr-4">{age(o.at)}</td>
-                        <td className="py-2.5 pr-4">{STATUS_LABEL[o.status] ?? o.status}</td>
-                        <td className="py-2.5 pr-4">{ROUTE_LABEL[o.coin] ?? o.coin}</td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {Number(o.amount)} {o.coin.toUpperCase()}
-                        </td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {naira(o.amountNgn)}
-                        </td>
-                        <td className="py-2.5 pr-4">
-                          {o.bankName} ••••{o.accountTail}
-                        </td>
-                        <td className="py-2.5 text-right">
-                          <a
-                            href={o.explorerUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-brand underline-offset-2 hover:underline"
-                          >
-                            View
-                          </a>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {nairaShown ? (
+            <>
+              <h2 className="font-display mt-4 text-2xl">Stellar naira form</h2>
+              <p className="text-muted-foreground -mt-3 text-sm">
+                The Stellar naira form, which pays through Linq in XLM or USDC.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                <Kpi label="Orders" value={formatCount(report.orders)} />
+                <Kpi label="Paid out" value={formatCount(report.paid.count)} />
+                <Kpi label="Naira paid out" value={naira(report.paid.ngn)} />
+                <Kpi
+                  label="Off-ramped"
+                  value={formatUsd(report.cashedOut.usd)}
+                  note={
+                    report.cashedOut.unvalued > 0
+                      ? `${report.cashedOut.unvalued} off-ramp${report.cashedOut.unvalued === 1 ? '' : 's'} could not be priced`
+                      : `${formatCount(report.cashedOut.count)} payment${report.cashedOut.count === 1 ? '' : 's'} sent`
+                  }
+                />
+                <Kpi
+                  label="Needs attention"
+                  value={formatCount(report.attention.length)}
+                  note="Payment sent, not paid out"
+                />
               </div>
-            )}
-          </Panel>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Panel title="By status" hint="Expired orders with no payment sent were abandoned.">
-              {report.byStatus.length === 0 ? (
-                <EmptyNote>No payouts were set up in this period.</EmptyNote>
-              ) : (
-                <table className="w-full text-left text-sm">
-                  <thead className="text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-4 font-normal">Status</th>
-                      <th className="py-2 pr-4 text-right font-normal">Orders</th>
-                      <th className="py-2 pr-4 text-right font-normal">Payment sent</th>
-                      <th className="py-2 text-right font-normal">Naira</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-border divide-y">
-                    {report.byStatus.map((s) => (
-                      <tr key={s.status}>
-                        <td className="py-2.5 pr-4">{STATUS_LABEL[s.status] ?? s.status}</td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {formatCount(s.count)}
-                        </td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {formatCount(s.sent)}
-                        </td>
-                        <td className="py-2.5 text-right font-mono tabular-nums">{naira(s.ngn)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Panel>
+              <Panel
+                title="Needs attention"
+                hint="The payment left the user's wallet and the payout has not completed. Not limited to the date range."
+              >
+                {report.attention.length === 0 ? (
+                  <EmptyNote>Every payment that was sent has been paid out.</EmptyNote>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-4 font-normal">Waiting</th>
+                          <th className="py-2 pr-4 font-normal">Status</th>
+                          <th className="py-2 pr-4 font-normal">Route</th>
+                          <th className="py-2 pr-4 text-right font-normal">Sent</th>
+                          <th className="py-2 pr-4 text-right font-normal">Naira</th>
+                          <th className="py-2 pr-4 font-normal">Bank</th>
+                          <th className="py-2 text-right font-normal">Payment</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-border divide-y">
+                        {report.attention.map((o) => (
+                          <tr key={o.id}>
+                            <td className="py-2.5 pr-4">{age(o.at)}</td>
+                            <td className="py-2.5 pr-4">{STATUS_LABEL[o.status] ?? o.status}</td>
+                            <td className="py-2.5 pr-4">{ROUTE_LABEL[o.coin] ?? o.coin}</td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {Number(o.amount)} {o.coin.toUpperCase()}
+                            </td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {naira(o.amountNgn)}
+                            </td>
+                            <td className="py-2.5 pr-4">
+                              {o.bankName} ••••{o.accountTail}
+                            </td>
+                            <td className="py-2.5 text-right">
+                              <a
+                                href={o.explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-brand underline-offset-2 hover:underline"
+                              >
+                                View
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Panel>
 
-            <Panel title="By route" hint="Paid orders and the naira they paid out.">
-              {report.byCoin.length === 0 ? (
-                <EmptyNote>No payouts were set up in this period.</EmptyNote>
-              ) : (
-                <table className="w-full text-left text-sm">
-                  <thead className="text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-4 font-normal">Route</th>
-                      <th className="py-2 pr-4 text-right font-normal">Orders</th>
-                      <th className="py-2 pr-4 text-right font-normal">Paid</th>
-                      <th className="py-2 text-right font-normal">Naira paid</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-border divide-y">
-                    {report.byCoin.map((c) => (
-                      <tr key={c.coin}>
-                        <td className="py-2.5 pr-4">{ROUTE_LABEL[c.coin] ?? c.coin}</td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {formatCount(c.orders)}
-                        </td>
-                        <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
-                          {formatCount(c.paid)}
-                        </td>
-                        <td className="py-2.5 text-right font-mono tabular-nums">
-                          {naira(c.paidNgn)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Panel>
-          </div>
+              <div className="grid gap-6 lg:grid-cols-2">
+                <Panel title="By status" hint="Expired orders with no payment sent were abandoned.">
+                  {report.byStatus.length === 0 ? (
+                    <EmptyNote>No payouts were set up in this period.</EmptyNote>
+                  ) : (
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-4 font-normal">Status</th>
+                          <th className="py-2 pr-4 text-right font-normal">Orders</th>
+                          <th className="py-2 pr-4 text-right font-normal">Payment sent</th>
+                          <th className="py-2 text-right font-normal">Naira</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-border divide-y">
+                        {report.byStatus.map((s) => (
+                          <tr key={s.status}>
+                            <td className="py-2.5 pr-4">{STATUS_LABEL[s.status] ?? s.status}</td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {formatCount(s.count)}
+                            </td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {formatCount(s.sent)}
+                            </td>
+                            <td className="py-2.5 text-right font-mono tabular-nums">
+                              {naira(s.ngn)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </Panel>
+
+                <Panel title="By route" hint="Paid orders and the naira they paid out.">
+                  {report.byCoin.length === 0 ? (
+                    <EmptyNote>No payouts were set up in this period.</EmptyNote>
+                  ) : (
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-muted-foreground">
+                        <tr>
+                          <th className="py-2 pr-4 font-normal">Route</th>
+                          <th className="py-2 pr-4 text-right font-normal">Orders</th>
+                          <th className="py-2 pr-4 text-right font-normal">Paid</th>
+                          <th className="py-2 text-right font-normal">Naira paid</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-border divide-y">
+                        {report.byCoin.map((c) => (
+                          <tr key={c.coin}>
+                            <td className="py-2.5 pr-4">{ROUTE_LABEL[c.coin] ?? c.coin}</td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {formatCount(c.orders)}
+                            </td>
+                            <td className="py-2.5 pr-4 text-right font-mono tabular-nums">
+                              {formatCount(c.paid)}
+                            </td>
+                            <td className="py-2.5 text-right font-mono tabular-nums">
+                              {naira(c.paidNgn)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </Panel>
+              </div>
+            </>
+          ) : null}
         </>
       )}
     </>

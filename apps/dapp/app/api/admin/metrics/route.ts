@@ -76,13 +76,16 @@ function flag(value: string | null): boolean | undefined {
 async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSearchParams) {
   switch (view) {
     case 'overview': {
-      const [overview, series, kinds, pairs] = await Promise.all([
+      const [overview, series, kinds, pairs, chains, types, venues] = await Promise.all([
         repo.overview(scope),
         repo.series(scope),
         repo.byKind(scope),
         repo.pairs(scope),
+        repo.byChain(scope),
+        repo.typesByChain(scope),
+        repo.venues(scope),
       ])
-      return { overview, series, kinds, pairs }
+      return { overview, series, kinds, pairs, chains, types, venues }
     }
     case 'wallets': {
       const [overview, series, wallets] = await Promise.all([
@@ -130,8 +133,15 @@ async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSear
       return { waitlist: await repo.waitlist() }
     case 'payouts': {
       const explorer = stellarDescriptorFor(scope.network).blockExplorerUrl
-      const naira = await repo.naira(scope)
+      const [naira, offRamps] = await Promise.all([repo.naira(scope), repo.offRamps(scope)])
       return {
+        offRamps: {
+          ...offRamps,
+          attention: offRamps.attention.map((r) => ({
+            ...r,
+            explorerUrl: txUrl(r.chain, scope.network, r.depositHash),
+          })),
+        },
         naira: {
           ...naira,
           attention: naira.attention.map((r) => ({
