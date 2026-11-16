@@ -37,7 +37,7 @@ const HELP_FACTS = `About Intent:
 - Intent is a chat app. People type what they want, for example "swap 10 USDC to XLM", "send 5 USDC to <address>" or "off-ramp $20 to my bank", AI agents compete to find the best route, and the person signs the transaction in their own wallet. Agents never hold anyone's money.
 - Chains: Stellar, Solana, Sui, NEAR, Avalanche and Monad. The chain is picked in the switcher and is part of the page address.
 - An off-ramp pays a bank account in naira (and some other currencies). The person types the amount, picks or confirms the bank account, reviews the card, then presses Sign to send the deposit from their wallet.
-- Naira off-ramps on Stellar, Solana and Sui are paid out by Linq. Avalanche and NEAR off-ramps are paid out by Weave.
+- Naira off-ramps on Stellar, Solana, Sui and Avalanche are paid out by Linq. NEAR off-ramps, and Avalanche off-ramps Linq can't take, are paid out by Weave.
 
 What an order's status means:
 - waiting: the order is made but no deposit has left the wallet. Nothing has moved. The person can go back to the card and press Sign, or let it expire.

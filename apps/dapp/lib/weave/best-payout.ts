@@ -26,7 +26,7 @@ export interface PayoutOffer {
  * fixed that, but Stellar naira stays on Linq's flow, which people have used. NEAR opened the same day.
  */
 export const PAYS_NAIRA: Readonly<Record<PayoutProvider, readonly CashoutChain[]>> = {
-  linq: ['stellar', 'sui', 'solana'],
+  linq: ['stellar', 'sui', 'solana', 'avalanche'],
   weave: ['solana', 'avalanche', 'sui', 'near'],
 }
 

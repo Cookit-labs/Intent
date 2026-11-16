@@ -2,6 +2,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 
 import { isAddress } from '@solana/kit'
 import { StrKey } from '@stellar/stellar-sdk'
+import { getAddress, isAddress as isEvmAddress, zeroAddress } from 'viem'
+
+import { AVALANCHE_USDC } from '../weave/deposit/avalanche'
 
 /**
  * Server-side client for the Linq B2B off-ramp: XLM or USDC in, naira to a bank.
@@ -10,7 +13,7 @@ import { StrKey } from '@stellar/stellar-sdk'
  * reached from route handlers. Nothing here is imported by a client component.
  *
  * Every order has `manualDeposit: true`, in native XLM or USDC on Stellar and
- * USDC on Sui and Solana, so the payout follows what actually arrives and a
+ * USDC on Sui, Solana and Avalanche, so the payout follows what actually arrives and a
  * short payment is never a loss for the operator.
  */
 
@@ -31,9 +34,10 @@ export type LinqCoin = 'xlm' | 'usdc'
 
 /**
  * Where a Linq order takes its deposit. Linq's dashboard docs list `sui` (USDSUI, USDC), `solana`
- * (USDC) and `stellar` (USDC, XLM) among others; only these three are ordered from here.
+ * (USDC), `stellar` (USDC, XLM) and, from 16 November 2026, `avalanche` (USDC, USDT on the C-Chain)
+ * among others; only these four are ordered from here.
  */
-export type LinqChain = 'stellar' | 'sui' | 'solana'
+export type LinqChain = 'stellar' | 'sui' | 'solana' | 'avalanche'
 
 /** A Sui account or object address: 0x and 64 hex digits. */
 const SUI_ADDRESS = /^0x[0-9a-fA-F]{64}$/
@@ -42,6 +46,18 @@ const IS_DEPOSIT_ADDRESS: Readonly<Record<LinqChain, (address: string) => boolea
   stellar: (address) => StrKey.isValidEd25519PublicKey(address),
   sui: (address) => SUI_ADDRESS.test(address),
   solana: (address) => isAddress(address),
+  avalanche: (address) =>
+    isEvmAddress(address, { strict: false }) &&
+    address.toLowerCase() !== zeroAddress &&
+    address.toLowerCase() !== AVALANCHE_USDC.toLowerCase(),
+}
+
+/**
+ * The token contract an order on this chain must name. On Avalanche only Circle's native USDC counts
+ * as payment; bridged USDC.e sent there is not paid out, so an order for any other contract is refused.
+ */
+const USDC_CONTRACT: Readonly<Partial<Record<LinqChain, string>>> = {
+  avalanche: AVALANCHE_USDC,
 }
 
 export interface LinqOrderInput {
@@ -295,6 +311,14 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       if (chain !== 'stellar' && input.coin !== 'usdc') {
         return { ok: false, code: 'rejected', message: 'This payout is ordered in USDC only.' }
       }
+      // Linq refuses a C-Chain refund address whose checksum is wrong, so it is sent checksummed.
+      let refundAddress = input.refundAddress
+      if (chain === 'avalanche') {
+        if (!isEvmAddress(refundAddress, { strict: false })) {
+          return { ok: false, code: 'rejected', message: 'The refund address is not on Avalanche.' }
+        }
+        refundAddress = getAddress(refundAddress)
+      }
       const res = await call('/b2b/offramp', {
         method: 'POST',
         body: {
@@ -307,7 +331,7 @@ export function createLinqClient(options: LinqClientOptions = {}): {
           bankCode: input.bankCode,
           bankName: input.bankName,
           accountName: input.accountName,
-          refundAddress: input.refundAddress,
+          refundAddress,
           customerRef: input.customerRef,
           idempotencyKey: input.idempotencyKey,
         },
@@ -322,9 +346,14 @@ export function createLinqClient(options: LinqClientOptions = {}): {
       const amountCoin = num(body['amountStableCoin'])
       // Off Stellar the order must also be for exactly the USDC asked: that is what the wallet signs.
       const exactAmount = chain === 'stellar' || amountCoin === input.amountStableCoin
+      const contract = USDC_CONTRACT[chain]
+      const coin = str(body['coin']).toLowerCase()
       const matches =
         str(body['chain']).toLowerCase() === chain &&
-        str(body['coin']).toLowerCase() === input.coin &&
+        // Where the contract is checked it names the asset, so a missing coin name is no doubt.
+        (coin === input.coin || (contract !== undefined && coin === '')) &&
+        (contract === undefined ||
+          str(body['coinType']).toLowerCase() === contract.toLowerCase()) &&
         IS_DEPOSIT_ADDRESS[chain](address) &&
         exactAmount &&
         amountCoin > 0 &&

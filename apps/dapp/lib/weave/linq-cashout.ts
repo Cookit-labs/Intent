@@ -65,13 +65,14 @@ export type LinqPlacement =
     }
 
 /** The chains where a naira cash-out can go to Linq or Weave. Stellar naira has its own Linq form. */
-export function comparesLinq(chain: CashoutChain): chain is 'sui' | 'solana' {
-  return chain === 'sui' || chain === 'solana'
+export function comparesLinq(chain: CashoutChain): chain is 'sui' | 'solana' | 'avalanche' {
+  return chain === 'sui' || chain === 'solana' || chain === 'avalanche'
 }
 
 /**
- * Places every Sui or Solana naira cash-out with Linq, whatever Weave quotes, because Linq locks the
- * naira it pays and Weave's estimate comes in lower than shown. Decided by the user, 10 November 2026.
+ * Places every Sui, Solana or Avalanche naira cash-out with Linq, whatever Weave quotes, because Linq
+ * locks the naira it pays and Weave's estimate comes in lower than shown. Decided by the user for Sui
+ * and Solana on 10 November 2026, and for Avalanche on 16 November 2026, once Linq took C-Chain USDC.
  *
  * Weave takes it only when Linq can't: a bank it doesn't know, a lookup or order that fails, or an
  * answer that can't be confirmed. An order Linq made but this app doesn't keep is never shown to

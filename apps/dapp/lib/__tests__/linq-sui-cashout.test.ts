@@ -38,6 +38,8 @@ const WALLET = `0x${'2c'.repeat(32)}`
 const LINQ_DEPOSIT = `0x${'ab'.repeat(32)}`
 const SOLANA_WALLET = '7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV'
 const SOLANA_LINQ_DEPOSIT = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
+const AVALANCHE_WALLET = `0x${'4e'.repeat(20)}`
+const AVALANCHE_LINQ_DEPOSIT = `0x${'7a'.repeat(20)}`
 const DIGITS = '8100003682'
 const HOLDER = 'JANE ADEYEMI'
 
@@ -208,7 +210,7 @@ describe('placeWithLinq', () => {
 
   it.each([
     ['another currency', { currency: 'KES' }, 'not_offered'],
-    ['another chain', { chain: 'avalanche' }, 'not_offered'],
+    ['another chain', { chain: 'near' }, 'not_offered'],
   ])('asks Linq nothing for %s', async (_name, over, reason) => {
     expect(await placeWithLinq(input(over))).toEqual({ skipped: reason })
     expect(called(state.linq['getRate'])).not.toHaveBeenCalled()
@@ -221,6 +223,16 @@ describe('placeWithLinq', () => {
     expect(placed).toEqual({ placed: linqOrder })
     expect(called(state.linq['createOrder'])).toHaveBeenCalledWith(
       expect.objectContaining({ chain: 'solana', coin: 'usdc', refundAddress: SOLANA_WALLET })
+    )
+  })
+
+  it('places an Avalanche USDC order on Avalanche, refunding to the C-Chain wallet', async () => {
+    const placed = await placeWithLinq(
+      input({ chain: 'avalanche', refundAddress: AVALANCHE_WALLET, customerRef: 'wallet:avax' })
+    )
+    expect(placed).toEqual({ placed: linqOrder })
+    expect(called(state.linq['createOrder'])).toHaveBeenCalledWith(
+      expect.objectContaining({ chain: 'avalanche', coin: 'usdc', refundAddress: AVALANCHE_WALLET })
     )
   })
 
@@ -455,8 +467,89 @@ describe('POST order, naira from Solana', () => {
   })
 })
 
-describe('GET quote, naira from Solana', () => {
-  it("shows Linq's naira when Linq pays more, and leaves Avalanche with Weave", async () => {
+describe('POST order, naira from Avalanche', () => {
+  const postFromAvalanche = (currency = 'NGN'): Request =>
+    new Request('http://localhost/api/cashout/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [WALLET_HEADER]: AVALANCHE_WALLET },
+      body: JSON.stringify({
+        chain: 'avalanche',
+        account: AVALANCHE_WALLET,
+        amount: '1',
+        currency,
+        institution: 'OPAYNGPC',
+        accountIdentifier: DIGITS,
+        idempotencyKey: KEY,
+      }),
+    })
+
+  const weaveOnAvalanche = (over: Record<string, unknown> = {}) =>
+    weave({
+      createOrder: vi.fn(async () => ({
+        ok: true,
+        value: {
+          ...weaveOrder,
+          sourceAssetKey: 'crypto:AVALANCHE:USDC',
+          deposit: { ...weaveOrder.deposit, address: `0x${'cd'.repeat(20)}`, chain: 'AVALANCHE' },
+        },
+      })),
+      ...over,
+    })
+
+  beforeEach(() => {
+    state.deposit = { ...state.deposit, isAccount: () => true, isDepositAddress: () => true }
+    state.weave = weaveOnAvalanche()
+    state.linq = linq({
+      createOrder: vi.fn(async () => ({
+        ok: true,
+        value: { ...linqOrder, depositAddress: AVALANCHE_LINQ_DEPOSIT },
+      })),
+    })
+  })
+
+  it('places it with Linq on Avalanche, and stores the naira Linq locked', async () => {
+    expect((await POST(postFromAvalanche())).status).toBe(200)
+    expect(called(state.linq['createOrder'])).toHaveBeenCalledWith(
+      expect.objectContaining({ chain: 'avalanche', refundAddress: AVALANCHE_WALLET })
+    )
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({
+      chain: 'avalanche',
+      provider: 'linq',
+      depositAddress: AVALANCHE_LINQ_DEPOSIT,
+      estimatedDest: '1368.39',
+    })
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
+  })
+
+  it('places it with Linq even when Weave would pay more', async () => {
+    state.weave = weaveOnAvalanche({
+      quote: vi.fn(async () => ({
+        ok: true,
+        value: { destAmount: 1400, netUsd: 0.99, seconds: 90 },
+      })),
+    })
+    expect((await POST(postFromAvalanche())).status).toBe(200)
+    expect(called(state.weave['createOrder'])).not.toHaveBeenCalled()
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'linq' })
+  })
+
+  it('falls back to Weave, and reports it, when Linq answers with a different order', async () => {
+    state.linq = linq({
+      createOrder: vi.fn(async () => ({ ok: false, code: 'unexpected_order', message: 'x' })),
+    })
+    expect((await POST(postFromAvalanche())).status).toBe(200)
+    expect(called(state.repo['insert']).mock.calls[0]?.[0]).toMatchObject({ provider: 'weave' })
+    expect(state.report.map((r) => String(r[1]))).toContain('Error: linq_order_unexpected')
+  })
+
+  it('keeps another currency with Weave, asking Linq nothing', async () => {
+    await POST(postFromAvalanche('KES'))
+    expect(called(state.linq['createOrder'])).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET quote, naira from Solana and Avalanche', () => {
+  it("shows Linq's naira on both, and leaves NEAR with Weave", async () => {
     const ask = (chain: string) =>
       quote(
         new Request(`http://localhost/api/cashout/quote?chain=${chain}&currency=NGN&amount=1`, {
@@ -468,7 +561,8 @@ describe('GET quote, naira from Solana', () => {
       costPercent: 0,
       seconds: 90,
     })
-    expect((await (await ask('avalanche')).json()).destAmount).not.toBe(1368.39)
+    expect((await (await ask('avalanche')).json()).destAmount).toBe(1368.39)
+    expect((await (await ask('near')).json()).destAmount).not.toBe(1368.39)
   })
 })
 
