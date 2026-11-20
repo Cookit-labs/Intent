@@ -166,6 +166,15 @@ export interface ManageMove {
 
 const SHARES = [25, 50] as const
 
+/** A claim or a stream cancel: all of it goes at once, so there is no amount to ask for. */
+export function onlyWhole(moves: {
+  out?: ManageMove | undefined
+  into?: ManageMove | undefined
+  all?: { label: string; onPress: () => void } | undefined
+}): boolean {
+  return moves.out === undefined && moves.into === undefined && moves.all !== undefined
+}
+
 /**
  * What to do with one position, in a panel of its own: take some or all out, or add to it. Nothing
  * signs from here; each choice builds the review, which takes the panel's place until it is done.
@@ -275,6 +284,15 @@ export function ManageSheet({
             ) : null}
             {review}
           </div>
+        ) : all !== undefined && onlyWhole({ out, into, all }) ? (
+          <Button
+            size="lg"
+            className="h-12 w-full rounded-full text-[15px]"
+            disabled={busy}
+            onClick={all.onPress}
+          >
+            {all.label}
+          </Button>
         ) : (
           <div className="flex flex-col gap-5">
             {out !== undefined && into !== undefined ? (
