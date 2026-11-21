@@ -2,6 +2,7 @@ import { stellarDescriptorFor, type StellarNetworkName } from '@intent/config'
 import { after, NextResponse } from 'next/server'
 
 import { evmExplorerUrl } from '../../../../lib/chains/evm/tokens'
+import { createLinqClient } from '../../../../lib/linq/client'
 import { explorerUrl as nearExplorerUrl } from '../../../../lib/chains/near/tokens'
 import { explorerUrl as solanaExplorerUrl } from '../../../../lib/chains/solana/submit'
 import { isAdminRequest } from '../../../../lib/server/admin-session'
@@ -69,6 +70,27 @@ function txUrl(chain: string, network: StellarNetworkName, hash: string): string
   }
 }
 
+const RATE_TTL_MS = 10 * 60_000
+
+const globalForRate = globalThis as unknown as {
+  intentAdminNgnRate?: { ngnPerUsd: number; at: number }
+}
+
+/**
+ * Today's naira per dollar from Linq, to put the dashboard's dollar totals in naira. Held for ten
+ * minutes, since the overview refreshes every thirty seconds. Null when Linq can't be asked.
+ */
+async function ngnPerUsd(now = Date.now()): Promise<number | null> {
+  const held = globalForRate.intentAdminNgnRate
+  if (held !== undefined && now - held.at < RATE_TTL_MS) return held.ngnPerUsd
+  const linq = createLinqClient()
+  if (!linq.configured) return null
+  const rate = await linq.getRate().catch(() => undefined)
+  if (rate === undefined || !rate.ok || !(rate.value.ngnPerUsd > 0)) return held?.ngnPerUsd ?? null
+  globalForRate.intentAdminNgnRate = { ngnPerUsd: rate.value.ngnPerUsd, at: now }
+  return rate.value.ngnPerUsd
+}
+
 function flag(value: string | null): boolean | undefined {
   return value === 'true' ? true : value === 'false' ? false : undefined
 }
@@ -76,17 +98,19 @@ function flag(value: string | null): boolean | undefined {
 async function read(repo: MetricsRepo, view: View, scope: Scope, params: URLSearchParams) {
   switch (view) {
     case 'overview': {
-      const [overview, series, kinds, pairs, chains, types, venues, naira] = await Promise.all([
-        repo.overview(scope),
-        repo.series(scope),
-        repo.byKind(scope),
-        repo.pairs(scope),
-        repo.byChain(scope),
-        repo.typesByChain(scope),
-        repo.venues(scope),
-        repo.nairaByChain(scope),
-      ])
-      return { overview, series, kinds, pairs, chains, types, venues, naira }
+      const [overview, series, kinds, pairs, chains, types, venues, naira, rate] =
+        await Promise.all([
+          repo.overview(scope),
+          repo.series(scope),
+          repo.byKind(scope),
+          repo.pairs(scope),
+          repo.byChain(scope),
+          repo.typesByChain(scope),
+          repo.venues(scope),
+          repo.nairaByChain(scope),
+          ngnPerUsd(),
+        ])
+      return { overview, series, kinds, pairs, chains, types, venues, naira, ngnPerUsd: rate }
     }
     case 'wallets': {
       const [overview, series, wallets] = await Promise.all([

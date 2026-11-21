@@ -31,7 +31,7 @@ export default function AdminOverviewPage(): JSX.Element {
         hint="Everything people did on the chain and network chosen above, over the chosen dates."
       />
       <WithStats>
-        {({ overview, series, kinds, pairs, chains, types, venues, naira }) => {
+        {({ overview, series, kinds, pairs, chains, types, venues, naira, ngnPerUsd }) => {
           const ngnPaid = naira.reduce((t, n) => t + n.ngn, 0)
           const ngnOrders = naira.reduce((t, n) => t + n.orders, 0)
           const valued = kinds.filter((k) => k.volumeUsd > 0 && COUNTED.includes(k.kind))
@@ -48,13 +48,16 @@ export default function AdminOverviewPage(): JSX.Element {
                   }
                 />
                 <Kpi
-                  label="Naira paid out"
-                  value={formatNgn(ngnPaid, true)}
-                  note={
+                  label="Total volume in naira"
+                  value={ngnPerUsd === null ? '—' : formatNgn(overview.volumeUsd * ngnPerUsd, true)}
+                  note={[
+                    ngnPerUsd === null
+                      ? 'No naira rate right now.'
+                      : `Every type, at today's ${formatNgn(ngnPerUsd)} per $1.`,
                     ngnOrders === 0
-                      ? 'No naira off-ramps paid in this period'
-                      : `${formatCount(ngnOrders)} off-ramp${ngnOrders === 1 ? '' : 's'} paid to banks`
-                  }
+                      ? 'No naira off-ramps paid.'
+                      : `${formatNgn(ngnPaid, true)} paid to banks in ${formatCount(ngnOrders)} off-ramp${ngnOrders === 1 ? '' : 's'}.`,
+                  ].join(' ')}
                 />
                 <Kpi
                   label="Transactions"
@@ -85,7 +88,7 @@ export default function AdminOverviewPage(): JSX.Element {
                   {chains.length === 0 ? (
                     <EmptyNote>Nothing ran on any chain in this period.</EmptyNote>
                   ) : (
-                    <ChainTable rows={chains} naira={naira} />
+                    <ChainTable rows={chains} naira={naira} ngnPerUsd={ngnPerUsd} />
                   )}
                 </Panel>
               ) : null}
